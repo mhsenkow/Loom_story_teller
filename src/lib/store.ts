@@ -36,7 +36,7 @@ export interface QueryResult {
 }
 
 export type ViewMode = "explorer" | "chart" | "query";
-export type PanelTab = "stats" | "chart";
+export type PanelTab = "stats" | "chart" | "export";
 
 export interface ChartVisualOverrides {
   pointSize?: number;
@@ -79,6 +79,12 @@ interface LoomState {
   aiSuggestionReason: string | null;
   /** Web-only: cache of parsed file data (path -> inspect result) when user loads files in browser. */
   webFileCache: Record<string, { stats: ColumnInfo[]; sample: QueryResult }>;
+  /** Per-chart custom title (chart id -> title). */
+  chartTitleOverrides: Record<string, string>;
+  /** Called from Export tab to capture chart as PNG. Set by ChartView. */
+  pngExportHandler: (() => Promise<Blob | null>) | null;
+  /** Called from Export tab to render chart as SVG. Set by ChartView. */
+  svgExportHandler: (() => Promise<string | null>) | null;
 
   // Actions
   setMountedFolder: (folder: string | null) => void;
@@ -102,6 +108,9 @@ interface LoomState {
   setChartVisualOverrides: (overrides: ChartVisualOverrides | ((prev: ChartVisualOverrides) => ChartVisualOverrides)) => void;
   setAISuggestionReason: (reason: string | null) => void;
   setWebFileCache: (cache: Record<string, { stats: ColumnInfo[]; sample: QueryResult }>) => void;
+  setChartTitleOverride: (chartId: string, title: string | null) => void;
+  setPngExportHandler: (fn: (() => Promise<Blob | null>) | null) => void;
+  setSvgExportHandler: (fn: (() => Promise<string | null>) | null) => void;
   reset: () => void;
 }
 
@@ -127,6 +136,9 @@ const initialState = {
   chartVisualOverrides: {} as ChartVisualOverrides,
   aiSuggestionReason: null as string | null,
   webFileCache: {} as Record<string, { stats: ColumnInfo[]; sample: QueryResult }>,
+  chartTitleOverrides: {} as Record<string, string>,
+  pngExportHandler: null as (() => Promise<Blob | null>) | null,
+  svgExportHandler: null as (() => Promise<string | null>) | null,
 };
 
 export const useLoomStore = create<LoomState>((set) => ({
@@ -162,5 +174,18 @@ export const useLoomStore = create<LoomState>((set) => ({
     })),
   setAISuggestionReason: (reason) => set({ aiSuggestionReason: reason }),
   setWebFileCache: (cache) => set({ webFileCache: cache }),
+  setChartTitleOverride: (chartId, title) =>
+    set((s) => ({
+      chartTitleOverrides:
+        title == null
+          ? (() => {
+              const next = { ...s.chartTitleOverrides };
+              delete next[chartId];
+              return next;
+            })()
+          : { ...s.chartTitleOverrides, [chartId]: title },
+    })),
+  setPngExportHandler: (fn) => set({ pngExportHandler: fn }),
+  setSvgExportHandler: (fn) => set({ svgExportHandler: fn }),
   reset: () => set(initialState),
 }));

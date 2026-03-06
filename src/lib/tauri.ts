@@ -23,11 +23,20 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
   throw new Error(`Tauri not available — cannot invoke "${cmd}"`);
 }
 
+/** Normalize path from dialog (strip file:// so Rust and JS see a plain path). */
+function normalizePath(p: string): string {
+  const s = p.trim();
+  if (s.startsWith("file:///")) return s.slice(7);
+  if (s.startsWith("file://")) return s.slice(6);
+  return s;
+}
+
 export async function pickFolder(): Promise<string | null> {
   if (isTauri()) {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({ directory: true, multiple: false });
-    return selected as string | null;
+    if (selected == null) return null;
+    return normalizePath(selected as string);
   }
   return "mock://demo-folder";
 }
@@ -72,6 +81,21 @@ export interface InspectResult {
   sample: QueryResult;
 }
 
+export interface DataGovResource {
+  id: string;
+  name: string;
+  format: string;
+  url: string;
+}
+
+export interface DataGovDataset {
+  id: string;
+  name: string;
+  title: string;
+  organization?: string;
+  resources: DataGovResource[];
+}
+
 export async function inspectFile(
   filePath: string,
   limit?: number
@@ -80,4 +104,22 @@ export async function inspectFile(
     return invoke<InspectResult>("inspect_file", { filePath, limit });
   }
   return mockInspect(filePath);
+}
+
+/** Download CSV from URL and save to the mounted folder (Tauri only). */
+export async function saveCsvToFolder(
+  folderPath: string,
+  url: string,
+  filename: string
+): Promise<string> {
+  return invoke<string>("save_csv_to_folder", {
+    folderPath,
+    url,
+    filename,
+  });
+}
+
+/** Fetch recent Data.gov datasets that contain CSV resources (Tauri only). */
+export async function fetchDataGovRecentCsv(rows = 40): Promise<DataGovDataset[]> {
+  return invoke<DataGovDataset[]>("fetch_data_gov_recent_csv", { rows });
 }

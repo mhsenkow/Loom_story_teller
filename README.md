@@ -1,105 +1,129 @@
 # Loom — Data Storyteller
 
-**Local-first data storytelling for macOS.** Mount a folder, query millions of rows via DuckDB, and render high-density visualizations with WebGPU compute shaders.
+**Local-first data storytelling for macOS.** Mount a folder, query millions of rows via DuckDB, and build charts with Vega-Lite and WebGPU. Discover data with heuristic and AI suggestions, tweak encodings in the panel, and export as PNG or SVG.
 
 ---
 
-## Quick Start
+## What it does
+
+- **Mount a folder** — Point at a directory of CSV/Parquet files; Loom scans and exposes them in the sidebar.
+- **Chart view** — Pick a file, get instant chart suggestions (bar, line, scatter, area, pie, etc.). Click a suggestion or use **Suggest with AI** (Ollama) for a recommendation.
+- **Encode your way** — Drag columns from the schema footer into X, Y, Color, Size, Row; or use dropdowns. Change mark type (point, line, bar, area, arc).
+- **Export** — Copy chart as PNG or SVG from the Export tab in the right panel. Edit the chart title (double-click or hover → edit).
+- **Data discovery** — In **Data & sources**, browse **Recent CSV datasets** from Data.gov (Tauri only) and **Save to folder** to download into your mounted folder.
+
+---
+
+## Screenshots
+
+| Main view | Data & sources |
+|-----------|----------------|
+| [![Main view](docs/screenshots/loom-main-view.png)](docs/screenshots/loom-main-view.png) | [![Data sources](docs/screenshots/loom-data-sources.png)](docs/screenshots/loom-data-sources.png) |
+
+*Add your own screenshots to `docs/screenshots/` — see [docs/screenshots/README.md](docs/screenshots/README.md) for suggested filenames and how to capture.*
+
+---
+
+## Quick start
 
 ### Prerequisites
 
-- **macOS 14+** (Sonoma) with Apple Silicon
-- **Rust** (via `rustup`) — 1.75+
-- **Node.js** 20+ (via `nvm`)
+- **macOS 14+** (Sonoma) with Apple Silicon recommended
+- **Rust** 1.75+ (`rustup`)
+- **Node.js** 20+ (e.g. `nvm`)
 - **Tauri CLI**: `cargo install tauri-cli`
 - **Docker** (optional, for containerized web UI)
 
-### First Time
+### First time
 
 ```bash
-make setup    # installs npm + cargo dependencies
-make spool    # generates sample data to explore
-make spin     # launches Loom in dev mode
+make setup    # install npm + cargo deps
+make spool    # generate sample data in .loom-data
+make spin     # launch Loom (Tauri + Next.js + optional Ollama)
 ```
+
+Then **Choose folder** → pick `.loom-data` (or any folder with CSV/Parquet), select a file, and switch to **Chart** to see suggestions.
 
 ---
 
-## The Command Loom
+## Command reference (the Loom)
 
-Every command has a weaving name. Run `make` to see them all.
+Run `make` (or `make help`) to list all commands. Every target uses a weaving metaphor.
 
 ### Develop
 
-| Command          | What it does                              |
-|------------------|-------------------------------------------|
-| `make spin`      | Full dev mode (Tauri + Next.js hot reload)|
-| `make thread`    | Frontend-only dev (no Rust, faster start) |
-| `make warp`      | Rust backend type-check only              |
-| `make setup`     | First-time dependency install             |
+| Command | Description |
+|--------|-------------|
+| `make spin` | Full dev: Tauri + Next.js hot reload; starts Ollama in background if available |
+| `make thread` | Frontend-only dev (no Rust) — good for UI work and web-only testing |
+| `make warp` | Rust backend type-check only (`cargo check`) |
+| `make setup` | First-time: install npm deps and fetch Rust deps |
 
 ### Build
 
-| Command          | What it does                              |
-|------------------|-------------------------------------------|
-| `make weave`     | Production .app bundle                    |
-| `make weave-web` | Static web export (no Tauri shell)        |
-| `make weave-rust`| Rust release binary only                  |
+| Command | Description |
+|--------|-------------|
+| `make weave` | Production build → `.app` bundle |
+| `make weave-web` | Static web export only (output in `./out`) |
+| `make weave-rust` | Rust release binary only |
 
 ### Data
 
-| Command           | What it does                             |
-|-------------------|------------------------------------------|
-| `make spool`      | Generate sample datasets (10K–1M rows)   |
-| `make spool-small`| Small test data (1K rows)                |
-| `make spool-mega` | Stress-test data (5M rows, ~500MB)       |
+| Command | Description |
+|--------|-------------|
+| `make spool` | Generate sample datasets (10K–1M rows) in `.loom-data` |
+| `make spool-small` | Small test set (1K rows) |
+| `make spool-mega` | Stress test (5M rows, ~500MB) |
 
 ### Docker
 
-| Command              | What it does                          |
-|----------------------|---------------------------------------|
-| `make shuttle`       | Build & run web UI in Docker          |
-| `make shuttle-build` | Build Docker image only               |
-| `make shuttle-down`  | Stop containers                       |
-| `make shuttle-shell` | Shell into running container          |
+| Command | Description |
+|--------|-------------|
+| `make shuttle` | Build and run web UI in Docker |
+| `make shuttle-build` | Build Docker image only |
+| `make shuttle-down` | Stop containers |
+| `make shuttle-shell` | Shell into running container |
 
 ### Quality
 
-| Command          | What it does                              |
-|------------------|-------------------------------------------|
-| `make check`     | Run all checks (TypeScript + Rust)        |
-| `make check-ts`  | TypeScript type-check + lint              |
-| `make check-rust`| Rust check + clippy                       |
-| `make fmt`       | Format all code (Prettier + rustfmt)      |
+| Command | Description |
+|--------|-------------|
+| `make check` | Run all checks (TypeScript + Rust) |
+| `make check-ts` | TypeScript type-check + lint |
+| `make check-rust` | Rust check + clippy |
+| `make fmt` | Format code (Prettier + rustfmt) |
 
 ### Cleanup
 
-| Command          | What it does                              |
-|------------------|-------------------------------------------|
-| `make unspool`   | Remove generated sample data              |
-| `make unravel`   | Deep clean (node_modules, targets, data)  |
-| `make tidy`      | Light clean (build caches only)           |
+| Command | Description |
+|--------|-------------|
+| `make unspool` | Remove generated `.loom-data` |
+| `make unravel` | Deep clean (node_modules, .next, out, targets, data) |
+| `make tidy` | Light clean (build caches only) |
 
-All commands are also available as npm scripts: `npm run spin`, `npm run weave`, `npm run spool`, etc.
+All of these are also exposed as npm scripts: `npm run spin`, `npm run weave`, `npm run spool`, etc.
 
-### Ollama (optional) — AI chart suggestions
+---
 
-To use **Suggest with AI** (local models for chart recommendations):
+## Ollama (optional) — AI chart suggestions
 
-1. **Run Ollama** and pull a model:
+To use **Suggest with AI** in the Chart view:
+
+1. Run Ollama and pull a model:
    ```bash
-   ollama serve    # if not already running
+   ollama serve
    ollama pull llama3.2
    ```
-2. **Optional env** (in `.env.local` or shell):
+2. Optional env (`.env.local` or shell):
    - `NEXT_PUBLIC_OLLAMA_URL` — default `http://localhost:11434`
-   - `NEXT_PUBLIC_OLLAMA_MODEL` — default: first available model or `llama3.2`
-3. **Tauri / CORS**: If the app can’t reach Ollama, allow the app origin:
+   - `NEXT_PUBLIC_OLLAMA_MODEL` — default: first available or `llama3.2`
+3. If the app can’t reach Ollama (e.g. CORS), allow origins:
    ```bash
    OLLAMA_ORIGINS="*" ollama serve
    ```
    Or set `OLLAMA_ORIGINS` to your dev URL (e.g. `http://localhost:1420`).
 
-In the Chart view, click **Suggest with AI** to get a recommendation from your local model. Hover **Why?** to see the reason (heuristic or AI).
+Hover **Why?** on a suggestion to see the reason (heuristic or AI).
 
 ---
 
@@ -108,143 +132,148 @@ In the Chart view, click **Suggest with AI** to get a recommendation from your l
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │  Tauri Shell (Rust)                                              │
-│  ┌──────────────┐    ┌──────────────┐    ┌───────────────────┐  │
-│  │  tauri-fs     │    │  DuckDB      │    │  MLX Sidecar      │  │
-│  │  (folder I/O) │    │  (analytics) │    │  (AI skinning)    │  │
-│  └──────┬───────┘    └──────┬───────┘    └───────┬───────────┘  │
-│         │  IPC (invoke)     │                     │              │
-├─────────┼───────────────────┼─────────────────────┼──────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │  tauri-fs     │  │  DuckDB      │  │  reqwest (Data.gov,     │ │
+│  │  (folder I/O) │  │  (analytics) │  │   save CSV to folder)   │ │
+│  └──────┬───────┘  └──────┬───────┘  └───────────┬─────────────┘ │
+│         │  IPC (invoke)   │                        │              │
+├─────────┼─────────────────┼────────────────────────┼──────────────┤
 │  Frontend (Next.js + TypeScript)                                 │
-│  ┌──────┴───────┐    ┌──────┴───────┐    ┌───────┴───────────┐  │
-│  │  Zustand      │    │  Vega-Lite   │    │  WebGPU Engine    │  │
-│  │  (state)      │    │  (spec gen)  │    │  (WGSL shaders)   │  │
-│  └──────────────┘    └──────────────┘    └───────────────────┘  │
+│  ┌──────┴───────┐  ┌──────┴───────┐  ┌─────────────┴───────────┐ │
+│  │  Zustand     │  │  Vega-Lite   │  │  WebGPU / Canvas 2D       │ │
+│  │  (state)     │  │  (spec gen)  │  │  (scatter + bar/line/…)  │ │
+│  └──────────────┘  └──────────────┘  └──────────────────────────┘ │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-**The Brain & Muscle pattern:**
-- **Vega-Lite** (brain) declares *what* to draw as portable JSON specs.
-- **WebGPU** (muscle) renders *how* via compute shaders, targeting 1M+ points at 60fps.
+- **Vega-Lite (brain)** — Declares *what* to draw as portable JSON specs; used for export and for non-WebGPU marks.
+- **WebGPU / Canvas (muscle)** — Renders scatter at scale; other mark types use Canvas 2D or Vega headless where appropriate.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 Loom_story_teller/
 ├── src-tauri/                  # Rust backend
-│   ├── Cargo.toml              # Rust dependencies (DuckDB, Tauri, Arrow)
-│   ├── tauri.conf.json         # App config (window, plugins, CSP)
-│   ├── build.rs                # Tauri build script
+│   ├── Cargo.toml               # DuckDB, Tauri, reqwest, etc.
+│   ├── tauri.conf.json          # Window, plugins, CSP
+│   ├── capabilities/            # Tauri v2 permissions
 │   └── src/
-│       ├── main.rs             # Binary entry point
-│       ├── lib.rs              # Plugin init, state management, command registration
-│       ├── db.rs               # DuckDB: folder scan, SQL queries, column stats
-│       └── commands.rs         # IPC command handlers (scan_folder, query_file, etc.)
+│       ├── lib.rs               # Plugin init, command registration
+│       ├── main.rs              # Binary entry
+│       ├── db.rs                # DuckDB: scan, query, column stats
+│       └── commands.rs          # IPC: scan_folder, query_file, inspect_file,
+│                                #      save_csv_to_folder, fetch_data_gov_recent_csv
 │
-├── src/                        # Next.js frontend
+├── src/                         # Next.js frontend
 │   ├── app/
-│   │   ├── layout.tsx          # Root HTML, fonts, global CSS
-│   │   └── page.tsx            # Three-panel layout compositor
+│   │   ├── layout.tsx           # Root layout, fonts, globals
+│   │   └── page.tsx             # Three-panel layout (Sidebar | Main | DetailPanel)
 │   ├── components/
-│   │   ├── Sidebar.tsx         # File explorer + folder picker
-│   │   ├── TopBar.tsx          # View mode tabs (Explorer/Chart/Query)
-│   │   ├── DetailPanel.tsx     # Right panel: schema, stats, preview
+│   │   ├── Sidebar.tsx          # Files list, Data & sources, folder picker
+│   │   ├── TopBar.tsx           # View tabs (Explorer / Chart / Query)
+│   │   ├── DetailPanel.tsx      # Right panel: Stats, Chart (encoding), Export
+│   │   ├── ChartView.tsx       # Chart canvas, suggestions, title edit, export handlers
+│   │   ├── ChartCard.tsx        # Thumbnail + “Try” for suggestions
 │   │   ├── ExplorerView.tsx    # Full-width data table
-│   │   ├── ChartView.tsx       # WebGPU canvas + Vega-Lite integration
-│   │   └── QueryView.tsx       # SQL editor + results grid
+│   │   ├── QueryView.tsx       # SQL editor + results
+│   │   └── PreviewFooter.tsx   # Collapsible preview + Schema (drag tokens)
 │   ├── lib/
-│   │   ├── store.ts            # Zustand state (files, selection, view mode)
-│   │   ├── tauri.ts            # Typed IPC bridge to Rust commands
-│   │   ├── vega.ts             # Vega-Lite spec generators (scatter, bar, histogram)
-│   │   ├── webgpu.ts           # GPU pipeline: init, upload, compute, render
-│   │   ├── format.ts           # Number/byte formatting helpers
-│   │   └── wgsl.d.ts           # TypeScript declarations for WGSL imports
+│   │   ├── store.ts             # Zustand state
+│   │   ├── tauri.ts             # Typed IPC bridge (invoke wrappers)
+│   │   ├── vega.ts              # Vega-Lite spec builders
+│   │   ├── webgpu.ts            # WebGPU pipeline (scatter)
+│   │   ├── recommendations.ts  # Heuristic chart suggestions
+│   │   ├── ollama.ts            # Ollama API for AI suggestions
+│   │   ├── mock-data.ts         # Browser fallbacks when not in Tauri
+│   │   ├── format.ts            # Number/byte formatting
+│   │   └── chartPalettes.ts     # Chart color palettes
 │   ├── shaders/
-│   │   └── scatter.wgsl        # Compute + vertex + fragment shaders
+│   │   └── scatter.wgsl         # Compute + vertex + fragment
 │   └── styles/
-│       └── globals.css         # Design tokens, themes, component utilities
+│       └── globals.css          # Design tokens, theme
 │
 ├── scripts/
-│   └── generate_data.py        # Sample data generator (scatter, sales, timeseries)
-├── .cursor/rules/
-│   └── loom-stack.mdc          # AI development rules for this project
-├── Makefile                    # 🧵 The Command Loom (run `make` for help)
-├── Dockerfile                  # Web UI container (static export + serve)
-├── docker-compose.yml          # Docker Compose for web UI
-├── .dockerignore               # Docker build exclusions
-├── next.config.mjs             # Static export for Tauri
-├── tailwind.config.ts          # Token-linked Tailwind theme
-├── tsconfig.json               # TypeScript config
-├── postcss.config.mjs          # PostCSS plugins
-└── package.json                # JS dependencies and scripts
+│   └── generate_data.py         # Sample data (scatter, sales, timeseries)
+├── docs/
+│   └── screenshots/            # Screenshots for README
+├── Makefile                     # Command Loom (run `make` for help)
+├── Dockerfile                   # Web UI container
+├── docker-compose.yml
+├── next.config.mjs              # Static export for Tauri
+├── tailwind.config.ts          # Token-linked theme
+└── package.json
 ```
 
----
-
-## Design System
-
-All visual decisions are token-based, defined in `src/styles/globals.css`.
-
-| Token                | Dark Default   | Purpose                |
-|----------------------|----------------|------------------------|
-| `--loom-bg`          | `#0a0a0c`      | Page background        |
-| `--loom-surface`     | `#111114`      | Cards, panels          |
-| `--loom-elevated`    | `#1a1a1f`      | Hover states, inputs   |
-| `--loom-border`      | `#2a2a30`      | Borders, dividers      |
-| `--loom-text`        | `#e8e8ec`      | Primary text           |
-| `--loom-muted`       | `#6b6b78`      | Secondary text         |
-| `--loom-accent`      | `#6c5ce7`      | Accent (purple)        |
-| `--chart-1..8`       | (8 colors)     | Visualization palette  |
-
-**To re-skin the entire product:** change only `globals.css` token values.
-
-Component classes: `.loom-panel`, `.loom-card`, `.loom-btn-primary`, `.loom-btn-ghost`, `.loom-input`, `.loom-badge`.
+See [DOCS.md](DOCS.md) for a deeper codebase map and conventions.
 
 ---
 
-## IPC Command Reference
+## Design system
 
-| Command            | Args                              | Returns           |
-|--------------------|-----------------------------------|--------------------|
-| `scan_folder`      | `{ folderPath: string }`          | `FileEntry[]`      |
-| `query_file`       | `{ filePath, sql, limit? }`       | `QueryResult`      |
-| `get_column_stats` | `{ filePath: string }`            | `ColumnInfo[]`     |
-| `get_sample_rows`  | `{ filePath, limit? }`            | `QueryResult`      |
+Visual design is token-based in `src/styles/globals.css`:
 
-All IPC calls are typed in `src/lib/tauri.ts`. Never use `invoke()` directly.
+| Token | Dark default | Purpose |
+|-------|--------------|---------|
+| `--loom-bg` | `#0a0a0c` | Page background |
+| `--loom-surface` | `#111114` | Cards, panels |
+| `--loom-elevated` | `#1a1a1f` | Hover, inputs |
+| `--loom-border` | `#2a2a30` | Borders |
+| `--loom-text` | `#e8e8ec` | Primary text |
+| `--loom-muted` | `#6b6b78` | Secondary text |
+| `--loom-accent` | `#6c5ce7` | Accent (purple) |
+| `--chart-1` … `--chart-8` | (palette) | Chart colors |
+
+Component classes: `.loom-panel`, `.loom-card`, `.loom-btn-primary`, `.loom-btn-ghost`, `.loom-input`, `.loom-badge`. To reskin the app, change token values in `globals.css`.
 
 ---
 
-## WebGPU Pipeline
+## IPC command reference
+
+Frontend calls go through `src/lib/tauri.ts`; do not use raw `invoke()`.
+
+| Command | Args | Returns |
+|---------|------|--------|
+| `scan_folder` | `{ folderPath: string }` | `FileEntry[]` |
+| `query_file` | `{ filePath, sql, limit? }` | `QueryResult` |
+| `get_column_stats` | `{ filePath: string }` | `ColumnInfo[]` |
+| `get_sample_rows` | `{ filePath, limit? }` | `QueryResult` |
+| `inspect_file` | `{ filePath, limit? }` | `InspectResult` (stats + sample) |
+| `save_csv_to_folder` | `{ folder_path, url, filename }` | `string` (saved path) |
+| `fetch_data_gov_recent_csv` | `{ rows?: number }` | `DataGovDataset[]` |
+
+---
+
+## WebGPU pipeline (scatter)
 
 ```
 CPU: Float32Array (x, y, category)
-  ↓ upload
-GPU Storage Buffer
-  ↓ compute_positions (256 threads/workgroup)
-Screen Buffer (NDC coords + color)
-  ↓ vertex_main (instanced quads)
-  ↓ fragment_main (circle + soft edge)
-Framebuffer
+  → upload to GPU storage buffer
+  → compute_positions (workgroups)
+  → screen-space coords + color
+  → vertex_main (instanced quads)
+  → fragment_main (circle + soft edge)
+  → framebuffer
 ```
 
-Shaders live in `src/shaders/scatter.wgsl`. The color palette matches the CSS `--chart-*` tokens for visual consistency.
+Shaders: `src/shaders/scatter.wgsl`. Palette aligns with `--chart-*` in CSS.
 
 ---
 
 ## Milestones
 
-- **M1 (Core):** Folder → DuckDB → WebGPU skeleton. Target: 1M+ points at 60fps.
-- **M2 (Skin):** WebGPU texture → MLX sidecar → AI-styled charts. Leverages UMA on Apple Silicon.
-- **M3 (Share):** Bundle spec + assets → Google Cloud Run for governed story sharing.
+- **M1 (Core)** — Folder → DuckDB → WebGPU scatter. Target: 1M+ points at 60fps.
+- **M2 (Skin)** — WebGPU texture → MLX sidecar for AI-styled charts (Apple Silicon).
+- **M3 (Share)** — Bundle spec + assets for governed story sharing.
 
 ---
 
-## Key Decisions
+## Key decisions
 
-1. **Static Export** — Tauri requires SSG, not SSR. `next.config.mjs` sets `output: "export"`.
-2. **In-Process DB** — DuckDB runs in the Rust process. No external database server.
-3. **Vega-Lite as Spec** — Charts are defined declaratively, making them LLM-friendly and auditable.
-4. **WebGPU over Canvas** — Compute shaders handle data transformation on the GPU for 100x throughput.
-5. **Zustand over Context** — Simpler than Redux, avoids Context re-render cascade.
+1. **Static export** — Tauri expects a static frontend; `next.config.mjs` uses `output: "export"`. No server-side API routes at runtime.
+2. **In-process DB** — DuckDB runs inside the Rust process; no separate database server.
+3. **Vega-Lite as spec** — Charts are declarative JSON, so they’re auditable and LLM-friendly; used for export (SVG) and for non-WebGPU marks.
+4. **WebGPU for scatter** — High-density scatter uses compute shaders; other marks use Canvas 2D or Vega as needed.
+5. **Zustand** — Single store for UI and cached results; avoids Context re-render chains.
+6. **Data.gov in Rust** — Data.gov “recent CSV” is fetched by a Tauri command (reqwest) so it works without a Next.js API route.

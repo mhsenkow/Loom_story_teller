@@ -31,7 +31,8 @@ function isNumericType(dt: string): boolean {
 export function ChartView() {
   const {
     selectedFile, sampleRows, chartRecs, activeChart, setActiveChart, setPanelTab, columnStats,
-    chartVisualOverrides, aiSuggestionReason,
+    chartVisualOverrides, aiSuggestionReason, chartTitleOverrides, setChartTitleOverride,
+    setPngExportHandler, setSvgExportHandler, vegaSpec,
   } = useLoomStore();
 
   const colors = useMemo(
@@ -48,11 +49,21 @@ export function ChartView() {
   const rendererRef = useRef<LoomRenderer | null>(null);
   const [gpuReady, setGpuReady] = useState(false);
   const [canvasSized, setCanvasSized] = useState(false);
+  const exportStateRef = useRef({ activeChart, gpuReady, vegaSpec, sampleRows });
+  exportStateRef.current = { activeChart, gpuReady, vegaSpec, sampleRows };
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [aiSuggesting, setAiSuggesting] = useState(false);
+  const [titleEditing, setTitleEditing] = useState(false);
+  const [titleEditValue, setTitleEditValue] = useState("");
+  const [showTitleEditButton, setShowTitleEditButton] = useState(false);
+  const titleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bestSuggestion = useMemo(() => getBestSuggestion(chartRecs), [chartRecs]);
   const tableName = selectedFile?.name?.replace(/\.\w+$/, "") ?? "";
+
+  const displayTitle = activeChart
+    ? (chartTitleOverrides[activeChart.id] ?? activeChart.title)
+    : "Select a chart";
 
   const handleSuggestChart = useCallback(() => {
     if (bestSuggestion) {
@@ -102,6 +113,30 @@ export function ChartView() {
       setAiSuggesting(false);
     }
   }, [columnStats, tableName, activeChart, bestSuggestion, setActiveChart, setPanelTab]);
+
+  const handleTitleStartEdit = useCallback(() => {
+    if (!activeChart) return;
+    setTitleEditValue(displayTitle);
+    setTitleEditing(true);
+  }, [activeChart, displayTitle]);
+
+  const handleTitleSave = useCallback(() => {
+    if (!activeChart) return;
+    const v = titleEditValue.trim();
+    setChartTitleOverride(activeChart.id, v || null);
+    setTitleEditing(false);
+  }, [activeChart, titleEditValue, setChartTitleOverride]);
+
+  const handleTitleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter") handleTitleSave();
+      if (e.key === "Escape") {
+        setTitleEditValue(displayTitle);
+        setTitleEditing(false);
+      }
+    },
+    [handleTitleSave, displayTitle],
+  );
 
   const handleRefresh = useCallback(() => {
     const container = containerRef.current;
@@ -163,6 +198,64 @@ export function ChartView() {
     observer.observe(container);
     return () => observer.disconnect();
   }, [suggestionsExpanded]);
+
+  // Register PNG/SVG export handlers for the Export tab
+  useEffect(() => {
+    setPngExportHandler(async (): Promise<Blob | null> => {
+      const { activeChart: ac, gpuReady: gpu } = exportStateRef.current;
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+      const canvas2D = canvas2DRef.current;
+      if (!container || !canvas || !canvas2D || !ac) return null;
+      const useWebGPU = ac.kind === "scatter" && gpu;
+      const sourceCanvas = useWebGPU ? canvas : canvas2D;
+      const w = sourceCanvas.width;
+      const h = sourceCanvas.height;
+      if (w === 0 || h === 0) return null;
+      try {
+        const off = document.createElement("canvas");
+        off.width = w;
+        off.height = h;
+        const ctx = off.getContext("2d");
+        if (!ctx) return null;
+        ctx.fillStyle = "#0a0a0c";
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(sourceCanvas, 0, 0);
+        return new Promise<Blob | null>((resolve) => {
+          off.toBlob((blob) => resolve(blob), "image/png");
+        });
+      } catch {
+        return null;
+      }
+    });
+    setSvgExportHandler(async (): Promise<string | null> => {
+      const { vegaSpec: spec, sampleRows: rows } = exportStateRef.current;
+      if (!spec || !rows?.rows?.length) return null;
+      try {
+        const { compile } = await import("vega-lite");
+        const vega = await import("vega");
+        const values = rows.rows.map((row) => {
+          const obj: Record<string, unknown> = {};
+          rows.columns.forEach((col, i) => { obj[col] = row[i]; });
+          return obj;
+        });
+        const specWithData = { ...spec, data: { values } };
+        const compiled = compile(specWithData as Parameters<typeof compile>[0]);
+        const view = new vega.View(vega.parse(compiled.spec), { renderer: "none" });
+        await view.runAsync();
+        const svg = await view.toSVG();
+        view.finalize();
+        return svg;
+      } catch (e) {
+        console.warn("SVG export failed:", e);
+        return null;
+      }
+    });
+    return () => {
+      setPngExportHandler(null);
+      setSvgExportHandler(null);
+    };
+  }, [setPngExportHandler, setSvgExportHandler]);
 
   const extractScatterData = useCallback(() => {
     if (!sampleRows || !activeChart) return null;
@@ -296,11 +389,12 @@ export function ChartView() {
       ctx.restore();
     }
 
-    // Title
+    // Title (use overridden title if set)
+    const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
     ctx.fillStyle = "#e8e8ec";
     ctx.font = "600 13px Inter, sans-serif";
     ctx.textAlign = "left";
-    ctx.fillText(activeChart.title, pad, 28);
+    ctx.fillText(titleText, pad, 28);
     ctx.fillStyle = "#6b6b78";
     ctx.font = "11px Inter, sans-serif";
     ctx.fillText(activeChart.subtitle, pad, 44);
@@ -319,7 +413,7 @@ export function ChartView() {
     }
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }, [canvasSized, activeChart, sampleRows, gpuReady, extractScatterData, colors, opacity, pointSize, refreshKey]);
+  }, [canvasSized, activeChart, sampleRows, gpuReady, extractScatterData, colors, opacity, pointSize, refreshKey, chartTitleOverrides]);
 
   // Axes overlay for WebGPU scatter; clear when not scatter so overlay doesn't sit on top of line/bar
   useEffect(() => {
@@ -464,14 +558,60 @@ export function ChartView() {
         `}
       >
         <div className="flex items-center gap-3 px-4 py-2 border-b border-loom-border bg-loom-surface/50">
-          <div className="flex flex-col gap-0.5 min-w-0">
-            <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
+            <div
+              className="flex items-center gap-2 min-w-0 group"
+              onMouseEnter={() => {
+                if (!activeChart || titleEditing) return;
+                titleHoverTimerRef.current = setTimeout(() => setShowTitleEditButton(true), 1000);
+              }}
+              onMouseLeave={() => {
+                if (titleHoverTimerRef.current) {
+                  clearTimeout(titleHoverTimerRef.current);
+                  titleHoverTimerRef.current = null;
+                }
+                setShowTitleEditButton(false);
+              }}
+            >
               <span className="w-2 h-2 rounded-full bg-loom-accent shrink-0" />
-              <span className="text-xs font-medium text-loom-text truncate">
-                {activeChart?.title ?? "Select a chart"}
-              </span>
+              {titleEditing ? (
+                <input
+                  type="text"
+                  value={titleEditValue}
+                  onChange={(e) => setTitleEditValue(e.target.value)}
+                  onBlur={handleTitleSave}
+                  onKeyDown={handleTitleKeyDown}
+                  className="flex-1 min-w-0 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded px-2 py-0.5 font-mono focus:outline-none focus:ring-1 focus:ring-loom-accent focus:border-loom-accent"
+                  placeholder="Chart title"
+                  autoFocus
+                  aria-label="Chart title"
+                />
+              ) : (
+                <>
+                  <span
+                    className="text-xs font-medium text-loom-text truncate cursor-text select-text"
+                    onDoubleClick={activeChart ? handleTitleStartEdit : undefined}
+                    title={activeChart ? "Double-click or hover for edit" : undefined}
+                  >
+                    {displayTitle}
+                  </span>
+                  {activeChart && showTitleEditButton && (
+                    <button
+                      type="button"
+                      onClick={handleTitleStartEdit}
+                      className="shrink-0 p-1 rounded text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors"
+                      title="Edit title"
+                      aria-label="Edit chart title"
+                    >
+                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                      </svg>
+                    </button>
+                  )}
+                </>
+              )}
             </div>
-            {activeChart && (
+            {activeChart && !titleEditing && (
               <span
                 className="text-2xs text-loom-muted pl-4 cursor-help border-b border-dotted border-loom-muted/50"
                 title={aiSuggestionReason ?? getRecommendationReason(activeChart)}

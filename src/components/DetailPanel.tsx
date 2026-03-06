@@ -17,6 +17,7 @@ import { createChartRec, CHART_KIND_OPTIONS, getRecommendationReason, getRandomC
 const TABS: { key: PanelTab; label: string }[] = [
   { key: "stats", label: "Stats" },
   { key: "chart", label: "Chart" },
+  { key: "export", label: "Export" },
 ];
 
 export function DetailPanel() {
@@ -53,6 +54,8 @@ export function DetailPanel() {
           </div>
         ) : panelTab === "stats" ? (
           <StatsView />
+        ) : panelTab === "export" ? (
+          <ExportView />
         ) : (
           <ChartPanelView />
         )}
@@ -146,6 +149,91 @@ function StatRow({ label, value }: { label: string; value: string }) {
   );
 }
 
+// --- Export tab: Copy as PNG / SVG ---
+
+function ExportView() {
+  const { activeChart, pngExportHandler, svgExportHandler } = useLoomStore();
+  const [pngFeedback, setPngFeedback] = useState(false);
+  const [svgFeedback, setSvgFeedback] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
+
+  const clearError = useCallback(() => {
+    setCopyError(null);
+  }, []);
+
+  const handleCopyPng = useCallback(async () => {
+    if (!pngExportHandler) return;
+    setCopyError(null);
+    try {
+      const blob = await pngExportHandler();
+      if (blob) {
+        await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+        setPngFeedback(true);
+        setTimeout(() => setPngFeedback(false), 2000);
+      }
+    } catch (e) {
+      console.warn("Copy PNG failed:", e);
+      setCopyError("Clipboard access denied. Use a secure context (HTTPS or localhost) and allow clipboard permission.");
+    }
+  }, [pngExportHandler]);
+
+  const handleCopySvg = useCallback(async () => {
+    if (!svgExportHandler) return;
+    setCopyError(null);
+    try {
+      const svg = await svgExportHandler();
+      if (svg) {
+        await navigator.clipboard.writeText(svg);
+        setSvgFeedback(true);
+        setTimeout(() => setSvgFeedback(false), 2000);
+      }
+    } catch (e) {
+      console.warn("Copy SVG failed:", e);
+      setCopyError("Clipboard access denied. Use a secure context (HTTPS or localhost) and allow clipboard permission.");
+    }
+  }, [svgExportHandler]);
+
+  if (!activeChart) {
+    return (
+      <div className="p-4 text-center text-sm text-loom-muted">
+        Select a chart to export it as PNG or SVG.
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-3 space-y-3">
+      <p className="text-2xs text-loom-muted">
+        Copy the current chart to the clipboard.
+      </p>
+      {copyError && (
+        <p className="text-2xs text-amber-500/90 bg-amber-500/10 rounded px-2 py-1.5 flex items-center justify-between gap-2">
+          <span>{copyError}</span>
+          <button type="button" onClick={clearError} className="shrink-0 text-loom-muted hover:text-loom-text" aria-label="Dismiss">×</button>
+        </p>
+      )}
+      <div className="loom-card space-y-2">
+        <button
+          type="button"
+          onClick={handleCopyPng}
+          disabled={!pngExportHandler}
+          className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent hover:bg-loom-elevated/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {pngFeedback ? "Copied!" : "Copy as PNG"}
+        </button>
+        <button
+          type="button"
+          onClick={handleCopySvg}
+          disabled={!svgExportHandler}
+          className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent hover:bg-loom-elevated/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {svgFeedback ? "Copied!" : "Copy as SVG"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // --- Chart tab: Vega spec + visual overrides ---
 
 function ChartPanelView() {
@@ -163,6 +251,10 @@ function ChartPanelView() {
   const [specExpanded, setSpecExpanded] = useState(true);
   const [specCopyOk, setSpecCopyOk] = useState(false);
   const [dragOverSlot, setDragOverSlot] = useState<"x" | "y" | "color" | null>(null);
+  const [encodingOpen, setEncodingOpen] = useState(true);
+  const [activeChartOpen, setActiveChartOpen] = useState(true);
+  const [visualOpen, setVisualOpen] = useState(true);
+  const [vegaOpen, setVegaOpen] = useState(false);
 
   const tableName = selectedFile?.name?.replace(/\.\w+$/, "") ?? "";
 
@@ -296,21 +388,32 @@ function ChartPanelView() {
     (c) => !numericCols.some((n) => n.name === c.name) && (c.distinct_count ?? 0) >= 2 && (c.distinct_count ?? 0) <= 30,
   );
 
+  const colType = (name: string) => columnStats.find((c) => c.name === name)?.data_type ?? "";
+
   return (
-    <div className="flex flex-col gap-4 p-3">
-      {/* Encoding: chart type + drag from footer Schema or dropdowns */}
-      <div className="loom-card space-y-2">
-        <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-3 p-3">
+      {/* Encoding — collapsible */}
+      <div className="loom-card overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setEncodingOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-2 py-1.5 text-left hover:bg-loom-elevated/50 rounded transition-colors"
+        >
           <span className="text-xs font-semibold text-loom-text">Encoding</span>
-          <button
-            type="button"
-            onClick={handleRandomize}
-            className="text-2xs py-1 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text transition-colors"
-            title="Random chart type and column combo"
-          >
-            Randomize
-          </button>
-        </div>
+          <span className="text-loom-muted text-xs">{encodingOpen ? "▼" : "▶"}</span>
+        </button>
+        {encodingOpen && (
+          <div className="space-y-2 px-2 pb-2">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={handleRandomize}
+                className="text-2xs py-1 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text transition-colors"
+                title="Random chart type and column combo"
+              >
+                Randomize
+              </button>
+            </div>
         <div>
           <label className="block text-2xs text-loom-muted mb-1">Chart type</label>
           <select
@@ -344,6 +447,9 @@ function ChartPanelView() {
                 <option key={c.name} value={c.name}>{c.name}</option>
               ))}
             </select>
+            {colType(activeChart.xField) && (
+              <p className="text-2xs text-loom-muted mt-0.5 font-mono">{colType(activeChart.xField)}</p>
+            )}
           </div>
           {showY && (
             <div className="flex flex-col gap-1">
@@ -366,6 +472,9 @@ function ChartPanelView() {
                   <option key={c.name} value={c.name}>{c.name}</option>
                 ))}
               </select>
+              {activeChart.yField && colType(activeChart.yField) && (
+                <p className="text-2xs text-loom-muted mt-0.5 font-mono">{colType(activeChart.yField)}</p>
+              )}
             </div>
           )}
           {showColor && (
@@ -389,6 +498,9 @@ function ChartPanelView() {
                   <option key={c.name} value={c.name}>{c.name}</option>
                 ))}
               </select>
+              {activeChart.colorField && colType(activeChart.colorField) && (
+                <p className="text-2xs text-loom-muted mt-0.5 font-mono">{colType(activeChart.colorField)}</p>
+              )}
             </div>
           )}
           {showSize && (
@@ -422,12 +534,23 @@ function ChartPanelView() {
             </div>
           )}
         </div>
+          </div>
+        )}
       </div>
 
-      {/* Chart info */}
-      <div className="loom-card space-y-1.5">
-        <div className="flex items-center justify-between">
+      {/* Active chart — collapsible */}
+      <div className="loom-card overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setActiveChartOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-2 py-1.5 text-left hover:bg-loom-elevated/50 rounded transition-colors"
+        >
           <span className="text-xs font-semibold text-loom-text">Active chart</span>
+          <span className="text-loom-muted text-xs">{activeChartOpen ? "▼" : "▶"}</span>
+        </button>
+        {activeChartOpen && (
+          <div className="space-y-1.5 px-2 pb-2">
+        <div className="flex items-center justify-between">
           <span className="loom-badge">{activeChart.kind}</span>
         </div>
         <p className="text-2xs text-loom-muted">
@@ -443,11 +566,22 @@ function ChartPanelView() {
           {activeChart.rowField && <p>Row: {activeChart.rowField}</p>}
           <p>{rowCount.toLocaleString()} rows (preview)</p>
         </div>
+          </div>
+        )}
       </div>
 
-      {/* Visual overrides */}
-      <div className="loom-card space-y-3">
-        <div className="text-xs font-semibold text-loom-text">Visual</div>
+      {/* Visual — collapsible */}
+      <div className="loom-card overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setVisualOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-2 py-1.5 text-left hover:bg-loom-elevated/50 rounded transition-colors"
+        >
+          <span className="text-xs font-semibold text-loom-text">Visual</span>
+          <span className="text-loom-muted text-xs">{visualOpen ? "▼" : "▶"}</span>
+        </button>
+        {visualOpen && (
+          <div className="space-y-3 px-2 pb-2">
         <div className="space-y-3">
           {(activeChart.kind === "scatter" || activeChart.kind === "strip") && (
             <>
@@ -517,17 +651,29 @@ function ChartPanelView() {
             Show grid
           </label>
         </div>
+          </div>
+        )}
       </div>
 
-      {/* Vega-Lite spec */}
-      <div className="loom-card space-y-2">
+      {/* Vega-Lite spec — collapsible */}
+      <div className="loom-card overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setVegaOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-2 py-1.5 text-left hover:bg-loom-elevated/50 rounded transition-colors"
+        >
+          <span className="text-xs font-semibold text-loom-text">Vega-Lite spec</span>
+          <span className="text-loom-muted text-xs">{vegaOpen ? "▼" : "▶"}</span>
+        </button>
+        {vegaOpen && (
+          <div className="space-y-2 px-2 pb-2">
         <div className="flex items-center justify-between">
           <button
             type="button"
             onClick={() => setSpecExpanded(!specExpanded)}
-            className="text-xs font-semibold text-loom-text hover:text-loom-accent transition-colors"
+            className="text-2xs text-loom-muted hover:text-loom-accent transition-colors"
           >
-            {specExpanded ? "▼" : "▶"} Vega-Lite spec
+            {specExpanded ? "Collapse JSON" : "Expand JSON"}
           </button>
           <button
             type="button"
@@ -541,6 +687,8 @@ function ChartPanelView() {
           <pre className="text-2xs font-mono text-loom-muted bg-loom-bg rounded p-2 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
             {specJson}
           </pre>
+        )}
+          </div>
         )}
       </div>
     </div>

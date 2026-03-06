@@ -11,6 +11,7 @@
 
 use crate::db::{ColumnInfo, FileEntry, LoomDb, QueryResult};
 use serde::Serialize;
+use serde_json::Value;
 use std::path::Path;
 use tauri::State;
 
@@ -18,6 +19,23 @@ use tauri::State;
 pub struct InspectResult {
     pub stats: Vec<ColumnInfo>,
     pub sample: QueryResult,
+}
+
+#[derive(Serialize)]
+pub struct DataGovResource {
+    pub id: String,
+    pub name: String,
+    pub format: String,
+    pub url: String,
+}
+
+#[derive(Serialize)]
+pub struct DataGovDataset {
+    pub id: String,
+    pub name: String,
+    pub title: String,
+    pub organization: Option<String>,
+    pub resources: Vec<DataGovResource>,
 }
 
 /// Scan a local folder for .parquet and .csv files.
@@ -77,4 +95,176 @@ pub async fn inspect_file(
 ) -> Result<InspectResult, String> {
     let (stats, sample) = db.inspect_file(&file_path, limit.unwrap_or(100))?;
     Ok(InspectResult { stats, sample })
+}
+
+/// Normalize path: strip file:// or file:/// prefix if the dialog returns a URI.
+fn normalize_folder_path(s: &str) -> String {
+    let s = s.trim();
+    if s.starts_with("file:///") {
+        s.replacen("file:///", "", 1)
+    } else if s.starts_with("file://") {
+        s.replacen("file://", "", 1)
+    } else {
+        s.to_string()
+    }
+}
+
+/// Download a CSV from a URL and save it to the mounted folder.
+/// Only allows writing under folder_path (the path the user picked).
+#[tauri::command]
+pub async fn save_csv_to_folder(
+    folder_path: String,
+    url: String,
+    filename: String,
+) -> Result<String, String> {
+    use std::io::Write;
+
+    let folder_path = normalize_folder_path(&folder_path);
+    if folder_path.is_empty() {
+        return Err("Folder path is empty".to_string());
+    }
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("URL must start with http:// or https://".to_string());
+    }
+    if filename.trim().is_empty() {
+        return Err("Filename is empty".to_string());
+    }
+
+    let path = Path::new(&folder_path);
+    if !path.exists() || !path.is_dir() {
+        return Err("Folder does not exist or is not a directory".to_string());
+    }
+    let sanitized = filename
+        .chars()
+        .map(|c| if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' { c } else { '_' })
+        .collect::<String>();
+    let filename_owned = if sanitized.ends_with(".csv") {
+        sanitized
+    } else {
+        format!("{}.csv", sanitized)
+    };
+    let file_path = path.join(&filename_owned);
+
+    let client = reqwest::Client::builder()
+        .user_agent("Loom-Data-Storyteller/1.0")
+        .build()
+        .map_err(|e| e.to_string())?;
+    let body = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?
+        .bytes()
+        .await
+        .map_err(|e| format!("Download failed: {}", e))?;
+
+    let mut f = std::fs::File::create(&file_path).map_err(|e| format!("Write failed: {}", e))?;
+    f.write_all(&body).map_err(|e| format!("Write failed: {}", e))?;
+
+    file_path
+        .to_str()
+        .map(String::from)
+        .ok_or_else(|| "Invalid path".to_string())
+}
+
+
+/// Fetch recent Data.gov datasets that have CSV resources.
+#[tauri::command]
+pub async fn fetch_data_gov_recent_csv(rows: Option<u32>) -> Result<Vec<DataGovDataset>, String> {
+    let rows = rows.unwrap_or(40).clamp(1, 100);
+    let client = reqwest::Client::builder()
+        .user_agent("Loom-Data-Storyteller/1.0")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let res = client
+        .get("https://catalog.data.gov/api/3/action/package_search")
+        // Match the catalog behavior from:
+        // https://catalog.data.gov/dataset/?q=&sort=metadata_created+desc&res_format=CSV
+        .query(&[
+            ("rows", rows.to_string()),
+            ("sort", "metadata_created desc".to_string()),
+            ("fq", "res_format:CSV".to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("Data.gov request failed: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Data.gov returned {}", res.status()));
+    }
+
+    let body: Value = res
+        .json()
+        .await
+        .map_err(|e| format!("Invalid Data.gov response: {}", e))?;
+
+    let results = body
+        .get("result")
+        .and_then(|r| r.get("results"))
+        .and_then(|r| r.as_array())
+        .ok_or_else(|| "Unexpected Data.gov payload".to_string())?;
+
+    let mut out: Vec<DataGovDataset> = Vec::new();
+    for pkg in results {
+        let pkg_id = pkg.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let pkg_name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+        if pkg_id.is_empty() || pkg_name.is_empty() {
+            continue;
+        }
+        let pkg_title = pkg
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or(pkg_name)
+            .to_string();
+        let organization = pkg
+            .get("organization")
+            .and_then(|o| o.get("title"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let mut csv_resources: Vec<DataGovResource> = Vec::new();
+        if let Some(resources) = pkg.get("resources").and_then(|r| r.as_array()) {
+            for (idx, res) in resources.iter().enumerate() {
+                let format = res.get("format").and_then(|v| v.as_str()).unwrap_or("");
+                if format.to_uppercase() != "CSV" {
+                    continue;
+                }
+                let url = match res.get("url").and_then(|v| v.as_str()) {
+                    Some(u) if u.starts_with("http://") || u.starts_with("https://") => u.to_string(),
+                    _ => continue,
+                };
+                let id = res
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("{}-{}", pkg_id, idx));
+                let name = res
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("CSV")
+                    .to_string();
+
+                csv_resources.push(DataGovResource {
+                    id,
+                    name,
+                    format: "CSV".to_string(),
+                    url,
+                });
+            }
+        }
+
+        if !csv_resources.is_empty() {
+            out.push(DataGovDataset {
+                id: pkg_id.to_string(),
+                name: pkg_name.to_string(),
+                title: pkg_title,
+                organization,
+                resources: csv_resources,
+            });
+        }
+    }
+
+    Ok(out)
 }

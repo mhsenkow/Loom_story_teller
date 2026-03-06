@@ -11,7 +11,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import { useLoomStore, type FileEntry } from "@/lib/store";
-import { pickFolder, scanFolder, inspectFile, isTauri } from "@/lib/tauri";
+import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, type DataGovDataset } from "@/lib/tauri";
 import { recommend } from "@/lib/recommendations";
 import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
@@ -27,11 +27,12 @@ export function Sidebar() {
     setDataRegionOpen, webFileCache, setWebFileCache,
   } = useLoomStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  // Defer isTauri() until after mount so server and first client render match (avoids hydration mismatch).
-  const [isWebEnv, setIsWebEnv] = useState<boolean | null>(null);
+  // Only show web vs Tauri UI after mount so server and first client render match (avoids hydration mismatch).
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
-    setIsWebEnv(!isTauri());
+    setMounted(true);
   }, []);
+  const isWebEnv = mounted && !isTauri();
 
   async function handlePickFolder() {
     const folder = await pickFolder();
@@ -43,6 +44,19 @@ export function Sidebar() {
       setFiles(result);
     } catch (e) {
       console.error("Scan failed:", e);
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
+  async function handleRescanFolder() {
+    if (!mountedFolder || mountedFolder.startsWith("mock://") || mountedFolder.startsWith("web://")) return;
+    setIsScanning(true);
+    try {
+      const result = await scanFolder(mountedFolder);
+      setFiles(result);
+    } catch (e) {
+      console.error("Rescan failed:", e);
     } finally {
       setIsScanning(false);
     }
@@ -144,6 +158,7 @@ export function Sidebar() {
           filesCount={files.length}
           isScanning={isScanning}
           onPickFolder={handlePickFolder}
+          onRescanFolder={handleRescanFolder}
         />
       ) : (
         <FilesView
@@ -156,7 +171,7 @@ export function Sidebar() {
           onSelectFile={handleSelectFile}
           onOpenDataRegion={() => setDataRegionOpen(true)}
           formatNumber={formatNumber}
-          isWeb={isWebEnv === true}
+          isWeb={isWebEnv}
           onLoadFiles={handleLoadFiles}
           fileInputRef={fileInputRef}
           onUseDemoData={handleUseDemoData}
@@ -175,6 +190,7 @@ function DataRegionView({
   filesCount,
   isScanning,
   onPickFolder,
+  onRescanFolder,
 }: {
   onBack: () => void;
   mountedFolder: string | null;
@@ -182,7 +198,55 @@ function DataRegionView({
   filesCount: number;
   isScanning: boolean;
   onPickFolder: () => void;
+  onRescanFolder: () => void;
 }) {
+  const [dataGovDatasets, setDataGovDatasets] = useState<DataGovDataset[]>([]);
+  const [dataGovLoading, setDataGovLoading] = useState(false);
+  const [dataGovError, setDataGovError] = useState<string | null>(null);
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const isTauriEnv = isTauri();
+
+  useEffect(() => {
+    let cancelled = false;
+    setDataGovLoading(true);
+    setDataGovError(null);
+    if (!isTauriEnv) {
+      setDataGovError("Data.gov discovery is available in the desktop app (Tauri mode).");
+      setDataGovDatasets([]);
+      setDataGovLoading(false);
+      return () => { cancelled = true; };
+    }
+    fetchDataGovRecentCsv(40)
+      .then((datasets) => {
+        if (cancelled) return;
+        setDataGovDatasets(datasets);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setDataGovError(e instanceof Error ? e.message : "Failed to load Data.gov datasets");
+        setDataGovDatasets([]);
+      })
+      .finally(() => {
+        if (!cancelled) setDataGovLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isTauriEnv]);
+
+  async function handleSaveToFolder(url: string, filename: string, resourceId: string) {
+    if (!mountedFolder || mountedFolder.startsWith("mock://") || mountedFolder.startsWith("web://")) return;
+    setSavingId(resourceId);
+    try {
+      await saveCsvToFolder(mountedFolder, url, filename);
+      await onRescanFolder();
+    } catch (e) {
+      console.error("Save failed:", e);
+    } finally {
+      setSavingId(null);
+    }
+  }
+
+  const canSaveToFolder = isTauriEnv && mountedFolder && !mountedFolder.startsWith("mock://") && !mountedFolder.startsWith("web://");
+
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden animate-fade-in">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-loom-border flex-shrink-0">
@@ -200,12 +264,19 @@ function DataRegionView({
       </div>
 
       <div className="flex-1 overflow-y-auto py-3 px-3 space-y-6">
-        {/* Local folders */}
+        {/* Local: choose folder first */}
         <section>
           <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
-            Local
+            Local folder
           </h3>
           <div className="space-y-2">
+            <button
+              onClick={onPickFolder}
+              disabled={isScanning}
+              className="loom-btn-primary w-full text-xs"
+            >
+              {isScanning ? "Scanning…" : mountedFolder ? "Change folder" : "Choose folder"}
+            </button>
             {mountedFolder ? (
               <div className="loom-card flex items-center justify-between gap-2">
                 <div className="min-w-0">
@@ -217,45 +288,97 @@ function DataRegionView({
                 <span className="loom-badge flex-shrink-0">{filesCount} files</span>
               </div>
             ) : (
-              <p className="text-xs text-loom-muted px-1">No folder mounted</p>
+              <p className="text-2xs text-loom-muted px-1">
+                Pick a folder to save discovered data and load local CSVs.
+              </p>
             )}
-            <button
-              onClick={onPickFolder}
-              disabled={isScanning}
-              className="loom-btn-ghost w-full text-xs justify-center"
-            >
-              {isScanning ? "Scanning…" : mountedFolder ? "Change folder" : "Add folder"}
-            </button>
           </div>
         </section>
 
-        {/* Online sources */}
+        {/* Data.gov: discover recent CSVs */}
         <section>
           <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
-            Online
+            Discover — Data.gov
           </h3>
-          <div className="space-y-2">
-            <a
-              href="https://data.gov/"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="loom-card block p-3 hover:border-loom-accent transition-colors group"
-            >
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-semibold text-loom-text group-hover:text-loom-accent">Data.gov</span>
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="opacity-50 group-hover:opacity-100">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
-                </svg>
+          <p className="text-2xs text-loom-muted px-1 mb-2">
+            Recent CSV datasets. Download or save to your folder.
+          </p>
+          {dataGovLoading && (
+            <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>
+          )}
+          {dataGovError && (
+            <p className="text-2xs text-amber-500/90 px-1 py-1">{dataGovError}</p>
+          )}
+          {!dataGovLoading && !dataGovError && dataGovDatasets.length === 0 && (
+            <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found.</p>
+          )}
+          <div className="space-y-3">
+            {dataGovDatasets.map((ds) => (
+              <div key={ds.id} className="loom-card p-2.5 space-y-1.5">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-loom-text line-clamp-2">{ds.title}</p>
+                    {ds.organization && (
+                      <p className="text-2xs text-loom-muted mt-0.5">{ds.organization}</p>
+                    )}
+                  </div>
+                  <a
+                    href={`https://catalog.data.gov/dataset/${ds.name}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-2xs text-loom-accent hover:underline shrink-0"
+                  >
+                    View
+                  </a>
+                </div>
+                <div className="space-y-1">
+                  {ds.resources.slice(0, 3).map((res) => {
+                    const label = res.name !== "CSV" ? res.name : `${ds.title.slice(0, 30)}.csv`;
+                    const filename = (res.name !== "CSV" ? res.name : ds.title).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) + ".csv";
+                    return (
+                      <div key={res.id} className="flex items-center gap-2 flex-wrap text-2xs">
+                        <span className="text-loom-muted truncate max-w-[180px]" title={res.url}>
+                          {label}
+                        </span>
+                        <a
+                          href={res.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-loom-accent hover:underline shrink-0"
+                        >
+                          Download
+                        </a>
+                        {canSaveToFolder && (
+                          <button
+                            type="button"
+                            disabled={savingId === res.id}
+                            onClick={() => handleSaveToFolder(res.url, filename, res.id)}
+                            className="text-loom-accent hover:underline shrink-0 disabled:opacity-50"
+                          >
+                            {savingId === res.id ? "Saving…" : "Save to folder"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {ds.resources.length > 3 && (
+                    <p className="text-2xs text-loom-muted">+{ds.resources.length - 3} more</p>
+                  )}
+                </div>
               </div>
-              <p className="text-2xs text-loom-muted">
-                U.S. government open data — 394K+ datasets. Download CSV/Parquet and mount locally in Loom.
-              </p>
-            </a>
-            <div className="loom-card p-3 border-dashed border-loom-border opacity-75">
-              <p className="text-xs text-loom-muted">More sources coming soon</p>
-              <p className="text-2xs text-loom-muted mt-0.5">Custom URLs, APIs, and catalogs.</p>
-            </div>
+            ))}
           </div>
+          <a
+            href="https://data.gov/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 mt-2 text-2xs text-loom-muted hover:text-loom-accent"
+          >
+            Browse all on Data.gov
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
+            </svg>
+          </a>
         </section>
       </div>
     </div>
@@ -296,57 +419,11 @@ function FilesView({
   return (
     <>
       <div className="px-3 py-3 border-b border-loom-border flex-shrink-0">
-        {isWeb ? (
-          <>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv"
-              multiple
-              className="hidden"
-              onChange={onLoadFiles}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef?.current?.click()}
-              disabled={isScanning}
-              className="loom-btn-primary w-full text-xs"
-            >
-              {isScanning ? "Loading…" : "Load files"}
-            </button>
-            <p className="text-2xs text-loom-muted mt-1.5 px-0.5">
-              Pick CSV files from your device (browser only).
-            </p>
-            {onUseDemoData && (
-              <button
-                type="button"
-                onClick={onUseDemoData}
-                className="loom-btn-ghost w-full text-xs mt-2"
-              >
-                Use demo data
-              </button>
-            )}
-          </>
-        ) : (
-          <button
-            onClick={onPickFolder}
-            className="loom-btn-primary w-full text-xs"
-            disabled={isScanning}
-          >
-            {isScanning ? (
-              <span className="animate-pulse-subtle">Scanning...</span>
-            ) : mountedFolder ? (
-              "Change Folder"
-            ) : (
-              "Mount Folder"
-            )}
-          </button>
-        )}
         <button
           type="button"
           onClick={onOpenDataRegion}
-          className="loom-btn-ghost w-full text-xs mt-2 flex items-center justify-center gap-1.5"
-          title="Data & sources — folders, Data.gov, more"
+          className="loom-btn-ghost w-full text-xs flex items-center justify-center gap-1.5"
+          title="Data & sources — discover and add data"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <ellipse cx="12" cy="5" rx="9" ry="3" />
@@ -355,6 +432,54 @@ function FilesView({
           </svg>
           Data & sources
         </button>
+        <div className="mt-2 pt-2 border-t border-loom-border/50">
+          {isWeb ? (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                multiple
+                className="hidden"
+                onChange={onLoadFiles}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef?.current?.click()}
+                disabled={isScanning}
+                className="loom-btn-primary w-full text-xs"
+              >
+                {isScanning ? "Loading…" : "Load files"}
+              </button>
+              <p className="text-2xs text-loom-muted mt-1.5 px-0.5">
+                Pick CSV files from your device.
+              </p>
+              {onUseDemoData && (
+                <button
+                  type="button"
+                  onClick={onUseDemoData}
+                  className="loom-btn-ghost w-full text-xs mt-2"
+                >
+                  Use demo data
+                </button>
+              )}
+            </>
+          ) : (
+            <button
+              onClick={onPickFolder}
+              className="loom-btn-primary w-full text-xs"
+              disabled={isScanning}
+            >
+              {isScanning ? (
+                <span className="animate-pulse-subtle">Scanning...</span>
+              ) : mountedFolder ? (
+                "Change folder"
+              ) : (
+                "Choose folder"
+              )}
+            </button>
+          )}
+        </div>
         {folderName && (
           <div className="mt-2 flex items-center gap-1.5">
             <span className="text-loom-accent text-xs">&#x25CF;</span>

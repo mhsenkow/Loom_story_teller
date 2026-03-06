@@ -15,7 +15,7 @@ const DRAG_TYPE_COLUMN = "application/x-loom-column";
 type FooterTab = "preview" | "schema";
 
 export function PreviewFooter() {
-  const { sampleRows, selectedFile, columnStats, activeChart } = useLoomStore();
+  const { sampleRows, selectedFile, columnStats, activeChart, chartTitleOverrides } = useLoomStore();
   const [expanded, setExpanded] = useState(false);
   const [footerTab, setFooterTab] = useState<FooterTab>("preview");
 
@@ -53,8 +53,8 @@ export function PreviewFooter() {
         </div>
         <div className="flex items-center gap-2 pr-2">
           {activeChart && (
-            <span className="text-2xs font-mono text-loom-accent truncate max-w-[200px]" title={activeChart.title}>
-              Chart: {activeChart.title}
+            <span className="text-2xs font-mono text-loom-accent truncate max-w-[200px]" title={chartTitleOverrides[activeChart.id] ?? activeChart.title}>
+              Chart: {chartTitleOverrides[activeChart.id] ?? activeChart.title}
             </span>
           )}
           {footerTab === "preview" && !activeChart && (
