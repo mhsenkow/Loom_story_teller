@@ -470,12 +470,73 @@ export function ChartView() {
     );
   }
 
+  // Always show suggestions panel when a file is selected so Expand is always available
+  const suggestionHeader = (
+    <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border flex-shrink-0">
+      <div>
+        <p className="text-xs font-semibold text-loom-text">Suggestions</p>
+        <p className="text-2xs text-loom-muted">{chartRecs.length} charts found</p>
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        {bestSuggestion && (
+          <button
+            type="button"
+            onClick={handleSuggestChart}
+            className="text-2xs py-1.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 transition-colors font-medium"
+            title="Apply best recommendation by score"
+          >
+            Suggest chart
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={handleSuggestWithAI}
+          disabled={aiSuggesting || columnStats.length === 0}
+          className="text-2xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text hover:bg-loom-accent/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title="Use local Ollama model to suggest a chart (requires Ollama running)"
+        >
+          {aiSuggesting ? "…" : "Suggest with AI"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
+          className="loom-btn-ghost text-2xs py-1.5 px-2 rounded border border-loom-border hover:border-loom-accent hover:bg-loom-accent/10 transition-colors inline-flex items-center gap-1"
+          title={suggestionsExpanded ? "Collapse to sidebar" : "Expand to full grid"}
+        >
+          {suggestionsExpanded ? (
+            <>
+              <span className="sr-only">Collapse</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M18 15l-6-6-6 6" /></svg>
+              Collapse
+            </>
+          ) : (
+            <>
+              <span className="sr-only">Expand</span>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>
+              Expand
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  );
+
   if (chartRecs.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <div className="text-center">
-          <p className="text-sm text-loom-muted">No chart suggestions for this file</p>
-          <p className="text-xs text-loom-muted mt-1">Needs at least 1 numeric or temporal column</p>
+      <div className="flex h-full animate-fade-in">
+        <div className="w-[220px] flex-shrink-0 border-r border-loom-border bg-loom-surface flex flex-col overflow-hidden">
+          {suggestionHeader}
+          <div className="flex-1 flex items-center justify-center p-4">
+            <div className="text-center">
+              <p className="text-sm text-loom-muted">No chart suggestions</p>
+              <p className="text-xs text-loom-muted mt-1">Needs at least 1 numeric or temporal column</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-sm text-loom-muted">Select encodings in the Chart tab to build a chart</p>
+          </div>
         </div>
       </div>
     );
@@ -490,45 +551,7 @@ export function ChartView() {
           ${suggestionsExpanded ? "w-full flex-1 flex flex-col min-h-0 border-r-0 border-b border-loom-border" : "w-[220px] flex-shrink-0 overflow-y-auto"}
         `}
       >
-        <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border flex-shrink-0">
-          <div>
-            <p className="text-xs font-semibold text-loom-text">Suggestions</p>
-            <p className="text-2xs text-loom-muted">{chartRecs.length} charts found</p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {bestSuggestion && (
-              <button
-                type="button"
-                onClick={handleSuggestChart}
-                className="text-2xs py-1.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 transition-colors font-medium"
-                title="Apply best recommendation by score"
-              >
-                Suggest chart
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleSuggestWithAI}
-              disabled={aiSuggesting || columnStats.length === 0}
-              className="text-2xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text hover:bg-loom-accent/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Use local Ollama model to suggest a chart (requires Ollama running)"
-            >
-              {aiSuggesting ? "…" : "Suggest with AI"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
-              className="loom-btn-ghost text-2xs py-1.5 px-2 rounded border border-loom-border hover:border-loom-accent hover:bg-loom-accent/10 transition-colors"
-              title={suggestionsExpanded ? "Collapse to sidebar" : "Expand to full grid"}
-            >
-              {suggestionsExpanded ? (
-                <>Collapse</>
-              ) : (
-                <>Expand</>
-              )}
-            </button>
-          </div>
-        </div>
+        {suggestionHeader}
         <div
           className={`
             overflow-y-auto flex-1 min-h-0

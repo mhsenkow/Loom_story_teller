@@ -11,7 +11,7 @@
 
 import { useRef, useState, useEffect } from "react";
 import { useLoomStore, type FileEntry } from "@/lib/store";
-import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, type DataGovDataset } from "@/lib/tauri";
+import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset } from "@/lib/tauri";
 import { recommend } from "@/lib/recommendations";
 import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
@@ -21,10 +21,10 @@ const DATA_REGION_WIDTH = 340;
 
 export function Sidebar() {
   const {
-    mountedFolder, files, isScanning, selectedFile, sidebarOpen, dataRegionOpen,
+    mountedFolder, files, isScanning, selectedFile, sidebarOpen, dataRegionOpen, dataSourcesExpanded,
     setMountedFolder, setFiles, setIsScanning, setSelectedFile,
     setColumnStats, setSampleRows, setVegaSpec, setChartRecs, setActiveChart,
-    setDataRegionOpen, webFileCache, setWebFileCache,
+    setDataRegionOpen, setDataSourcesExpanded, webFileCache, setWebFileCache,
   } = useLoomStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Only show web vs Tauri UI after mount so server and first client render match (avoids hydration mismatch).
@@ -136,13 +136,13 @@ export function Sidebar() {
 
   if (!sidebarOpen) return null;
 
-  const width = dataRegionOpen ? DATA_REGION_WIDTH : SIDEBAR_WIDTH;
+  const width = dataSourcesExpanded ? undefined : (dataRegionOpen ? DATA_REGION_WIDTH : SIDEBAR_WIDTH);
   const folderName = mountedFolder?.split("/").pop() ?? null;
 
   return (
     <aside
-      className="flex flex-col h-full border-r border-loom-border bg-loom-surface flex-shrink-0 overflow-hidden transition-[width] duration-200 ease-out"
-      style={{ width: `${width}px` }}
+      className={`flex flex-col h-full border-r border-loom-border bg-loom-surface overflow-hidden transition-[width] duration-200 ease-out ${dataSourcesExpanded ? "flex-1 min-w-0" : "flex-shrink-0"}`}
+      style={width !== undefined ? { width: `${width}px` } : undefined}
     >
       {/* Header */}
       <div className="flex items-center gap-2 px-4 h-[var(--topbar-height)] border-b border-loom-border flex-shrink-0">
@@ -152,7 +152,10 @@ export function Sidebar() {
 
       {dataRegionOpen ? (
         <DataRegionView
-          onBack={() => setDataRegionOpen(false)}
+          onBack={() => { setDataRegionOpen(false); setDataSourcesExpanded(false); }}
+          expanded={dataSourcesExpanded}
+          onExpand={() => setDataSourcesExpanded(true)}
+          onCollapse={() => setDataSourcesExpanded(false)}
           mountedFolder={mountedFolder}
           folderName={folderName}
           filesCount={files.length}
@@ -181,10 +184,106 @@ export function Sidebar() {
   );
 }
 
+// --- Dataset preview modal (before opening full site) ---
+
+function DatasetPreviewModal({
+  dataset,
+  onClose,
+  onOpenFullSite,
+}: {
+  dataset: DataGovDataset;
+  onClose: () => void;
+  onOpenFullSite: () => void;
+}) {
+  const portalId = dataset.portal_id || "data.gov";
+  const portal = OPEN_DATA_PORTALS[portalId] ?? OPEN_DATA_PORTALS["data.gov"];
+  const viewUrl = `${portal.url}/${dataset.name}`;
+  const notesPreview = dataset.notes
+    ? dataset.notes.slice(0, 400) + (dataset.notes.length > 400 ? "…" : "")
+    : null;
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 animate-fade-in"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="preview-title"
+    >
+      <div
+        className="loom-card max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col bg-loom-surface border border-loom-border shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-loom-border flex-shrink-0">
+          <h2 id="preview-title" className="text-sm font-semibold text-loom-text truncate">
+            Preview
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="loom-btn-ghost p-1.5 rounded-md shrink-0"
+            aria-label="Close"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          <div>
+            <p className="text-sm font-medium text-loom-text">{dataset.title}</p>
+            {dataset.organization && (
+              <p className="text-2xs text-loom-muted mt-0.5">{dataset.organization}</p>
+            )}
+          </div>
+          {notesPreview && (
+            <p className="text-xs text-loom-muted leading-relaxed line-clamp-4">{notesPreview}</p>
+          )}
+          <div>
+            <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-1">
+              {dataset.resources.length} CSV resource{dataset.resources.length !== 1 ? "s" : ""}
+            </p>
+            <ul className="text-2xs text-loom-muted space-y-0.5">
+              {dataset.resources.slice(0, 5).map((r) => (
+                <li key={r.id} className="truncate" title={r.url}>
+                  {r.name !== "CSV" ? r.name : "CSV file"}
+                </li>
+              ))}
+              {dataset.resources.length > 5 && (
+                <li>+{dataset.resources.length - 5} more</li>
+              )}
+            </ul>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 px-4 py-3 border-t border-loom-border flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => {
+              onOpenFullSite();
+              window.open(viewUrl, "_blank", "noopener,noreferrer");
+            }}
+            className="loom-btn-primary text-xs flex-1"
+          >
+            Open on {portal.label}
+          </button>
+          <button type="button" onClick={onClose} className="loom-btn-ghost text-xs">
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // --- Data & Sources (slide-in region) ---
+
+const DATA_GOV_ROWS = 80;
 
 function DataRegionView({
   onBack,
+  expanded,
+  onExpand,
+  onCollapse,
   mountedFolder,
   folderName,
   filesCount,
@@ -193,6 +292,9 @@ function DataRegionView({
   onRescanFolder,
 }: {
   onBack: () => void;
+  expanded: boolean;
+  onExpand: () => void;
+  onCollapse: () => void;
   mountedFolder: string | null;
   folderName: string | null;
   filesCount: number;
@@ -203,7 +305,11 @@ function DataRegionView({
   const [dataGovDatasets, setDataGovDatasets] = useState<DataGovDataset[]>([]);
   const [dataGovLoading, setDataGovLoading] = useState(false);
   const [dataGovError, setDataGovError] = useState<string | null>(null);
+  const [ukDatasets, setUkDatasets] = useState<DataGovDataset[]>([]);
+  const [ukLoading, setUkLoading] = useState(false);
+  const [ukError, setUkError] = useState<string | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [previewDataset, setPreviewDataset] = useState<DataGovDataset | null>(null);
   const isTauriEnv = isTauri();
 
   useEffect(() => {
@@ -216,7 +322,7 @@ function DataRegionView({
       setDataGovLoading(false);
       return () => { cancelled = true; };
     }
-    fetchDataGovRecentCsv(40)
+    fetchDataGovRecentCsv(DATA_GOV_ROWS)
       .then((datasets) => {
         if (cancelled) return;
         setDataGovDatasets(datasets);
@@ -228,6 +334,32 @@ function DataRegionView({
       })
       .finally(() => {
         if (!cancelled) setDataGovLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [isTauriEnv]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isTauriEnv) {
+      setUkError("UK data is available in the desktop app (Tauri mode).");
+      setUkDatasets([]);
+      setUkLoading(false);
+      return () => { cancelled = true; };
+    }
+    setUkLoading(true);
+    setUkError(null);
+    fetchUkDataRecentCsv(DATA_GOV_ROWS)
+      .then((datasets) => {
+        if (!cancelled) setUkDatasets(datasets);
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setUkError(e instanceof Error ? e.message : "Failed to load UK datasets");
+          setUkDatasets([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setUkLoading(false);
       });
     return () => { cancelled = true; };
   }, [isTauriEnv]);
@@ -249,21 +381,41 @@ function DataRegionView({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden animate-fade-in">
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-loom-border flex-shrink-0">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border flex-shrink-0">
+        <div className="flex items-center gap-2 min-w-0">
+          <button
+            type="button"
+            onClick={onBack}
+            className="loom-btn-ghost p-1.5 rounded-md shrink-0"
+            title="Back to files"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <span className="text-xs font-semibold text-loom-text uppercase tracking-wider truncate">Data & sources</span>
+        </div>
         <button
           type="button"
-          onClick={onBack}
-          className="loom-btn-ghost p-1.5 rounded-md"
-          title="Back to files"
+          onClick={expanded ? onCollapse : onExpand}
+          className="loom-btn-ghost text-2xs py-1.5 px-2 rounded border border-loom-border hover:border-loom-accent hover:bg-loom-accent/10 transition-colors inline-flex items-center gap-1 shrink-0"
+          title={expanded ? "Collapse to sidebar" : "Expand to full grid"}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M19 12H5M12 19l-7-7 7-7" />
-          </svg>
+          {expanded ? (
+            <>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 15l-6-6-6 6" /></svg>
+              Collapse
+            </>
+          ) : (
+            <>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>
+              Expand
+            </>
+          )}
         </button>
-        <span className="text-xs font-semibold text-loom-text uppercase tracking-wider">Data & sources</span>
       </div>
 
-      <div className="flex-1 overflow-y-auto py-3 px-3 space-y-6">
+      <div className={`flex-1 overflow-y-auto py-3 px-3 ${expanded ? "min-h-0" : ""} ${expanded ? "space-y-4" : "space-y-6"}`}>
         {/* Local: choose folder first */}
         <section>
           <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
@@ -295,14 +447,21 @@ function DataRegionView({
           </div>
         </section>
 
-        {/* Data.gov: discover recent CSVs */}
-        <section>
-          <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
-            Discover — Data.gov
-          </h3>
-          <p className="text-2xs text-loom-muted px-1 mb-2">
-            Recent CSV datasets. Download or save to your folder.
-          </p>
+        {/* Data.gov: discover recent CSVs — list or grid when expanded */}
+        <section className={expanded ? "flex-1 min-h-0 flex flex-col" : ""}>
+          <div className="flex items-center justify-between gap-2 mb-2 px-1">
+            <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">
+              Discover — Data.gov
+            </h3>
+            {!dataGovLoading && dataGovDatasets.length > 0 && (
+              <span className="text-2xs text-loom-muted">{dataGovDatasets.length} datasets</span>
+            )}
+          </div>
+          {!expanded && (
+            <p className="text-2xs text-loom-muted px-1 mb-2">
+              Recent CSV datasets. Download or save to your folder.
+            </p>
+          )}
           {dataGovLoading && (
             <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>
           )}
@@ -312,32 +471,31 @@ function DataRegionView({
           {!dataGovLoading && !dataGovError && dataGovDatasets.length === 0 && (
             <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found.</p>
           )}
-          <div className="space-y-3">
+          <div className={expanded ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 flex-1 content-start overflow-y-auto min-h-0" : "space-y-3"}>
             {dataGovDatasets.map((ds) => (
-              <div key={ds.id} className="loom-card p-2.5 space-y-1.5">
-                <div className="flex items-start justify-between gap-2">
+              <div key={ds.id} className={`loom-card p-2.5 space-y-1.5 ${expanded ? "flex flex-col min-w-0" : ""}`}>
+                <div className="flex items-start justify-between gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-loom-text line-clamp-2">{ds.title}</p>
+                    <p className={`text-xs font-medium text-loom-text ${expanded ? "line-clamp-2" : "line-clamp-2"}`}>{ds.title}</p>
                     {ds.organization && (
-                      <p className="text-2xs text-loom-muted mt-0.5">{ds.organization}</p>
+                      <p className="text-2xs text-loom-muted mt-0.5 truncate">{ds.organization}</p>
                     )}
                   </div>
-                  <a
-                    href={`https://catalog.data.gov/dataset/${ds.name}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-2xs text-loom-accent hover:underline shrink-0"
+                  <button
+                    type="button"
+                    onClick={() => setPreviewDataset(ds)}
+                    className="text-2xs text-loom-accent hover:underline shrink-0 text-left"
                   >
                     View
-                  </a>
+                  </button>
                 </div>
                 <div className="space-y-1">
-                  {ds.resources.slice(0, 3).map((res) => {
+                  {ds.resources.slice(0, expanded ? 2 : 3).map((res) => {
                     const label = res.name !== "CSV" ? res.name : `${ds.title.slice(0, 30)}.csv`;
                     const filename = (res.name !== "CSV" ? res.name : ds.title).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) + ".csv";
                     return (
                       <div key={res.id} className="flex items-center gap-2 flex-wrap text-2xs">
-                        <span className="text-loom-muted truncate max-w-[180px]" title={res.url}>
+                        <span className={`text-loom-muted truncate ${expanded ? "max-w-full" : "max-w-[180px]"}`} title={res.url}>
                           {label}
                         </span>
                         <a
@@ -349,20 +507,25 @@ function DataRegionView({
                           Download
                         </a>
                         {canSaveToFolder && (
-                          <button
-                            type="button"
-                            disabled={savingId === res.id}
-                            onClick={() => handleSaveToFolder(res.url, filename, res.id)}
-                            className="text-loom-accent hover:underline shrink-0 disabled:opacity-50"
-                          >
-                            {savingId === res.id ? "Saving…" : "Save to folder"}
-                          </button>
+                          <span className="shrink-0 flex flex-col items-start">
+                            <button
+                              type="button"
+                              disabled={savingId === res.id}
+                              onClick={() => handleSaveToFolder(res.url, filename, res.id)}
+                              className="text-loom-accent hover:underline disabled:opacity-50"
+                            >
+                              {savingId === res.id ? "Saving…" : "Save to folder"}
+                            </button>
+                            {savingId === res.id && (
+                              <span className="text-2xs text-loom-muted mt-0.5">Large files may take a moment</span>
+                            )}
+                          </span>
                         )}
                       </div>
                     );
                   })}
-                  {ds.resources.length > 3 && (
-                    <p className="text-2xs text-loom-muted">+{ds.resources.length - 3} more</p>
+                  {ds.resources.length > (expanded ? 2 : 3) && (
+                    <p className="text-2xs text-loom-muted">+{ds.resources.length - (expanded ? 2 : 3)} more</p>
                   )}
                 </div>
               </div>
@@ -372,7 +535,7 @@ function DataRegionView({
             href="https://data.gov/"
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 mt-2 text-2xs text-loom-muted hover:text-loom-accent"
+            className="inline-flex items-center gap-1.5 mt-2 text-2xs text-loom-muted hover:text-loom-accent shrink-0"
           >
             Browse all on Data.gov
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -380,7 +543,138 @@ function DataRegionView({
             </svg>
           </a>
         </section>
+
+        {/* data.gov.uk — same card UI + preview modal */}
+        <section>
+          <div className="flex items-center justify-between gap-2 mb-2 px-1">
+            <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">
+              Discover — data.gov.uk
+            </h3>
+            {!ukLoading && ukDatasets.length > 0 && (
+              <span className="text-2xs text-loom-muted">{ukDatasets.length} datasets</span>
+            )}
+          </div>
+          {!expanded && (
+            <p className="text-2xs text-loom-muted px-1 mb-2">
+              UK government open data. Recent CSVs.
+            </p>
+          )}
+          {ukLoading && <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>}
+          {ukError && <p className="text-2xs text-amber-500/90 px-1 py-1">{ukError}</p>}
+          {!ukLoading && !ukError && ukDatasets.length === 0 && (
+            <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found.</p>
+          )}
+          <div className={expanded ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 content-start" : "space-y-3"}>
+            {ukDatasets.map((ds) => (
+              <div key={ds.id} className={`loom-card p-2.5 space-y-1.5 ${expanded ? "flex flex-col min-w-0" : ""}`}>
+                <div className="flex items-start justify-between gap-2 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium text-loom-text line-clamp-2">{ds.title}</p>
+                    {ds.organization && (
+                      <p className="text-2xs text-loom-muted mt-0.5 truncate">{ds.organization}</p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewDataset(ds)}
+                    className="text-2xs text-loom-accent hover:underline shrink-0 text-left"
+                  >
+                    View
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {ds.resources.slice(0, expanded ? 2 : 3).map((res) => {
+                    const label = res.name !== "CSV" ? res.name : `${ds.title.slice(0, 30)}.csv`;
+                    const filename = (res.name !== "CSV" ? res.name : ds.title).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) + ".csv";
+                    return (
+                      <div key={res.id} className="flex items-center gap-2 flex-wrap text-2xs">
+                        <span className={`text-loom-muted truncate ${expanded ? "max-w-full" : "max-w-[180px]"}`} title={res.url}>
+                          {label}
+                        </span>
+                        <a href={res.url} target="_blank" rel="noopener noreferrer" className="text-loom-accent hover:underline shrink-0">
+                          Download
+                        </a>
+                        {canSaveToFolder && (
+                          <span className="shrink-0 flex flex-col items-start">
+                            <button
+                              type="button"
+                              disabled={savingId === res.id}
+                              onClick={() => handleSaveToFolder(res.url, filename, res.id)}
+                              className="text-loom-accent hover:underline disabled:opacity-50"
+                            >
+                              {savingId === res.id ? "Saving…" : "Save to folder"}
+                            </button>
+                            {savingId === res.id && (
+                              <span className="text-2xs text-loom-muted mt-0.5">Large files may take a moment</span>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {ds.resources.length > (expanded ? 2 : 3) && (
+                    <p className="text-2xs text-loom-muted">+{ds.resources.length - (expanded ? 2 : 3)} more</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <a
+            href="https://data.gov.uk"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 mt-2 text-2xs text-loom-muted hover:text-loom-accent shrink-0"
+          >
+            Browse all on data.gov.uk
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
+            </svg>
+          </a>
+        </section>
+
+        {/* More data sources — links to other open data portals */}
+        <section>
+          <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
+            More sources
+          </h3>
+          <p className="text-2xs text-loom-muted px-1 mb-2">
+            Open data portals with CSV downloads. Open in browser, then download and add to your folder.
+          </p>
+          <ul className="space-y-1.5">
+            <li>
+              <a href="https://data.europa.eu" target="_blank" rel="noopener noreferrer" className="text-2xs text-loom-accent hover:underline">
+                data.europa.eu
+              </a>
+              <span className="text-2xs text-loom-muted"> — EU open data (1M+ datasets)</span>
+            </li>
+            <li>
+              <a href="https://data.gov.uk" target="_blank" rel="noopener noreferrer" className="text-2xs text-loom-accent hover:underline">
+                data.gov.uk
+              </a>
+              <span className="text-2xs text-loom-muted"> — UK government data</span>
+            </li>
+            <li>
+              <a href="https://ourworldindata.org" target="_blank" rel="noopener noreferrer" className="text-2xs text-loom-accent hover:underline">
+                Our World in Data
+              </a>
+              <span className="text-2xs text-loom-muted"> — Global development, health, environment</span>
+            </li>
+            <li>
+              <a href="https://data.nasa.gov" target="_blank" rel="noopener noreferrer" className="text-2xs text-loom-accent hover:underline">
+                data.nasa.gov
+              </a>
+              <span className="text-2xs text-loom-muted"> — NASA open data</span>
+            </li>
+          </ul>
+        </section>
       </div>
+      {previewDataset && (
+        <DatasetPreviewModal
+          dataset={previewDataset}
+          onClose={() => setPreviewDataset(null)}
+          onOpenFullSite={() => setPreviewDataset(null)}
+        />
+      )}
     </div>
   );
 }

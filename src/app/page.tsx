@@ -20,7 +20,7 @@ import { QueryView } from "@/components/QueryView";
 import { useEffect } from "react";
 
 export default function Home() {
-  const { viewMode, setViewMode } = useLoomStore();
+  const { viewMode, setViewMode, dataSourcesExpanded } = useLoomStore();
 
   // Keyboard shortcuts for view switching
   useEffect(() => {
@@ -51,16 +51,16 @@ export default function Home() {
       {/* Top Bar spans full width */}
       <TopBar />
 
-      {/* Main Body: Sidebar + Canvas + Panel */}
+      {/* Main Body: Sidebar + Canvas + Panel. When dataSourcesExpanded, sidebar takes over. */}
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex flex-1 min-h-0">
           <Sidebar />
 
-          {/* Canvas Area */}
-          <main className="flex-1 min-w-0 bg-loom-bg overflow-hidden">
-            {viewMode === "explorer" && <ExplorerView />}
-            {viewMode === "chart" && <ChartView />}
-            {viewMode === "query" && <QueryView />}
+          {/* Canvas Area — hidden when Data & sources is expanded */}
+          <main className={`bg-loom-bg overflow-hidden transition-[flex] duration-200 ${dataSourcesExpanded ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}>
+            {!dataSourcesExpanded && viewMode === "explorer" && <ExplorerView />}
+            {!dataSourcesExpanded && viewMode === "chart" && <ChartView />}
+            {!dataSourcesExpanded && viewMode === "query" && <QueryView />}
           </main>
 
           <DetailPanel />

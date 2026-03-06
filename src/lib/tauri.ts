@@ -93,7 +93,9 @@ export interface DataGovDataset {
   name: string;
   title: string;
   organization?: string;
+  notes?: string;
   resources: DataGovResource[];
+  portal_id: string;
 }
 
 export async function inspectFile(
@@ -119,7 +121,18 @@ export async function saveCsvToFolder(
   });
 }
 
-/** Fetch recent Data.gov datasets that contain CSV resources (Tauri only). */
+/** Fetch recent Data.gov (US) datasets that contain CSV resources (Tauri only). */
 export async function fetchDataGovRecentCsv(rows = 40): Promise<DataGovDataset[]> {
   return invoke<DataGovDataset[]>("fetch_data_gov_recent_csv", { rows });
 }
+
+/** Fetch recent data.gov.uk datasets that contain CSV resources (Tauri only). */
+export async function fetchUkDataRecentCsv(rows = 40): Promise<DataGovDataset[]> {
+  return invoke<DataGovDataset[]>("fetch_uk_data_recent_csv", { rows });
+}
+
+/** Base URL and label for a portal (for preview modal "Open on …"). */
+export const OPEN_DATA_PORTALS: Record<string, { url: string; label: string }> = {
+  "data.gov": { url: "https://catalog.data.gov/dataset", label: "Data.gov" },
+  "data.gov.uk": { url: "https://data.gov.uk/dataset", label: "data.gov.uk" },
+};

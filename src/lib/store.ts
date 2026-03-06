@@ -63,6 +63,8 @@ interface LoomState {
   sidebarOpen: boolean;
   panelOpen: boolean;
   dataRegionOpen: boolean;
+  /** When true, Data & sources expands to full width (grid of Data.gov etc.). */
+  dataSourcesExpanded: boolean;
 
   // Query
   querySql: string;
@@ -98,6 +100,7 @@ interface LoomState {
   toggleSidebar: () => void;
   togglePanel: () => void;
   setDataRegionOpen: (open: boolean) => void;
+  setDataSourcesExpanded: (v: boolean) => void;
   setQuerySql: (sql: string) => void;
   setQueryResult: (result: QueryResult | null) => void;
   setQueryError: (error: string | null) => void;
@@ -126,6 +129,7 @@ const initialState = {
   sidebarOpen: true,
   panelOpen: true,
   dataRegionOpen: false,
+  dataSourcesExpanded: false,
   querySql: "",
   queryResult: null,
   queryError: null,
@@ -155,6 +159,7 @@ export const useLoomStore = create<LoomState>((set) => ({
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
   setDataRegionOpen: (open) => set({ dataRegionOpen: open }),
+  setDataSourcesExpanded: (v) => set({ dataSourcesExpanded: v }),
   setQuerySql: (sql) => set({ querySql: sql }),
   setQueryResult: (result) => set({ queryResult: result }),
   setQueryError: (error) => set({ queryError: error }),

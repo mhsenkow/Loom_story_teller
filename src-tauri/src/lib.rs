@@ -35,6 +35,7 @@ pub fn run() {
             commands::inspect_file,
             commands::save_csv_to_folder,
             commands::fetch_data_gov_recent_csv,
+            commands::fetch_uk_data_recent_csv,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loom");

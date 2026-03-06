@@ -35,7 +35,11 @@ pub struct DataGovDataset {
     pub name: String,
     pub title: String,
     pub organization: Option<String>,
+    /// Description/notes from the portal (for preview modal).
+    pub notes: Option<String>,
     pub resources: Vec<DataGovResource>,
+    /// Portal id for building view URL, e.g. "data.gov", "data.gov.uk".
+    pub portal_id: String,
 }
 
 /// Scan a local folder for .parquet and .csv files.
@@ -222,6 +226,11 @@ pub async fn fetch_data_gov_recent_csv(rows: Option<u32>) -> Result<Vec<DataGovD
             .and_then(|o| o.get("title"))
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
+        let notes = pkg
+            .get("notes")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string());
 
         let mut csv_resources: Vec<DataGovResource> = Vec::new();
         if let Some(resources) = pkg.get("resources").and_then(|r| r.as_array()) {
@@ -261,7 +270,115 @@ pub async fn fetch_data_gov_recent_csv(rows: Option<u32>) -> Result<Vec<DataGovD
                 name: pkg_name.to_string(),
                 title: pkg_title,
                 organization,
+                notes,
                 resources: csv_resources,
+                portal_id: "data.gov".to_string(),
+            });
+        }
+    }
+
+    Ok(out)
+}
+
+/// UK open data (CKAN). Same shape as Data.gov for unified UI.
+#[tauri::command]
+pub async fn fetch_uk_data_recent_csv(rows: Option<u32>) -> Result<Vec<DataGovDataset>, String> {
+    let rows = rows.unwrap_or(40).clamp(1, 100);
+    let client = reqwest::Client::builder()
+        .user_agent("Loom-Data-Storyteller/1.0")
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    // data.gov.uk CKAN: /api/action/ (see guidance.data.gov.uk)
+    let res = client
+        .get("https://data.gov.uk/api/action/package_search")
+        .query(&[
+            ("rows", rows.to_string()),
+            ("sort", "metadata_created desc".to_string()),
+            ("fq", "res_format:CSV".to_string()),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("UK data request failed: {}", e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("UK data returned {}", res.status()));
+    }
+
+    let body: Value = res
+        .json()
+        .await
+        .map_err(|e| format!("Invalid UK data response: {}", e))?;
+
+    let results = body
+        .get("result")
+        .and_then(|r| r.get("results"))
+        .and_then(|r| r.as_array())
+        .ok_or_else(|| "Unexpected UK data payload".to_string())?;
+
+    let mut out: Vec<DataGovDataset> = Vec::new();
+    for pkg in results {
+        let pkg_id = pkg.get("id").and_then(|v| v.as_str()).unwrap_or_default();
+        let pkg_name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or_default();
+        if pkg_id.is_empty() || pkg_name.is_empty() {
+            continue;
+        }
+        let pkg_title = pkg
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or(pkg_name)
+            .to_string();
+        let organization = pkg
+            .get("organization")
+            .and_then(|o| o.get("title"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let notes = pkg
+            .get("notes")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| s.to_string());
+
+        let mut csv_resources: Vec<DataGovResource> = Vec::new();
+        if let Some(resources) = pkg.get("resources").and_then(|r| r.as_array()) {
+            for (idx, res) in resources.iter().enumerate() {
+                let format = res.get("format").and_then(|v| v.as_str()).unwrap_or("");
+                if format.to_uppercase() != "CSV" {
+                    continue;
+                }
+                let url = match res.get("url").and_then(|v| v.as_str()) {
+                    Some(u) if u.starts_with("http://") || u.starts_with("https://") => u.to_string(),
+                    _ => continue,
+                };
+                let id = res
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| format!("{}-{}", pkg_id, idx));
+                let name = res
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or("CSV")
+                    .to_string();
+                csv_resources.push(DataGovResource {
+                    id,
+                    name,
+                    format: "CSV".to_string(),
+                    url,
+                });
+            }
+        }
+
+        if !csv_resources.is_empty() {
+            out.push(DataGovDataset {
+                id: pkg_id.to_string(),
+                name: pkg_name.to_string(),
+                title: pkg_title,
+                organization,
+                notes,
+                resources: csv_resources,
+                portal_id: "data.gov.uk".to_string(),
             });
         }
     }
