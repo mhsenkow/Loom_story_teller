@@ -18,7 +18,9 @@
 
 | Main view | Data & sources |
 |-----------|----------------|
-| [![Main view](docs/screenshots/loom-main-view.png)](docs/screenshots/loom-main-view.png) | [![Data sources](docs/screenshots/loom-data-sources.png)](docs/screenshots/loom-data-sources.png) |
+| [![Main view](<img width="2560" height="1440" alt="Screenshot 2026-03-06 at 12 50 04 PM" src="https://github.com/user-attachments/assets/74a74df2-7a1c-4fbb-bcf3-4119ad61aea8" />
+) | [![Data sources](<img width="2560" height="1440" alt="Screenshot 2026-03-06 at 12 50 18 PM" src="https://github.com/user-attachments/assets/04c64131-b30a-418a-b880-214d7ce75499" />
+) |
 
 *Add your own screenshots to `docs/screenshots/` — see [docs/screenshots/README.md](docs/screenshots/README.md) for suggested filenames and how to capture.*
 
