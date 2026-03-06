@@ -1,0 +1,43 @@
+{
+  "name": "loom-storyteller",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack -p 1420",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "tauri": "tauri",
+    "spin": "npm run tauri dev",
+    "weave": "npm run tauri build",
+    "thread": "npm run dev",
+    "spool": "python3 scripts/generate_data.py",
+    "spool:small": "python3 scripts/generate_data.py --size small",
+    "spool:mega": "python3 scripts/generate_data.py --size mega",
+    "check": "tsc --noEmit",
+    "fmt": "prettier --write 'src/**/*.{ts,tsx,css}'"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "@tauri-apps/plugin-fs": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.0.0",
+    "next": "^15.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "vega-lite": "^5.21.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@webgpu/types": "^0.1.69",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "raw-loader": "^4.0.2",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.7.0"
+  }
+}

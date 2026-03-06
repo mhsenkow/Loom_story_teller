@@ -1,0 +1,9 @@
+node_modules
+.next
+out
+src-tauri/target
+.loom-data
+.git
+*.md
+.cursor
+scripts

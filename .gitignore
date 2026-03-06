@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+
+# Tauri / Rust
+src-tauri/target/
+src-tauri/Cargo.lock
+
+# Build / IDE
+dist/
+*.log
+.DS_Store
+*.local
+.env
+.env.local
+.env.*.local
+
+# Loom data
+.loom-data/
+
+# Debug / test
+coverage/
+.nyc_output/
+*.tsbuildinfo

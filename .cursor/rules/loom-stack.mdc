@@ -1,0 +1,113 @@
+---
+description: Loom Development Standards — architecture, conventions, and performance rules
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Loom Development Standards
+
+## Architecture
+
+### The Spec-Renderer Gap
+- **Vega-Lite** defines chart logic (scales, axes, encodings) as JSON specs.
+- **WebGPU** handles pixel output via compute + render shaders in WGSL.
+- NEVER render charts with Vega's built-in SVG/Canvas renderer. Always pipe specs to WebGPU.
+
+### Local-First
+- Use `tauri-plugin-fs` and native Rust `std::fs` for all file operations.
+- DuckDB runs in-process — no remote database connections.
+- All data stays on the user's machine.
+
+### Apple Silicon Optimization
+- Target Unified Memory Architecture (UMA) on M-series chips.
+- Use MLX (not PyTorch) for AI sidecar tasks.
+- Prefer `@group(0)` storage buffers for zero-copy GPU access.
+
+## Code Organization
+
+```
+src-tauri/src/         Rust backend (DuckDB, IPC commands)
+  lib.rs               App entry, plugin registration, state init
+  db.rs                DuckDB wrapper: scan, query, stats
+  commands.rs          #[tauri::command] IPC handlers
+
+src/                   Next.js frontend
+  app/                 App Router pages
+    layout.tsx         Root HTML shell, fonts, global CSS
+    page.tsx           Main three-panel layout compositor
+  components/          React components (one per file)
+    Sidebar.tsx        File explorer, folder picker
+    TopBar.tsx         View mode tabs, controls
+    DetailPanel.tsx    Schema / stats / preview tabs
+    ExplorerView.tsx   Full-width data table
+    ChartView.tsx      WebGPU canvas + Vega-Lite integration
+    QueryView.tsx      SQL editor + results grid
+  lib/                 Business logic (no React)
+    store.ts           Zustand global state
+    tauri.ts           Typed IPC bridge to Rust
+    vega.ts            Vega-Lite spec generators
+    webgpu.ts          WebGPU pipeline (compute + render)
+    format.ts          Number/byte formatting utilities
+    wgsl.d.ts          TypeScript declarations for .wgsl imports
+  shaders/             WGSL shader source files
+    scatter.wgsl       Scatterplot compute + vertex + fragment
+  styles/
+    globals.css        Design tokens, theme, component classes
+
+scripts/               Dev tooling
+  generate_data.py     Sample data generator (scatter, sales, timeseries)
+
+Root files:
+  Makefile             🧵 Command Loom (run `make` for help)
+  Dockerfile           Web UI container (static export + serve)
+  docker-compose.yml   Docker Compose for web UI
+```
+
+## Command Loom (Makefile)
+
+All dev commands use weaving metaphors:
+- `make spin` — full dev mode (Tauri + Next.js)
+- `make thread` — frontend-only dev
+- `make weave` — production .app build
+- `make spool` — generate sample data
+- `make shuttle` — Docker web UI
+- `make check` — all quality checks
+- `make unravel` — deep clean everything
+
+Run `make` to see the full list with descriptions.
+
+## Design System
+
+All visual tokens live in `src/styles/globals.css` as CSS custom properties.
+Tailwind references them via `tailwind.config.ts` (e.g. `bg-loom-surface`).
+
+To re-skin the product: change ONLY `globals.css` token values.
+
+Key prefixes:
+- `--loom-*` : Color tokens (bg, surface, text, accent, etc.)
+- `--chart-*` : Data visualization palette (8 perceptually distinct colors)
+- `--font-*` : Typography (sans = Inter, mono = JetBrains Mono)
+- `--radius-*`, `--sidebar-*`, `--panel-*` : Layout tokens
+
+Component utility classes: `.loom-panel`, `.loom-card`, `.loom-btn-primary`, `.loom-btn-ghost`, `.loom-input`, `.loom-badge`, `.loom-divider`.
+
+## Performance Rules
+
+1. **Zero-Copy Data Path:** Arrow buffers move from DuckDB → GPU without JS serialization.
+2. **Concurrency:** DuckDB queries run in Rust threads (via `async` commands). Keep the JS main thread free for 60fps UI.
+3. **Buffer Reuse:** Reuse GPU buffers when point count hasn't changed. Only recreate on data changes.
+4. **Workgroup Size:** Compute shaders use `@workgroup_size(256)` — optimal for Apple GPU cores.
+
+## Conventions
+
+- **File naming:** PascalCase for components, camelCase for lib modules, snake_case for Rust.
+- **State:** All shared state in Zustand (`src/lib/store.ts`). Components select only the slices they need.
+- **IPC:** All Tauri invoke calls go through `src/lib/tauri.ts` — never call `invoke()` directly from components.
+- **Error handling:** Rust commands return `Result<T, String>`. Frontend catches with try/catch.
+- **Comments:** Every file starts with a header block explaining its role. No inline narration.
+
+## Milestones Reference
+
+- **M1 (Core):** Folder → DuckDB → WebGPU skeleton (1M+ point perf)
+- **M2 (Skin):** WebGPU Texture → MLX sidecar → AI styled chart (UMA)
+- **M3 (Share):** Bundle spec + assets → Google Cloud Run deployment

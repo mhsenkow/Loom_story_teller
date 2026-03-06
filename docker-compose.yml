@@ -1,0 +1,24 @@
+# =================================================================
+# Loom — Docker Compose
+# =================================================================
+# Runs the static web UI in a container. Useful for:
+#   - Sharing chart stories without the Tauri desktop shell
+#   - CI/CD preview deployments
+#   - Testing the web export in isolation
+#
+# Commands:
+#   make shuttle       → docker compose up --build
+#   make shuttle-down  → docker compose down
+#   make shuttle-shell → shell into the container
+# =================================================================
+
+services:
+  loom-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
