@@ -9,6 +9,7 @@
 
 import { useLoomStore } from "@/lib/store";
 import { queryFile } from "@/lib/tauri";
+import { recommend } from "@/lib/recommendations";
 import { useState, useCallback } from "react";
 
 export function QueryView() {
@@ -16,6 +17,7 @@ export function QueryView() {
     selectedFile, querySql, setQuerySql,
     queryResult, setQueryResult, queryError, setQueryError,
     isQuerying, setIsQuerying,
+    setSampleRows, setColumnStats, setChartRecs, setActiveChart,
   } = useLoomStore();
 
   const [localSql, setLocalSql] = useState(querySql || "SELECT * FROM loom_active LIMIT 100");
@@ -28,13 +30,27 @@ export function QueryView() {
     try {
       const result = await queryFile(selectedFile.path, localSql, 10000);
       setQueryResult(result);
+      // Sync chart + preview to query result so the chart reflects the query
+      setSampleRows(result);
+      const stats = result.columns.map((name, i) => ({
+        name,
+        data_type: result.types[i] ?? "VARCHAR",
+        null_count: 0,
+        distinct_count: 0,
+        min_value: null as string | null,
+        max_value: null as string | null,
+      }));
+      setColumnStats(stats);
+      const recs = recommend(stats, result, selectedFile.name);
+      setChartRecs(recs);
+      setActiveChart(recs.length > 0 ? recs[0] : null);
     } catch (e) {
       setQueryError(String(e));
       setQueryResult(null);
     } finally {
       setIsQuerying(false);
     }
-  }, [selectedFile, localSql, setIsQuerying, setQueryError, setQuerySql, setQueryResult]);
+  }, [selectedFile, localSql, setIsQuerying, setQueryError, setQuerySql, setQueryResult, setSampleRows, setColumnStats, setChartRecs, setActiveChart]);
 
   if (!selectedFile) {
     return (

@@ -217,6 +217,25 @@ impl LoomDb {
         Ok(columns)
     }
 
+    /// Strip trailing "LIMIT n" and return (sql_without_limit, user_limit_if_any).
+    /// Caller should use min(user_limit, backend_limit) so the user's LIMIT is respected.
+    fn strip_trailing_limit(sql: &str) -> (String, Option<u32>) {
+        let s = sql.trim().trim_end_matches(';').trim();
+        if s.is_empty() {
+            return (String::new(), None);
+        }
+        let s_upper = s.to_uppercase();
+        if let Some(pos) = s_upper.rfind(" LIMIT ") {
+            let after = s_upper.get(pos + 7..).unwrap_or("");
+            if !after.is_empty() && after.chars().all(|c| c.is_ascii_digit()) {
+                let base = s.get(..pos).unwrap_or(s).trim().to_string();
+                let n: u32 = after.parse().unwrap_or(0);
+                return (base, Some(n));
+            }
+        }
+        (s.to_string(), None)
+    }
+
     fn query_inner(
         conn: &Connection,
         file_path: &str,
@@ -234,7 +253,11 @@ impl LoomDb {
         let full_sql = if sql.trim().is_empty() {
             format!("SELECT * FROM loom_active LIMIT {}", limit)
         } else {
-            format!("{} LIMIT {}", sql.trim().trim_end_matches(';'), limit)
+            let (base, user_limit) = Self::strip_trailing_limit(sql);
+            let effective_limit = user_limit
+                .map(|n| n.min(limit))
+                .unwrap_or(limit);
+            format!("{} LIMIT {}", base, effective_limit)
         };
 
         let meta_sql = format!(

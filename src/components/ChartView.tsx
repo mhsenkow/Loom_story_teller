@@ -470,54 +470,46 @@ export function ChartView() {
     );
   }
 
-  // Always show suggestions panel when a file is selected so Expand is always available
+  // Always show suggestions panel when a file is selected. Expand (first) stays visible; clicking it expands suggestions into the full view.
   const suggestionHeader = (
-    <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border flex-shrink-0">
-      <div>
+    <div className="flex items-center gap-2 px-3 py-2 border-b border-loom-border flex-shrink-0 flex-wrap">
+      <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold text-loom-text">Suggestions</p>
         <p className="text-2xs text-loom-muted">{chartRecs.length} charts found</p>
       </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0">
-        {bestSuggestion && (
-          <button
-            type="button"
-            onClick={handleSuggestChart}
-            className="text-2xs py-1.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 transition-colors font-medium"
-            title="Apply best recommendation by score"
-          >
-            Suggest chart
-          </button>
+      {/* Expand first so it's never cut off; icon-only to save space */}
+      <button
+        type="button"
+        onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
+        className="loom-btn-ghost p-2 rounded border border-loom-border hover:border-loom-accent hover:bg-loom-accent/10 transition-colors shrink-0"
+        title={suggestionsExpanded ? "Collapse to sidebar" : "Expand to full grid — suggestions fill the view"}
+        aria-label={suggestionsExpanded ? "Collapse" : "Expand"}
+      >
+        {suggestionsExpanded ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M18 15l-6-6-6 6" /></svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>
         )}
+      </button>
+      {bestSuggestion && (
         <button
           type="button"
-          onClick={handleSuggestWithAI}
-          disabled={aiSuggesting || columnStats.length === 0}
-          className="text-2xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text hover:bg-loom-accent/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          title="Use local Ollama model to suggest a chart (requires Ollama running)"
+          onClick={handleSuggestChart}
+          className="text-2xs py-1.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 transition-colors font-medium shrink-0"
+          title="Apply best recommendation by score"
         >
-          {aiSuggesting ? "…" : "Suggest with AI"}
+          Suggest chart
         </button>
-        <button
-          type="button"
-          onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
-          className="loom-btn-ghost text-2xs py-1.5 px-2 rounded border border-loom-border hover:border-loom-accent hover:bg-loom-accent/10 transition-colors inline-flex items-center gap-1"
-          title={suggestionsExpanded ? "Collapse to sidebar" : "Expand to full grid"}
-        >
-          {suggestionsExpanded ? (
-            <>
-              <span className="sr-only">Collapse</span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M18 15l-6-6-6 6" /></svg>
-              Collapse
-            </>
-          ) : (
-            <>
-              <span className="sr-only">Expand</span>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>
-              Expand
-            </>
-          )}
-        </button>
-      </div>
+      )}
+      <button
+        type="button"
+        onClick={handleSuggestWithAI}
+        disabled={aiSuggesting || columnStats.length === 0}
+        className="text-2xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text hover:bg-loom-accent/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+        title="Use local Ollama model to suggest a chart (requires Ollama running)"
+      >
+        {aiSuggesting ? "…" : "Suggest with AI"}
+      </button>
     </div>
   );
 
