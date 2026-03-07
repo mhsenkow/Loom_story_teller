@@ -6,23 +6,46 @@
 
 ## What it does
 
-- **Mount a folder** — Point at a directory of CSV/Parquet files; Loom scans and exposes them in the sidebar.
-- **Chart view** — Pick a file, get instant chart suggestions (bar, line, scatter, area, pie, etc.). Click a suggestion or use **Suggest with AI** (Ollama) for a recommendation.
-- **Encode your way** — Drag columns from the schema footer into X, Y, Color, Size, Row; or use dropdowns. Change mark type (point, line, bar, area, arc).
-- **Export** — Copy chart as PNG or SVG from the Export tab in the right panel. Edit the chart title (double-click or hover → edit).
-- **Data discovery** — In **Data & sources**, browse **Recent CSV datasets** from Data.gov (Tauri only) and **Save to folder** to download into your mounted folder.
+### Explorer
+- **Mount a folder** — Point at a directory of CSV/Parquet files; Loom scans and exposes them in the sidebar. Search files by name.
+- **Data table** — Virtualized table with sort, column reorder (drag headers), show/hide columns, per-column text and range filters. Sparklines, value bars, heat tint, trend cues, and null % in headers. Date columns auto-formatted.
+- **Row selection** — Checkboxes, keyboard (↑/↓ + Space). Export selected rows to CSV. **Saved views** store column visibility, order, and filters; **Undo/Redo** for table layout.
+- **Linked highlighting** — Hover a row in the table to highlight the corresponding point on the chart (and vice versa via scatter hover).
+- **Column profiling** — Right-click a column header for a quick profile: null %, unique count, min/max/median, distribution histogram, top values.
+
+### Chart
+- **Chart view** — Pick a file, get instant chart suggestions (bar, line, scatter, area, pie, heatmap, strip, box). Click a suggestion or use **Suggest with AI** (Ollama).
+- **Encode your way** — X, Y, Color, Size, Row; plus **Glow by**, **Outline by**, **Opacity by**. Bar stacking: grouped, stacked, or 100% stacked. Scatter: connect points (trail), marginal distributions.
+- **Visual controls** — Typography (font, title weight, tick rotation), marks (shape, outline, jitter, bar radius, line style, smooth curve), axes and grid, layout (padding, legend, data labels), atmosphere (background, blend, glow, entrance animation). **Responsive** — compact padding and smaller type when the panel is narrow.
+- **Interactivity** — **Pan** (drag) and **zoom** (wheel) on scatter. **Brush** (Shift+drag) or **Lasso** (freeform polygon) to select points and sync to table selection. **Crosshair** mode shows live (x, y) and ruler pins for Δx/Δy. **Tooltip pinning** — click a point to pin its tooltip. **Mini-map** when zoomed. **Custom reference lines** from the Chart panel.
+- **Smart tab** — **Anomaly** (Z-score, IQR, MAD), **Forecast**, **Trend line**, **Reference lines**, **Clustering**, and **Correlation matrix** (pairwise Pearson heatmap). Overlays draw on the chart; filter table to anomalies.
+- **Export** — Copy or download PNG/SVG; copy chart config as JSON. Annotations and custom ref lines are per chart.
+
+### Query
+- **SQL editor** — Run DuckDB SQL against `loom_active`. Schema browser (Tables + Columns) and click-to-insert. **Validation** (parentheses, SELECT/WITH) before run.
+- **Results** — Paginated grid, copy cell/row, export CSV. **Query history** and **snippets** (save/load named SQL). **Snapshot** current result and **Diff** vs a snapshot (row count delta).
+- **NL-to-SQL** — Plain-language input (e.g. “show me sales by region”); scaffold query with schema context (full generation via Ollama when available).
+
+### App
+- **Theming** — Dark, light, high-contrast, colorblind; font scale; reduced motion. Tokens in `globals.css`.
+- **Onboarding** — First-run modal: add data, then explore.
+- **Data & sources** — Data.gov recent CSVs (Tauri), Save to folder.
 
 ---
 
 ## Screenshots
 
-| Main view | Data & sources |
-|-----------|----------------|
-| [![Main view](<img width="2560" height="1440" alt="Screenshot 2026-03-06 at 12 50 04 PM" src="https://github.com/user-attachments/assets/74a74df2-7a1c-4fbb-bcf3-4119ad61aea8" />
-) | [![Data sources](<img width="2560" height="1440" alt="Screenshot 2026-03-06 at 12 50 18 PM" src="https://github.com/user-attachments/assets/04c64131-b30a-418a-b880-214d7ce75499" />
-) |
+Place screenshots in `docs/screenshots/` and reference them below. See [docs/screenshots/README.md](docs/screenshots/README.md) for how to capture.
 
-*Add your own screenshots to `docs/screenshots/` — see [docs/screenshots/README.md](docs/screenshots/README.md) for suggested filenames and how to capture.*
+| Explorer (table) | Chart view |
+|------------------|------------|
+| ![Explorer](docs/screenshots/loom-explorer.png) | ![Chart](docs/screenshots/loom-main-view.png) |
+
+| Query + results | Data & sources |
+|-----------------|----------------|
+| ![Query](docs/screenshots/loom-query.png) | ![Data sources](docs/screenshots/loom-data-sources.png) |
+
+*If the image files are missing, run the app, capture screenshots as described in `docs/screenshots/README.md`, and add them to the repo.*
 
 ---
 
@@ -90,6 +113,7 @@ Run `make` (or `make help`) to list all commands. Every target uses a weaving me
 
 | Command | Description |
 |--------|-------------|
+| `make test` | Run unit tests (Vitest) |
 | `make check` | Run all checks (TypeScript + Rust) |
 | `make check-ts` | TypeScript type-check + lint |
 | `make check-rust` | Rust check + clippy |
@@ -175,8 +199,8 @@ Loom_story_teller/
 │   ├── components/
 │   │   ├── Sidebar.tsx          # Files list, Data & sources, folder picker
 │   │   ├── TopBar.tsx           # View tabs (Explorer / Chart / Query)
-│   │   ├── DetailPanel.tsx      # Right panel: Stats, Chart (encoding), Export
-│   │   ├── ChartView.tsx       # Chart canvas, suggestions, title edit, export handlers
+│   │   ├── DetailPanel.tsx      # Right panel: Stats, Chart (encoding + Visual), Export, Smart
+│   │   ├── ChartView.tsx       # Chart canvas, suggestions, Smart overlays, title edit, export
 │   │   ├── ChartCard.tsx        # Thumbnail + “Try” for suggestions
 │   │   ├── ExplorerView.tsx    # Full-width data table
 │   │   ├── QueryView.tsx       # SQL editor + results
@@ -190,7 +214,8 @@ Loom_story_teller/
 │   │   ├── ollama.ts            # Ollama API for AI suggestions
 │   │   ├── mock-data.ts         # Browser fallbacks when not in Tauri
 │   │   ├── format.ts            # Number/byte formatting
-│   │   └── chartPalettes.ts     # Chart color palettes
+│   │   ├── chartPalettes.ts     # Chart color palettes
+│   │   └── smartAnalytics.ts   # Anomaly, forecast, trend, reference lines, clustering
 │   ├── shaders/
 │   │   └── scatter.wgsl         # Compute + vertex + fragment
 │   └── styles/
@@ -249,17 +274,19 @@ Frontend calls go through `src/lib/tauri.ts`; do not use raw `invoke()`.
 
 ## WebGPU pipeline (scatter)
 
+WebGPU is used for scatter only when the mark is **circle**, there is no outline/jitter/glow or data-driven glow/outline/opacity encoding, and **no Smart overlays** (anomaly, trend, forecast, reference lines, clustering). When any of those are active, scatter uses Canvas 2D so overlays and encodings render correctly.
+
 ```
-CPU: Float32Array (x, y, category)
+CPU: Float32Array (x, y, category, size_norm)
   → upload to GPU storage buffer
-  → compute_positions (workgroups)
+  → compute_positions (workgroups) × size_scale
   → screen-space coords + color
   → vertex_main (instanced quads)
   → fragment_main (circle + soft edge)
   → framebuffer
 ```
 
-Shaders: `src/shaders/scatter.wgsl`. Palette aligns with `--chart-*` in CSS.
+Shaders: `src/shaders/scatter.wgsl`. Palette aligns with `--chart-*` in CSS. **Size scale** (0.5–2×) multiplies size-encoded point radius in the shader.
 
 ---
 
@@ -268,6 +295,12 @@ Shaders: `src/shaders/scatter.wgsl`. Palette aligns with `--chart-*` in CSS.
 - **M1 (Core)** — Folder → DuckDB → WebGPU scatter. Target: 1M+ points at 60fps.
 - **M2 (Skin)** — WebGPU texture → MLX sidecar for AI-styled charts (Apple Silicon).
 - **M3 (Share)** — Bundle spec + assets for governed story sharing.
+
+---
+
+## Build notes
+
+- **vega-canvas warning** — Next.js may report `Module not found: Can't resolve 'canvas'` from `vega-canvas`. This is an optional native dependency used by Vega in Node; the browser build works without it. You can ignore the warning or add `canvas` as an optional dependency if you run Vega in Node.
 
 ---
 
