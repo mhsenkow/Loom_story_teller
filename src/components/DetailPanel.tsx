@@ -12,7 +12,7 @@ import { useState, useCallback } from "react";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
 import { COLOR_PALETTES } from "@/lib/chartPalettes";
-import { createChartRec, CHART_KIND_OPTIONS, getRecommendationReason, getRandomChartAndEncoding, type ChartKind } from "@/lib/recommendations";
+import { createChartRec, CHART_KIND_OPTIONS, Y_AGGREGATE_OPTIONS, getRecommendationReason, getRandomChartAndEncoding, type ChartKind, type YAggregateOption } from "@/lib/recommendations";
 import {
   runAnomaly,
   runForecast,
@@ -22,6 +22,8 @@ import {
   type AnomalyMethod,
 } from "@/lib/smartAnalytics";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
+import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
+import { exportDashboardMicrosite } from "@/lib/tauri";
 
 const TABS: { key: PanelTab; label: string }[] = [
   { key: "stats", label: "Stats" },
@@ -100,6 +102,8 @@ function DashboardsView() {
     removeDashboard,
     addDashboardSlot,
     removeDashboardSlot,
+    setDashboardLayout,
+    moveDashboardSlot,
     setDashboardsExpanded,
     applyTableView,
     applyChartView,
@@ -111,6 +115,43 @@ function DashboardsView() {
     setDashboardRefresh,
   } = useLoomStore();
   const active = dashboards.find((d) => d.id === activeDashboardId);
+
+  const handleExportMicrosite = useCallback(async () => {
+    if (!active) return;
+    const slots = active.slots.map((slot) => {
+      const label = getSlotLabel(slot.viewType, slot.viewId);
+      let snapshotDataUrl: string | null = null;
+      let sourceLabel: string | undefined;
+      if (slot.viewType === "chart") {
+        const v = chartViews.find((x) => x.id === slot.viewId);
+        snapshotDataUrl = v?.snapshotImageDataUrl ?? null;
+        sourceLabel = v?.fileName;
+      } else if (slot.viewType === "table") {
+        const v = tableViews.find((x) => x.id === slot.viewId);
+        sourceLabel = v?.name;
+      } else if (slot.viewType === "query") {
+        const v = queryViews.find((x) => x.id === slot.viewId);
+        sourceLabel = v?.name;
+      } else {
+        const v = querySnapshots.find((x) => x.id === slot.viewId);
+        sourceLabel = v?.name;
+      }
+      return { label, viewType: slot.viewType, snapshotDataUrl, sourceLabel };
+    });
+    const html = buildDashboardMicrositeHtml({
+      dashboardName: active.name,
+      slots,
+      lastUpdatedMs: active.lastRefreshedAt ?? null,
+      layoutTemplate: active.layoutTemplate ?? "auto",
+    });
+    try {
+      const ok = await exportDashboardMicrosite(html, `${active.name}.html`);
+      setToast(ok ? "Dashboard exported as microsite" : "Export cancelled");
+    } catch (e) {
+      console.error(e);
+      setToast("Export failed");
+    }
+  }, [active, chartViews, tableViews, queryViews, querySnapshots, setToast]);
 
   const getSlotLabel = (viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => {
     if (viewType === "table") {
@@ -196,6 +237,19 @@ function DashboardsView() {
             )}
           </div>
           <p className="text-2xs text-loom-muted/80">Refresh interval is a hint for when data might be stale; use &quot;Refresh now&quot; to update.</p>
+        </div>
+      )}
+
+      {active && active.slots.length > 0 && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleExportMicrosite}
+            className="text-xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated hover:border-loom-accent"
+            title="Export dashboard as a self-contained HTML file (data lineage included)"
+          >
+            Export as microsite
+          </button>
         </div>
       )}
 
@@ -312,6 +366,21 @@ function DashboardsView() {
 
       {active && (
         <>
+          <div className="space-y-1">
+            <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Layout</span>
+            <select
+              value={active.layoutTemplate ?? "auto"}
+              onChange={(e) => setDashboardLayout(active.id, (e.target.value as import("@/lib/store").DashboardLayoutTemplate) || "auto")}
+              className="text-2xs w-full px-2 py-1 rounded border border-loom-border bg-loom-surface text-loom-text"
+            >
+              <option value="auto">Auto (responsive)</option>
+              <option value="1x1">1×1</option>
+              <option value="2x1">2×1</option>
+              <option value="2x2">2×2</option>
+              <option value="3x2">3×2</option>
+              <option value="1+2">1 large + 2</option>
+            </select>
+          </div>
           <div className="flex items-center justify-between">
             <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Slots</span>
             <AddViewDropdown
@@ -334,11 +403,31 @@ function DashboardsView() {
             </div>
           ) : (
             <ul className="space-y-1.5">
-              {active.slots.map((slot) => {
+              {active.slots.map((slot, idx) => {
                 const chartView = slot.viewType === "chart" ? chartViews.find((x) => x.id === slot.viewId) : null;
                 const snapshotUrl = chartView?.snapshotImageDataUrl ?? null;
                 return (
-                  <li key={slot.id} className="flex items-center gap-2 group loom-card px-2 py-1.5">
+                  <li key={slot.id} className="flex items-center gap-1 group loom-card px-2 py-1.5">
+                    <div className="flex flex-col shrink-0 opacity-60 group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => moveDashboardSlot(active.id, slot.id, "up")}
+                        disabled={idx === 0}
+                        className="p-0.5 text-loom-muted hover:text-loom-text disabled:opacity-30"
+                        aria-label="Move up"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveDashboardSlot(active.id, slot.id, "down")}
+                        disabled={idx === active.slots.length - 1}
+                        className="p-0.5 text-loom-muted hover:text-loom-text disabled:opacity-30"
+                        aria-label="Move down"
+                      >
+                        ▼
+                      </button>
+                    </div>
                     {snapshotUrl ? (
                       <div className="shrink-0 w-10 h-8 rounded overflow-hidden bg-loom-bg/50 flex items-center justify-center">
                         <img src={snapshotUrl} alt="" className="max-w-full max-h-full object-contain" />
@@ -1338,8 +1427,9 @@ function ChartPanelView() {
       glowField: activeChart?.glowField ?? null,
       outlineField: activeChart?.outlineField ?? null,
       opacityField: activeChart?.opacityField ?? null,
+      yAggregate: activeChart?.yAggregate ?? null,
     }),
-    [activeChart?.sizeField, activeChart?.rowField, activeChart?.glowField, activeChart?.outlineField, activeChart?.opacityField],
+    [activeChart?.sizeField, activeChart?.rowField, activeChart?.glowField, activeChart?.outlineField, activeChart?.opacityField, activeChart?.yAggregate],
   );
 
   const applyEncoding = useCallback(
@@ -1369,7 +1459,7 @@ function ChartPanelView() {
         activeChart.yField,
         activeChart.colorField,
         tableName,
-        { sizeField, rowField, glowField, outlineField, opacityField },
+        { sizeField, rowField, glowField, outlineField, opacityField, yAggregate: activeChart.yAggregate ?? null },
       );
       if (rec) setActiveChart(rec);
     },
@@ -1387,6 +1477,23 @@ function ChartPanelView() {
         activeChart.colorField,
         tableName,
         extraFromChart(),
+      );
+      if (rec) setActiveChart(rec);
+    },
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+  );
+
+  const applyYAggregate = useCallback(
+    (agg: YAggregateOption) => {
+      if (!activeChart || columnStats.length === 0) return;
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        activeChart.colorField,
+        tableName,
+        { ...extraFromChart(), yAggregate: agg },
       );
       if (rec) setActiveChart(rec);
     },
@@ -1422,6 +1529,10 @@ function ChartPanelView() {
   const showY = activeChart.kind !== "histogram";
   const showColor = !["histogram", "pie"].includes(activeChart.kind);
   const showSize = activeChart.kind === "scatter" || activeChart.kind === "strip";
+  const showAggregate = ["bar", "line", "area", "pie"].includes(activeChart.kind);
+  const effectiveAggregate: YAggregateOption = !activeChart.yField
+    ? "count"
+    : (activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum"));
   const showRow = ["bar", "line", "area"].includes(activeChart.kind);
   const showVisualEncoding = activeChart.kind === "scatter" || activeChart.kind === "strip";
   const numericCols = columnStats.filter(
@@ -1522,6 +1633,23 @@ function ChartPanelView() {
                   </select>
                   {activeChart.yField && colType(activeChart.yField) && (
                     <p className="text-2xs text-loom-muted mt-0.5 font-mono">{colType(activeChart.yField)}</p>
+                  )}
+                  {showAggregate && (
+                    <>
+                      <label className="text-2xs text-loom-muted mt-1">Aggregate (Y)</label>
+                      <select
+                        value={effectiveAggregate}
+                        onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)}
+                        className="loom-input w-full text-xs py-1.5 font-mono"
+                        title="Sum, average, count, min, or max for the Y column"
+                      >
+                        {Y_AGGREGATE_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value} disabled={!activeChart.yField && opt.value !== "count"}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </>
                   )}
                 </div>
               )}

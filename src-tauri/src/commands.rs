@@ -171,6 +171,20 @@ pub async fn save_csv_to_folder(
         .ok_or_else(|| "Invalid path".to_string())
 }
 
+/// Write text content to a file at the given path (e.g. path from save dialog).
+#[tauri::command]
+pub async fn write_text_file(path: String, content: String) -> Result<(), String> {
+    let path = normalize_folder_path(&path);
+    if path.is_empty() {
+        return Err("Path is empty".to_string());
+    }
+    let p = Path::new(&path);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Create dir failed: {}", e))?;
+    }
+    std::fs::write(p, content.as_bytes()).map_err(|e| format!("Write failed: {}", e))?;
+    Ok(())
+}
 
 /// Fetch recent Data.gov datasets that have CSV resources.
 #[tauri::command]

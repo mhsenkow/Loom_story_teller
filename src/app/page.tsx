@@ -11,7 +11,7 @@
 
 import { useState, useRef } from "react";
 import { useLoomStore } from "@/lib/store";
-import type { DashboardSlot } from "@/lib/store";
+import type { DashboardSlot, DashboardLayoutTemplate } from "@/lib/store";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { DetailPanel } from "@/components/DetailPanel";
@@ -64,6 +64,13 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     return queryViews.find((x) => x.id === viewId)?.name ?? viewId;
   };
 
+  const getSlotSource = (viewType: "table" | "chart" | "query" | "snapshot", viewId: string): string | null => {
+    if (viewType === "chart") return chartViews.find((x) => x.id === viewId)?.fileName ?? null;
+    if (viewType === "table") return tableViews.find((x) => x.id === viewId)?.name ?? null;
+    if (viewType === "query") return queryViews.find((x) => x.id === viewId)?.name ?? null;
+    return querySnapshots.find((x) => x.id === viewId)?.name ?? null;
+  };
+
   const handleApply = (viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => {
     if (viewType === "table") applyTableView(viewId);
     else if (viewType === "chart") applyChartView(viewId);
@@ -108,6 +115,19 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     { value: "1d", label: "1 day" },
   ];
   const lastRefreshed = active.lastRefreshedAt ? new Date(active.lastRefreshedAt) : null;
+
+  const layout = (active.layoutTemplate ?? "auto") as DashboardLayoutTemplate;
+  const gridClass =
+    layout === "1x1"
+      ? "grid-cols-1"
+      : layout === "2x1"
+        ? "grid-cols-2"
+        : layout === "2x2"
+          ? "grid-cols-2"
+          : layout === "3x2"
+            ? "grid-cols-3"
+            : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+  const gridStyle = layout === "1+2" ? { display: "grid", gridTemplateColumns: "1fr 1fr", gridAutoRows: "minmax(140px, 1fr)" } as React.CSSProperties : undefined;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -154,17 +174,22 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
             <p className="text-2xs text-loom-muted mt-1">Add table, chart, query, or snapshot views from the Dashboards tab.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {active.slots.map((slot) => {
+          <div
+            className={layout === "1+2" ? "grid gap-3" : `grid ${gridClass} gap-3`}
+            style={gridStyle}
+          >
+            {active.slots.map((slot, idx) => {
               const label = getSlotLabel(slot.viewType, slot.viewId);
               const chartView = slot.viewType === "chart" ? chartViews.find((x) => x.id === slot.viewId) : null;
               const snapshotUrl = chartView?.snapshotImageDataUrl ?? null;
+              const is1p2First = layout === "1+2" && idx === 0;
               return (
                 <button
                   key={slot.id}
                   type="button"
                   onClick={() => setFocusedSlot(slot)}
-                  className="loom-card p-3 text-left hover:border-loom-accent hover:bg-loom-elevated/50 transition-colors border border-loom-border rounded-lg flex flex-col min-h-[140px] aspect-[4/3]"
+                  className={`loom-card p-3 text-left hover:border-loom-accent hover:bg-loom-elevated/50 transition-colors border border-loom-border rounded-lg flex flex-col min-h-[140px] aspect-[4/3] ${layout === "1+2" ? "" : ""}`}
+                  style={is1p2First ? { gridRow: "span 2" } : undefined}
                 >
                   <span className="text-2xs font-medium text-loom-muted uppercase tracking-wider shrink-0">{slot.viewType}</span>
                   {snapshotUrl ? (
@@ -205,7 +230,13 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
               <p className="text-sm font-medium text-loom-text truncate flex-1 text-center">
                 {getSlotLabel(focusedSlot.viewType, focusedSlot.viewId)}
               </p>
-              <div className="w-32" />
+              <div className="w-32 text-right min-w-0">
+                {getSlotSource(focusedSlot.viewType, focusedSlot.viewId) && (
+                  <span className="text-2xs text-loom-muted truncate block max-w-full" title={getSlotSource(focusedSlot.viewType, focusedSlot.viewId) ?? undefined}>
+                    {getSlotSource(focusedSlot.viewType, focusedSlot.viewId)}
+                  </span>
+                )}
+              </div>
             </div>
             <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center p-4">
               {focusedSlot.viewType === "chart" && (() => {

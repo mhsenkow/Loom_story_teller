@@ -173,3 +173,46 @@ export async function openExternalUrl(url: string): Promise<void> {
     await invoke<void>("open_external_url", { url });
   }
 }
+
+/** Open save-as dialog (Tauri only). Returns chosen path or null if cancelled. */
+export async function saveDialog(options: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> {
+  if (!isTauri()) return null;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const path = await save({
+    defaultPath: options.defaultPath,
+    filters: options.filters ?? [{ name: "HTML", extensions: ["html"] }],
+  });
+  return path ?? null;
+}
+
+/** Write text to a file at path (Tauri only; path typically from save dialog). */
+export async function writeTextFile(path: string, content: string): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("write_text_file", { path, content });
+  }
+}
+
+/**
+ * Export dashboard as microsite: Tauri = save dialog then write file;
+ * Web = download as file.
+ */
+export async function exportDashboardMicrosite(html: string, defaultName: string): Promise<boolean> {
+  const baseName = defaultName.replace(/[^\w\-.]/g, "_").replace(/.html$/i, "") || "dashboard";
+  const filename = `${baseName}.html`;
+
+  if (isTauri()) {
+    const path = await saveDialog({ defaultPath: filename, filters: [{ name: "HTML", extensions: ["html"] }] });
+    if (!path) return false;
+    await writeTextFile(path, html);
+    return true;
+  }
+
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  return true;
+}

@@ -255,6 +255,7 @@ export interface DashboardItemPersist {
   id: string;
   name: string;
   slots: DashboardSlotPersist[];
+  layoutTemplate?: string | null;
   refreshInterval?: string | null;
   lastRefreshedAt?: number | null;
 }

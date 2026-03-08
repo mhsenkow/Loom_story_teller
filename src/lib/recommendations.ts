@@ -34,6 +34,17 @@ const DARK_AXIS = {
 
 export type ChartKind = "scatter" | "bar" | "histogram" | "line" | "heatmap" | "strip" | "box" | "area" | "pie";
 
+/** Aggregation for Y (or theta) encoding — sum, average, count, min, max. */
+export type YAggregateOption = "sum" | "mean" | "count" | "min" | "max";
+
+export const Y_AGGREGATE_OPTIONS: { value: YAggregateOption; label: string }[] = [
+  { value: "sum", label: "Sum" },
+  { value: "mean", label: "Average" },
+  { value: "count", label: "Count" },
+  { value: "min", label: "Min" },
+  { value: "max", label: "Max" },
+];
+
 /** Display options for chart-type selector (dot/line/rect/pie etc). */
 export const CHART_KIND_OPTIONS: { value: ChartKind; label: string }[] = [
   { value: "scatter", label: "Dot (scatter)" },
@@ -67,6 +78,8 @@ export interface ChartRecommendation {
   outlineField?: string | null;
   /** Optional opacity encoding (scatter, strip): column drives per-point opacity. */
   opacityField?: string | null;
+  /** Aggregation for Y (or theta) when chart type uses it: bar, line, area, pie. */
+  yAggregate?: YAggregateOption | null;
 }
 
 type ColType = "quantitative" | "nominal" | "temporal";
@@ -152,6 +165,7 @@ export function createChartRec(
     glowField?: string | null;
     outlineField?: string | null;
     opacityField?: string | null;
+    yAggregate?: YAggregateOption | null;
   },
 ): ChartRecommendation | null {
   const numCols = columns.filter(c => inferType(c.data_type, c.name) === "quantitative");
@@ -162,6 +176,7 @@ export function createChartRec(
   const glowField = extra?.glowField ?? null;
   const outlineField = extra?.outlineField ?? null;
   const opacityField = extra?.opacityField ?? null;
+  const yAggregate = extra?.yAggregate ?? null;
 
   if (kind === "scatter") {
     if (!yField || !numCols.some(c => c.name === xField) || !numCols.some(c => c.name === yField)) return null;
@@ -177,17 +192,25 @@ export function createChartRec(
   let title = "";
   let subtitle = "";
 
+  /** Default aggregate when a measure column is used; count when no yField. */
+  const aggForMeasure = (defaultAgg: YAggregateOption): YAggregateOption =>
+    !yField ? "count" : (yAggregate ?? defaultAgg);
+  const aggLabel = (a: YAggregateOption) =>
+    a === "mean" ? "Average" : a === "sum" ? "Sum" : a === "count" ? "Count" : a === "min" ? "Min" : "Max";
+
   switch (kind) {
-    case "bar":
+    case "bar": {
+      const agg = aggForMeasure("sum");
       enc.x = { field: xField, type: "nominal", sort: "-y" };
       enc.y = yField
-        ? { field: yField, type: "quantitative", aggregate: "sum" }
+        ? { field: yField, type: "quantitative", aggregate: agg }
         : { aggregate: "count", type: "quantitative" };
       enc.color = { value: COLORS[0] };
       if (rowField) enc.row = { field: rowField, type: "nominal", header: { title: rowField } };
-      title = yField ? `Sum of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = rowField ? `by ${rowField}` : (yField ? "total, grouped" : "rows per category");
+      title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
+      subtitle = rowField ? `by ${rowField}` : (yField ? "grouped" : "rows per category");
       break;
+    }
     case "histogram":
       enc.x = { field: xField, type: "quantitative", bin: { maxbins: 30 } };
       enc.y = { aggregate: "count", type: "quantitative" };
@@ -195,14 +218,16 @@ export function createChartRec(
       title = `Distribution of ${xField}`;
       subtitle = "binned count";
       break;
-    case "line":
+    case "line": {
+      const agg = aggForMeasure("mean");
       enc.x = { field: xField, type: "temporal" };
-      enc.y = yField ? { field: yField, type: "quantitative", aggregate: "mean" } : { aggregate: "count", type: "quantitative" };
+      enc.y = yField ? { field: yField, type: "quantitative", aggregate: agg } : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       if (rowField) enc.row = { field: rowField, type: "nominal", header: { title: rowField } };
-      title = yField ? `${yField} over ${xField}` : `Count over ${xField}`;
+      title = yField ? `${yField} (${aggLabel(agg)}) over ${xField}` : `Count over ${xField}`;
       subtitle = rowField ? `by ${rowField}` : (colorField ? `split by ${colorField}` : "time trend");
       break;
+    }
     case "heatmap":
       if (!yField) return null;
       enc.x = { field: xField, type: "nominal" };
@@ -228,22 +253,26 @@ export function createChartRec(
       title = `${yField} by ${xField}`;
       subtitle = "box plot";
       break;
-    case "area":
+    case "area": {
+      const agg = aggForMeasure("sum");
       enc.x = { field: xField, type: "temporal" };
-      enc.y = yField ? { field: yField, type: "quantitative", aggregate: "sum" } : { aggregate: "count", type: "quantitative" };
+      enc.y = yField ? { field: yField, type: "quantitative", aggregate: agg } : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       if (rowField) enc.row = { field: rowField, type: "nominal", header: { title: rowField } };
-      title = yField ? `${yField} over ${xField}` : `Count over ${xField}`;
+      title = yField ? `${yField} (${aggLabel(agg)}) over ${xField}` : `Count over ${xField}`;
       subtitle = rowField ? `by ${rowField}` : (colorField ? `stacked by ${colorField}` : "area");
       break;
-    case "pie":
+    }
+    case "pie": {
+      const agg = aggForMeasure("sum");
       enc.theta = yField
-        ? { field: yField, type: "quantitative", aggregate: "sum" }
+        ? { field: yField, type: "quantitative", aggregate: agg }
         : { aggregate: "count", type: "quantitative" };
       enc.color = { field: xField, type: "nominal", scale: { range: COLORS } };
-      title = yField ? `${yField} by ${xField}` : `Count by ${xField}`;
+      title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
       subtitle = "donut";
       break;
+    }
     default:
       return null;
   }
@@ -257,6 +286,11 @@ export function createChartRec(
     kind === "strip" ? { type: "tick" as const, thickness: 1.5 } :
     kind === "pie" ? { type: "arc" as const, innerRadius: 40 } :
     "rect";
+
+  const effectiveYAggregate: YAggregateOption | undefined =
+    (kind === "bar" || kind === "line" || kind === "area" || kind === "pie")
+      ? (!yField ? "count" : (yAggregate ?? (kind === "line" ? "mean" : "sum")))
+      : undefined;
 
   return {
     id,
@@ -280,6 +314,7 @@ export function createChartRec(
     glowField: glowField ?? undefined,
     outlineField: outlineField ?? undefined,
     opacityField: opacityField ?? undefined,
+    yAggregate: effectiveYAggregate ?? undefined,
   };
 }
 

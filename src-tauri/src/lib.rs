@@ -38,6 +38,7 @@ pub fn run() {
             commands::fetch_uk_data_recent_csv,
             commands::create_github_issue,
             commands::open_external_url,
+            commands::write_text_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loom");

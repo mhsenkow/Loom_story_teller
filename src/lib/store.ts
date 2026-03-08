@@ -107,11 +107,22 @@ export interface DashboardSlot {
 /** Dashboard refresh interval — when to treat data as stale and show "Refresh". */
 export type DashboardRefreshInterval = "manual" | "1m" | "5m" | "15m" | "1h" | "1d";
 
+/** Layout template for dashboard grid. */
+export type DashboardLayoutTemplate =
+  | "auto"      // responsive 1–4 cols
+  | "1x1"       // single large
+  | "2x1"       // 2 columns 1 row
+  | "2x2"       // 2x2 grid
+  | "3x2"       // 3 columns 2 rows
+  | "1+2";      // 1 large left, 2 stacked right
+
 /** Dashboard: named layout of view slots + optional refresh and last-updated. */
 export interface DashboardItem {
   id: string;
   name: string;
   slots: DashboardSlot[];
+  /** Grid layout template. */
+  layoutTemplate?: DashboardLayoutTemplate;
   /** How often the dashboard is considered stale (UI hint; actual refresh is manual or future auto). */
   refreshInterval?: DashboardRefreshInterval;
   /** Timestamp (ms) when the dashboard was last refreshed / viewed with fresh data. */
@@ -382,6 +393,8 @@ interface LoomState {
   removeDashboard: (id: string) => void;
   setDashboardRefresh: (dashboardId: string, interval: DashboardRefreshInterval | null, lastRefreshedAt?: number) => void;
   setDashboardSlots: (dashboardId: string, slots: DashboardSlot[]) => void;
+  setDashboardLayout: (dashboardId: string, template: DashboardLayoutTemplate) => void;
+  moveDashboardSlot: (dashboardId: string, slotId: string, direction: "up" | "down") => void;
   addDashboardSlot: (dashboardId: string, viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => void;
   removeDashboardSlot: (dashboardId: string, slotId: string) => void;
   setActiveDashboardId: (id: string | null) => void;
@@ -764,9 +777,9 @@ export const useLoomStore = create<LoomState>((set) => ({
     set((s) => {
       const id = `db-${Date.now()}`;
       const now = Date.now();
-      return {
+        return {
         dashboards: [
-          { id, name: name.trim() || "Dashboard", slots: [], refreshInterval: "manual", lastRefreshedAt: now },
+          { id, name: name.trim() || "Dashboard", slots: [], layoutTemplate: "auto", refreshInterval: "manual", lastRefreshedAt: now },
           ...s.dashboards.slice(0, 19),
         ],
         activeDashboardId: id,
@@ -794,6 +807,25 @@ export const useLoomStore = create<LoomState>((set) => ({
       dashboards: s.dashboards.map((d) =>
         d.id === dashboardId ? { ...d, slots: slots.slice(0, 24) } : d
       ),
+    })),
+  setDashboardLayout: (dashboardId, layoutTemplate) =>
+    set((s) => ({
+      dashboards: s.dashboards.map((d) =>
+        d.id === dashboardId ? { ...d, layoutTemplate } : d
+      ),
+    })),
+  moveDashboardSlot: (dashboardId, slotId, direction) =>
+    set((s) => ({
+      dashboards: s.dashboards.map((d) => {
+        if (d.id !== dashboardId) return d;
+        const i = d.slots.findIndex((sl) => sl.id === slotId);
+        if (i < 0) return d;
+        const next = [...d.slots];
+        const j = direction === "up" ? i - 1 : i + 1;
+        if (j < 0 || j >= next.length) return d;
+        [next[i], next[j]] = [next[j], next[i]];
+        return { ...d, slots: next };
+      }),
     })),
   addDashboardSlot: (dashboardId, viewType, viewId) =>
     set((s) => ({
