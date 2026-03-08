@@ -55,7 +55,7 @@ export interface QueryResult {
 export type ViewMode = "explorer" | "chart" | "query";
 export type PanelTab = "stats" | "chart" | "export" | "smart" | "settings" | "dashboards";
 
-/** Saved chart view: file + chart config + visual overrides. */
+/** Saved chart view: file + chart config + visual overrides + optional snapshot image for dashboards. */
 export interface ChartViewItem {
   id: string;
   name: string;
@@ -70,6 +70,8 @@ export interface ChartViewItem {
     rows: (string | number | boolean | null)[][];
     total_rows: number;
   };
+  /** Data URL (PNG) of chart at save time — used for dashboard thumbnails. */
+  snapshotImageDataUrl?: string | null;
 }
 
 /** Saved table view: UI state + optional data snapshot */
@@ -102,11 +104,18 @@ export interface DashboardSlot {
   viewId: string;
 }
 
-/** Dashboard: named layout of view slots. */
+/** Dashboard refresh interval — when to treat data as stale and show "Refresh". */
+export type DashboardRefreshInterval = "manual" | "1m" | "5m" | "15m" | "1h" | "1d";
+
+/** Dashboard: named layout of view slots + optional refresh and last-updated. */
 export interface DashboardItem {
   id: string;
   name: string;
   slots: DashboardSlot[];
+  /** How often the dashboard is considered stale (UI hint; actual refresh is manual or future auto). */
+  refreshInterval?: DashboardRefreshInterval;
+  /** Timestamp (ms) when the dashboard was last refreshed / viewed with fresh data. */
+  lastRefreshedAt?: number;
 }
 
 export type AppTheme = "dark" | "light" | "high-contrast" | "colorblind";
@@ -171,6 +180,8 @@ interface LoomState {
   mountedFolder: string | null;
   files: FileEntry[];
   isScanning: boolean;
+  /** Path of file currently being inspected (loading stats/sample). Enables loading UI. */
+  inspectingFilePath: string | null;
 
   // Selection
   selectedFile: FileEntry | null;
@@ -278,12 +289,13 @@ interface LoomState {
   dashboardsExpanded: boolean;
 
   /** Global prompt dialog state for replacing window.prompt. */
-  promptDialog: { title: string; defaultValue: string; onConfirm: (val: string | null) => void } | null;
+  promptDialog: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null;
 
   // Actions
   setMountedFolder: (folder: string | null) => void;
   setFiles: (files: FileEntry[]) => void;
   setIsScanning: (v: boolean) => void;
+  setInspectingFilePath: (path: string | null) => void;
   setSelectedFile: (file: FileEntry | null) => void;
   setColumnStats: (stats: ColumnInfo[]) => void;
   setSampleRows: (rows: QueryResult | null) => void;
@@ -356,7 +368,8 @@ interface LoomState {
     chart: ChartRecommendation,
     visualOverrides: ChartVisualOverrides,
     querySql?: string | null,
-    snapshotData?: { columns: string[]; types: string[]; rows: (string | number | boolean | null)[][]; total_rows: number }
+    snapshotData?: { columns: string[]; types: string[]; rows: (string | number | boolean | null)[][]; total_rows: number },
+    snapshotImageDataUrl?: string | null
   ) => boolean;
   removeChartView: (id: string) => void;
   applyChartView: (id: string) => void;
@@ -367,13 +380,14 @@ interface LoomState {
   setDashboards: (dashboards: DashboardItem[]) => void;
   addDashboard: (name: string) => void;
   removeDashboard: (id: string) => void;
+  setDashboardRefresh: (dashboardId: string, interval: DashboardRefreshInterval | null, lastRefreshedAt?: number) => void;
   setDashboardSlots: (dashboardId: string, slots: DashboardSlot[]) => void;
   addDashboardSlot: (dashboardId: string, viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => void;
   removeDashboardSlot: (dashboardId: string, slotId: string) => void;
   setActiveDashboardId: (id: string | null) => void;
   setDashboardsExpanded: (v: boolean) => void;
   applyQuerySnapshot: (id: string) => void;
-  setPromptDialog: (config: { title: string; defaultValue: string; onConfirm: (val: string | null) => void } | null) => void;
+  setPromptDialog: (config: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null) => void;
   reset: () => void;
 }
 
@@ -381,6 +395,7 @@ const initialState = {
   mountedFolder: null,
   files: [],
   isScanning: false,
+  inspectingFilePath: null,
   selectedFile: null,
   columnStats: [],
   sampleRows: null,
@@ -441,7 +456,7 @@ const initialState = {
   dashboards: [] as DashboardItem[],
   activeDashboardId: null as string | null,
   dashboardsExpanded: false,
-  promptDialog: null as { title: string; defaultValue: string; onConfirm: (val: string | null) => void } | null,
+  promptDialog: null as { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null,
 };
 
 export const useLoomStore = create<LoomState>((set) => ({
@@ -450,6 +465,7 @@ export const useLoomStore = create<LoomState>((set) => ({
   setMountedFolder: (folder) => set({ mountedFolder: folder }),
   setFiles: (files) => set({ files }),
   setIsScanning: (v) => set({ isScanning: v }),
+  setInspectingFilePath: (path) => set({ inspectingFilePath: path }),
   setSelectedFile: (file) => set({ selectedFile: file }),
   setColumnStats: (stats) => set({ columnStats: stats }),
   setSampleRows: (rows) => set({ sampleRows: rows }),
@@ -661,7 +677,7 @@ export const useLoomStore = create<LoomState>((set) => ({
   setNlQueryInput: (v) => set({ nlQueryInput: v }),
   setToast: (msg) => set({ toastMessage: msg }),
   setChartViews: (views) => set({ chartViews: views.slice(0, 30) }),
-  addChartView: (name, filePath, fileName, chart, visualOverrides, querySql, snapshotData) => {
+  addChartView: (name, filePath, fileName, chart, visualOverrides, querySql, snapshotData, snapshotImageDataUrl) => {
     let ok = false;
     set((s) => {
       try {
@@ -678,7 +694,8 @@ export const useLoomStore = create<LoomState>((set) => ({
               chart: chartCopy,
               visualOverrides: overridesCopy,
               querySql,
-              snapshotData
+              snapshotData,
+              snapshotImageDataUrl: snapshotImageDataUrl ?? null,
             },
             ...s.chartViews.slice(0, 29),
           ],
@@ -746,14 +763,27 @@ export const useLoomStore = create<LoomState>((set) => ({
   addDashboard: (name) =>
     set((s) => {
       const id = `db-${Date.now()}`;
+      const now = Date.now();
       return {
         dashboards: [
-          { id, name: name.trim() || "Dashboard", slots: [] },
+          { id, name: name.trim() || "Dashboard", slots: [], refreshInterval: "manual", lastRefreshedAt: now },
           ...s.dashboards.slice(0, 19),
         ],
         activeDashboardId: id,
       };
     }),
+  setDashboardRefresh: (dashboardId, interval, lastRefreshedAt) =>
+    set((s) => ({
+      dashboards: s.dashboards.map((d) =>
+        d.id === dashboardId
+          ? {
+              ...d,
+              refreshInterval: interval ?? d.refreshInterval,
+              lastRefreshedAt: lastRefreshedAt ?? d.lastRefreshedAt,
+            }
+          : d
+      ),
+    })),
   removeDashboard: (id) =>
     set((s) => ({
       dashboards: s.dashboards.filter((d) => d.id !== id),

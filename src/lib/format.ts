@@ -27,6 +27,11 @@ export function extensionIcon(ext: string): string {
   switch (ext) {
     case "parquet": return "PQ";
     case "csv": return "CSV";
-    default: return "?";
+    case "json": return "JSON";
+    case "ndjson": return "NDJSON";
+    case "jsonl": return "JSONL";
+    case "xlsx": return "XLSX";
+    case "sqlite": return "SQLite";
+    default: return ext.toUpperCase().slice(0, 6) || "?";
   }
 }

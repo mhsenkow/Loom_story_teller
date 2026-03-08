@@ -42,7 +42,7 @@ pub struct DataGovDataset {
     pub portal_id: String,
 }
 
-/// Scan a local folder for .parquet and .csv files.
+/// Scan a local folder for data files: .parquet, .csv, .json/.ndjson/.jsonl, .xlsx, and .db/.sqlite (one entry per table).
 /// Returns a list of files with names, paths, and row counts.
 #[tauri::command]
 pub async fn scan_folder(

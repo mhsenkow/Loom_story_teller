@@ -41,7 +41,7 @@ export function ChartView() {
   const {
     selectedFile, sampleRows, chartRecs, activeChart, setActiveChart, setPanelTab, columnStats,
     chartVisualOverrides, aiSuggestionReason, chartTitleOverrides, setChartTitleOverride,
-    setPngExportHandler, setSvgExportHandler, vegaSpec, smartResults, appSettings,
+    pngExportHandler, setPngExportHandler, setSvgExportHandler, vegaSpec, smartResults, appSettings,
     setSelectedRowIndices, setToast, chartAnnotations,
     hoveredRowIndex, setHoveredRowIndex,
     pinnedTooltips, addPinnedTooltip, removePinnedTooltip,
@@ -1189,11 +1189,25 @@ export function ChartView() {
                     setPromptDialog({
                       title: "Name for this chart view",
                       defaultValue: activeChart.title || "Chart view",
-                      onConfirm: (name) => {
-                        if (name != null && name.trim()) {
-                          const ok = addChartView(name.trim(), selectedFile.path, selectedFile.name, activeChart, { ...chartVisualOverrides }, querySql, sampleRows ?? undefined);
-                          setToast(ok ? "Chart view saved. Open the Dashboards tab and use \"Add to dashboard\" or \"+ Add view\"." : "Could not save chart view");
+                      onConfirm: async (name) => {
+                        if (name == null || !name.trim()) return;
+                        let snapshotImageDataUrl: string | null = null;
+                        if (pngExportHandler) {
+                          try {
+                            const blob = await pngExportHandler();
+                            if (blob) {
+                              snapshotImageDataUrl = await new Promise<string>((res, rej) => {
+                                const r = new FileReader();
+                                r.onload = () => res(r.result as string);
+                                r.onerror = rej;
+                                r.readAsDataURL(blob);
+                              });
+                            }
+                          } catch (_) { /* ignore */ }
                         }
+                        const sample = sampleRows ? { columns: sampleRows.columns, types: sampleRows.types ?? [], rows: sampleRows.rows, total_rows: sampleRows.total_rows } : undefined;
+                        const ok = addChartView(name.trim(), selectedFile.path, selectedFile.name, activeChart, { ...chartVisualOverrides }, querySql, sample, snapshotImageDataUrl);
+                        setToast(ok ? "Chart view saved. Open the Dashboards tab and use \"Add to dashboard\" or \"+ Add view\"." : "Could not save chart view");
                       }
                     });
                   }}

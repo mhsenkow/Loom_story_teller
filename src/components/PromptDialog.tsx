@@ -21,8 +21,12 @@ export function PromptDialog() {
     if (!promptDialog) return null;
 
     const handleConfirm = () => {
-        promptDialog.onConfirm(value);
-        setPromptDialog(null);
+        const result = promptDialog.onConfirm(value) as void | Promise<unknown>;
+        if (typeof result === "object" && result != null && typeof (result as Promise<unknown>).then === "function") {
+            (result as Promise<unknown>).then(() => setPromptDialog(null));
+        } else {
+            setPromptDialog(null);
+        }
     };
 
     const handleCancel = () => {

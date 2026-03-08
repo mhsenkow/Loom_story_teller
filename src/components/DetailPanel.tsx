@@ -108,6 +108,7 @@ function DashboardsView() {
     setViewMode,
     setPanelTab,
     setToast,
+    setDashboardRefresh,
   } = useLoomStore();
   const active = dashboards.find((d) => d.id === activeDashboardId);
 
@@ -164,6 +165,39 @@ function DashboardsView() {
           </button>
         )}
       </div>
+
+      {active && (
+        <div className="space-y-1">
+          <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Update</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <select
+              value={active.refreshInterval ?? "manual"}
+              onChange={(e) => setDashboardRefresh(active.id, (e.target.value as import("@/lib/store").DashboardRefreshInterval) || "manual")}
+              className="text-2xs px-1.5 py-0.5 rounded border border-loom-border bg-loom-surface text-loom-text"
+            >
+              <option value="manual">Manual</option>
+              <option value="1m">1 min</option>
+              <option value="5m">5 min</option>
+              <option value="15m">15 min</option>
+              <option value="1h">1 hour</option>
+              <option value="1d">1 day</option>
+            </select>
+            <button
+              type="button"
+              onClick={() => setDashboardRefresh(active.id, null, Date.now())}
+              className="text-2xs px-2 py-0.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
+            >
+              Refresh now
+            </button>
+            {active.lastRefreshedAt != null && (
+              <span className="text-2xs text-loom-muted">
+                Last updated {new Date(active.lastRefreshedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+          </div>
+          <p className="text-2xs text-loom-muted/80">Refresh interval is a hint for when data might be stale; use &quot;Refresh now&quot; to update.</p>
+        </div>
+      )}
 
       {/* Saved views — always visible so users see what they have and can add to dashboard */}
       <div className="space-y-1">
@@ -249,10 +283,18 @@ function DashboardsView() {
                 <button
                   type="button"
                   onClick={() => setActiveDashboardId(activeDashboardId === d.id ? null : d.id)}
-                  className={`flex-1 text-left text-xs px-2 py-1.5 rounded truncate transition-colors ${activeDashboardId === d.id ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted hover:text-loom-text hover:bg-loom-elevated/50 border border-transparent"
+                  className={`flex-1 min-w-0 text-left text-xs px-2 py-1.5 rounded truncate transition-colors ${activeDashboardId === d.id ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted hover:text-loom-text hover:bg-loom-elevated/50 border border-transparent"
                     }`}
                 >
                   {d.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setActiveDashboardId(d.id); setDashboardsExpanded(true); }}
+                  className="shrink-0 text-xs px-2 py-1 rounded border border-loom-accent text-loom-accent hover:bg-loom-accent/10"
+                  title={`Expand ${d.name} to main area`}
+                >
+                  Expand
                 </button>
                 <button
                   type="button"
@@ -292,26 +334,36 @@ function DashboardsView() {
             </div>
           ) : (
             <ul className="space-y-1.5">
-              {active.slots.map((slot) => (
-                <li key={slot.id} className="flex items-center gap-1 group loom-card px-2 py-1.5">
-                  <span className="text-2xs text-loom-muted shrink-0">{slot.viewType}</span>
-                  <button
-                    type="button"
-                    onClick={() => handleApplySlot(slot.viewType, slot.viewId)}
-                    className="flex-1 text-left text-xs text-loom-text truncate hover:underline"
-                  >
-                    {getSlotLabel(slot.viewType, slot.viewId)}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => removeDashboardSlot(active.id, slot.id)}
-                    className="opacity-0 group-hover:opacity-100 text-loom-muted hover:text-loom-text text-xs p-0.5"
-                    aria-label="Remove slot"
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
+              {active.slots.map((slot) => {
+                const chartView = slot.viewType === "chart" ? chartViews.find((x) => x.id === slot.viewId) : null;
+                const snapshotUrl = chartView?.snapshotImageDataUrl ?? null;
+                return (
+                  <li key={slot.id} className="flex items-center gap-2 group loom-card px-2 py-1.5">
+                    {snapshotUrl ? (
+                      <div className="shrink-0 w-10 h-8 rounded overflow-hidden bg-loom-bg/50 flex items-center justify-center">
+                        <img src={snapshotUrl} alt="" className="max-w-full max-h-full object-contain" />
+                      </div>
+                    ) : (
+                      <span className="text-2xs text-loom-muted shrink-0 w-10">{slot.viewType}</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleApplySlot(slot.viewType, slot.viewId)}
+                      className="flex-1 text-left text-xs text-loom-text truncate hover:underline min-w-0"
+                    >
+                      {getSlotLabel(slot.viewType, slot.viewId)}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeDashboardSlot(active.id, slot.id)}
+                      className="opacity-0 group-hover:opacity-100 text-loom-muted hover:text-loom-text text-xs p-0.5 shrink-0"
+                      aria-label="Remove slot"
+                    >
+                      ×
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </>
@@ -1169,7 +1221,7 @@ function SmartView() {
 
 // --- Save chart view button (used in Chart tab) ---
 function SaveChartViewButton() {
-  const { selectedFile, activeChart, chartVisualOverrides, addChartView, setToast, setPromptDialog, querySql, sampleRows } = useLoomStore();
+  const { selectedFile, activeChart, chartVisualOverrides, addChartView, setToast, setPromptDialog, querySql, sampleRows, pngExportHandler } = useLoomStore();
   if (!selectedFile || !activeChart) return null;
   return (
     <button
@@ -1178,11 +1230,25 @@ function SaveChartViewButton() {
         setPromptDialog({
           title: "Name for this chart view",
           defaultValue: activeChart.title || "Chart view",
-          onConfirm: (name) => {
-            if (name != null && name.trim()) {
-              const ok = addChartView(name.trim(), selectedFile.path, selectedFile.name, activeChart, { ...chartVisualOverrides }, querySql, sampleRows ?? undefined);
-              setToast(ok ? "Chart view saved. Add it in the Dashboards tab with \"Add to dashboard\" or \"+ Add view\"." : "Could not save chart view");
+          onConfirm: async (name) => {
+            if (name == null || !name.trim()) return;
+            let snapshotImageDataUrl: string | null = null;
+            if (pngExportHandler) {
+              try {
+                const blob = await pngExportHandler();
+                if (blob) {
+                  snapshotImageDataUrl = await new Promise<string>((res, rej) => {
+                    const r = new FileReader();
+                    r.onload = () => res(r.result as string);
+                    r.onerror = rej;
+                    r.readAsDataURL(blob);
+                  });
+                }
+              } catch (_) { /* ignore */ }
             }
+            const sample = sampleRows ? { columns: sampleRows.columns, types: sampleRows.types ?? [], rows: sampleRows.rows, total_rows: sampleRows.total_rows } : undefined;
+            const ok = addChartView(name.trim(), selectedFile.path, selectedFile.name, activeChart, { ...chartVisualOverrides }, querySql, sample, snapshotImageDataUrl);
+            setToast(ok ? "Chart view saved. Add it in the Dashboards tab with \"Add to dashboard\" or \"+ Add view\"." : "Could not save chart view");
           }
         });
       }}

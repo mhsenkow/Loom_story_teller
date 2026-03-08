@@ -11,6 +11,7 @@
 
 import { useState, useRef } from "react";
 import { useLoomStore } from "@/lib/store";
+import type { DashboardSlot } from "@/lib/store";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { DetailPanel } from "@/components/DetailPanel";
@@ -24,7 +25,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toast } from "@/components/Toast";
 import { PromptDialog } from "@/components/PromptDialog";
 import { Onboarding } from "@/components/Onboarding";
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
 import { createGitHubIssue, getGitHubNewIssueUrl, isTauri, openExternalUrl } from "@/lib/tauri";
 
 /** Open a URL: in Tauri use backend (default browser), in web use new tab. */
@@ -51,8 +52,10 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     applyQuerySnapshot,
     setViewMode,
     setPanelTab,
+    setDashboardRefresh,
   } = useLoomStore();
   const active = dashboards.find((d) => d.id === activeDashboardId);
+  const [focusedSlot, setFocusedSlot] = useState<DashboardSlot | null>(null);
 
   const getSlotLabel = (viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => {
     if (viewType === "table") return tableViews.find((x) => x.id === viewId)?.name ?? viewId;
@@ -70,6 +73,20 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     setPanelTab(viewType === "table" || viewType === "snapshot" ? "stats" : viewType === "chart" ? "chart" : "stats");
   };
 
+  const handleBackFromFocus = useCallback(() => setFocusedSlot(null), []);
+
+  useEffect(() => {
+    if (!focusedSlot) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        handleBackFromFocus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusedSlot, handleBackFromFocus]);
+
   if (!active) {
     return (
       <div className="flex flex-col items-center justify-center flex-1 p-8 text-center">
@@ -82,10 +99,45 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     );
   }
 
+  const refreshIntervalOptions: { value: typeof active.refreshInterval; label: string }[] = [
+    { value: "manual", label: "Manual" },
+    { value: "1m", label: "1 min" },
+    { value: "5m", label: "5 min" },
+    { value: "15m", label: "15 min" },
+    { value: "1h", label: "1 hour" },
+    { value: "1d", label: "1 day" },
+  ];
+  const lastRefreshed = active.lastRefreshedAt ? new Date(active.lastRefreshedAt) : null;
+
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 border-b border-loom-border bg-loom-surface/50 flex-shrink-0">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border bg-loom-surface/50 flex-shrink-0 flex-wrap">
         <h2 className="text-sm font-semibold text-loom-text">{active.name}</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-2xs text-loom-muted">Refresh:</span>
+          <select
+            value={active.refreshInterval ?? "manual"}
+            onChange={(e) => setDashboardRefresh(active.id, (e.target.value as typeof active.refreshInterval) || "manual")}
+            className="text-2xs px-1.5 py-0.5 rounded border border-loom-border bg-loom-surface text-loom-text"
+          >
+            {refreshIntervalOptions.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setDashboardRefresh(active.id, null, Date.now())}
+            className="text-2xs px-2 py-0.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
+            title="Mark as refreshed now"
+          >
+            Refresh
+          </button>
+          {lastRefreshed && (
+            <span className="text-2xs text-loom-muted" title={lastRefreshed.toLocaleString()}>
+              Updated {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
         <button
           type="button"
           onClick={onCollapse}
@@ -103,20 +155,91 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {active.slots.map((slot) => (
+            {active.slots.map((slot) => {
+              const label = getSlotLabel(slot.viewType, slot.viewId);
+              const chartView = slot.viewType === "chart" ? chartViews.find((x) => x.id === slot.viewId) : null;
+              const snapshotUrl = chartView?.snapshotImageDataUrl ?? null;
+              return (
+                <button
+                  key={slot.id}
+                  type="button"
+                  onClick={() => setFocusedSlot(slot)}
+                  className="loom-card p-3 text-left hover:border-loom-accent hover:bg-loom-elevated/50 transition-colors border border-loom-border rounded-lg flex flex-col min-h-[140px] aspect-[4/3]"
+                >
+                  <span className="text-2xs font-medium text-loom-muted uppercase tracking-wider shrink-0">{slot.viewType}</span>
+                  {snapshotUrl ? (
+                    <div className="mt-1 flex-1 min-h-0 w-full rounded overflow-hidden bg-loom-bg/50 flex items-center justify-center">
+                      <img src={snapshotUrl} alt="" className="w-full h-full object-contain" />
+                    </div>
+                  ) : (
+                    <div className="mt-1 flex-1 min-h-0 rounded bg-loom-bg/30 flex items-center justify-center">
+                      <span className="text-2xs text-loom-muted">{label}</span>
+                    </div>
+                  )}
+                  <p className="text-xs font-medium text-loom-text truncate shrink-0 mt-1.5" title={label}>
+                    {label}
+                  </p>
+                  <p className="text-2xs text-loom-muted shrink-0 mt-0.5">Click to focus</p>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Focused slot modal: chart/content without editing UI, with Back to dashboard */}
+        {focusedSlot && (
+          <div
+            className="fixed inset-0 z-50 flex flex-col bg-loom-bg"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Focused view"
+          >
+            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border bg-loom-surface/80 shrink-0">
               <button
-                key={slot.id}
                 type="button"
-                onClick={() => handleApply(slot.viewType, slot.viewId)}
-                className="loom-card p-4 text-left hover:border-loom-accent hover:bg-loom-elevated/50 transition-colors border border-loom-border rounded-lg"
+                onClick={handleBackFromFocus}
+                className="text-xs px-3 py-1.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
               >
-                <span className="text-2xs font-medium text-loom-muted uppercase tracking-wider">{slot.viewType}</span>
-                <p className="text-xs font-medium text-loom-text mt-1 truncate" title={getSlotLabel(slot.viewType, slot.viewId)}>
-                  {getSlotLabel(slot.viewType, slot.viewId)}
-                </p>
-                <p className="text-2xs text-loom-muted mt-0.5">Click to open</p>
+                ← Back to dashboard
               </button>
-            ))}
+              <p className="text-sm font-medium text-loom-text truncate flex-1 text-center">
+                {getSlotLabel(focusedSlot.viewType, focusedSlot.viewId)}
+              </p>
+              <div className="w-32" />
+            </div>
+            <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center p-4">
+              {focusedSlot.viewType === "chart" && (() => {
+                const cv = chartViews.find((x) => x.id === focusedSlot.viewId);
+                const url = cv?.snapshotImageDataUrl ?? null;
+                if (url) {
+                  return <img src={url} alt="" className="max-w-full max-h-full object-contain shadow-lg rounded" />;
+                }
+                return (
+                  <div className="flex flex-col items-center gap-3">
+                    <p className="text-sm text-loom-muted">No preview for this chart.</p>
+                    <button
+                      type="button"
+                      onClick={() => { handleApply(focusedSlot.viewType, focusedSlot.viewId); handleBackFromFocus(); }}
+                      className="text-xs px-3 py-1.5 rounded border border-loom-accent text-loom-accent hover:bg-loom-accent/10"
+                    >
+                      Open in editor
+                    </button>
+                  </div>
+                );
+              })()}
+              {focusedSlot.viewType !== "chart" && (
+                <div className="flex flex-col items-center gap-3">
+                  <p className="text-sm text-loom-muted">{getSlotLabel(focusedSlot.viewType, focusedSlot.viewId)}</p>
+                  <button
+                    type="button"
+                    onClick={() => { handleApply(focusedSlot.viewType, focusedSlot.viewId); handleBackFromFocus(); }}
+                    className="text-xs px-3 py-1.5 rounded border border-loom-accent text-loom-accent hover:bg-loom-accent/10"
+                  >
+                    Open in editor
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>

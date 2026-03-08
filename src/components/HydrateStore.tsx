@@ -120,6 +120,7 @@ export function HydrateStore() {
           fileName: c.fileName,
           chart: c.chart as unknown as ChartViewItem["chart"],
           visualOverrides: (c.visualOverrides || {}) as ChartViewItem["visualOverrides"],
+          snapshotImageDataUrl: c.snapshotImageDataUrl ?? null,
         }))
       );
 
@@ -207,6 +208,7 @@ export function HydrateStore() {
           fileName: c.fileName,
           chart: c.chart as unknown as Record<string, unknown>,
           visualOverrides: c.visualOverrides as unknown as Record<string, unknown>,
+          snapshotImageDataUrl: c.snapshotImageDataUrl ?? null,
         }))
       );
     } catch (_) {

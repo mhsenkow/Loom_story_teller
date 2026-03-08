@@ -206,6 +206,7 @@ export interface ChartViewItemPersist {
   fileName: string;
   chart: Record<string, unknown>;
   visualOverrides: Record<string, unknown>;
+  snapshotImageDataUrl?: string | null;
 }
 
 export function getChartViews(): ChartViewItemPersist[] {
@@ -254,6 +255,8 @@ export interface DashboardItemPersist {
   id: string;
   name: string;
   slots: DashboardSlotPersist[];
+  refreshInterval?: string | null;
+  lastRefreshedAt?: number | null;
 }
 
 export function getDashboards(): DashboardItemPersist[] {

@@ -21,11 +21,12 @@ const DATA_REGION_WIDTH = 340;
 
 export function Sidebar() {
   const {
-    mountedFolder, files, isScanning, selectedFile, sidebarOpen, dataRegionOpen, dataSourcesExpanded,
-    setMountedFolder, setFiles, setIsScanning, setSelectedFile,
+    mountedFolder, files, isScanning, selectedFile, inspectingFilePath, sidebarOpen, dataRegionOpen, dataSourcesExpanded,
+    setMountedFolder, setFiles, setIsScanning, setSelectedFile, setInspectingFilePath,
     setColumnStats, setSampleRows, setVegaSpec, setChartRecs, setActiveChart,
     setDataRegionOpen, setDataSourcesExpanded, webFileCache, setWebFileCache,
     addRecentFile, setLastSession, viewMode, recentFiles, lastSession, setViewMode,
+    setToast,
   } = useLoomStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
@@ -123,6 +124,9 @@ export function Sidebar() {
 
   async function handleSelectFile(file: FileEntry) {
     setSelectedFile(file);
+    setInspectingFilePath(file.path);
+    setColumnStats([]);
+    setSampleRows(null);
     addRecentFile(file);
     setLastSession({
       folderPath: mountedFolder,
@@ -132,6 +136,7 @@ export function Sidebar() {
     try {
       const cached = webFileCache[file.path];
       const result = cached ?? await inspectFile(file.path, 500);
+      if (useLoomStore.getState().selectedFile?.path !== file.path) return;
       setColumnStats(result.stats);
       setSampleRows(result.sample);
 
@@ -145,6 +150,13 @@ export function Sidebar() {
       }
     } catch (e) {
       console.error("File inspection failed:", e);
+      if (useLoomStore.getState().selectedFile?.path === file.path) {
+        setToast("Failed to load file. Try another or check the file.");
+      }
+    } finally {
+      if (useLoomStore.getState().inspectingFilePath === file.path) {
+        setInspectingFilePath(null);
+      }
     }
   }
 
@@ -239,6 +251,7 @@ export function Sidebar() {
           allFiles={files}
           isScanning={isScanning}
           selectedFile={selectedFile}
+          inspectingFilePath={inspectingFilePath}
           onPickFolder={handlePickFolder}
           onSelectFile={handleSelectFile}
           onOpenDataRegion={() => setDataRegionOpen(true)}
@@ -763,6 +776,7 @@ function FilesView({
   allFiles,
   isScanning,
   selectedFile,
+  inspectingFilePath,
   onPickFolder,
   onSelectFile,
   onOpenDataRegion,
@@ -784,6 +798,7 @@ function FilesView({
   allFiles?: FileEntry[];
   isScanning: boolean;
   selectedFile: FileEntry | null;
+  inspectingFilePath?: string | null;
   onPickFolder: () => void;
   onSelectFile: (f: FileEntry) => void;
   onOpenDataRegion: () => void;
@@ -932,6 +947,7 @@ function FilesView({
             key={file.path}
             file={file}
             isSelected={selectedFile?.path === file.path}
+            isInspecting={inspectingFilePath === file.path}
             onSelect={() => onSelectFile(file)}
           />
         ))}
@@ -952,15 +968,18 @@ function FilesView({
 function FileItem({
   file,
   isSelected,
+  isInspecting,
   onSelect,
 }: {
   file: FileEntry;
   isSelected: boolean;
+  isInspecting?: boolean;
   onSelect: () => void;
 }) {
   return (
     <button
       onClick={onSelect}
+      disabled={isInspecting}
       className={`
         w-full flex items-center gap-2.5 px-3 py-2 text-left
         transition-all duration-100
@@ -968,6 +987,7 @@ function FileItem({
           ? "bg-loom-accent/10 border-r-2 border-loom-accent"
           : "hover:bg-loom-elevated border-r-2 border-transparent"
         }
+        ${isInspecting ? "opacity-90" : ""}
       `}
     >
       <span
@@ -980,12 +1000,16 @@ function FileItem({
           }
         `}
       >
-        {extensionIcon(file.extension)}
+        {isInspecting ? (
+          <span className="inline-block w-3 h-3 border-2 border-loom-muted border-t-loom-accent rounded-full animate-spin" aria-hidden />
+        ) : (
+          extensionIcon(file.extension)
+        )}
       </span>
       <div className="flex-1 min-w-0">
         <p className="text-xs font-medium text-loom-text truncate">{file.name}</p>
         <p className="text-2xs text-loom-muted font-mono">
-          {formatNumber(file.row_count)} rows &middot; {formatBytes(file.size_bytes)}
+          {isInspecting ? "Loading…" : `${formatNumber(file.row_count)} rows · ${formatBytes(file.size_bytes)}`}
         </p>
       </div>
     </button>

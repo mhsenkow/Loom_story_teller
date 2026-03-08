@@ -53,8 +53,18 @@ describe("format", () => {
     it("returns PQ for parquet", () => {
       expect(extensionIcon("parquet")).toBe("PQ");
     });
-    it("returns ? for unknown", () => {
-      expect(extensionIcon("xlsx")).toBe("?");
+    it("returns XLSX for xlsx", () => {
+      expect(extensionIcon("xlsx")).toBe("XLSX");
+    });
+    it("returns JSON/NDJSON/JSONL/SQLite for data connector types", () => {
+      expect(extensionIcon("json")).toBe("JSON");
+      expect(extensionIcon("ndjson")).toBe("NDJSON");
+      expect(extensionIcon("jsonl")).toBe("JSONL");
+      expect(extensionIcon("sqlite")).toBe("SQLite");
+    });
+    it("returns uppercased prefix for unknown extension", () => {
+      expect(extensionIcon("other")).toBe("OTHER");
+      expect(extensionIcon("x")).toBe("X");
     });
   });
 });
