@@ -18,6 +18,7 @@
   /* ---- Typography ---- */
   --font-sans: "Inter", "SF Pro Display", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  --app-font-scale: 1;
 
   /* ---- Layout ---- */
   --sidebar-width: 260px;
@@ -91,6 +92,67 @@
 }
 
 /* ============================================================
+ * HIGH-CONTRAST THEME (accessibility)
+ * ============================================================ */
+.high-contrast,
+.theme-high-contrast {
+  --loom-bg:         #000000;
+  --loom-surface:    #0d0d0d;
+  --loom-elevated:   #1a1a1a;
+  --loom-border:     #404040;
+  --loom-text:       #ffffff;
+  --loom-muted:      #b0b0b0;
+  --loom-accent:     #7c6cf7;
+  --loom-accent-dim: #5a4cdb;
+  --loom-success:    #00ff9d;
+  --loom-warning:    #ffcc00;
+  --loom-error:      #ff5555;
+
+  --chart-1: #7c6cf7;
+  --chart-2: #00ff9d;
+  --chart-3: #ff5555;
+  --chart-4: #ffcc00;
+  --chart-5: #00ccff;
+  --chart-6: #ff8844;
+  --chart-7: #bb99ff;
+  --chart-8: #66bbff;
+}
+
+/* ============================================================
+ * COLORBLIND-FRIENDLY THEME (deuteranopia/protanopia safe)
+ * Uses blue / orange / yellow / teal / pink / grey palette
+ * ============================================================ */
+.colorblind,
+.theme-colorblind {
+  --loom-bg:         #0c0c0e;
+  --loom-surface:    #141418;
+  --loom-elevated:   #1e1e24;
+  --loom-border:     #36363d;
+  --loom-text:       #eaeaf0;
+  --loom-muted:      #7a7a88;
+  --loom-accent:     #3b82f6;
+  --loom-accent-dim: #2563eb;
+  --loom-success:    #10b981;
+  --loom-warning:    #f59e0b;
+  --loom-error:      #ef4444;
+
+  /* Paul Tol–style colorblind-safe sequence (no red–green only) */
+  --chart-1: #4477aa;
+  --chart-2: #ee7733;
+  --chart-3: #009988;
+  --chart-4: #cc3311;
+  --chart-5: #bbbb00;
+  --chart-6: #66bbee;
+  --chart-7: #aa3377;
+  --chart-8: #888888;
+}
+
+/* Apply font scale to root for app-wide scaling */
+html {
+  font-size: calc(100% * var(--app-font-scale));
+}
+
+/* ============================================================
  * BASE RESETS
  * ============================================================ */
 @layer base {
@@ -130,6 +192,14 @@
   ::selection {
     background: var(--loom-accent);
     color: white;
+  }
+
+  .reduced-motion *,
+  .reduced-motion *::before,
+  .reduced-motion *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
 

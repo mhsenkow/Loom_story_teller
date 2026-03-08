@@ -385,3 +385,82 @@ pub async fn fetch_uk_data_recent_csv(rows: Option<u32>) -> Result<Vec<DataGovDa
 
     Ok(out)
 }
+
+const GITHUB_REPO: &str = "mhsenkow/Loom_story_teller";
+
+/// Create a GitHub issue (feedback). Requires GITHUB_TOKEN env to be set.
+/// Returns the new issue URL on success.
+#[tauri::command]
+pub async fn create_github_issue(
+    title: String,
+    body: String,
+    image_base64: Option<String>,
+) -> Result<String, String> {
+    let token = std::env::var("GITHUB_TOKEN").map_err(|_| {
+        "GITHUB_TOKEN not set. Open the issue link to submit feedback in the browser.".to_string()
+    })?;
+
+    let body_with_image = match image_base64 {
+        Some(b64) if !b64.is_empty() => {
+            let data_url = if b64.starts_with("data:") {
+                b64.to_string()
+            } else {
+                format!("data:image/png;base64,{}", b64)
+            };
+            format!("{}\n\n![screenshot]({})", body.trim(), data_url)
+        }
+        _ => body,
+    };
+
+    let client = reqwest::Client::builder()
+        .user_agent("Loom-Data-Storyteller")
+        .build()
+        .map_err(|e| format!("HTTP client: {}", e))?;
+
+    let res = client
+        .post(format!(
+            "https://api.github.com/repos/{}/issues",
+            GITHUB_REPO
+        ))
+        .header("Accept", "application/vnd.github+json")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .json(&serde_json::json!({
+            "title": title,
+            "body": body_with_image,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    if !res.status().is_success() {
+        let status = res.status();
+        let text = res.text().await.unwrap_or_default();
+        return Err(format!("GitHub API {}: {}", status, text));
+    }
+
+    let json: serde_json::Value = res
+        .json()
+        .await
+        .map_err(|e| format!("Invalid response: {}", e))?;
+    let url = json
+        .get("html_url")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "No html_url in response".to_string())?;
+    Ok(url.to_string())
+}
+
+/// Open a URL in the system default browser. Used for feedback issue links.
+#[tauri::command]
+pub async fn open_external_url(url: String) -> Result<(), String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("URL is empty".to_string());
+    }
+    tokio::task::spawn_blocking(move || {
+        opener::open(&url).map_err(|e| format!("Failed to open URL: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task join: {}", e))?
+}
+

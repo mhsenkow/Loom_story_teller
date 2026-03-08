@@ -76,6 +76,13 @@ export async function getSampleRows(
   return mockQuery(filePath, limit ?? 100);
 }
 
+/**
+ * Future: streaming/chunked load for large files.
+ * Rust could expose get_sample_rows_chunked(filePath, offset, limit) and the
+ * frontend would merge chunks and optionally virtualize the table from a
+ * growing buffer.
+ */
+
 export interface InspectResult {
   stats: ColumnInfo[];
   sample: QueryResult;
@@ -136,3 +143,33 @@ export const OPEN_DATA_PORTALS: Record<string, { url: string; label: string }> =
   "data.gov": { url: "https://catalog.data.gov/dataset", label: "Data.gov" },
   "data.gov.uk": { url: "https://data.gov.uk/dataset", label: "data.gov.uk" },
 };
+
+const GITHUB_REPO = "mhsenkow/Loom_story_teller";
+
+/** Create a GitHub issue (Tauri only, requires GITHUB_TOKEN). Returns issue URL or throws. */
+export async function createGitHubIssue(
+  title: string,
+  body: string,
+  imageBase64?: string | null
+): Promise<string> {
+  return invoke<string>("create_github_issue", {
+    title,
+    body,
+    image_base64: imageBase64 ?? null,
+  });
+}
+
+/** URL to open a new GitHub issue with pre-filled title and body (no auth). */
+export function getGitHubNewIssueUrl(title: string, body: string): string {
+  const params = new URLSearchParams();
+  if (title.trim()) params.set("title", title.trim());
+  if (body.trim()) params.set("body", body.trim());
+  return `https://github.com/${GITHUB_REPO}/issues/new?${params.toString()}`;
+}
+
+/** Open a URL in the default browser (Tauri only). In web, returns without doing anything; caller should use window.open. */
+export async function openExternalUrl(url: string): Promise<void> {
+  if (isTauri()) {
+    await invoke<void>("open_external_url", { url });
+  }
+}

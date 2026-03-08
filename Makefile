@@ -173,6 +173,11 @@ shuttle-shell: ## 🐳 Shell into running container
 check: check-ts check-rust ## ✅ Run all checks (TS + Rust)
 	@echo "$(GREEN)✓ All checks passed$(RESET)"
 
+.PHONY: test
+test: ## ✅ Run unit tests (Vitest)
+	@echo "$(CYAN)Running tests...$(RESET)"
+	npm run test:run
+
 .PHONY: check-ts
 check-ts: ## ✅ TypeScript type-check + lint
 	@echo "$(CYAN)Checking TypeScript...$(RESET)"

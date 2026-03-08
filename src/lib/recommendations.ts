@@ -61,6 +61,12 @@ export interface ChartRecommendation {
   sizeField?: string | null;
   /** Optional row facet (bar, line, area). */
   rowField?: string | null;
+  /** Optional glow encoding (scatter): column drives glow on/off or intensity. */
+  glowField?: string | null;
+  /** Optional outline encoding (scatter): column drives stroke on/off or width. */
+  outlineField?: string | null;
+  /** Optional opacity encoding (scatter, strip): column drives per-point opacity. */
+  opacityField?: string | null;
 }
 
 type ColType = "quantitative" | "nominal" | "temporal";
@@ -93,6 +99,7 @@ export function createScatterRec(
   colorField: string | null,
   tableName: string,
   sizeField?: string | null,
+  visualEncoding?: { glowField?: string | null; outlineField?: string | null; opacityField?: string | null },
 ): ChartRecommendation {
   const encoding: Record<string, unknown> = {
     x: { field: xField, type: "quantitative" },
@@ -125,6 +132,9 @@ export function createScatterRec(
     yField,
     colorField,
     sizeField: sizeField ?? undefined,
+    glowField: visualEncoding?.glowField ?? undefined,
+    outlineField: visualEncoding?.outlineField ?? undefined,
+    opacityField: visualEncoding?.opacityField ?? undefined,
   };
 }
 
@@ -136,17 +146,30 @@ export function createChartRec(
   yField: string | null,
   colorField: string | null,
   tableName: string,
-  extra?: { sizeField?: string | null; rowField?: string | null },
+  extra?: {
+    sizeField?: string | null;
+    rowField?: string | null;
+    glowField?: string | null;
+    outlineField?: string | null;
+    opacityField?: string | null;
+  },
 ): ChartRecommendation | null {
   const numCols = columns.filter(c => inferType(c.data_type, c.name) === "quantitative");
   const nomCols = columns.filter(c => inferType(c.data_type, c.name) === "nominal");
   const timeCols = columns.filter(c => inferType(c.data_type, c.name) === "temporal");
   const sizeField = extra?.sizeField ?? null;
   const rowField = extra?.rowField ?? null;
+  const glowField = extra?.glowField ?? null;
+  const outlineField = extra?.outlineField ?? null;
+  const opacityField = extra?.opacityField ?? null;
 
   if (kind === "scatter") {
     if (!yField || !numCols.some(c => c.name === xField) || !numCols.some(c => c.name === yField)) return null;
-    return createScatterRec(columns, xField, yField, colorField, tableName, sizeField);
+    return createScatterRec(columns, xField, yField, colorField, tableName, sizeField, {
+      glowField,
+      outlineField,
+      opacityField,
+    });
   }
 
   const id = `${kind}-${xField}-${yField ?? "n"}-${colorField ?? "n"}${rowField ? `-row:${rowField}` : ""}`;
@@ -254,6 +277,9 @@ export function createChartRec(
     colorField,
     sizeField: sizeField ?? undefined,
     rowField: rowField ?? undefined,
+    glowField: glowField ?? undefined,
+    outlineField: outlineField ?? undefined,
+    opacityField: opacityField ?? undefined,
   };
 }
 

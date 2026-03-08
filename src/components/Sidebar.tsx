@@ -9,7 +9,7 @@
 
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useMemo } from "react";
 import { useLoomStore, type FileEntry } from "@/lib/store";
 import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset } from "@/lib/tauri";
 import { recommend } from "@/lib/recommendations";
@@ -25,10 +25,18 @@ export function Sidebar() {
     setMountedFolder, setFiles, setIsScanning, setSelectedFile,
     setColumnStats, setSampleRows, setVegaSpec, setChartRecs, setActiveChart,
     setDataRegionOpen, setDataSourcesExpanded, webFileCache, setWebFileCache,
+    addRecentFile, setLastSession, viewMode, recentFiles, lastSession, setViewMode,
   } = useLoomStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileSearchQuery, setFileSearchQuery] = useState("");
   // Only show web vs Tauri UI after mount so server and first client render match (avoids hydration mismatch).
   const [mounted, setMounted] = useState(false);
+
+  const filteredFiles = useMemo(() => {
+    if (!fileSearchQuery.trim()) return files;
+    const q = fileSearchQuery.toLowerCase();
+    return files.filter((f) => f.name.toLowerCase().includes(q));
+  }, [files, fileSearchQuery]);
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -38,6 +46,7 @@ export function Sidebar() {
     const folder = await pickFolder();
     if (!folder) return;
     setMountedFolder(folder);
+    setLastSession({ folderPath: folder, filePath: null, viewMode });
     setIsScanning(true);
     try {
       const result = await scanFolder(folder);
@@ -62,8 +71,64 @@ export function Sidebar() {
     }
   }
 
+  async function handleReopenSession() {
+    if (!lastSession?.folderPath) return;
+    const folder = lastSession.folderPath;
+    if (folder.startsWith("mock://") || folder.startsWith("web://")) return;
+    setMountedFolder(folder);
+    setIsScanning(true);
+    try {
+      const result = await scanFolder(folder);
+      setFiles(result);
+      if (lastSession.filePath && result.length > 0) {
+        const file = result.find((f) => f.path === lastSession!.filePath);
+        if (file) {
+          setViewMode(lastSession.viewMode);
+          await handleSelectFile(file);
+        }
+      }
+    } catch (e) {
+      console.error("Reopen session failed:", e);
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
+  async function handleOpenRecentFile(file: FileEntry) {
+    if (file.path.startsWith("web://") || file.path.startsWith("mock://")) {
+      if (mountedFolder && files.some((f) => f.path === file.path)) {
+        await handleSelectFile(file);
+      }
+      return;
+    }
+    const parent = file.path.includes("/") ? file.path.replace(/\/[^/]+$/, "") : "";
+    if (mountedFolder === parent && files.some((f) => f.path === file.path)) {
+      await handleSelectFile(file);
+      return;
+    }
+    if (!parent) return;
+    setMountedFolder(parent);
+    setIsScanning(true);
+    try {
+      const result = await scanFolder(parent);
+      setFiles(result);
+      const found = result.find((f) => f.path === file.path);
+      if (found) await handleSelectFile(found);
+    } catch (e) {
+      console.error("Open recent failed:", e);
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
   async function handleSelectFile(file: FileEntry) {
     setSelectedFile(file);
+    addRecentFile(file);
+    setLastSession({
+      folderPath: mountedFolder,
+      filePath: file.path,
+      viewMode,
+    });
     try {
       const cached = webFileCache[file.path];
       const result = cached ?? await inspectFile(file.path, 500);
@@ -116,12 +181,15 @@ export function Sidebar() {
       setWebFileCache(cache);
       setFiles(entries);
       if (entries.length > 0) {
-        setSelectedFile(entries[0]);
-        const first = cache[entries[0].path];
+        const firstEntry = entries[0];
+        setSelectedFile(firstEntry);
+        addRecentFile(firstEntry);
+        setLastSession({ folderPath: "web://", filePath: firstEntry.path, viewMode });
+        const first = cache[firstEntry.path];
         if (first) {
           setColumnStats(first.stats);
           setSampleRows(first.sample);
-          const recs = recommend(first.stats, first.sample, entries[0].name);
+          const recs = recommend(first.stats, first.sample, firstEntry.name);
           setChartRecs(recs);
           setActiveChart(recs.length > 0 ? recs[0] : null);
         }
@@ -167,7 +235,8 @@ export function Sidebar() {
         <FilesView
           mountedFolder={mountedFolder}
           folderName={folderName}
-          files={files}
+          files={filteredFiles}
+          allFiles={files}
           isScanning={isScanning}
           selectedFile={selectedFile}
           onPickFolder={handlePickFolder}
@@ -178,6 +247,12 @@ export function Sidebar() {
           onLoadFiles={handleLoadFiles}
           fileInputRef={fileInputRef}
           onUseDemoData={handleUseDemoData}
+          recentFiles={recentFiles}
+          lastSession={lastSession}
+          onReopenSession={handleReopenSession}
+          onOpenRecentFile={handleOpenRecentFile}
+          fileSearchQuery={fileSearchQuery}
+          onFileSearchChange={setFileSearchQuery}
         />
       )}
     </aside>
@@ -685,6 +760,7 @@ function FilesView({
   mountedFolder,
   folderName,
   files,
+  allFiles,
   isScanning,
   selectedFile,
   onPickFolder,
@@ -695,10 +771,17 @@ function FilesView({
   onLoadFiles,
   fileInputRef,
   onUseDemoData,
+  recentFiles,
+  lastSession,
+  onReopenSession,
+  onOpenRecentFile,
+  fileSearchQuery,
+  onFileSearchChange,
 }: {
   mountedFolder: string | null;
   folderName: string | null;
   files: FileEntry[];
+  allFiles?: FileEntry[];
   isScanning: boolean;
   selectedFile: FileEntry | null;
   onPickFolder: () => void;
@@ -709,6 +792,12 @@ function FilesView({
   onLoadFiles?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   fileInputRef?: React.RefObject<HTMLInputElement | null>;
   onUseDemoData?: () => void;
+  recentFiles?: FileEntry[];
+  lastSession?: { folderPath: string | null; filePath: string | null; viewMode: string } | null;
+  onReopenSession?: () => void;
+  onOpenRecentFile?: (f: FileEntry) => void;
+  fileSearchQuery?: string;
+  onFileSearchChange?: (q: string) => void;
 }) {
   return (
     <>
@@ -774,16 +863,60 @@ function FilesView({
             </button>
           )}
         </div>
+        {(allFiles?.length ?? files.length) > 0 && onFileSearchChange && (
+          <input
+            type="search"
+            value={fileSearchQuery ?? ""}
+            onChange={(e) => onFileSearchChange(e.target.value)}
+            placeholder="Search files..."
+            className="loom-input w-full mt-2 text-2xs py-1.5 px-2"
+            aria-label="Search files in folder"
+          />
+        )}
         {folderName && (
           <div className="mt-2 flex items-center gap-1.5">
             <span className="text-loom-accent text-xs">&#x25CF;</span>
             <span className="text-xs text-loom-muted font-mono truncate" title={mountedFolder ?? ""}>
               {folderName}
             </span>
-            <span className="loom-badge ml-auto">{files.length}</span>
+            <span className="loom-badge ml-auto">
+              {fileSearchQuery && (allFiles?.length ?? files.length) !== files.length
+                ? `${files.length} of ${allFiles?.length ?? files.length}`
+                : files.length}
+            </span>
           </div>
         )}
+        {lastSession?.folderPath && !lastSession.folderPath.startsWith("web://") && !lastSession.folderPath.startsWith("mock://") && onReopenSession && (
+          <button
+            type="button"
+            onClick={onReopenSession}
+            disabled={isScanning}
+            className="mt-2 w-full text-2xs text-loom-muted hover:text-loom-accent border border-loom-border hover:border-loom-accent/50 rounded px-2 py-1 transition-colors"
+          >
+            Reopen last session
+          </button>
+        )}
       </div>
+
+      {recentFiles && recentFiles.length > 0 && onOpenRecentFile && (
+        <div className="px-3 py-2 border-b border-loom-border flex-shrink-0">
+          <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-1">Recent</p>
+          <ul className="space-y-0.5 max-h-28 overflow-y-auto">
+            {recentFiles.slice(0, 8).map((f) => (
+              <li key={f.path}>
+                <button
+                  type="button"
+                  onClick={() => onOpenRecentFile(f)}
+                  className="w-full text-left text-xs text-loom-muted hover:text-loom-text truncate px-1.5 py-0.5 rounded hover:bg-loom-elevated"
+                  title={f.path}
+                >
+                  {f.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto py-1 min-h-0">
         {files.length === 0 && !isScanning && (

@@ -19,6 +19,7 @@ struct Uniforms {
   y_max: f32,
   point_size: f32,
   opacity: f32,
+  size_scale: f32,
 }
 
 struct DataPoint {
@@ -39,20 +40,12 @@ struct ScreenPoint {
   _pad: f32,
 }
 
-// --- Color Palette (matches CSS chart vars) ---
+// --- Color Palette: 8 RGB colors (24 floats), bound from CPU (theme-aware) ---
+@group(0) @binding(3) var<storage, read> palette: array<f32>;
 
 fn get_color(category: u32) -> vec3<f32> {
-  switch (category % 8u) {
-    case 0u: { return vec3<f32>(0.424, 0.361, 0.906); } // #6c5ce7
-    case 1u: { return vec3<f32>(0.0, 0.839, 0.561);   } // #00d68f
-    case 2u: { return vec3<f32>(1.0, 0.420, 0.420);   } // #ff6b6b
-    case 3u: { return vec3<f32>(1.0, 0.851, 0.239);   } // #ffd93d
-    case 4u: { return vec3<f32>(0.0, 0.706, 0.847);   } // #00b4d8
-    case 5u: { return vec3<f32>(0.906, 0.486, 0.361);  } // #e77c5c
-    case 6u: { return vec3<f32>(0.635, 0.608, 0.996);  } // #a29bfe
-    case 7u: { return vec3<f32>(0.455, 0.725, 1.0);   } // #74b9ff
-    default: { return vec3<f32>(0.424, 0.361, 0.906); }
-  }
+  let i = (category % 8u) * 3u;
+  return vec3<f32>(palette[i], palette[i + 1u], palette[i + 2u]);
 }
 
 // --- Compute Shader: Data → Screen Space ---
@@ -77,7 +70,7 @@ fn compute_positions(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ny = ((dp.y - uniforms.y_min) / y_range) * 2.0 - 1.0;
 
   let color = get_color(dp.category);
-  let pixel_size = uniforms.point_size * (0.4 + 0.6 * dp.size_norm);
+  let pixel_size = uniforms.point_size * (0.4 + 0.6 * dp.size_norm) * uniforms.size_scale;
 
   screen_points[idx] = ScreenPoint(
     nx, ny,

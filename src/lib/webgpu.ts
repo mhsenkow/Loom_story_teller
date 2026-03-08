@@ -31,11 +31,31 @@ export interface GPUScatterPoint {
 export interface ScatterConfig {
   pointSize: number;
   opacity: number;
+  /** Scale for size encoding (0.5–2). Default 1. */
+  sizeScale?: number;
+  /** 8 colors (hex or rgb) for theme-aware scatter. Defaults to dark Loom palette. */
+  palette?: string[];
+  /** Background clear color (0–1 RGB) so light/dark theme matches. Defaults to dark. */
+  clearColor?: [number, number, number];
+}
+
+function parseColorToRgb(c: string): [number, number, number] {
+  const s = c.trim();
+  if (s.startsWith("#") && s.length >= 7) {
+    const r = parseInt(s.slice(1, 3), 16) / 255;
+    const g = parseInt(s.slice(3, 5), 16) / 255;
+    const b = parseInt(s.slice(5, 7), 16) / 255;
+    return [r, g, b];
+  }
+  const rgb = s.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
+  if (rgb) return [Number(rgb[1]) / 255, Number(rgb[2]) / 255, Number(rgb[3]) / 255];
+  return [0.424, 0.361, 0.906];
 }
 
 const DEFAULT_CONFIG: ScatterConfig = {
   pointSize: 4.0,
   opacity: 0.7,
+  sizeScale: 1,
 };
 
 export class LoomRenderer {
@@ -48,8 +68,14 @@ export class LoomRenderer {
   private screenBuffer: GPUBuffer | null = null;
   private computeBindGroup: GPUBindGroup | null = null;
   private renderBindGroup: GPUBindGroup | null = null;
+  private paletteBuffer: GPUBuffer | null = null;
   private pointCount = 0;
   private config: ScatterConfig = { ...DEFAULT_CONFIG };
+
+  private static readonly DEFAULT_PALETTE = [
+    [0.424, 0.361, 0.906], [0, 0.839, 0.561], [1, 0.42, 0.42], [1, 0.851, 0.239],
+    [0, 0.706, 0.847], [0.906, 0.486, 0.361], [0.635, 0.608, 0.996], [0.455, 0.725, 1],
+  ];
 
   async init(canvas: HTMLCanvasElement): Promise<boolean> {
     try {
@@ -142,17 +168,34 @@ export class LoomRenderer {
     });
 
     this.uniformBuffer = this.device.createBuffer({
-      size: 32, // 8 floats × 4 bytes
+      size: 36, // 9 floats × 4 bytes (incl. size_scale)
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+
+    this.paletteBuffer = this.device.createBuffer({
+      size: 8 * 3 * 4, // 8 colors × RGB × 4 bytes
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
   }
 
   uploadData(points: GPUScatterPoint[], config?: Partial<ScatterConfig>) {
-    if (!this.device || !this.computePipeline || !this.renderPipeline || !this.uniformBuffer) return;
+    if (!this.device || !this.computePipeline || !this.renderPipeline || !this.uniformBuffer || !this.paletteBuffer) return;
 
     if (config) {
       this.config = { ...this.config, ...config };
     }
+
+    const palette = this.config.palette && this.config.palette.length >= 8
+      ? this.config.palette.map((c) => parseColorToRgb(c))
+      : LoomRenderer.DEFAULT_PALETTE;
+    const paletteF32 = new Float32Array(24);
+    for (let i = 0; i < 8; i++) {
+      const [r, g, b] = palette[i] ?? LoomRenderer.DEFAULT_PALETTE[0]!;
+      paletteF32[i * 3 + 0] = r;
+      paletteF32[i * 3 + 1] = g;
+      paletteF32[i * 3 + 2] = b;
+    }
+    this.device.queue.writeBuffer(this.paletteBuffer, 0, paletteF32);
 
     this.pointCount = points.length;
     if (this.pointCount === 0) return;
@@ -189,6 +232,7 @@ export class LoomRenderer {
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: { buffer: this.dataBuffer } },
         { binding: 2, resource: { buffer: this.screenBuffer } },
+        { binding: 3, resource: { buffer: this.paletteBuffer } },
       ],
     });
 
@@ -201,17 +245,24 @@ export class LoomRenderer {
     });
   }
 
+  private getClearValue(): { r: number; g: number; b: number; a: number } {
+    const c = this.config.clearColor;
+    if (c && c.length >= 3) return { r: c[0], g: c[1], b: c[2], a: 1 };
+    return { r: 0.039, g: 0.039, b: 0.047, a: 1.0 };
+  }
+
   /** Clear the WebGPU canvas only (e.g. when switching to a non-scatter chart). */
   clearCanvas(): void {
     if (!this.device || !this.context) return;
     try {
+      const clear = this.getClearValue();
       const textureView = this.context.getCurrentTexture().createView();
       const encoder = this.device.createCommandEncoder();
       const pass = encoder.beginRenderPass({
         colorAttachments: [
           {
             view: textureView,
-            clearValue: { r: 0.039, g: 0.039, b: 0.047, a: 1.0 },
+            clearValue: clear,
             loadOp: "clear",
             storeOp: "store",
           },
@@ -237,9 +288,12 @@ export class LoomRenderer {
       return;
     }
 
-    const canvas = this.context.canvas as HTMLCanvasElement;
+    const canvas = this.context.canvas as HTMLCanvasElement | undefined;
+    if (!canvas || typeof canvas.width !== "number" || typeof canvas.height !== "number") {
+      return;
+    }
 
-    // Update uniforms
+    const sizeScale = this.config.sizeScale ?? 1;
     const uniforms = new Float32Array([
       canvas.width,
       canvas.height,
@@ -249,6 +303,7 @@ export class LoomRenderer {
       yMax,
       this.config.pointSize,
       this.config.opacity,
+      sizeScale,
     ]);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, uniforms);
 
@@ -261,13 +316,14 @@ export class LoomRenderer {
     computePass.dispatchWorkgroups(Math.ceil(this.pointCount / 256));
     computePass.end();
 
-    // Render pass: draw point sprites
+    // Render pass: draw point sprites (clear to theme bg for light/dark)
+    const clear = this.getClearValue();
     const textureView = this.context.getCurrentTexture().createView();
     const renderPass = encoder.beginRenderPass({
       colorAttachments: [
         {
           view: textureView,
-          clearValue: { r: 0.039, g: 0.039, b: 0.047, a: 1.0 }, // matches --loom-bg
+          clearValue: clear,
           loadOp: "clear",
           storeOp: "store",
         },
@@ -285,6 +341,7 @@ export class LoomRenderer {
     this.dataBuffer?.destroy();
     this.screenBuffer?.destroy();
     this.uniformBuffer?.destroy();
+    this.paletteBuffer?.destroy();
     this.device?.destroy();
     this.device = null;
     this.context = null;

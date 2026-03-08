@@ -38,9 +38,9 @@ src/                   Next.js frontend
   components/          React components (one per file)
     Sidebar.tsx        File explorer, folder picker
     TopBar.tsx         View mode tabs, controls
-    DetailPanel.tsx    Schema / stats / preview tabs
+    DetailPanel.tsx    Schema / stats / Chart (encoding + Visual) / Export / Smart tabs
     ExplorerView.tsx   Full-width data table
-    ChartView.tsx      WebGPU canvas + Vega-Lite integration
+    ChartView.tsx      WebGPU/Canvas chart + Vega-Lite + Smart overlays
     QueryView.tsx      SQL editor + results grid
   lib/                 Business logic (no React)
     store.ts           Zustand global state
