@@ -1011,7 +1011,7 @@ export function recommendSourceStory(
         mk("bar", "GDP by country (latest)", "Economic output across nations", 95, "country_name", "value", null, "max"),
         mk("line", "Indicators over time", "How do key metrics change globally?", 90, "yr", "value", "indicator_name", "mean"),
         mk("bar", "Top 10 by population", "Most populous nations", 85, "country_name", "value", null, "max"),
-        mk("scatter", "GDP vs life expectancy", "Wealth and health relationship", 82, "value", "value", "country_code"),
+        mk("scatter", "Year vs indicator value", "How values evolve over time (per country)", 82, "yr", "value", "country_code"),
         mk("histogram", "Value distribution", "Spread of indicator values", 78, "value", null, null),
       ].slice(0, 5),
     };

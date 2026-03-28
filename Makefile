@@ -182,7 +182,7 @@ test: ## ✅ Run unit tests (Vitest)
 check-ts: ## ✅ TypeScript type-check + lint
 	@echo "$(CYAN)Checking TypeScript...$(RESET)"
 	npx tsc --noEmit
-	npm run lint 2>/dev/null || true
+	npm run lint
 
 .PHONY: check-rust
 check-rust: ## ✅ Rust type-check + clippy

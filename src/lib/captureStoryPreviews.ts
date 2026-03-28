@@ -1,8 +1,9 @@
-/**
- * Captures PNG previews for chart views in a story dashboard by briefly
- * applying each chart, waiting for render, and calling the chart export handler.
- * Call after createStoryDashboard so dashboard slots show thumbnails.
- */
+// =================================================================
+// Loom — Story dashboard chart previews
+// =================================================================
+// After createStoryDashboard, briefly applies each chart slot, waits for
+// render, and uses the registered PNG export handler to fill thumbnails.
+// =================================================================
 
 import { useLoomStore } from "./store";
 

@@ -639,12 +639,15 @@ export function ChartView() {
     if (!sampleRows || !activeChart) return null;
     const spec = activeChart.spec as Record<string, unknown>;
     const encoding = spec.encoding as Record<string, { field: string }> | undefined;
-    if (!encoding?.x?.field || !encoding?.y?.field) return null;
+    const xFieldName = encoding?.x?.field ?? activeChart.xField;
+    const yFieldName = encoding?.y?.field ?? activeChart.yField;
+    if (!xFieldName || !yFieldName) return null;
 
-    const xIdx = sampleRows.columns.indexOf(encoding.x.field);
-    const yIdx = sampleRows.columns.indexOf(encoding.y.field);
-    const colorField = (encoding.color as { field?: string } | undefined)?.field;
-    const sizeField = (encoding.size as { field?: string } | undefined)?.field ?? activeChart.sizeField;
+    const xIdx = sampleRows.columns.indexOf(xFieldName);
+    const yIdx = sampleRows.columns.indexOf(yFieldName);
+    const colorField =
+      (encoding?.color as { field?: string } | undefined)?.field ?? activeChart.colorField ?? undefined;
+    const sizeField = (encoding?.size as { field?: string } | undefined)?.field ?? activeChart.sizeField;
     const cIdx = colorField ? sampleRows.columns.indexOf(colorField) : -1;
     const sizeIdx = sizeField ? sampleRows.columns.indexOf(sizeField) : -1;
     if (xIdx === -1 || yIdx === -1) return null;

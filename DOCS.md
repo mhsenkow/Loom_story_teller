@@ -1,6 +1,6 @@
 # Loom — Codebase documentation
 
-For contributors and AI: where things live and how they connect.
+For contributors and AI: where things live and how they connect. For a shorter agent-oriented map, see [AGENTS.md](AGENTS.md).
 
 ---
 
@@ -21,7 +21,9 @@ For contributors and AI: where things live and how they connect.
 2. **File selection** — User clicks a file. Frontend calls `inspectFile(filePath)` → Rust `inspect_file` → DuckDB returns column stats + sample rows. Store: `selectedFile`, `columnStats`, `sampleRows`, and a Vega-Lite spec is derived (or built from recommendations).
 3. **Chart suggestions** — `recommendations.ts` builds candidate specs from column types and names; optional Ollama call suggests one. User clicks a suggestion or encoding; store updates `activeChart`, `vegaSpec`, and optional `encodingOverrides`.
 4. **Rendering** — `ChartView` uses `vegaSpec` + `sampleRows`: WebGPU for point marks, Canvas 2D or Vega for bar/line/area/arc. Export handlers (PNG/SVG) read from a ref that’s updated with the current spec and canvas.
-5. **Data.gov** — Only in Tauri. Data & sources view calls `fetchDataGovRecentCsv()` → Rust `fetch_data_gov_recent_csv` (reqwest to catalog.data.gov). User can “Save to folder” → `saveCsvToFolder(folder_path, url, filename)` → Rust downloads CSV and writes under the mounted folder.
+5. **Data.gov** — Only in Tauri. Data & sources view calls `fetchDataGovRecentCsv()` / `fetchUkDataRecentCsv()` (reqwest). User can “Save to folder” → `saveCsvToFolder` writes under the mounted folder.
+6. **Wikipedia live stream** — `stream_start` / `stream_stop` / `stream_snapshot` / `stream_query` (Rust `stream.rs`) append to DuckDB `wiki_stream`. Sidebar starts the stream; chart stories use `recommendStreamStory`; Query view uses `STREAM_SQL_SNIPPETS` and routes SQL for `stream://wiki`.
+7. **Poll-based sources** — `source_start` / `source_stop` / `source_snapshot` / `source_query` (Rust `sources.rs`) fill `usgs_quakes`, `meteo_weather`, `nws_alerts`, `world_bank`. Sidebar cards per kind; `recommendSourceStory` + `SOURCE_SQL_SNIPPETS`; Query routes `stream://usgs`, `stream://meteo`, `stream://nws`, `stream://world_bank`.
 
 ---
 
@@ -46,7 +48,7 @@ Components subscribe to slices; avoid putting derived data that changes often in
 
 ## IPC (Tauri)
 
-All Rust commands are in `src-tauri/src/commands.rs`. Frontend wrappers in `src/lib/tauri.ts`:
+All Rust commands are in `src-tauri/src/commands.rs`. Ingestion helpers live in `stream.rs` (SSE) and `sources.rs` (HTTP polls). Frontend wrappers in `src/lib/tauri.ts`:
 
 - Use `isTauri()` to branch; in browser, many calls fall back to `mock-data.ts`.
 - Never call `invoke()` directly from UI code; use the typed functions from `tauri.ts`.
@@ -62,7 +64,7 @@ Adding a new command:
 ## Chart pipeline
 
 - **Spec generation** — `src/lib/vega.ts`: `buildScatterSpec`, `buildBarSpec`, `buildLineSpec`, etc. They take column names, types, and options and return Vega-Lite JSON.
-- **Recommendations** — `src/lib/recommendations.ts`: from `columnStats` and optional `vegaSpec`, returns `ChartRecommendation[]` with `spec`, encoding fields (`xField`, `yField`, `colorField`, `sizeField`, `rowField`, `glowField`, `outlineField`, `opacityField`). Used for the suggestion grid and for “Suggest with AI” (Ollama can override choice).
+- **Recommendations** — `src/lib/recommendations.ts`: `recommend()` for arbitrary files; `recommendStorySequence()` for multi-chart dashboards; `recommendStreamStory()` / `recommendSourceStory()` for `wiki_stream` and poll-source schemas (often `spec: {}` with `xField`/`yField` — WebGPU scatter reads those when `spec.encoding` is missing). `STREAM_SQL_SNIPPETS` and `SOURCE_SQL_SNIPPETS` feed the Query view. Returns `ChartRecommendation[]` with encoding fields used by `ChartView`.
 - **Rendering** — `ChartView.tsx`:
   - Chooses WebGPU for scatter only when mark is circle and no stroke/jitter/glow and no glow/outline/opacity encoding; otherwise Canvas 2D scatter so mark shape, outline, jitter, glow, and size scale all apply.
   - Bar/line/area/arc/strip are drawn with Canvas 2D. Visual overrides (fonts, grid, axes, padding, legend, data labels, background, blend, entrance animation) come from `chartVisualOverrides`.
@@ -148,10 +150,14 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 | `src/components/ExplorerView.tsx` | Virtualized data table, filters, saved views, undo/redo, column profiling, linked highlight. |
 | `src/components/QueryView.tsx` | SQL editor, schema browser, validation, paginated results, snippets, snapshots, diff, NL-to-SQL input. |
 | `src/components/PreviewFooter.tsx` | Collapsible preview table + Schema with draggable column tokens. |
-| `src/components/Sidebar.tsx` | File list, Data & sources (Data.gov + Save to folder), folder picker. |
+| `src/components/Sidebar.tsx` | File list, Data & sources (portals + save CSV), Wikipedia stream + USGS/Meteo/NWS/World Bank cards, folder picker. |
 | `src/lib/dateFormat.ts` | Date column formatting for table and charts. |
 | `src/lib/queryValidate.ts` | Basic SQL validation (parentheses, SELECT/WITH). |
 | `src/lib/persist.ts` | Persist `tableViews` (and optional state) to storage. |
+| `src-tauri/src/stream.rs` | Wikimedia SSE → `wiki_stream` table; stream IPC helpers. |
+| `src-tauri/src/sources.rs` | USGS, Open-Meteo, NWS, World Bank → DuckDB tables; source IPC helpers. |
+| `src/lib/dashboardMicrosite.ts` | Single-file HTML export for dashboard layouts. |
+| `src/lib/captureStoryPreviews.ts` | PNG thumbnails for story-dashboard chart slots. |
 
 ---
 

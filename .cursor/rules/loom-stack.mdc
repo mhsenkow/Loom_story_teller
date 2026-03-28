@@ -25,10 +25,14 @@ alwaysApply: true
 
 ## Code Organization
 
+Repo root **AGENTS.md** (agent map) and **DOCS.md** (deep dive) complement this rule.
+
 ```
 src-tauri/src/         Rust backend (DuckDB, IPC commands)
   lib.rs               App entry, plugin registration, state init
   db.rs                DuckDB wrapper: scan, query, stats
+  stream.rs            Wikipedia SSE → wiki_stream
+  sources.rs           USGS, Open-Meteo, NWS, World Bank → tables
   commands.rs          #[tauri::command] IPC handlers
 
 src/                   Next.js frontend

@@ -2,6 +2,8 @@
 
 **Local-first data storytelling for macOS.** Mount a folder, query millions of rows via DuckDB, and build charts with Vega-Lite and WebGPU. Discover data with heuristic and AI suggestions, tweak encodings in the panel, and export as PNG or SVG.
 
+**Contributors & AI agents:** See [DOCS.md](DOCS.md) for architecture and [AGENTS.md](AGENTS.md) for a concise repo map and conventions.
+
 ---
 
 ## What it does
@@ -29,7 +31,7 @@
 ### App
 - **Theming** — Dark, light, high-contrast, colorblind; font scale; reduced motion. Tokens in `globals.css`.
 - **Onboarding** — First-run modal: add data, then explore.
-- **Data & sources** — Data.gov recent CSVs (Tauri), Save to folder.
+- **Data & sources** — Data.gov / data.gov.uk recent CSVs (Tauri), save CSV to folder, **Wikipedia live stream** (SSE → `wiki_stream`), and **poll-based feeds** (USGS earthquakes, Open-Meteo weather, NWS alerts, World Bank indicators) with sidebar cards and Query-view SQL against virtual `stream://…` sources.
 
 ---
 
@@ -186,18 +188,19 @@ Loom_story_teller/
 │   ├── tauri.conf.json          # Window, plugins, CSP
 │   ├── capabilities/            # Tauri v2 permissions
 │   └── src/
-│       ├── lib.rs               # Plugin init, command registration
+│       ├── lib.rs               # Plugin init, command registration, DB + stream + sources state
 │       ├── main.rs              # Binary entry
 │       ├── db.rs                # DuckDB: scan, query, column stats
-│       └── commands.rs          # IPC: scan_folder, query_file, inspect_file,
-│                                #      save_csv_to_folder, fetch_data_gov_recent_csv
+│       ├── stream.rs            # Wikipedia SSE → wiki_stream
+│       ├── sources.rs           # USGS, Open-Meteo, NWS, World Bank → DuckDB tables
+│       └── commands.rs          # All #[tauri::command] handlers (see tauri.ts)
 │
 ├── src/                         # Next.js frontend
 │   ├── app/
 │   │   ├── layout.tsx           # Root layout, fonts, globals
 │   │   └── page.tsx             # Three-panel layout (Sidebar | Main | DetailPanel)
 │   ├── components/
-│   │   ├── Sidebar.tsx          # Files list, Data & sources, folder picker
+│   │   ├── Sidebar.tsx          # Files, Data & sources, live stream + poll source cards
 │   │   ├── TopBar.tsx           # View tabs (Explorer / Chart / Query)
 │   │   ├── DetailPanel.tsx      # Right panel: Stats, Chart (encoding + Visual), Export, Smart
 │   │   ├── ChartView.tsx       # Chart canvas, suggestions, Smart overlays, title edit, export
@@ -210,7 +213,7 @@ Loom_story_teller/
 │   │   ├── tauri.ts             # Typed IPC bridge (invoke wrappers)
 │   │   ├── vega.ts              # Vega-Lite spec builders
 │   │   ├── webgpu.ts            # WebGPU pipeline (scatter)
-│   │   ├── recommendations.ts  # Heuristic chart suggestions
+│   │   ├── recommendations.ts  # Heuristics + recommendStreamStory / recommendSourceStory + SQL snippets
 │   │   ├── ollama.ts            # Ollama API for AI suggestions
 │   │   ├── mock-data.ts         # Browser fallbacks when not in Tauri
 │   │   ├── format.ts            # Number/byte formatting
@@ -269,6 +272,10 @@ Frontend calls go through `src/lib/tauri.ts`; do not use raw `invoke()`.
 | `inspect_file` | `{ filePath, limit? }` | `InspectResult` (stats + sample) |
 | `save_csv_to_folder` | `{ folder_path, url, filename }` | `string` (saved path) |
 | `fetch_data_gov_recent_csv` | `{ rows?: number }` | `DataGovDataset[]` |
+| `stream_*` | (see `tauri.ts`) | Wikipedia SSE ingest → `wiki_stream` |
+| `source_*` | `kind: usgs \| meteo \| nws \| world_bank` | Poll-based APIs → per-source tables |
+
+Full signatures live in `src/lib/tauri.ts` and Rust in `src-tauri/src/commands.rs`.
 
 ---
 

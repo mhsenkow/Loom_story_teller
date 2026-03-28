@@ -80,7 +80,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     setPanelTab(viewType === "table" || viewType === "snapshot" ? "stats" : viewType === "chart" ? "chart" : "stats");
   };
 
-  const handleBackFromFocus = useCallback(() => setFocusedSlot(null), []);
+  const handleBackFromFocus = useCallback(() => setFocusedSlot(null), [setFocusedSlot]);
 
   useEffect(() => {
     if (!focusedSlot) return;

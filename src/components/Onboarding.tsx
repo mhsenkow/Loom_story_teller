@@ -16,11 +16,14 @@ export function Onboarding() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    try {
-      setShow(!window.localStorage.getItem(KEY));
-    } catch {
-      setShow(false);
-    }
+    const id = window.setTimeout(() => {
+      try {
+        setShow(!window.localStorage.getItem(KEY));
+      } catch {
+        setShow(false);
+      }
+    }, 0);
+    return () => window.clearTimeout(id);
   }, []);
 
   const dismiss = () => {

@@ -12,7 +12,17 @@ import { useState, useCallback } from "react";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
 import { COLOR_PALETTES } from "@/lib/chartPalettes";
-import { createChartRec, CHART_KIND_OPTIONS, Y_AGGREGATE_OPTIONS, getRecommendationReason, getRandomChartAndEncoding, type ChartKind, type YAggregateOption } from "@/lib/recommendations";
+import {
+  createChartRec,
+  CHART_KIND_OPTIONS,
+  Y_AGGREGATE_OPTIONS,
+  getRecommendationReason,
+  getRandomChartAndEncoding,
+  recommendStorySequence,
+  recommendStreamStory,
+  type ChartKind,
+  type YAggregateOption,
+} from "@/lib/recommendations";
 import {
   runAnomaly,
   runForecast,
@@ -24,7 +34,6 @@ import {
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
 import { exportDashboardMicrosite } from "@/lib/tauri";
-import { recommendStorySequence, recommendStreamStory, STREAM_SQL_SNIPPETS } from "@/lib/recommendations";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
 import { streamSnapshot, isTauri as checkTauri } from "@/lib/tauri";
 
@@ -123,6 +132,26 @@ function DashboardsView() {
   } = useLoomStore();
   const active = dashboards.find((d) => d.id === activeDashboardId);
 
+  const getSlotLabel = useCallback(
+    (viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => {
+      if (viewType === "table") {
+        const v = tableViews.find((x) => x.id === viewId);
+        return v ? v.name : viewId;
+      }
+      if (viewType === "chart") {
+        const v = chartViews.find((x) => x.id === viewId);
+        return v ? v.name : viewId;
+      }
+      if (viewType === "snapshot") {
+        const v = querySnapshots.find((x) => x.id === viewId);
+        return v ? v.name : viewId;
+      }
+      const v = queryViews.find((x) => x.id === viewId);
+      return v ? v.name : viewId;
+    },
+    [tableViews, chartViews, querySnapshots, queryViews],
+  );
+
   const handleCreateStoryDashboard = useCallback(async () => {
     if (!selectedFile) {
       setToast("Select a file first to create a story dashboard");
@@ -220,24 +249,7 @@ function DashboardsView() {
       console.error(e);
       setToast("Export failed");
     }
-  }, [active, chartViews, tableViews, queryViews, querySnapshots, setToast]);
-
-  const getSlotLabel = (viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => {
-    if (viewType === "table") {
-      const v = tableViews.find((x) => x.id === viewId);
-      return v ? v.name : viewId;
-    }
-    if (viewType === "chart") {
-      const v = chartViews.find((x) => x.id === viewId);
-      return v ? v.name : viewId;
-    }
-    if (viewType === "snapshot") {
-      const v = querySnapshots.find((x) => x.id === viewId);
-      return v ? v.name : viewId;
-    }
-    const v = queryViews.find((x) => x.id === viewId);
-    return v ? v.name : viewId;
-  };
+  }, [active, chartViews, tableViews, queryViews, querySnapshots, setToast, getSlotLabel]);
 
   const handleApplySlot = (viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => {
     if (viewType === "table") applyTableView(viewId);

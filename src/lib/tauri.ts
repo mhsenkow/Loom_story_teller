@@ -2,7 +2,8 @@
 // Loom — Tauri IPC Bridge
 // =================================================================
 // Typed wrappers around `invoke()` so the frontend never constructs
-// raw IPC calls. Each function maps 1:1 to a Rust #[tauri::command].
+// raw IPC calls. Each function maps 1:1 to a Rust #[tauri::command]
+// (folder/db, Data.gov, stream_*, source_*, export helpers).
 //
 // In browser dev mode (no Tauri), returns mock data so the UI
 // is fully functional for development and demos.

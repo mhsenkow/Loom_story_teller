@@ -3,15 +3,15 @@
 // =================================================================
 // Two modes:
 //   1. Files — Change Folder, mounted folder, file list.
-//   2. Data & sources — Slide-in region: local folders, online sources
-//      (e.g. Data.gov), future multi-folder and connectors.
+//   2. Data & sources — Portals (Data.gov, UK), save CSV, Wikipedia live
+//      stream (SSE), and poll sources (USGS, Open-Meteo, NWS, World Bank).
 // =================================================================
 
 "use client";
 
 import { useRef, useState, useEffect, useMemo } from "react";
 import { useLoomStore, type FileEntry } from "@/lib/store";
-import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, type StreamStatus, sourceStart, sourceStop, sourceStatus, sourceSnapshot, sourceClear, type SourceKind, type SourceStatus } from "@/lib/tauri";
+import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, sourceStart, sourceStop, sourceStatus, sourceSnapshot, sourceClear, type SourceKind } from "@/lib/tauri";
 import { recommend, recommendStreamStory, recommendSourceStory } from "@/lib/recommendations";
 import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
@@ -368,7 +368,7 @@ function DatasetPreviewModal({
 function WikiStreamSection() {
   const {
     streamRunning, streamTotalEvents, streamEventsPerSec, streamBufferRows,
-    streamWikisSeen, streamUptimeSecs, streamActive,
+    streamWikisSeen, streamUptimeSecs,
     setStreamStatus, setStreamActive, setSelectedFile, setColumnStats,
     setSampleRows, setChartRecs, setActiveChart, setVegaSpec, setToast,
     setViewMode, setPanelTab,
