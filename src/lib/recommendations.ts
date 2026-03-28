@@ -946,6 +946,108 @@ export function recommendStreamStory(
   };
 }
 
+/**
+ * Chart recommendations for poll-based sources (USGS, Open-Meteo, NWS, World Bank).
+ */
+export function recommendSourceStory(
+  kind: string,
+  columns: ColumnInfo[],
+  data: QueryResult | null,
+): StorySequence {
+  let idx = 0;
+  const mkId = () => `${kind}-${Date.now()}-${idx++}`;
+  const mk = (
+    k: ChartKind, title: string, subtitle: string, score: number,
+    xField: string, yField: string | null, colorField: string | null,
+    yAgg?: YAggregateOption | null,
+  ): ChartRecommendation => ({
+    id: mkId(), kind: k, title, subtitle, score, spec: {},
+    xField, yField, colorField, yAggregate: yAgg ?? null,
+  });
+
+  if (kind === "usgs") {
+    return {
+      title: "Earthquake Analytics",
+      charts: [
+        mk("scatter", "Quakes by location", "Latitude vs longitude — where do they cluster?", 95, "longitude", "latitude", "mag_type"),
+        mk("histogram", "Magnitude distribution", "How strong are the quakes?", 90, "magnitude", null, null),
+        mk("line", "Quakes over time", "Temporal pattern of seismic activity", 88, "ts", null, null, "count"),
+        mk("bar", "Quakes by network", "Which seismic networks report most?", 85, "net", null, null, "count"),
+        mk("scatter", "Depth vs magnitude", "Do deeper quakes tend to be stronger?", 82, "depth", "magnitude", null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "meteo") {
+    return {
+      title: "World Weather Comparison",
+      charts: [
+        mk("line", "Temperature over time", "How does temperature vary across cities?", 95, "ts", "temperature", "city"),
+        mk("bar", "Average temperature by city", "Compare baseline temps", 90, "city", "temperature", null, "mean"),
+        mk("line", "Wind speed trends", "Wind patterns across locations", 85, "ts", "wind_speed", "city"),
+        mk("bar", "Precipitation by city", "Who gets the most rain?", 82, "city", "precipitation", null, "sum"),
+        mk("histogram", "Humidity distribution", "Global humidity spread", 78, "humidity", null, null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "nws") {
+    return {
+      title: "US Weather Alert Analytics",
+      charts: [
+        mk("bar", "Alerts by event type", "What kinds of alerts are most common?", 95, "event", null, null, "count"),
+        mk("bar", "Alerts by severity", "Distribution of severity levels", 90, "severity", null, null, "count"),
+        mk("pie", "Urgency breakdown", "How urgent are current alerts?", 85, "urgency", null, null, "count"),
+        mk("bar", "Top alert sources", "Which NWS offices issue most alerts?", 80, "sender_name", null, null, "count"),
+        mk("bar", "Certainty levels", "How certain are the alerts?", 75, "certainty", null, "severity", "count"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "world_bank") {
+    return {
+      title: "Global Development Indicators",
+      charts: [
+        mk("bar", "GDP by country (latest)", "Economic output across nations", 95, "country_name", "value", null, "max"),
+        mk("line", "Indicators over time", "How do key metrics change globally?", 90, "yr", "value", "indicator_name", "mean"),
+        mk("bar", "Top 10 by population", "Most populous nations", 85, "country_name", "value", null, "max"),
+        mk("scatter", "GDP vs life expectancy", "Wealth and health relationship", 82, "value", "value", "country_code"),
+        mk("histogram", "Value distribution", "Spread of indicator values", 78, "value", null, null),
+      ].slice(0, 5),
+    };
+  }
+
+  return { title: `${kind} data`, charts: [] };
+}
+
+/** SQL queries for each source kind. */
+export const SOURCE_SQL_SNIPPETS: Record<string, { name: string; sql: string }[]> = {
+  usgs: [
+    { name: "Recent quakes", sql: "SELECT place, magnitude, depth, ts FROM usgs_quakes ORDER BY ts DESC LIMIT 20" },
+    { name: "Strongest quakes", sql: "SELECT place, magnitude, depth, latitude, longitude, ts FROM usgs_quakes ORDER BY magnitude DESC LIMIT 15" },
+    { name: "Quakes by network", sql: "SELECT net, COUNT(*) AS cnt, AVG(magnitude) AS avg_mag FROM usgs_quakes GROUP BY net ORDER BY cnt DESC" },
+    { name: "Tsunami alerts", sql: "SELECT * FROM usgs_quakes WHERE tsunami = true ORDER BY ts DESC" },
+  ],
+  meteo: [
+    { name: "Current conditions", sql: "SELECT city, temperature, humidity, wind_speed, precipitation, ts FROM meteo_weather ORDER BY ts DESC LIMIT 5" },
+    { name: "Hottest hours", sql: "SELECT city, temperature, ts FROM meteo_weather ORDER BY temperature DESC LIMIT 20" },
+    { name: "City averages", sql: "SELECT city, AVG(temperature) AS avg_temp, AVG(humidity) AS avg_hum, AVG(wind_speed) AS avg_wind FROM meteo_weather GROUP BY city" },
+    { name: "Rainy periods", sql: "SELECT city, ts, precipitation, temperature FROM meteo_weather WHERE precipitation > 0 ORDER BY precipitation DESC LIMIT 20" },
+  ],
+  nws: [
+    { name: "Active alerts", sql: "SELECT event, severity, urgency, headline, area_desc FROM nws_alerts ORDER BY effective DESC LIMIT 20" },
+    { name: "By severity", sql: "SELECT severity, COUNT(*) AS cnt FROM nws_alerts GROUP BY severity ORDER BY cnt DESC" },
+    { name: "By event type", sql: "SELECT event, COUNT(*) AS cnt, MIN(effective) AS first_seen FROM nws_alerts GROUP BY event ORDER BY cnt DESC LIMIT 15" },
+    { name: "Extreme alerts", sql: "SELECT * FROM nws_alerts WHERE severity = 'Extreme' OR severity = 'Severe' ORDER BY effective DESC" },
+  ],
+  world_bank: [
+    { name: "GDP rankings (2023)", sql: "SELECT country_name, value FROM world_bank WHERE indicator_id = 'NY.GDP.MKTP.CD' AND yr = 2023 ORDER BY value DESC LIMIT 20" },
+    { name: "Population (2023)", sql: "SELECT country_name, value FROM world_bank WHERE indicator_id = 'SP.POP.TOTL' AND yr = 2023 ORDER BY value DESC LIMIT 20" },
+    { name: "Life expectancy trend", sql: "SELECT yr, AVG(value) AS avg_le FROM world_bank WHERE indicator_id = 'SP.DYN.LE00.IN' GROUP BY yr ORDER BY yr" },
+    { name: "CO₂ top emitters", sql: "SELECT country_name, value FROM world_bank WHERE indicator_id = 'EN.ATM.CO2E.PC' AND yr = 2022 ORDER BY value DESC LIMIT 15" },
+  ],
+};
+
 /** SQL queries that work well with the wiki_stream table for the Query view. */
 export const STREAM_SQL_SNIPPETS = [
   {

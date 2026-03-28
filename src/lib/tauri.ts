@@ -182,6 +182,45 @@ export async function streamClear(): Promise<void> {
   return invoke<void>("stream_clear", {});
 }
 
+// =================================================================
+// Poll-Based Data Sources (USGS, Open-Meteo, NWS, World Bank)
+// =================================================================
+
+export type SourceKind = "usgs" | "meteo" | "nws" | "world_bank";
+
+export interface SourceStatus {
+  running: boolean;
+  total_events: number;
+  events_per_sec: number;
+  buffer_rows: number;
+  started_at: number | null;
+  uptime_secs: number;
+}
+
+export async function sourceStart(kind: SourceKind): Promise<void> {
+  return invoke<void>("source_start", { kind });
+}
+
+export async function sourceStop(kind: SourceKind): Promise<void> {
+  return invoke<void>("source_stop", { kind });
+}
+
+export async function sourceStatus(kind: SourceKind): Promise<SourceStatus> {
+  return invoke<SourceStatus>("source_status", { kind });
+}
+
+export async function sourceQuery(kind: SourceKind, sql: string, limit?: number): Promise<QueryResult> {
+  return invoke<QueryResult>("source_query", { kind, sql, limit });
+}
+
+export async function sourceSnapshot(kind: SourceKind, limit?: number): Promise<InspectResult> {
+  return invoke<InspectResult>("source_snapshot", { kind, limit });
+}
+
+export async function sourceClear(kind: SourceKind): Promise<void> {
+  return invoke<void>("source_clear", { kind });
+}
+
 const GITHUB_REPO = "mhsenkow/Loom_story_teller";
 
 /** Create a GitHub issue (Tauri only, requires GITHUB_TOKEN). Returns issue URL or throws. */

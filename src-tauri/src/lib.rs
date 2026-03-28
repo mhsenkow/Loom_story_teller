@@ -11,6 +11,7 @@
 
 mod db;
 mod commands;
+mod sources;
 mod stream;
 
 use std::sync::Arc;
@@ -27,8 +28,10 @@ pub fn run() {
             let db = db::LoomDb::new().expect("Failed to initialize DuckDB");
             let db = Arc::new(db);
             let stream_state = Arc::new(stream::StreamState::new());
+            let sources_state = Arc::new(sources::SourcesState::new());
             handle.manage(db);
             handle.manage(stream_state);
+            handle.manage(sources_state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -49,6 +52,12 @@ pub fn run() {
             commands::stream_query,
             commands::stream_snapshot,
             commands::stream_clear,
+            commands::source_start,
+            commands::source_stop,
+            commands::source_status,
+            commands::source_query,
+            commands::source_snapshot,
+            commands::source_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loom");

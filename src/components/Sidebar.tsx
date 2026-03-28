@@ -11,8 +11,8 @@
 
 import { useRef, useState, useEffect, useMemo } from "react";
 import { useLoomStore, type FileEntry } from "@/lib/store";
-import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, type StreamStatus } from "@/lib/tauri";
-import { recommend, recommendStreamStory } from "@/lib/recommendations";
+import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, type StreamStatus, sourceStart, sourceStop, sourceStatus, sourceSnapshot, sourceClear, type SourceKind, type SourceStatus } from "@/lib/tauri";
+import { recommend, recommendStreamStory, recommendSourceStory } from "@/lib/recommendations";
 import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
 
@@ -561,6 +561,180 @@ function WikiStreamSection() {
 
 // --- Data & Sources (slide-in region) ---
 
+// --- Generic Source Card (USGS, Open-Meteo, NWS, World Bank) ---
+
+interface SourceCardDef {
+  kind: SourceKind;
+  label: string;
+  description: string;
+  attribution?: string;
+  streamPath: string;
+  fileName: string;
+  color: string;
+}
+
+const SOURCE_DEFS: SourceCardDef[] = [
+  {
+    kind: "usgs",
+    label: "USGS Earthquakes",
+    description: "Global seismic events from the USGS Earthquake Hazards Program. Polls hourly feed every 60s.",
+    attribution: "Data: USGS (public domain, no key required)",
+    streamPath: "stream://usgs",
+    fileName: "USGS Quakes",
+    color: "loom-warning",
+  },
+  {
+    kind: "meteo",
+    label: "Open-Meteo Weather",
+    description: "Hourly weather for 5 world cities (NYC, London, Tokyo, Sydney, São Paulo). Refreshes every 5 min.",
+    attribution: "Data: Open-Meteo.com — free for non-commercial use, no API key",
+    streamPath: "stream://meteo",
+    fileName: "World Weather",
+    color: "loom-accent",
+  },
+  {
+    kind: "nws",
+    label: "NWS Alerts (US)",
+    description: "Active US weather alerts from the National Weather Service. Polls every 2 min.",
+    attribution: "Data: api.weather.gov — public, requires User-Agent (included)",
+    streamPath: "stream://nws",
+    fileName: "NWS Alerts",
+    color: "loom-error",
+  },
+  {
+    kind: "world_bank",
+    label: "World Bank Indicators",
+    description: "GDP, population, life expectancy, and CO₂ emissions for all countries (2015–2023). Loads once.",
+    attribution: "Data: World Bank Open Data API — free, no key required",
+    streamPath: "stream://world_bank",
+    fileName: "World Bank",
+    color: "loom-success",
+  },
+];
+
+function SourceCard({ def }: { def: SourceCardDef }) {
+  const {
+    sourceStatuses, setSourceStatus,
+    setSelectedFile, setColumnStats, setSampleRows,
+    setChartRecs, setActiveChart, setVegaSpec,
+    setViewMode, setPanelTab, setToast, setStreamActive,
+  } = useLoomStore();
+  const [connecting, setConnecting] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isTauriEnv = isTauri();
+  const status = sourceStatuses[def.kind];
+  const running = status?.running ?? false;
+  const bufferRows = status?.buffer_rows ?? 0;
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  const startPolling = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await sourceStatus(def.kind);
+        setSourceStatus(def.kind, s);
+      } catch { /* ignore */ }
+    }, 3000);
+  };
+
+  const handleConnect = async () => {
+    if (!isTauriEnv) { setToast("Requires the desktop app (Tauri)"); return; }
+    setConnecting(true);
+    try {
+      await sourceStart(def.kind);
+      startPolling();
+      setToast(`Connected to ${def.label}`);
+    } catch (e) {
+      setToast(`${def.label} failed: ${e instanceof Error ? e.message : e}`);
+    } finally { setConnecting(false); }
+  };
+
+  const handleDisconnect = async () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    try {
+      await sourceStop(def.kind);
+      setSourceStatus(def.kind, { running: false, total_events: 0, events_per_sec: 0, buffer_rows: bufferRows, started_at: null, uptime_secs: 0 });
+      setToast(`${def.label} stopped`);
+    } catch { /* ignore */ }
+  };
+
+  const handleExplore = async () => {
+    try {
+      const snap = await sourceSnapshot(def.kind, 500);
+      const file = { path: def.streamPath, name: def.fileName, extension: "stream", row_count: snap.sample.total_rows, size_bytes: 0 };
+      setSelectedFile(file);
+      setColumnStats(snap.stats);
+      setSampleRows(snap.sample);
+      setStreamActive(true);
+      const story = recommendSourceStory(def.kind, snap.stats, snap.sample);
+      const recs = story.charts;
+      setChartRecs(recs);
+      setActiveChart(recs.length > 0 ? recs[0] : null);
+      if (recs.length === 0) setVegaSpec(null);
+      setViewMode("chart");
+      setPanelTab("chart");
+      setToast(`Loaded ${snap.sample.rows.length} ${def.label} rows`);
+    } catch (e) {
+      setToast(`Failed: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  const handleClear = async () => {
+    try {
+      await sourceClear(def.kind);
+      setSourceStatus(def.kind, { ...(status ?? { running: false, total_events: 0, events_per_sec: 0, buffer_rows: 0, started_at: null, uptime_secs: 0 }), buffer_rows: 0 });
+      setToast(`${def.label} cleared`);
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <div className="loom-card border border-loom-border rounded-lg p-3 space-y-2">
+      <div className="flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full ${running ? `bg-${def.color} animate-pulse` : "bg-loom-muted"}`} />
+        <span className="text-xs font-medium text-loom-text">{def.label}</span>
+        <span className="flex-1" />
+        {!running ? (
+          <button type="button" onClick={handleConnect} disabled={connecting}
+            className="text-2xs py-1 px-2.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
+            {connecting ? "Loading…" : "Connect"}
+          </button>
+        ) : (
+          <button type="button" onClick={handleDisconnect}
+            className="text-2xs py-1 px-2.5 rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium">
+            Stop
+          </button>
+        )}
+      </div>
+      {running && (
+        <div className="flex items-center justify-between">
+          <span className="text-2xs text-loom-muted">{(status?.total_events ?? 0).toLocaleString()} rows loaded</span>
+          <div className="flex gap-1.5">
+            <button type="button" onClick={handleClear} className="text-2xs py-0.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">Clear</button>
+            <button type="button" onClick={handleExplore} disabled={bufferRows === 0}
+              className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
+              Explore
+            </button>
+          </div>
+        </div>
+      )}
+      {!running && bufferRows > 0 && (
+        <div className="flex items-center justify-between">
+          <span className="text-2xs text-loom-muted">{bufferRows.toLocaleString()} rows</span>
+          <button type="button" onClick={handleExplore}
+            className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium">
+            Explore
+          </button>
+        </div>
+      )}
+      <p className="text-2xs text-loom-muted leading-relaxed">{def.description}</p>
+      {def.attribution && <p className="text-2xs text-loom-muted/70 italic">{def.attribution}</p>}
+    </div>
+  );
+}
+
 const DATA_GOV_ROWS = 80;
 
 function DataRegionView({
@@ -916,8 +1090,11 @@ function DataRegionView({
           </a>
         </section>
 
-        {/* Wikipedia Live Stream — Scuba-style event analytics */}
+        {/* Live Streams & Sources */}
         <WikiStreamSection />
+        {SOURCE_DEFS.map((def) => (
+          <SourceCard key={def.kind} def={def} />
+        ))}
 
         {/* More data sources — links to other open data portals */}
         <section>

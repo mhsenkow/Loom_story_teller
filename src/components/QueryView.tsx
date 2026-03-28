@@ -8,8 +8,8 @@
 "use client";
 
 import { useLoomStore } from "@/lib/store";
-import { queryFile, streamQuery } from "@/lib/tauri";
-import { recommend, STREAM_SQL_SNIPPETS } from "@/lib/recommendations";
+import { queryFile, streamQuery, sourceQuery, type SourceKind } from "@/lib/tauri";
+import { recommend, STREAM_SQL_SNIPPETS, SOURCE_SQL_SNIPPETS } from "@/lib/recommendations";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { QueryResultsSkeleton } from "@/components/Skeleton";
@@ -32,9 +32,14 @@ export function QueryView() {
   } = useLoomStore();
 
   const isStream = selectedFile?.path === "stream://wiki";
-  const [localSql, setLocalSql] = useState(
-    querySql || (isStream ? "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT 100" : "SELECT * FROM loom_active LIMIT 100")
-  );
+  const sourceTableMap: Record<string, string> = { "stream://usgs": "usgs_quakes", "stream://meteo": "meteo_weather", "stream://nws": "nws_alerts", "stream://world_bank": "world_bank" };
+  const sourceTable = selectedFile?.path ? sourceTableMap[selectedFile.path] : undefined;
+  const defaultSql = isStream
+    ? "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT 100"
+    : sourceTable
+      ? `SELECT * FROM ${sourceTable} LIMIT 100`
+      : "SELECT * FROM loom_active LIMIT 100";
+  const [localSql, setLocalSql] = useState(querySql || defaultSql);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number; colIndex: number } | null>(null);
   const [schemaOpen, setSchemaOpen] = useState(true);
   const [diffSnapshotId, setDiffSnapshotId] = useState<string | null>(null);
@@ -98,9 +103,12 @@ export function QueryView() {
     setQuerySql(localSql);
     try {
       const isStream = selectedFile.path === "stream://wiki";
+      const sourceKindMatch = selectedFile.path.match(/^stream:\/\/(usgs|meteo|nws|world_bank)$/);
       const result = isStream
         ? await streamQuery(localSql, 10000)
-        : await queryFile(selectedFile.path, localSql, 10000);
+        : sourceKindMatch
+          ? await sourceQuery(sourceKindMatch[1] as SourceKind, localSql, 10000)
+          : await queryFile(selectedFile.path, localSql, 10000);
       setQueryResult(result);
       appendQueryHistory(localSql);
       // Sync chart + preview to query result so the chart reflects the query
@@ -213,6 +221,28 @@ export function QueryView() {
               ))}
             </select>
           )}
+          {(() => {
+            const m = selectedFile?.path?.match(/^stream:\/\/(usgs|meteo|nws|world_bank)$/);
+            const sk = m?.[1] as string | undefined;
+            const snippets = sk ? SOURCE_SQL_SNIPPETS[sk] : undefined;
+            if (!snippets?.length) return null;
+            return (
+              <select
+                className="loom-input text-2xs font-mono max-w-[140px] py-1"
+                value=""
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value, 10);
+                  if (!isNaN(idx) && snippets[idx]) setLocalSql(snippets[idx].sql);
+                }}
+                title="Pre-built queries for this source"
+              >
+                <option value="">Source queries</option>
+                {snippets.map((s, i) => (
+                  <option key={s.name} value={i}>{s.name}</option>
+                ))}
+              </select>
+            );
+          })()}
           <button
             type="button"
             onClick={() => {

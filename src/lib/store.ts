@@ -321,6 +321,9 @@ interface LoomState {
   /** Whether the stream view is active (file selected = stream://wiki). */
   streamActive: boolean;
 
+  // --- Poll-based sources (USGS, Open-Meteo, NWS, World Bank) ---
+  sourceStatuses: Record<string, { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; uptime_secs: number }>;
+
   // Actions
   setMountedFolder: (folder: string | null) => void;
   setFiles: (files: FileEntry[]) => void;
@@ -432,6 +435,7 @@ interface LoomState {
   // Live stream actions
   setStreamStatus: (status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; wikis_seen: number; started_at: number | null; uptime_secs: number }) => void;
   setStreamActive: (v: boolean) => void;
+  setSourceStatus: (kind: string, status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; uptime_secs: number }) => void;
   reset: () => void;
 }
 
@@ -509,6 +513,7 @@ const initialState = {
   streamStartedAt: null as number | null,
   streamUptimeSecs: 0,
   streamActive: false,
+  sourceStatuses: {} as Record<string, { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; uptime_secs: number }>,
 };
 
 export const useLoomStore = create<LoomState>((set, get) => ({
@@ -986,5 +991,7 @@ export const useLoomStore = create<LoomState>((set, get) => ({
       streamUptimeSecs: status.uptime_secs,
     }),
   setStreamActive: (v) => set({ streamActive: v }),
+  setSourceStatus: (kind, status) =>
+    set((s) => ({ sourceStatuses: { ...s.sourceStatuses, [kind]: status } })),
   reset: () => set(initialState),
 }));

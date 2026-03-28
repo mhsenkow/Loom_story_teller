@@ -10,6 +10,7 @@
 // =================================================================
 
 use crate::db::{ColumnInfo, FileEntry, LoomDb, QueryResult};
+use crate::sources::SourcesState;
 use crate::stream::StreamState;
 use serde::Serialize;
 use serde_json::Value;
@@ -543,5 +544,87 @@ pub async fn stream_clear(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.execute_batch("DELETE FROM wiki_stream")
         .map_err(|e| e.to_string())
+}
+
+// =================================================================
+// Poll-Based Data Sources (USGS, Open-Meteo, NWS, World Bank)
+// =================================================================
+
+#[tauri::command]
+pub async fn source_start(
+    kind: String,
+    db: State<'_, Arc<LoomDb>>,
+    sources: State<'_, Arc<SourcesState>>,
+) -> Result<(), String> {
+    crate::sources::source_start(&kind, Arc::clone(&*db), Arc::clone(&*sources)).await
+}
+
+#[tauri::command]
+pub async fn source_stop(
+    kind: String,
+    sources: State<'_, Arc<SourcesState>>,
+) -> Result<(), String> {
+    crate::sources::source_stop(&kind, Arc::clone(&*sources)).await
+}
+
+#[tauri::command]
+pub async fn source_status(
+    kind: String,
+    db: State<'_, Arc<LoomDb>>,
+    sources: State<'_, Arc<SourcesState>>,
+) -> Result<crate::sources::SourceStatus, String> {
+    let inst = sources.get(&kind).ok_or("Unknown source kind")?;
+    let table = match kind.as_str() {
+        "usgs" => "usgs_quakes",
+        "meteo" => "meteo_weather",
+        "nws" => "nws_alerts",
+        "world_bank" => "world_bank",
+        _ => return Err("Unknown source kind".to_string()),
+    };
+    Ok(inst.status(table, &*db).await)
+}
+
+#[tauri::command]
+pub async fn source_query(
+    kind: String,
+    sql: String,
+    limit: Option<u32>,
+    db: State<'_, Arc<LoomDb>>,
+) -> Result<QueryResult, String> {
+    crate::sources::source_query(&*db, &kind, &sql, limit.unwrap_or(5000))
+}
+
+#[tauri::command]
+pub async fn source_snapshot(
+    kind: String,
+    limit: Option<u32>,
+    db: State<'_, Arc<LoomDb>>,
+) -> Result<InspectResult, String> {
+    let stats = crate::sources::source_stats(&*db, &kind)?;
+    let table = match kind.as_str() {
+        "usgs" => "usgs_quakes",
+        "meteo" => "meteo_weather",
+        "nws" => "nws_alerts",
+        "world_bank" => "world_bank",
+        _ => return Err("Unknown source kind".to_string()),
+    };
+    let order = match kind.as_str() {
+        "usgs" => "ORDER BY ts DESC",
+        "meteo" => "ORDER BY ts DESC",
+        "nws" => "ORDER BY effective DESC",
+        "world_bank" => "ORDER BY yr DESC, country_code",
+        _ => "",
+    };
+    let sql = format!("SELECT * FROM {} {}", table, order);
+    let sample = crate::sources::source_query(&*db, &kind, &sql, limit.unwrap_or(500))?;
+    Ok(InspectResult { stats, sample })
+}
+
+#[tauri::command]
+pub async fn source_clear(
+    kind: String,
+    db: State<'_, Arc<LoomDb>>,
+) -> Result<(), String> {
+    crate::sources::source_clear(&*db, &kind)
 }
 
