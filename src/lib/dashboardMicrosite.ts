@@ -42,12 +42,15 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
   const { dashboardName, slots, lastUpdatedMs, layoutTemplate = "auto" } = input;
   const title = escapeHtml(dashboardName);
 
-  // Grid: match app's gridClass and gridStyle for 1+2
+  // Grid: match app's gridClass and gridStyle for 1+2 / stream
   const is1p2 = layoutTemplate === "1+2";
+  const isStream = layoutTemplate === "stream";
   const gridInlineStyle = is1p2
     ? "display:grid; grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(140px, 1fr); gap: 0.75rem;"
-    : "";
-  const gridClass = is1p2
+    : isStream
+      ? "display:grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: minmax(160px, 1fr); gap: 0.75rem;"
+      : "";
+  const gridClass = (is1p2 || isStream)
     ? "dm-grid"
     : layoutTemplate === "1x1"
       ? "dm-grid dm-cols-1"
@@ -62,6 +65,7 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
   const slotCards = slots
     .map((slot, i) => {
       const rowSpan2 = is1p2 && i === 0 ? " dm-slot-span-2" : "";
+      const streamHero = isStream && i === 0 ? " dm-stream-hero" : "";
       const content = slot.snapshotDataUrl
         ? `<img src="${escapeHtml(slot.snapshotDataUrl)}" alt="${escapeHtml(slot.label)}" class="dm-slot-img" />`
         : `<div class="dm-slot-placeholder">${escapeHtml(slot.label)}</div>`;
@@ -69,7 +73,7 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
         ? `<p class="dm-slot-source">${escapeHtml(slot.sourceLabel)}</p>`
         : "";
       return `
-    <div class="dm-card${rowSpan2}">
+    <div class="dm-card${rowSpan2}${streamHero}">
       <span class="dm-card-type">${escapeHtml(slot.viewType)}</span>
       <div class="dm-card-content">${content}</div>
       <p class="dm-card-title">${escapeHtml(slot.label)}</p>${sourceLine}
@@ -155,6 +159,7 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
       text-align: left;
     }
     .dm-slot-span-2.dm-card { aspect-ratio: auto; min-height: 200px; }
+    .dm-stream-hero.dm-card { grid-column: span 2; aspect-ratio: auto; min-height: 200px; }
     .dm-card-type {
       font-size: 0.65rem;
       font-weight: 500;

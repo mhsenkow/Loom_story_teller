@@ -126,8 +126,15 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
           ? "grid-cols-2"
           : layout === "3x2"
             ? "grid-cols-3"
-            : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
-  const gridStyle = layout === "1+2" ? { display: "grid", gridTemplateColumns: "1fr 1fr", gridAutoRows: "minmax(140px, 1fr)" } as React.CSSProperties : undefined;
+            : layout === "stream"
+              ? "grid-cols-3"
+              : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
+  const gridStyle =
+    layout === "1+2"
+      ? { display: "grid", gridTemplateColumns: "1fr 1fr", gridAutoRows: "minmax(140px, 1fr)" } as React.CSSProperties
+      : layout === "stream"
+        ? { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gridAutoRows: "minmax(160px, 1fr)" } as React.CSSProperties
+        : undefined;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -183,13 +190,14 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
               const chartView = slot.viewType === "chart" ? chartViews.find((x) => x.id === slot.viewId) : null;
               const snapshotUrl = chartView?.snapshotImageDataUrl ?? null;
               const is1p2First = layout === "1+2" && idx === 0;
+              const isStreamHero = layout === "stream" && idx === 0;
               return (
                 <button
                   key={slot.id}
                   type="button"
                   onClick={() => setFocusedSlot(slot)}
-                  className={`loom-card p-3 text-left hover:border-loom-accent hover:bg-loom-elevated/50 transition-colors border border-loom-border rounded-lg flex flex-col min-h-[140px] aspect-[4/3] ${layout === "1+2" ? "" : ""}`}
-                  style={is1p2First ? { gridRow: "span 2" } : undefined}
+                  className={`loom-card p-3 text-left hover:border-loom-accent hover:bg-loom-elevated/50 transition-colors border border-loom-border rounded-lg flex flex-col min-h-[140px] aspect-[4/3]`}
+                  style={is1p2First ? { gridRow: "span 2" } : isStreamHero ? { gridColumn: "span 2", gridRow: "span 1" } : undefined}
                 >
                   <span className="text-2xs font-medium text-loom-muted uppercase tracking-wider shrink-0">{slot.viewType}</span>
                   {snapshotUrl ? (

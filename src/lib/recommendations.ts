@@ -670,6 +670,91 @@ export function recommend(
   return recs.slice(0, 18);
 }
 
+export interface StorySequence {
+  title: string;
+  charts: ChartRecommendation[];
+}
+
+/**
+ * Returns an ordered sequence of 3–5 charts that "tell a story" about the data:
+ * trend → breakdown → distribution → relationship (no AI). Used for "Create story dashboard".
+ */
+export function recommendStorySequence(
+  columns: ColumnInfo[],
+  data: QueryResult | null,
+  fileName: string,
+): StorySequence {
+  const all = recommend(columns, data, fileName);
+  const baseName = fileName.replace(/\.[^.]+$/, "").replace(/_/g, " ") || "Data";
+  const title = `Story: ${baseName}`;
+
+  if (all.length === 0) {
+    return { title, charts: [] };
+  }
+
+  const byKind = new Map<ChartKind, ChartRecommendation[]>();
+  for (const r of all) {
+    if (!byKind.has(r.kind)) byKind.set(r.kind, []);
+    byKind.get(r.kind)!.push(r);
+  }
+
+  const pick = (kind: ChartKind): ChartRecommendation | null => {
+    const list = byKind.get(kind);
+    if (!list?.length) return null;
+    return list.shift() ?? null;
+  };
+
+  const sequence: ChartRecommendation[] = [];
+  const used = new Set<string>();
+
+  // 1. Trend (line or area) — "what happened over time"
+  const lineOrArea = pick("line") ?? pick("area");
+  if (lineOrArea && !used.has(lineOrArea.id)) {
+    sequence.push(lineOrArea);
+    used.add(lineOrArea.id);
+  }
+
+  // 2. Breakdown (bar or pie) — "by category"
+  const barOrPie = pick("bar") ?? pick("pie");
+  if (barOrPie && !used.has(barOrPie.id)) {
+    sequence.push(barOrPie);
+    used.add(barOrPie.id);
+  }
+
+  // 3. Distribution (histogram)
+  const hist = pick("histogram");
+  if (hist && !used.has(hist.id)) {
+    sequence.push(hist);
+    used.add(hist.id);
+  }
+
+  // 4. Relationship (scatter)
+  const scatter = pick("scatter");
+  if (scatter && !used.has(scatter.id)) {
+    sequence.push(scatter);
+    used.add(scatter.id);
+  }
+
+  // 5. Fill to 3–5 with next best variety (avoid duplicate kind)
+  const remaining = all.filter((r) => !used.has(r.id));
+  const kindUsed = new Set(sequence.map((r) => r.kind));
+  for (const r of remaining) {
+    if (sequence.length >= 5) break;
+    if (kindUsed.has(r.kind)) continue;
+    sequence.push(r);
+    used.add(r.id);
+    kindUsed.add(r.kind);
+  }
+  for (const r of remaining) {
+    if (sequence.length >= 5) break;
+    if (used.has(r.id)) continue;
+    sequence.push(r);
+    used.add(r.id);
+  }
+
+  return { title, charts: sequence.slice(0, 5) };
+}
+
 /** Picks the single best recommendation (highest score). Use for "Suggest chart". */
 export function getBestSuggestion(recs: ChartRecommendation[]): ChartRecommendation | null {
   if (recs.length === 0) return null;
@@ -783,3 +868,108 @@ export function getRecommendationReason(rec: ChartRecommendation): string {
       return "Fits your column types and cardinality";
   }
 }
+
+// =================================================================
+// Wikipedia Stream — curated chart recommendations
+// =================================================================
+
+/**
+ * Pre-built dashboard story for Wikipedia stream data.
+ * Returns chart recs tailored to the wiki_stream schema.
+ */
+export function recommendStreamStory(
+  columns: ColumnInfo[],
+  data: QueryResult | null,
+): StorySequence {
+  const colNames = new Set(columns.map((c) => c.name));
+  const hasTs = colNames.has("ts");
+  const hasWiki = colNames.has("wiki");
+  const hasBot = colNames.has("bot");
+  const hasNamespace = colNames.has("namespace");
+  const hasDelta = colNames.has("delta");
+  const hasEditType = colNames.has("edit_type");
+
+  const charts: ChartRecommendation[] = [];
+  let idx = 0;
+  const mkId = () => `stream-${Date.now()}-${idx++}`;
+
+  const mkRec = (
+    kind: ChartKind,
+    title: string,
+    subtitle: string,
+    score: number,
+    xField: string,
+    yField: string | null,
+    colorField: string | null,
+    yAggregate?: YAggregateOption | null,
+  ): ChartRecommendation => ({
+    id: mkId(),
+    kind,
+    title,
+    subtitle,
+    score,
+    spec: {},
+    xField,
+    yField,
+    colorField,
+    yAggregate: yAggregate ?? null,
+  });
+
+  if (hasTs) {
+    charts.push(mkRec("line", "Edits over time", "Event rate trend — the pulse of Wikipedia", 95, "ts", null, null, "count"));
+  }
+  if (hasWiki) {
+    charts.push(mkRec("bar", "Edits by wiki", "Which language editions are most active", 90, "wiki", null, null, "count"));
+  }
+  if (hasBot && hasWiki) {
+    charts.push(mkRec("bar", "Bot vs Human", "Automated edits vs manual contributions", 88, "bot", null, "wiki", "count"));
+  }
+  if (hasDelta) {
+    charts.push(mkRec("histogram", "Edit size distribution", "How big are typical edits (bytes delta)", 85, "delta", null, null));
+  }
+  if (hasNamespace && hasDelta) {
+    charts.push(mkRec("bar", "Impact by namespace", "Average edit size per namespace", 82, "namespace", "delta", null, "mean"));
+  }
+  if (hasEditType) {
+    charts.push(mkRec("pie", "Edit types", "New pages vs edits vs categorize vs log", 80, "edit_type", null, null, "count"));
+  }
+  if (hasTs && hasWiki) {
+    charts.push(mkRec("area", "Activity by wiki over time", "Stacked area of edit volume per wiki", 78, "ts", null, "wiki", "count"));
+  }
+  if (hasBot && hasTs) {
+    charts.push(mkRec("line", "Bot activity trend", "Are bots more active at certain times?", 75, "ts", null, "bot", "count"));
+  }
+
+  return {
+    title: "Wikipedia Live: Real-time edit analytics",
+    charts: charts.slice(0, 6),
+  };
+}
+
+/** SQL queries that work well with the wiki_stream table for the Query view. */
+export const STREAM_SQL_SNIPPETS = [
+  {
+    name: "Edits per minute",
+    sql: "SELECT date_trunc('minute', ts) AS minute, COUNT(*) AS edits FROM wiki_stream GROUP BY 1 ORDER BY 1",
+  },
+  {
+    name: "Top 10 wikis",
+    sql: "SELECT wiki, COUNT(*) AS edits FROM wiki_stream GROUP BY wiki ORDER BY edits DESC LIMIT 10",
+  },
+  {
+    name: "Bot ratio",
+    sql: "SELECT bot, COUNT(*) AS cnt, ROUND(100.0 * COUNT(*) / SUM(COUNT(*)) OVER(), 1) AS pct FROM wiki_stream GROUP BY bot",
+  },
+  {
+    name: "Biggest edits",
+    sql: "SELECT title, wiki, \"user\", delta, ts FROM wiki_stream ORDER BY ABS(delta) DESC LIMIT 20",
+  },
+  {
+    name: "Active editors",
+    sql: "SELECT \"user\", COUNT(*) AS edits, SUM(delta) AS total_delta FROM wiki_stream WHERE NOT bot GROUP BY 1 ORDER BY edits DESC LIMIT 15",
+  },
+  {
+    name: "Namespace breakdown",
+    sql: "SELECT namespace, COUNT(*) AS edits, AVG(delta) AS avg_delta FROM wiki_stream GROUP BY namespace ORDER BY edits DESC",
+  },
+];

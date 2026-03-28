@@ -24,6 +24,9 @@ import {
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
 import { exportDashboardMicrosite } from "@/lib/tauri";
+import { recommendStorySequence, recommendStreamStory, STREAM_SQL_SNIPPETS } from "@/lib/recommendations";
+import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
+import { streamSnapshot, isTauri as checkTauri } from "@/lib/tauri";
 
 const TABS: { key: PanelTab; label: string }[] = [
   { key: "stats", label: "Stats" },
@@ -97,6 +100,9 @@ function DashboardsView() {
     queryViews,
     tableViews,
     querySnapshots,
+    selectedFile,
+    columnStats,
+    sampleRows,
     setActiveDashboardId,
     addDashboard,
     removeDashboard,
@@ -113,8 +119,71 @@ function DashboardsView() {
     setPanelTab,
     setToast,
     setDashboardRefresh,
+    createStoryDashboard,
   } = useLoomStore();
   const active = dashboards.find((d) => d.id === activeDashboardId);
+
+  const handleCreateStoryDashboard = useCallback(async () => {
+    if (!selectedFile) {
+      setToast("Select a file first to create a story dashboard");
+      return;
+    }
+    const story = recommendStorySequence(columnStats, sampleRows, selectedFile.name);
+    if (story.charts.length === 0) {
+      setToast("Not enough data variety to build a story. Try a file with categories and numbers.");
+      return;
+    }
+    const id = createStoryDashboard(selectedFile.path, selectedFile.name, story.title, story.charts, sampleRows);
+    if (!id) {
+      setToast("Could not create story dashboard");
+      return;
+    }
+    const dashboard = useLoomStore.getState().dashboards.find((d) => d.id === id);
+    const chartIds = dashboard?.slots.filter((s) => s.viewType === "chart").map((s) => s.viewId) ?? [];
+    if (chartIds.length > 0) {
+      setToast("Capturing chart previews…");
+      await captureStoryDashboardPreviews(id);
+      setToast(`Created "${story.title}" with ${story.charts.length} charts`);
+    } else {
+      setDashboardsExpanded(true);
+      setToast(`Created "${story.title}" with ${story.charts.length} charts`);
+    }
+  }, [selectedFile, columnStats, sampleRows, createStoryDashboard, setDashboardsExpanded, setToast]);
+
+  const handleCreateStreamDashboard = useCallback(async () => {
+    if (!checkTauri()) {
+      setToast("Stream dashboards require the desktop app");
+      return;
+    }
+    setToast("Loading stream data…");
+    try {
+      const snap = await streamSnapshot(500);
+      if (!snap.sample.rows.length) {
+        setToast("No stream data yet. Connect to Wikipedia stream first and wait a few seconds.");
+        return;
+      }
+      const story = recommendStreamStory(snap.stats, snap.sample);
+      if (story.charts.length === 0) {
+        setToast("Could not generate stream charts");
+        return;
+      }
+      const id = createStoryDashboard("stream://wiki", "Wikipedia Live", story.title, story.charts, snap.sample);
+      if (!id) {
+        setToast("Could not create stream dashboard");
+        return;
+      }
+      const dashboard = useLoomStore.getState().dashboards.find((d) => d.id === id);
+      const chartIds = dashboard?.slots.filter((s) => s.viewType === "chart").map((s) => s.viewId) ?? [];
+      if (chartIds.length > 0) {
+        setToast("Capturing chart previews…");
+        await captureStoryDashboardPreviews(id);
+      }
+      setDashboardsExpanded(true);
+      setToast(`Created "${story.title}" with ${story.charts.length} charts`);
+    } catch (e) {
+      setToast(`Stream dashboard failed: ${e instanceof Error ? e.message : e}`);
+    }
+  }, [createStoryDashboard, setDashboardsExpanded, setToast]);
 
   const handleExportMicrosite = useCallback(async () => {
     if (!active) return;
@@ -188,6 +257,22 @@ function DashboardsView() {
       </p>
 
       <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={handleCreateStoryDashboard}
+          className="text-xs py-1.5 px-2 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium"
+          title="Auto-create a dashboard of charts that tell a story (trend, breakdown, distribution, relationship)"
+        >
+          Tell a story
+        </button>
+        <button
+          type="button"
+          onClick={handleCreateStreamDashboard}
+          className="text-xs py-1.5 px-2 rounded border border-loom-success/50 bg-loom-success/10 text-loom-success hover:bg-loom-success/20 font-medium"
+          title="Create a live analytics dashboard from the Wikipedia event stream (connect in Data &amp; sources first)"
+        >
+          Stream dashboard
+        </button>
         <button
           type="button"
           onClick={() => addDashboard("New dashboard")}
@@ -379,6 +464,7 @@ function DashboardsView() {
               <option value="2x2">2×2</option>
               <option value="3x2">3×2</option>
               <option value="1+2">1 large + 2</option>
+              <option value="stream">Stream (hero + grid)</option>
             </select>
           </div>
           <div className="flex items-center justify-between">
@@ -1380,6 +1466,18 @@ function ChartPanelView() {
 
   const tableName = selectedFile?.name?.replace(/\.\w+$/, "") ?? "";
 
+  const extraFromChart = useCallback(
+    () => ({
+      sizeField: activeChart?.sizeField ?? null,
+      rowField: activeChart?.rowField ?? null,
+      glowField: activeChart?.glowField ?? null,
+      outlineField: activeChart?.outlineField ?? null,
+      opacityField: activeChart?.opacityField ?? null,
+      yAggregate: activeChart?.yAggregate ?? null,
+    }),
+    [activeChart?.sizeField, activeChart?.rowField, activeChart?.glowField, activeChart?.outlineField, activeChart?.opacityField, activeChart?.yAggregate],
+  );
+
   const handleDrop = useCallback(
     (slot: "x" | "y" | "color") => (e: React.DragEvent) => {
       e.preventDefault();
@@ -1389,11 +1487,10 @@ function ChartPanelView() {
       const newX = slot === "x" ? colName : activeChart.xField;
       const newY = slot === "y" ? colName : activeChart.yField;
       const newColor = slot === "color" ? colName : activeChart.colorField;
-      const extra = { sizeField: activeChart.sizeField ?? null, rowField: activeChart.rowField ?? null };
-      const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extra);
+      const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extraFromChart());
       if (rec) setActiveChart(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart],
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
   );
 
   const handleDragEnter = useCallback((slot: "x" | "y" | "color") => () => setDragOverSlot(slot), []);
@@ -1419,18 +1516,6 @@ function ChartPanelView() {
       setTimeout(() => setSpecCopyOk(false), 1500);
     });
   }, [vegaSpec]);
-
-  const extraFromChart = useCallback(
-    () => ({
-      sizeField: activeChart?.sizeField ?? null,
-      rowField: activeChart?.rowField ?? null,
-      glowField: activeChart?.glowField ?? null,
-      outlineField: activeChart?.outlineField ?? null,
-      opacityField: activeChart?.opacityField ?? null,
-      yAggregate: activeChart?.yAggregate ?? null,
-    }),
-    [activeChart?.sizeField, activeChart?.rowField, activeChart?.glowField, activeChart?.outlineField, activeChart?.opacityField, activeChart?.yAggregate],
-  );
 
   const applyEncoding = useCallback(
     (slot: "x" | "y" | "color", colName: string) => {

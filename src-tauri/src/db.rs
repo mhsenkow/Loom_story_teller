@@ -436,7 +436,7 @@ impl LoomDb {
     }
 }
 
-fn duckdb_value_to_json(val: duckdb::types::Value) -> serde_json::Value {
+pub(crate) fn duckdb_value_to_json(val: duckdb::types::Value) -> serde_json::Value {
     match val {
         duckdb::types::Value::Null => serde_json::Value::Null,
         duckdb::types::Value::Boolean(b) => serde_json::Value::Bool(b),

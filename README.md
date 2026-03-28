@@ -147,7 +147,7 @@ To use **Suggest with AI** in the Chart view:
    ```bash
    OLLAMA_ORIGINS="*" ollama serve
    ```
-   Or set `OLLAMA_ORIGINS` to your dev URL (e.g. `http://localhost:1420`).
+   Or set `OLLAMA_ORIGINS` to your dev URL (e.g. `http://localhost:1337`).
 
 Hover **Why?** on a suggestion to see the reason (heuristic or AI).
 

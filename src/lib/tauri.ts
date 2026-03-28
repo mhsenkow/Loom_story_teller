@@ -144,6 +144,44 @@ export const OPEN_DATA_PORTALS: Record<string, { url: string; label: string }> =
   "data.gov.uk": { url: "https://data.gov.uk/dataset", label: "data.gov.uk" },
 };
 
+// =================================================================
+// Wikipedia Live Stream IPC
+// =================================================================
+
+export interface StreamStatus {
+  running: boolean;
+  total_events: number;
+  events_per_sec: number;
+  buffer_rows: number;
+  wikis_seen: number;
+  started_at: number | null;
+  uptime_secs: number;
+}
+
+export async function streamStart(): Promise<void> {
+  return invoke<void>("stream_start", {});
+}
+
+export async function streamStop(): Promise<void> {
+  return invoke<void>("stream_stop", {});
+}
+
+export async function streamStatus(): Promise<StreamStatus> {
+  return invoke<StreamStatus>("stream_status", {});
+}
+
+export async function streamQuery(sql: string, limit?: number): Promise<QueryResult> {
+  return invoke<QueryResult>("stream_query", { sql, limit });
+}
+
+export async function streamSnapshot(limit?: number): Promise<InspectResult> {
+  return invoke<InspectResult>("stream_snapshot", { limit });
+}
+
+export async function streamClear(): Promise<void> {
+  return invoke<void>("stream_clear", {});
+}
+
 const GITHUB_REPO = "mhsenkow/Loom_story_teller";
 
 /** Create a GitHub issue (Tauri only, requires GITHUB_TOKEN). Returns issue URL or throws. */

@@ -114,7 +114,8 @@ export type DashboardLayoutTemplate =
   | "2x1"       // 2 columns 1 row
   | "2x2"       // 2x2 grid
   | "3x2"       // 3 columns 2 rows
-  | "1+2";      // 1 large left, 2 stacked right
+  | "1+2"       // 1 large left, 2 stacked right
+  | "stream";   // hero + 2×3 grid — optimized for live stream dashboards
 
 /** Dashboard: named layout of view slots + optional refresh and last-updated. */
 export interface DashboardItem {
@@ -302,6 +303,24 @@ interface LoomState {
   /** Global prompt dialog state for replacing window.prompt. */
   promptDialog: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null;
 
+  // --- Live Stream (Wikipedia) ---
+  /** Whether the stream is currently connected. */
+  streamRunning: boolean;
+  /** Total events received since stream started. */
+  streamTotalEvents: number;
+  /** Current events per second rate. */
+  streamEventsPerSec: number;
+  /** Number of rows currently buffered in DuckDB. */
+  streamBufferRows: number;
+  /** Number of distinct wikis seen. */
+  streamWikisSeen: number;
+  /** Timestamp (epoch secs) when stream started; null if stopped. */
+  streamStartedAt: number | null;
+  /** Uptime in seconds. */
+  streamUptimeSecs: number;
+  /** Whether the stream view is active (file selected = stream://wiki). */
+  streamActive: boolean;
+
   // Actions
   setMountedFolder: (folder: string | null) => void;
   setFiles: (files: FileEntry[]) => void;
@@ -381,8 +400,17 @@ interface LoomState {
     querySql?: string | null,
     snapshotData?: { columns: string[]; types: string[]; rows: (string | number | boolean | null)[][]; total_rows: number },
     snapshotImageDataUrl?: string | null
-  ) => boolean;
+  ) => string | null;
+  /** Create a dashboard and add chart views from a story sequence; returns dashboard id or null. Pass sampleData so applied views have data for capture. */
+  createStoryDashboard: (
+    filePath: string,
+    fileName: string,
+    storyTitle: string,
+    charts: ChartRecommendation[],
+    sampleData?: QueryResult | null,
+  ) => string | null;
   removeChartView: (id: string) => void;
+  setChartViewSnapshot: (viewId: string, dataUrl: string | null) => void;
   applyChartView: (id: string) => void;
   setQueryViews: (views: QueryViewItem[]) => void;
   addQueryView: (name: string, sql: string) => void;
@@ -401,6 +429,9 @@ interface LoomState {
   setDashboardsExpanded: (v: boolean) => void;
   applyQuerySnapshot: (id: string) => void;
   setPromptDialog: (config: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null) => void;
+  // Live stream actions
+  setStreamStatus: (status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; wikis_seen: number; started_at: number | null; uptime_secs: number }) => void;
+  setStreamActive: (v: boolean) => void;
   reset: () => void;
 }
 
@@ -470,9 +501,17 @@ const initialState = {
   activeDashboardId: null as string | null,
   dashboardsExpanded: false,
   promptDialog: null as { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null,
+  streamRunning: false,
+  streamTotalEvents: 0,
+  streamEventsPerSec: 0,
+  streamBufferRows: 0,
+  streamWikisSeen: 0,
+  streamStartedAt: null as number | null,
+  streamUptimeSecs: 0,
+  streamActive: false,
 };
 
-export const useLoomStore = create<LoomState>((set) => ({
+export const useLoomStore = create<LoomState>((set, get) => ({
   ...initialState,
 
   setMountedFolder: (folder) => set({ mountedFolder: folder }),
@@ -691,6 +730,7 @@ export const useLoomStore = create<LoomState>((set) => ({
   setToast: (msg) => set({ toastMessage: msg }),
   setChartViews: (views) => set({ chartViews: views.slice(0, 30) }),
   addChartView: (name, filePath, fileName, chart, visualOverrides, querySql, snapshotData, snapshotImageDataUrl) => {
+    const id = `cv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     let ok = false;
     set((s) => {
       try {
@@ -700,7 +740,7 @@ export const useLoomStore = create<LoomState>((set) => ({
         return {
           chartViews: [
             {
-              id: `cv-${Date.now()}`,
+              id,
               name: name.trim() || "Chart view",
               filePath,
               fileName,
@@ -717,10 +757,74 @@ export const useLoomStore = create<LoomState>((set) => ({
         return s;
       }
     });
-    return ok;
+    return ok ? id : null;
+  },
+  createStoryDashboard: (filePath, fileName, storyTitle, charts, sampleData) => {
+    if (charts.length === 0) return null;
+    const now = Date.now();
+    const dbId = `db-${now}`;
+    const snapshotData =
+      sampleData?.columns && sampleData?.rows
+        ? {
+            columns: sampleData.columns,
+            types: sampleData.types ?? sampleData.columns.map(() => "VARCHAR"),
+            rows: sampleData.rows,
+            total_rows: sampleData.total_rows ?? sampleData.rows.length,
+          }
+        : undefined;
+    set((s) => {
+      const visualOverrides = s.chartVisualOverrides;
+      const newChartViews: ChartViewItem[] = [];
+      const slots: DashboardSlot[] = [];
+      try {
+        for (const rec of charts) {
+          const id = `cv-${now}-${Math.random().toString(36).slice(2, 8)}`;
+          const chartCopy = JSON.parse(JSON.stringify(rec)) as ChartRecommendation;
+          const overridesCopy = JSON.parse(JSON.stringify(visualOverrides)) as ChartVisualOverrides;
+          newChartViews.push({
+            id,
+            name: (rec.title || `${rec.kind} chart`).trim(),
+            filePath,
+            fileName,
+            chart: chartCopy,
+            visualOverrides: overridesCopy,
+            querySql: null,
+            snapshotData,
+            snapshotImageDataUrl: null,
+          });
+          slots.push({ id: `ds-${now}-${slots.length}`, viewType: "chart", viewId: id });
+        }
+        const isStream = filePath.startsWith("stream://");
+        const layoutTemplate: DashboardLayoutTemplate = isStream
+          ? "stream"
+          : charts.length <= 2 ? "2x1" : charts.length <= 4 ? "2x2" : "3x2";
+        const newDashboard: DashboardItem = {
+          id: dbId,
+          name: storyTitle.trim() || "Story",
+          slots,
+          layoutTemplate,
+          refreshInterval: "manual",
+          lastRefreshedAt: now,
+        };
+        return {
+          chartViews: [...newChartViews, ...s.chartViews].slice(0, 30),
+          dashboards: [newDashboard, ...s.dashboards].slice(0, 20),
+          activeDashboardId: dbId,
+        };
+      } catch {
+        return s;
+      }
+    });
+    return get().activeDashboardId ?? dbId;
   },
   removeChartView: (id) =>
     set((s) => ({ chartViews: s.chartViews.filter((v) => v.id !== id) })),
+  setChartViewSnapshot: (viewId, dataUrl) =>
+    set((s) => ({
+      chartViews: s.chartViews.map((v) =>
+        v.id === viewId ? { ...v, snapshotImageDataUrl: dataUrl ?? null } : v,
+      ),
+    })),
   applyChartView: (id) =>
     set((s) => {
       const v = s.chartViews.find((x) => x.id === id);
@@ -871,5 +975,16 @@ export const useLoomStore = create<LoomState>((set) => ({
       };
     }),
   setPromptDialog: (config) => set({ promptDialog: config }),
+  setStreamStatus: (status) =>
+    set({
+      streamRunning: status.running,
+      streamTotalEvents: status.total_events,
+      streamEventsPerSec: status.events_per_sec,
+      streamBufferRows: status.buffer_rows,
+      streamWikisSeen: status.wikis_seen,
+      streamStartedAt: status.started_at,
+      streamUptimeSecs: status.uptime_secs,
+    }),
+  setStreamActive: (v) => set({ streamActive: v }),
   reset: () => set(initialState),
 }));

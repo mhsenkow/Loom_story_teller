@@ -11,7 +11,9 @@
 
 mod db;
 mod commands;
+mod stream;
 
+use std::sync::Arc;
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -22,9 +24,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let handle = app.handle().clone();
-            // Initialize the database pool on startup
             let db = db::LoomDb::new().expect("Failed to initialize DuckDB");
+            let db = Arc::new(db);
+            let stream_state = Arc::new(stream::StreamState::new());
             handle.manage(db);
+            handle.manage(stream_state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -39,6 +43,12 @@ pub fn run() {
             commands::create_github_issue,
             commands::open_external_url,
             commands::write_text_file,
+            commands::stream_start,
+            commands::stream_stop,
+            commands::stream_status,
+            commands::stream_query,
+            commands::stream_snapshot,
+            commands::stream_clear,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Loom");

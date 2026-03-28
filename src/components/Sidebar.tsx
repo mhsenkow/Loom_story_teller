@@ -11,8 +11,8 @@
 
 import { useRef, useState, useEffect, useMemo } from "react";
 import { useLoomStore, type FileEntry } from "@/lib/store";
-import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset } from "@/lib/tauri";
-import { recommend } from "@/lib/recommendations";
+import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, type StreamStatus } from "@/lib/tauri";
+import { recommend, recommendStreamStory } from "@/lib/recommendations";
 import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
 
@@ -360,6 +360,202 @@ function DatasetPreviewModal({
         </div>
       </div>
     </div>
+  );
+}
+
+// --- Wikipedia Live Stream Section ---
+
+function WikiStreamSection() {
+  const {
+    streamRunning, streamTotalEvents, streamEventsPerSec, streamBufferRows,
+    streamWikisSeen, streamUptimeSecs, streamActive,
+    setStreamStatus, setStreamActive, setSelectedFile, setColumnStats,
+    setSampleRows, setChartRecs, setActiveChart, setVegaSpec, setToast,
+    setViewMode, setPanelTab,
+  } = useLoomStore();
+  const [connecting, setConnecting] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isTauriEnv = isTauri();
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const startPolling = () => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const s = await streamStatus();
+        setStreamStatus(s);
+      } catch { /* ignore */ }
+    }, 2000);
+  };
+
+  const stopPolling = () => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  const handleConnect = async () => {
+    if (!isTauriEnv) {
+      setToast("Wikipedia stream requires the desktop app (Tauri)");
+      return;
+    }
+    setConnecting(true);
+    try {
+      await streamStart();
+      startPolling();
+      setToast("Connected to Wikipedia live stream");
+    } catch (e) {
+      setToast(`Stream failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    stopPolling();
+    try {
+      await streamStop();
+      setStreamStatus({ running: false, total_events: 0, events_per_sec: 0, buffer_rows: streamBufferRows, wikis_seen: streamWikisSeen, started_at: null, uptime_secs: 0 });
+      setToast("Stream stopped");
+    } catch { /* ignore */ }
+  };
+
+  const handleLoadSnapshot = async () => {
+    try {
+      const snap = await streamSnapshot(500);
+      const streamFile = { path: "stream://wiki", name: "Wikipedia Live", extension: "stream", row_count: snap.sample.total_rows, size_bytes: 0 };
+      setSelectedFile(streamFile);
+      setColumnStats(snap.stats);
+      setSampleRows(snap.sample);
+      setStreamActive(true);
+
+      const story = recommendStreamStory(snap.stats, snap.sample);
+      const recs = story.charts;
+      setChartRecs(recs);
+      if (recs.length > 0) {
+        setActiveChart(recs[0]);
+      } else {
+        setActiveChart(null);
+        setVegaSpec(null);
+      }
+      setViewMode("chart");
+      setPanelTab("chart");
+      setToast(`Loaded ${snap.sample.rows.length} stream events`);
+    } catch (e) {
+      setToast(`Failed to load snapshot: ${e instanceof Error ? e.message : e}`);
+    }
+  };
+
+  const handleClear = async () => {
+    try {
+      await streamClear();
+      setStreamStatus({ running: streamRunning, total_events: streamTotalEvents, events_per_sec: streamEventsPerSec, buffer_rows: 0, wikis_seen: 0, started_at: streamRunning ? (useLoomStore.getState().streamStartedAt) : null, uptime_secs: streamUptimeSecs });
+      setToast("Stream buffer cleared");
+    } catch { /* ignore */ }
+  };
+
+  const formatUptime = (secs: number) => {
+    if (secs < 60) return `${Math.round(secs)}s`;
+    if (secs < 3600) return `${Math.floor(secs / 60)}m ${Math.round(secs % 60)}s`;
+    return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+  };
+
+  return (
+    <section>
+      <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
+        Live Streams
+      </h3>
+      <div className="loom-card border border-loom-border rounded-lg p-3 space-y-3">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className={`w-2 h-2 rounded-full ${streamRunning ? "bg-loom-success animate-pulse" : "bg-loom-muted"}`} />
+            <span className="text-xs font-medium text-loom-text">Wikipedia</span>
+          </div>
+          <span className="text-2xs text-loom-muted flex-1">Real-time edits</span>
+          {!streamRunning ? (
+            <button
+              type="button"
+              onClick={handleConnect}
+              disabled={connecting}
+              className="text-2xs py-1 px-2.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50"
+            >
+              {connecting ? "Connecting…" : "Connect"}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleDisconnect}
+              className="text-2xs py-1 px-2.5 rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium"
+            >
+              Stop
+            </button>
+          )}
+        </div>
+
+        {streamRunning && (
+          <div className="grid grid-cols-3 gap-2">
+            <div className="text-center">
+              <p className="text-sm font-semibold text-loom-text font-mono">{streamEventsPerSec.toFixed(1)}</p>
+              <p className="text-2xs text-loom-muted">events/s</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-loom-text font-mono">{streamBufferRows.toLocaleString()}</p>
+              <p className="text-2xs text-loom-muted">buffered</p>
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-semibold text-loom-text font-mono">{streamWikisSeen}</p>
+              <p className="text-2xs text-loom-muted">wikis</p>
+            </div>
+          </div>
+        )}
+
+        {streamRunning && (
+          <div className="flex items-center justify-between">
+            <span className="text-2xs text-loom-muted">{formatUptime(streamUptimeSecs)} uptime · {streamTotalEvents.toLocaleString()} total</span>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={handleClear}
+                className="text-2xs py-0.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
+              >
+                Clear
+              </button>
+              <button
+                type="button"
+                onClick={handleLoadSnapshot}
+                disabled={streamBufferRows === 0}
+                className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50"
+              >
+                Explore
+              </button>
+            </div>
+          </div>
+        )}
+
+        {!streamRunning && streamBufferRows > 0 && (
+          <div className="flex items-center justify-between">
+            <span className="text-2xs text-loom-muted">{streamBufferRows.toLocaleString()} rows in buffer</span>
+            <button
+              type="button"
+              onClick={handleLoadSnapshot}
+              className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium"
+            >
+              Explore
+            </button>
+          </div>
+        )}
+
+        <p className="text-2xs text-loom-muted leading-relaxed">
+          Wikimedia recent-changes stream. Events buffer locally in DuckDB — explore with charts, queries, and dashboards. {!isTauriEnv && <span className="text-loom-warning">Desktop app required.</span>}
+        </p>
+      </div>
+    </section>
   );
 }
 
@@ -719,6 +915,9 @@ function DataRegionView({
             </svg>
           </a>
         </section>
+
+        {/* Wikipedia Live Stream — Scuba-style event analytics */}
+        <WikiStreamSection />
 
         {/* More data sources — links to other open data portals */}
         <section>

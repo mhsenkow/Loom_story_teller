@@ -8,8 +8,8 @@
 "use client";
 
 import { useLoomStore } from "@/lib/store";
-import { queryFile } from "@/lib/tauri";
-import { recommend } from "@/lib/recommendations";
+import { queryFile, streamQuery } from "@/lib/tauri";
+import { recommend, STREAM_SQL_SNIPPETS } from "@/lib/recommendations";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { QueryResultsSkeleton } from "@/components/Skeleton";
@@ -31,7 +31,10 @@ export function QueryView() {
     addQueryView,
   } = useLoomStore();
 
-  const [localSql, setLocalSql] = useState(querySql || "SELECT * FROM loom_active LIMIT 100");
+  const isStream = selectedFile?.path === "stream://wiki";
+  const [localSql, setLocalSql] = useState(
+    querySql || (isStream ? "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT 100" : "SELECT * FROM loom_active LIMIT 100")
+  );
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number; colIndex: number } | null>(null);
   const [schemaOpen, setSchemaOpen] = useState(true);
   const [diffSnapshotId, setDiffSnapshotId] = useState<string | null>(null);
@@ -94,7 +97,10 @@ export function QueryView() {
     setQueryError(null);
     setQuerySql(localSql);
     try {
-      const result = await queryFile(selectedFile.path, localSql, 10000);
+      const isStream = selectedFile.path === "stream://wiki";
+      const result = isStream
+        ? await streamQuery(localSql, 10000)
+        : await queryFile(selectedFile.path, localSql, 10000);
       setQueryResult(result);
       appendQueryHistory(localSql);
       // Sync chart + preview to query result so the chart reflects the query
@@ -188,6 +194,22 @@ export function QueryView() {
               <option value="">Snippets</option>
               {querySnippets.map((s) => (
                 <option key={s.name} value={s.name}>{s.name}</option>
+              ))}
+            </select>
+          )}
+          {selectedFile?.path === "stream://wiki" && (
+            <select
+              className="loom-input text-2xs font-mono max-w-[140px] py-1"
+              value=""
+              onChange={(e) => {
+                const idx = parseInt(e.target.value, 10);
+                if (!isNaN(idx) && STREAM_SQL_SNIPPETS[idx]) setLocalSql(STREAM_SQL_SNIPPETS[idx].sql);
+              }}
+              title="Pre-built stream queries"
+            >
+              <option value="">Stream queries</option>
+              {STREAM_SQL_SNIPPETS.map((s, i) => (
+                <option key={s.name} value={i}>{s.name}</option>
               ))}
             </select>
           )}

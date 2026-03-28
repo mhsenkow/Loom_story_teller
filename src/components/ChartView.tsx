@@ -16,7 +16,8 @@ import { useLoomStore, type SmartResults } from "@/lib/store";
 import { ChartCard } from "@/components/ChartCard";
 import { LoomRenderer, type GPUScatterPoint } from "@/lib/webgpu";
 import { getPaletteColors, getThemeUiColors, hexToRgb01 } from "@/lib/chartPalettes";
-import { getBestSuggestion, getRecommendationReason, createChartRec } from "@/lib/recommendations";
+import { getBestSuggestion, getRecommendationReason, createChartRec, recommendStorySequence, type YAggregateOption } from "@/lib/recommendations";
+import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
 import { suggestChartFromOllama } from "@/lib/ollama";
 
 const DEFAULT_COLORS = ["#6c5ce7", "#00d68f", "#ff6b6b", "#ffd93d", "#00b4d8", "#e77c5c", "#a29bfe", "#74b9ff"];
@@ -52,6 +53,7 @@ export function ChartView() {
     selectedRowIndices,
     rulerPins, setRulerPins,
     addChartView, setPromptDialog, querySql,
+    createStoryDashboard, setDashboardsExpanded,
   } = useLoomStore();
 
   const colors = useMemo(
@@ -104,7 +106,12 @@ export function ChartView() {
     themeText: themeUi.text,
     themeMuted: themeUi.muted,
     themeBorder: themeUi.border,
-  }), [colors, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium]);
+    yAggregate: (() => {
+      if (!activeChart) return undefined;
+      if (!activeChart.yField) return "count" as YAggregateOption;
+      return activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum");
+    })(),
+  }), [colors, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart?.yField, activeChart?.yAggregate, activeChart?.kind]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvas2DRef = useRef<HTMLCanvasElement>(null);
@@ -821,17 +828,21 @@ export function ChartView() {
 
         let barEntries: [string, number][] | undefined;
         if (activeChart.kind === "bar") {
-          const groups = new Map<string, number>();
-          const isCount = yIdx < 0;
+          const barAgg: YAggregateOption = yIdx < 0 ? "count" : (opts.yAggregate ?? "sum");
+          const groups = new Map<string, number[]>();
           for (const r of rows) {
             const k = String(r[xIdx]);
-            if (isCount) groups.set(k, (groups.get(k) ?? 0) + 1);
+            if (!groups.has(k)) groups.set(k, []);
+            if (yIdx < 0) groups.get(k)!.push(1);
             else {
               const v = Number(r[yIdx]);
-              if (!isNaN(v)) groups.set(k, (groups.get(k) ?? 0) + v);
+              if (!isNaN(v)) groups.get(k)!.push(v);
             }
           }
-          barEntries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
+          barEntries = [...groups.entries()]
+            .map(([label, vals]) => [label, aggregateValues(vals, barAgg)] as [string, number])
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 20);
         }
 
         switch (activeChart.kind) {
@@ -1023,6 +1034,40 @@ export function ChartView() {
           Suggest chart
         </button>
       )}
+      <button
+        type="button"
+        onClick={async () => {
+          if (!selectedFile) {
+            setToast("Select a file first");
+            return;
+          }
+          const story = recommendStorySequence(columnStats, sampleRows, selectedFile.name);
+          if (story.charts.length === 0) {
+            setToast("Not enough data variety to build a story");
+            return;
+          }
+          const id = createStoryDashboard(selectedFile.path, selectedFile.name, story.title, story.charts, sampleRows);
+          if (!id) {
+            setToast("Could not create story dashboard");
+            return;
+          }
+          const dashboard = useLoomStore.getState().dashboards.find((d) => d.id === id);
+          const chartIds = dashboard?.slots.filter((s) => s.viewType === "chart").map((s) => s.viewId) ?? [];
+          if (chartIds.length > 0) {
+            setToast("Capturing chart previews…");
+            await captureStoryDashboardPreviews(id);
+          } else {
+            useLoomStore.getState().setDashboardsExpanded(true);
+          }
+          setPanelTab("dashboards");
+          setToast(`Created "${story.title}" with ${story.charts.length} charts`);
+        }}
+        disabled={!selectedFile || chartRecs.length === 0}
+        className="text-2xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-accent transition-colors font-medium shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+        title="Create a dashboard of charts that tell a story (trend → breakdown → distribution → relationship)"
+      >
+        Tell a story
+      </button>
       <button
         type="button"
         onClick={handleSuggestWithAI}
@@ -1449,6 +1494,8 @@ export interface ChartRenderOpts {
   themeText?: string;
   themeMuted?: string;
   themeBorder?: string;
+  /** Y aggregation for bar/line/area/pie (canvas renderer uses this; Vega spec has it too). */
+  yAggregate?: YAggregateOption | null;
 }
 
 // --- Shape Drawing Helpers ---
@@ -1936,6 +1983,16 @@ function renderFullScatter(
   drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
 }
 
+function aggregateValues(values: number[], agg: YAggregateOption): number {
+  if (values.length === 0) return 0;
+  if (agg === "count") return values.length;
+  if (agg === "sum") return values.reduce((a, b) => a + b, 0);
+  if (agg === "mean") return values.reduce((a, b) => a + b, 0) / values.length;
+  if (agg === "min") return Math.min(...values);
+  if (agg === "max") return Math.max(...values);
+  return values.reduce((a, b) => a + b, 0);
+}
+
 function renderFullBar(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.85;
@@ -1943,19 +2000,21 @@ function renderFullBar(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
   const showDataLabels = opts?.showDataLabels ?? false;
   const fontFamily = opts?.fontFamily ?? "Inter";
   const axisLabelColor = opts?.axisLabelColor ?? "#6b6b78";
-  const groups = new Map<string, number>();
-  const isCount = yi < 0;
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+  const groups = new Map<string, number[]>();
   for (const r of rows) {
     const k = String(r[xi]);
-    if (isCount) {
-      groups.set(k, (groups.get(k) ?? 0) + 1);
-    } else {
+    if (!groups.has(k)) groups.set(k, []);
+    if (yi < 0) groups.get(k)!.push(1);
+    else {
       const v = Number(r[yi]);
-      if (isNaN(v)) continue;
-      groups.set(k, (groups.get(k) ?? 0) + v);
+      if (!isNaN(v)) groups.get(k)!.push(v);
     }
   }
-  const entries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
+  const entries = [...groups.entries()]
+    .map(([label, vals]) => [label, aggregateValues(vals, agg)] as [string, number])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20);
   if (entries.length === 0) return;
   const maxVal = Math.max(...entries.map(e => e[1]), 1);
   const barW = Math.max(4, (w - 2 * pad) / entries.length - 4);
@@ -2014,35 +2073,52 @@ function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.8;
   const lineW = opts?.lineWidth ?? 1.5;
-  const [yMin, yMax] = numRange(rows, yi);
+  const agg = opts?.yAggregate ?? "mean";
   const sorted = [...rows].sort((a, b) => String(a[xi]).localeCompare(String(b[xi])));
+
+  const aggregateByX = (gRows: unknown[][]): { xKey: string; yVal: number }[] => {
+    const byX = new Map<string, number[]>();
+    for (const r of gRows) {
+      const xKey = String(r[xi]);
+      if (!byX.has(xKey)) byX.set(xKey, []);
+      const v = Number(r[yi]);
+      if (!isNaN(v)) byX.get(xKey)!.push(v);
+    }
+    const xKeys = [...byX.keys()].sort((a, b) => String(a).localeCompare(String(b)));
+    return xKeys.map((xKey) => ({ xKey, yVal: aggregateValues(byX.get(xKey) ?? [], agg) }));
+  };
+
+  const series = aggregateByX(sorted);
+  if (series.length === 0) return;
+  const yMin = Math.min(...series.map((s) => s.yVal));
+  const yMax = Math.max(...series.map((s) => s.yVal));
+  const yRange = yMax - yMin || 1;
 
   drawGridLines(ctx, 0, 1, yMin, yMax, w, h, pad, opts);
   applyLineDash(ctx, opts?.lineStrokeStyle);
 
-  const toPoints = (gRows: unknown[][]) =>
-    gRows.map((r, i) => {
-      const y = Number(r[yi]);
-      if (isNaN(y)) return null;
-      const sx = pad + (i / Math.max(gRows.length - 1, 1)) * (w - 2 * pad);
-      const sy = h - pad - ((y - yMin) / (yMax - yMin)) * (h - 2 * pad);
-      return { x: sx, y: sy };
-    }).filter((p): p is { x: number; y: number } => p !== null);
+  const toPoints = (s: { xKey: string; yVal: number }[]) =>
+    s.map((p, i) => ({
+      x: pad + (i / Math.max(s.length - 1, 1)) * (w - 2 * pad),
+      y: h - pad - ((p.yVal - yMin) / yRange) * (h - 2 * pad),
+    }));
 
   if (ci >= 0) {
-    const groups = new Map<string, typeof sorted>();
+    const colorGroups = new Map<string, unknown[][]>();
     for (const r of sorted) {
       const k = String(r[ci]);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k)!.push(r);
+      if (!colorGroups.has(k)) colorGroups.set(k, []);
+      colorGroups.get(k)!.push(r);
     }
     let gi = 0;
-    for (const [, gRows] of groups) {
+    for (const [, gRows] of colorGroups) {
+      const s = aggregateByX(gRows);
+      if (s.length === 0) continue;
       ctx.strokeStyle = cols[gi++ % cols.length];
       ctx.lineWidth = lineW;
       ctx.globalAlpha = alpha;
       ctx.beginPath();
-      const pts = toPoints(gRows);
+      const pts = toPoints(s);
       if (opts?.lineCurveSmooth && pts.length >= 2) {
         drawSmoothLine(ctx, pts);
       } else {
@@ -2055,7 +2131,7 @@ function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
     ctx.lineWidth = lineW;
     ctx.globalAlpha = alpha;
     ctx.beginPath();
-    const pts = toPoints(sorted);
+    const pts = toPoints(series);
     if (opts?.lineCurveSmooth && pts.length >= 2) {
       drawSmoothLine(ctx, pts);
     } else {
@@ -2216,21 +2292,30 @@ function renderFullBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
 function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.75;
+  const agg = opts?.yAggregate ?? "sum";
   const sorted = [...rows].sort((a, b) => String(a[xi]).localeCompare(String(b[xi])));
   const plotH = h - 2 * pad - 20;
   const plotW = w - 2 * pad;
   let maxStack = 0;
 
   if (ci >= 0) {
-    const xToGroupSums = new Map<string, Map<string, number>>();
+    const xToGroupVals = new Map<string, Map<string, number[]>>();
     for (const r of sorted) {
       const xKey = String(r[xi]);
       const g = String(r[ci]);
       const v = Number(r[yi]);
       if (isNaN(v)) continue;
-      if (!xToGroupSums.has(xKey)) xToGroupSums.set(xKey, new Map());
-      const gm = xToGroupSums.get(xKey)!;
-      gm.set(g, (gm.get(g) ?? 0) + v);
+      if (!xToGroupVals.has(xKey)) xToGroupVals.set(xKey, new Map());
+      const gm = xToGroupVals.get(xKey)!;
+      if (!gm.has(g)) gm.set(g, []);
+      gm.get(g)!.push(v);
+    }
+    const xToGroupSums = new Map<string, Map<string, number>>();
+    for (const [xKey, groupMap] of xToGroupVals) {
+      xToGroupSums.set(xKey, new Map());
+      for (const [g, vals] of groupMap) {
+        xToGroupSums.get(xKey)!.set(g, aggregateValues(vals, agg));
+      }
     }
     const xKeys = [...xToGroupSums.keys()].sort((a, b) => String(a).localeCompare(String(b)));
     const groupKeys = [...new Set(sorted.map(r => String(r[ci])))];
@@ -2268,15 +2353,25 @@ function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
       base = top;
     }
   } else {
-    const [yMin, yMax] = numRange(rows, yi);
+    const byX = new Map<string, number[]>();
+    for (const r of sorted) {
+      const xKey = String(r[xi]);
+      if (!byX.has(xKey)) byX.set(xKey, []);
+      const v = Number(r[yi]);
+      if (!isNaN(v)) byX.get(xKey)!.push(v);
+    }
+    const xKeys = [...byX.keys()].sort((a, b) => String(a).localeCompare(String(b)));
+    const series = xKeys.map((xKey) => aggregateValues(byX.get(xKey) ?? [], agg));
+    if (series.length === 0) return;
+    const yMin = Math.min(...series);
+    const yMax = Math.max(...series);
     const range = yMax - yMin || 1;
     ctx.fillStyle = cols[0];
     ctx.globalAlpha = alpha;
     ctx.beginPath();
-    sorted.forEach((r, i) => {
-      const y = Number(r[yi]);
-      if (isNaN(y)) return;
-      const sx = pad + (i / Math.max(sorted.length - 1, 1)) * plotW;
+    xKeys.forEach((_, i) => {
+      const y = series[i]!;
+      const sx = pad + (i / Math.max(xKeys.length - 1, 1)) * plotW;
       const sy = h - pad - 20 - ((y - yMin) / range) * plotH;
       i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
     });
@@ -2297,13 +2392,17 @@ function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
 function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.9;
-  const groups = new Map<string, number>();
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+  const groups = new Map<string, number[]>();
   for (const r of rows) {
     const k = String(r[xi]);
-    const v = yi >= 0 ? Number(r[yi]) : 1;
-    groups.set(k, (groups.get(k) ?? 0) + (isNaN(v) ? 1 : v));
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(yi >= 0 ? Number(r[yi]) : 1);
   }
-  const entries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const entries = [...groups.entries()]
+    .map(([label, vals]) => [label, aggregateValues(vals.filter((v) => !isNaN(v)), agg) || (yi < 0 ? vals.length : 0)] as [string, number])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 12);
   const total = entries.reduce((s, [, v]) => s + v, 0);
   if (total === 0) return;
 

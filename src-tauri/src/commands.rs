@@ -10,9 +10,11 @@
 // =================================================================
 
 use crate::db::{ColumnInfo, FileEntry, LoomDb, QueryResult};
+use crate::stream::StreamState;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
+use std::sync::Arc;
 use tauri::State;
 
 #[derive(Serialize)]
@@ -46,7 +48,7 @@ pub struct DataGovDataset {
 /// Returns a list of files with names, paths, and row counts.
 #[tauri::command]
 pub async fn scan_folder(
-    db: State<'_, LoomDb>,
+    db: State<'_, Arc<LoomDb>>,
     folder_path: String,
 ) -> Result<Vec<FileEntry>, String> {
     let path = Path::new(&folder_path);
@@ -63,7 +65,7 @@ pub async fn scan_folder(
 /// The file is exposed as the table "loom_active" in the query.
 #[tauri::command]
 pub async fn query_file(
-    db: State<'_, LoomDb>,
+    db: State<'_, Arc<LoomDb>>,
     file_path: String,
     sql: String,
     limit: Option<u32>,
@@ -74,7 +76,7 @@ pub async fn query_file(
 /// Retrieve column-level stats (type, nulls, distinct, min, max).
 #[tauri::command]
 pub async fn get_column_stats(
-    db: State<'_, LoomDb>,
+    db: State<'_, Arc<LoomDb>>,
     file_path: String,
 ) -> Result<Vec<ColumnInfo>, String> {
     db.get_column_stats(&file_path)
@@ -83,7 +85,7 @@ pub async fn get_column_stats(
 /// Fetch a small sample of rows from a file for the preview pane.
 #[tauri::command]
 pub async fn get_sample_rows(
-    db: State<'_, LoomDb>,
+    db: State<'_, Arc<LoomDb>>,
     file_path: String,
     limit: Option<u32>,
 ) -> Result<QueryResult, String> {
@@ -93,7 +95,7 @@ pub async fn get_sample_rows(
 /// Combined stats + sample in one call — avoids Mutex contention.
 #[tauri::command]
 pub async fn inspect_file(
-    db: State<'_, LoomDb>,
+    db: State<'_, Arc<LoomDb>>,
     file_path: String,
     limit: Option<u32>,
 ) -> Result<InspectResult, String> {
@@ -476,5 +478,70 @@ pub async fn open_external_url(url: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("Task join: {}", e))?
+}
+
+// =================================================================
+// Wikipedia Live Stream Commands
+// =================================================================
+
+/// Start the Wikimedia recent-changes SSE stream.
+#[tauri::command]
+pub async fn stream_start(
+    db: State<'_, Arc<LoomDb>>,
+    stream: State<'_, Arc<StreamState>>,
+) -> Result<(), String> {
+    crate::stream::start_stream(Arc::clone(&*db), Arc::clone(&*stream)).await
+}
+
+/// Stop the live stream.
+#[tauri::command]
+pub async fn stream_stop(
+    stream: State<'_, Arc<StreamState>>,
+) -> Result<(), String> {
+    crate::stream::stop_stream(Arc::clone(&*stream)).await
+}
+
+/// Get the current stream status (running, event count, eps, buffer size).
+#[tauri::command]
+pub async fn stream_status(
+    db: State<'_, Arc<LoomDb>>,
+    stream: State<'_, Arc<StreamState>>,
+) -> Result<crate::stream::StreamStatus, String> {
+    Ok(stream.status(&*db).await)
+}
+
+/// Query the stream buffer table (wiki_stream) with arbitrary SQL.
+#[tauri::command]
+pub async fn stream_query(
+    db: State<'_, Arc<LoomDb>>,
+    sql: String,
+    limit: Option<u32>,
+) -> Result<QueryResult, String> {
+    crate::stream::query_stream(&*db, &sql, limit.unwrap_or(5000))
+}
+
+/// Get a snapshot: column stats + recent rows from wiki_stream.
+#[tauri::command]
+pub async fn stream_snapshot(
+    db: State<'_, Arc<LoomDb>>,
+    limit: Option<u32>,
+) -> Result<InspectResult, String> {
+    let stats = crate::stream::stream_column_stats(&*db)?;
+    let sample = crate::stream::query_stream(
+        &*db,
+        "SELECT * FROM wiki_stream ORDER BY ts DESC",
+        limit.unwrap_or(500),
+    )?;
+    Ok(InspectResult { stats, sample })
+}
+
+/// Clear the stream buffer table.
+#[tauri::command]
+pub async fn stream_clear(
+    db: State<'_, Arc<LoomDb>>,
+) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute_batch("DELETE FROM wiki_stream")
+        .map_err(|e| e.to_string())
 }
 
