@@ -16,9 +16,26 @@ import { useLoomStore, type SmartResults } from "@/lib/store";
 import { ChartCard } from "@/components/ChartCard";
 import { LoomRenderer, type GPUScatterPoint } from "@/lib/webgpu";
 import { getPaletteColors, getThemeUiColors, hexToRgb01 } from "@/lib/chartPalettes";
-import { getBestSuggestion, getRecommendationReason, createChartRec, recommendStorySequence, type YAggregateOption } from "@/lib/recommendations";
+import {
+  getBestSuggestion,
+  getRecommendationReason,
+  createChartRec,
+  recommendStorySequence,
+  recommend,
+  tryBuildRandomChartRec,
+  type YAggregateOption,
+} from "@/lib/recommendations";
+import { getChartRenderIssue, formatChartAggregationSummary } from "@/lib/chartSupport";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
 import { suggestChartFromOllama } from "@/lib/ollama";
+import {
+  allowedRowIndices,
+  pickCanvasTooltipRowIndex,
+  projectRowForTooltip,
+  resolveTooltipFieldNames,
+  rowMatchesTooltipLink,
+} from "@/lib/chartTooltip";
+import { buildBarFacetGrid, type BarFacetHitPayload, type Canvas2DHitContext } from "@/lib/chartTooltip";
 
 const DEFAULT_COLORS = ["#6c5ce7", "#00d68f", "#ff6b6b", "#ffd93d", "#00b4d8", "#e77c5c", "#a29bfe", "#74b9ff"];
 
@@ -44,7 +61,8 @@ export function ChartView() {
     chartVisualOverrides, aiSuggestionReason, chartTitleOverrides, setChartTitleOverride,
     pngExportHandler, setPngExportHandler, setSvgExportHandler, vegaSpec, smartResults, appSettings,
     setSelectedRowIndices, setToast, chartAnnotations,
-    hoveredRowIndex, setHoveredRowIndex,
+    setHoveredRowIndex,
+    tooltipLink, setTooltipLink,
     pinnedTooltips, addPinnedTooltip, removePinnedTooltip,
     customRefLines, chartInteractionMode, setChartInteractionMode,
     crosshairPos, setCrosshairPos,
@@ -111,7 +129,35 @@ export function ChartView() {
       if (!activeChart.yField) return "count" as YAggregateOption;
       return activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum");
     })(),
-  }), [colors, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart?.yField, activeChart?.yAggregate, activeChart?.kind]);
+    barStackMode: activeChart?.kind === "bar" ? barStackMode : undefined,
+  }), [colors, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart?.yField, activeChart?.yAggregate, activeChart?.kind, barStackMode]);
+
+  const renderIssue = useMemo(
+    () => getChartRenderIssue(activeChart, sampleRows),
+    [activeChart, sampleRows],
+  );
+
+  const sampleHonestyLabel = useMemo(() => {
+    if (!sampleRows) return "";
+    const n = sampleRows.rows.length;
+    const t = sampleRows.total_rows ?? n;
+    if (t > n) return `${n.toLocaleString()} / ${t.toLocaleString()} rows`;
+    return `${n.toLocaleString()} rows`;
+  }, [sampleRows]);
+
+  const aggregationHint = useMemo(
+    () => (activeChart ? formatChartAggregationSummary(activeChart) : ""),
+    [activeChart],
+  );
+
+  const applyWorkingChart = useCallback(() => {
+    const stats = columnStats ?? [];
+    if (!stats.length) return;
+    const tn = selectedFile?.name?.replace(/\.\w+$/, "") ?? "data";
+    const first = recommend(stats, sampleRows ?? null, selectedFile?.name ?? `${tn}.csv`)[0];
+    const rec = first ?? tryBuildRandomChartRec(stats, tn);
+    if (rec) setActiveChart(rec);
+  }, [columnStats, selectedFile, setActiveChart]);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvas2DRef = useRef<HTMLCanvasElement>(null);
@@ -146,14 +192,20 @@ export function ChartView() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [scatterTooltip, setScatterTooltip] = useState<{ clientX: number; clientY: number; rowIndex: number; row: (string | number | boolean | null)[]; columns: string[] } | null>(null);
-  const [chartTooltip, setChartTooltip] = useState<{ clientX: number; clientY: number; row: (string | number | boolean | null)[]; columns: string[] } | null>(null);
+  const [chartTooltip, setChartTooltip] = useState<{
+    clientX: number;
+    clientY: number;
+    rowIndex: number;
+    row: (string | number | boolean | null)[];
+    columns: string[];
+  } | null>(null);
   const [scatterView, setScatterView] = useState({ scale: 1, panX: 0, panY: 0 });
   const [brushRect, setBrushRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const brushStartRef = useRef<{ x: number; y: number } | null>(null);
   const brushRectRef = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   brushRectRef.current = brushRect;
   const scatterDataRef = useRef<{ points: { x: number; y: number }[]; rowIndices: number[]; xMin: number; xMax: number; yMin: number; yMax: number; pad: number; w: number; h: number; columns: string[] } | null>(null);
-  const canvas2DHitRef = useRef<{ kind: string; rows: (string | number | boolean | null)[][]; columns: string[]; pad: number; w: number; h: number; xIdx: number; yIdx: number; barEntries?: [string, number][] } | null>(null);
+  const canvas2DHitRef = useRef<Canvas2DHitContext | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleEditValue, setTitleEditValue] = useState("");
   const [showTitleEditButton, setShowTitleEditButton] = useState(false);
@@ -260,6 +312,41 @@ export function ChartView() {
     }
     setRefreshKey((k) => k + 1);
   }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (e.key !== "l" && e.key !== "L") return;
+      const el = e.target as HTMLElement;
+      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) return;
+
+      if (tooltipLink) {
+        e.preventDefault();
+        setTooltipLink(null);
+        return;
+      }
+
+      const chart = activeChart;
+      const rows = sampleRows?.rows;
+      const cols = sampleRows?.columns;
+      if (!chart || !rows || !cols) return;
+
+      const tt = scatterTooltip ?? chartTooltip;
+      if (!tt) return;
+
+      const keyField = chart.tooltipKeyField ?? chart.xField;
+      const kidx = cols.indexOf(keyField);
+      if (kidx < 0) return;
+
+      const rawRow = rows[tt.rowIndex];
+      if (!rawRow) return;
+
+      e.preventDefault();
+      setTooltipLink({ field: keyField, value: String(rawRow[kidx] ?? "") });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [tooltipLink, setTooltipLink, activeChart, sampleRows, scatterTooltip, chartTooltip]);
 
   // Initialize WebGPU on its own canvas (a canvas can only have one context: webgpu OR 2d)
   useEffect(() => {
@@ -371,26 +458,34 @@ export function ChartView() {
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!activeChart || activeChart.kind !== "scatter") return;
       const data = scatterDataRef.current;
-      if (!data) {
+      const allCols = sampleRowsRef.current?.columns;
+      const rows = sampleRowsRef.current?.rows;
+      if (!data || !allCols || !rows) {
         setScatterTooltip(null);
+        setHoveredRowIndex(null);
         return;
       }
+      const link = useLoomStore.getState().tooltipLink;
       const rect = (e.target as HTMLDivElement).getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
-      const { xMin, xMax, yMin, yMax, pad, w, h, points, rowIndices, columns } = data;
+      const { xMin, xMax, yMin, yMax, pad, w, h, points, rowIndices } = data;
       const chartW = w - 2 * pad;
       const chartH = h - 2 * pad;
       if (chartW <= 0 || chartH <= 0) return;
-      const dataX = xMin + ((sx - pad) / chartW) * (xMax - xMin);
-      const dataY = yMax - ((sy - pad) / chartH) * (yMax - yMin);
+      const scaleX = w / rect.width;
+      const scaleY = h / rect.height;
+      const px = sx * scaleX;
+      const py = sy * scaleY;
       let bestIdx = -1;
       let bestDist = 24;
       for (let i = 0; i < points.length; i++) {
+        const rowIndex = rowIndices[i]!;
+        if (link && !rowMatchesTooltipLink(allCols, rows[rowIndex]!, link)) continue;
         const p = points[i];
-        const px = pad + ((p.x - xMin) / (xMax - xMin)) * chartW;
-        const py = pad + (1 - (p.y - yMin) / (yMax - yMin)) * chartH;
-        const d = Math.hypot(sx - px, sy - py);
+        const ppx = pad + ((p.x - xMin) / (xMax - xMin)) * chartW;
+        const ppy = pad + (1 - (p.y - yMin) / (yMax - yMin)) * chartH;
+        const d = Math.hypot(px - ppx, py - ppy);
         if (d < bestDist) {
           bestDist = d;
           bestIdx = i;
@@ -398,22 +493,41 @@ export function ChartView() {
       }
       if (bestIdx >= 0) {
         const rowIndex = rowIndices[bestIdx];
-        const rows = sampleRowsRef.current?.rows;
-        const row = rows?.[rowIndex];
-        if (row)
-          setScatterTooltip({ clientX: e.clientX, clientY: e.clientY, rowIndex, row, columns });
-        else setScatterTooltip(null);
-      } else setScatterTooltip(null);
+        const rawRow = rows[rowIndex];
+        if (rawRow) {
+          const names = resolveTooltipFieldNames(activeChart, allCols);
+          const proj = projectRowForTooltip(allCols, rawRow, names);
+          setScatterTooltip({
+            clientX: e.clientX,
+            clientY: e.clientY,
+            rowIndex,
+            row: proj.row,
+            columns: proj.columns,
+          });
+          setHoveredRowIndex(rowIndex);
+        } else {
+          setScatterTooltip(null);
+          setHoveredRowIndex(null);
+        }
+      } else {
+        setScatterTooltip(null);
+        setHoveredRowIndex(null);
+      }
     },
-    [activeChart]
+    [activeChart, setHoveredRowIndex],
   );
 
-  const handleScatterPointerLeave = useCallback(() => setScatterTooltip(null), []);
+  const handleScatterPointerLeave = useCallback(() => {
+    setScatterTooltip(null);
+    setHoveredRowIndex(null);
+  }, [setHoveredRowIndex]);
 
   const handleCanvas2DPointerMove = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       const hit = canvas2DHitRef.current;
-      if (!hit || !containerRef.current) return;
+      const ac = activeChart;
+      const sr = sampleRowsRef.current;
+      if (!hit || !containerRef.current || !ac || !sr?.rows.length) return;
       const rect = containerRef.current.getBoundingClientRect();
       const relX = e.clientX - rect.left;
       const relY = e.clientY - rect.top;
@@ -421,55 +535,38 @@ export function ChartView() {
       const scaleY = hit.h / rect.height;
       const chartX = relX * scaleX;
       const chartY = relY * scaleY;
-      const { pad, w, h, rows, columns, xIdx, yIdx } = hit;
-      const chartWidth = w - 2 * pad;
-      const chartHeight = h - 2 * pad;
+      const { pad, w, h } = hit;
       if (chartX < pad || chartX > w - pad || chartY < pad || chartY > h - pad) {
         setChartTooltip(null);
+        setHoveredRowIndex(null);
         return;
       }
-      if (hit.kind === "bar" && hit.barEntries?.length) {
-        const t = (chartX - pad) / chartWidth;
-        const barIndex = Math.floor(t * hit.barEntries.length);
-        const idx = Math.max(0, Math.min(barIndex, hit.barEntries.length - 1));
-        const [label, value] = hit.barEntries[idx];
-        setChartTooltip({
-          clientX: e.clientX,
-          clientY: e.clientY,
-          row: [label, value],
-          columns: [activeChart?.xField ?? "x", activeChart?.yField ?? "value"],
-        });
+      const link = useLoomStore.getState().tooltipLink;
+      const allowed = allowedRowIndices(sr.rows, sr.columns, link);
+      const rowIdx = pickCanvasTooltipRowIndex(hit, chartX, chartY, allowed);
+      if (rowIdx == null) {
+        setChartTooltip(null);
+        setHoveredRowIndex(null);
         return;
       }
-      if (hit.kind === "line" && rows.length > 0) {
-        let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
-        for (const r of rows) {
-          const x = Number(r[xIdx]);
-          const y = Number(r[yIdx]);
-          if (!isNaN(x)) { xMin = Math.min(xMin, x); xMax = Math.max(xMax, x); }
-          if (!isNaN(y)) { yMin = Math.min(yMin, y); yMax = Math.max(yMax, y); }
-        }
-        if (xMin === xMax) xMax = xMin + 1;
-        if (yMin === yMax) yMax = yMin + 1;
-        const dataX = ((chartX - pad) / chartWidth) * (xMax - xMin) + xMin;
-        const dataY = yMax - ((chartY - pad) / chartHeight) * (yMax - yMin);
-        let bestIdx = 0;
-        let bestDist = Infinity;
-        rows.forEach((r, i) => {
-          const x = Number(r[xIdx]);
-          const y = Number(r[yIdx]);
-          if (isNaN(x) || isNaN(y)) return;
-          const d = (x - dataX) ** 2 + (y - dataY) ** 2;
-          if (d < bestDist) { bestDist = d; bestIdx = i; }
-        });
-        setChartTooltip({ clientX: e.clientX, clientY: e.clientY, row: rows[bestIdx], columns });
-        return;
-      }
-      setChartTooltip(null);
+      const rawRow = sr.rows[rowIdx]!;
+      const names = resolveTooltipFieldNames(ac, sr.columns);
+      const proj = projectRowForTooltip(sr.columns, rawRow, names);
+      setChartTooltip({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        rowIndex: rowIdx,
+        row: proj.row,
+        columns: proj.columns,
+      });
+      setHoveredRowIndex(rowIdx);
     },
-    [activeChart]
+    [activeChart, setHoveredRowIndex],
   );
-  const handleCanvas2DPointerLeave = useCallback(() => setChartTooltip(null), []);
+  const handleCanvas2DPointerLeave = useCallback(() => {
+    setChartTooltip(null);
+    setHoveredRowIndex(null);
+  }, [setHoveredRowIndex]);
 
   const panStartRef = useRef<{ x: number; y: number } | null>(null);
   const handleScatterWheel = useCallback(
@@ -700,6 +797,7 @@ export function ChartView() {
 
     const useWebGPU = useWebGPUScatter;
     if (useWebGPU) {
+      canvas2DHitRef.current = null;
       // Scatter: clear 2D canvas to theme bg so it never shows through, then draw with WebGPU
       const canvas2D = canvas2DRef.current;
       if (canvas2D) {
@@ -829,23 +927,31 @@ export function ChartView() {
           }
         }
 
+        const barColorIdx = cIdx >= 0 && cIdx !== xIdx ? cIdx : -1;
         let barEntries: [string, number][] | undefined;
+        let barFacetPayload: ReturnType<typeof buildBarFacetGrid> | undefined;
         if (activeChart.kind === "bar") {
           const barAgg: YAggregateOption = yIdx < 0 ? "count" : (opts.yAggregate ?? "sum");
-          const groups = new Map<string, number[]>();
-          for (const r of rows) {
-            const k = String(r[xIdx]);
-            if (!groups.has(k)) groups.set(k, []);
-            if (yIdx < 0) groups.get(k)!.push(1);
-            else {
-              const v = Number(r[yIdx]);
-              if (!isNaN(v)) groups.get(k)!.push(v);
-            }
+          const stackM = opts.barStackMode ?? "grouped";
+          if (barColorIdx >= 0) {
+            barFacetPayload = buildBarFacetGrid(rows, xIdx, yIdx, barColorIdx, barAgg, stackM) ?? undefined;
           }
-          barEntries = [...groups.entries()]
-            .map(([label, vals]) => [label, aggregateValues(vals, barAgg)] as [string, number])
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 20);
+          if (!barFacetPayload) {
+            const groups = new Map<string, number[]>();
+            for (const r of rows) {
+              const k = String(r[xIdx]);
+              if (!groups.has(k)) groups.set(k, []);
+              if (yIdx < 0) groups.get(k)!.push(1);
+              else {
+                const v = Number(r[yIdx]);
+                if (!isNaN(v)) groups.get(k)!.push(v);
+              }
+            }
+            barEntries = [...groups.entries()]
+              .map(([label, vals]) => [label, aggregateValues(vals, barAgg)] as [string, number])
+              .sort((a, b) => b[1] - a[1])
+              .slice(0, 20);
+          }
         }
 
         switch (activeChart.kind) {
@@ -856,7 +962,7 @@ export function ChartView() {
               opacityIdx,
             }, smartResults?.clusters?.rowToCluster ?? undefined, scatterViewBounds);
             break;
-          case "bar": renderFullBar(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "bar": renderFullBar(ctx, rows, xIdx, yIdx, barColorIdx, w, h, pad, opts, barFacetPayload); break;
           case "histogram": renderFullHistogram(ctx, rows, xIdx, w, h, pad, opts); break;
           case "line": renderFullLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "heatmap": renderFullHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
@@ -866,22 +972,45 @@ export function ChartView() {
           case "box": renderFullBox(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
           case "area": renderFullArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "pie": renderFullPie(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "bubble": renderFullBubble(ctx, rows, cols, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, opts); break;
+          case "violin": renderFullViolin(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "radar": renderFullRadar(ctx, rows, cols, xIdx, yIdx, cIdx, w, h, pad, opts); break;
+          case "waterfall": renderFullWaterfall(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "lollipop": renderFullLollipop(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
+          case "treemap": renderFullTreemap(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
+          case "sunburst": renderFullSunburst(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
+          case "choropleth": renderFullChoropleth(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "forceBubble": renderFullForceBubble(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
+          case "sankey": renderFullSankey(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
         }
 
-        if (activeChart.kind === "bar" && barEntries?.length) {
-          canvas2DHitRef.current = { kind: "bar", rows, columns: cols, pad, w, h, xIdx, yIdx, barEntries };
-        } else if (activeChart.kind === "line" && rows.length > 0) {
-          canvas2DHitRef.current = { kind: "line", rows, columns: cols, pad, w, h, xIdx, yIdx };
-        } else {
-          canvas2DHitRef.current = null;
-        }
+        const baseHit: Canvas2DHitContext = {
+          kind: activeChart.kind,
+          rows,
+          columns: cols,
+          pad,
+          w,
+          h,
+          xIdx,
+          yIdx,
+          cIdx: cIdx >= 0 ? cIdx : -1,
+          sizeIdx: sizeIdx >= 0 ? sizeIdx : -1,
+          yAggregate: opts.yAggregate ?? undefined,
+          ...(activeChart.kind === "bar" && barFacetPayload ? { barFacet: barFacetPayload } : {}),
+          ...(activeChart.kind === "bar" && !barFacetPayload && barEntries?.length ? { barEntries } : {}),
+        };
+        canvas2DHitRef.current = baseHit;
 
         const catMap = new Map<string, number>();
         if (cIdx >= 0) {
-          let next = 0;
-          for (const r of rows) {
-            const k = String(r[cIdx]);
-            if (!catMap.has(k)) catMap.set(k, next++);
+          if (activeChart.kind === "bar" && barFacetPayload) {
+            barFacetPayload.subLabels.forEach((lab, i) => catMap.set(lab, i));
+          } else {
+            let next = 0;
+            for (const r of rows) {
+              const k = String(r[cIdx]);
+              if (!catMap.has(k)) catMap.set(k, next++);
+            }
           }
         }
         if (opts.legendPosition && opts.legendPosition !== "none") {
@@ -1265,8 +1394,10 @@ export function ChartView() {
                   Save view
                 </button>
               )}
-              <span className="loom-badge text-2xs">{useWebGPUScatter ? "GPU" : "2D"}</span>
-              <span className="loom-badge text-2xs">{sampleRows?.rows.length.toLocaleString() ?? 0}r</span>
+              <span className="loom-badge text-2xs" title={aggregationHint || undefined}>{useWebGPUScatter ? "GPU" : "2D"}</span>
+              <span className="loom-badge text-2xs max-w-[200px] truncate" title={`${sampleHonestyLabel}${aggregationHint ? ` · ${aggregationHint}` : ""}`}>
+                {sampleHonestyLabel || "—"}
+              </span>
             </div>
           )}
         </div>
@@ -1287,6 +1418,30 @@ export function ChartView() {
             className="absolute inset-0 w-full h-full pointer-events-none"
             style={{ zIndex: useWebGPUScatter ? 2 : 0 }}
           />
+          {renderIssue && activeChart && (
+            <div className="absolute inset-0 z-20 flex items-center justify-center p-6 bg-loom-bg/85 backdrop-blur-sm">
+              <div className="loom-card max-w-md w-full p-4 space-y-3 border border-loom-accent/30 shadow-lg">
+                <p className="text-sm font-semibold text-loom-text">{renderIssue.title}</p>
+                <p className="text-2xs text-loom-muted leading-relaxed">{renderIssue.message}</p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={applyWorkingChart}
+                    className="loom-btn-primary text-2xs py-1.5 px-3"
+                  >
+                    Pick a working suggestion
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPanelTab("chart")}
+                    className="text-2xs py-1.5 px-3 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text"
+                  >
+                    Open Encoding
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {activeChart?.kind === "scatter" && (
             <div
               ref={overlayRef}
@@ -1309,7 +1464,7 @@ export function ChartView() {
               }}
             />
           )}
-          {activeChart && (activeChart.kind === "bar" || activeChart.kind === "line") && !useWebGPUScatter && (
+          {activeChart && activeChart.kind !== "scatter" && (
             <div
               className="absolute inset-0 w-full h-full"
               style={{ zIndex: 2, cursor: "crosshair" }}
@@ -1436,15 +1591,38 @@ export function ChartView() {
               {(scatterTooltip ?? chartTooltip)!.columns.length > 8 && (
                 <div className="text-loom-muted">+{(scatterTooltip ?? chartTooltip)!.columns.length - 8} more</div>
               )}
+              {tooltipLink && (
+                <div className="text-2xs text-loom-accent border-t border-loom-border mt-1 pt-1 truncate" title={`Filter: ${tooltipLink.field} = ${tooltipLink.value}`}>
+                  Link: {tooltipLink.field}={tooltipLink.value}
+                </div>
+              )}
             </div>
           </div>
         )}
 
         {activeChart && (
-          <div className="flex items-center gap-2 px-3 h-[var(--statusbar-height)] border-t border-loom-border text-2xs text-loom-muted font-mono">
+          <div className="flex flex-wrap items-center gap-2 px-3 h-[var(--statusbar-height)] border-t border-loom-border text-2xs text-loom-muted font-mono">
             <span>Vega-Lite spec: {activeChart.kind}</span>
             <span className="text-loom-border">|</span>
             <span>{activeChart.xField}{activeChart.yField ? ` × ${activeChart.yField}` : ""}</span>
+            <span className="text-loom-border">|</span>
+            <span title="Press L while hovering a point to lock/unlock tooltip filter across charts">
+              Tooltip L = link
+            </span>
+            {tooltipLink && (
+              <>
+                <span className="text-loom-accent truncate max-w-[200px]">
+                  {tooltipLink.field}={tooltipLink.value}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setTooltipLink(null)}
+                  className="text-loom-muted hover:text-loom-text underline"
+                >
+                  Clear link
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
@@ -1499,6 +1677,8 @@ export interface ChartRenderOpts {
   themeBorder?: string;
   /** Y aggregation for bar/line/area/pie (canvas renderer uses this; Vega spec has it too). */
   yAggregate?: YAggregateOption | null;
+  /** Bar + Color: grouped (dodge), stacked, or 100% stacked — canvas + Vega via createChartRec. */
+  barStackMode?: "grouped" | "stacked" | "percent";
 }
 
 // --- Shape Drawing Helpers ---
@@ -1996,13 +2176,112 @@ function aggregateValues(values: number[], agg: YAggregateOption): number {
   return values.reduce((a, b) => a + b, 0);
 }
 
-function renderFullBar(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+function renderFullBar(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+  facet?: BarFacetHitPayload | null,
+) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.85;
   const cornerR = opts?.barCornerRadius ?? 3;
   const showDataLabels = opts?.showDataLabels ?? false;
   const fontFamily = opts?.fontFamily ?? "Inter";
   const axisLabelColor = opts?.axisLabelColor ?? "#6b6b78";
+  const plotH = h - 2 * pad - 20;
+  const chartW = w - 2 * pad;
+
+  if (facet && ci >= 0 && facet.grid.length > 0 && facet.subLabels.length > 0) {
+    const { xLabels, subLabels, grid, stackMode } = facet;
+    const nx = xLabels.length;
+    const ns = subLabels.length;
+    const groupW = chartW / nx;
+
+    if (stackMode === "grouped") {
+      let maxVal = 0;
+      for (let gi = 0; gi < nx; gi++) {
+        for (let si = 0; si < ns; si++) {
+          maxVal = Math.max(maxVal, grid[gi]![si]!);
+        }
+      }
+      if (maxVal <= 0) return;
+      const innerW = Math.max(2, (groupW - 6) / ns);
+      for (let gi = 0; gi < nx; gi++) {
+        const xk = xLabels[gi]!;
+        for (let si = 0; si < ns; si++) {
+          const val = grid[gi]![si]!;
+          const barH = (val / maxVal) * plotH;
+          const x = pad + gi * groupW + 3 + si * innerW;
+          ctx.fillStyle = cols[si % cols.length];
+          ctx.globalAlpha = alpha;
+          ctx.beginPath();
+          roundedRect(ctx, x, h - pad - barH, innerW - 1, barH, cornerR);
+          ctx.fill();
+          if (showDataLabels && barH > 10) {
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = axisLabelColor;
+            ctx.font = `8px '${fontFamily}', sans-serif`;
+            ctx.textAlign = "center";
+            const lbl = val >= 1000 || (val > 0 && val < 0.01) ? val.toExponential(1) : String(Math.round(val * 10) / 10);
+            ctx.fillText(lbl, x + (innerW - 1) / 2, h - pad - barH - 4);
+          }
+        }
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = axisLabelColor;
+        ctx.font = `9px '${fontFamily}', sans-serif`;
+        ctx.textAlign = "center";
+        ctx.save();
+        ctx.translate(pad + gi * groupW + groupW / 2, h - pad + 10);
+        ctx.rotate(-0.5);
+        const lab = xk.length > 10 ? xk.slice(0, 9) + "\u2026" : xk;
+        ctx.fillText(lab, 0, 0);
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+      return;
+    }
+
+    const maxStack = Math.max(1, ...xLabels.map((_, gi) => subLabels.reduce((s, _, si) => s + grid[gi]![si]!, 0)));
+    for (let gi = 0; gi < nx; gi++) {
+      const xk = xLabels[gi]!;
+      const x0 = pad + gi * groupW + 2;
+      const bw = Math.max(4, groupW - 4);
+      let yCursor = h - pad;
+      const rowSum = stackMode === "percent"
+        ? Math.max(1, subLabels.reduce((s, _, si) => s + grid[gi]![si]!, 0))
+        : maxStack;
+      for (let si = 0; si < ns; si++) {
+        const v = grid[gi]![si]!;
+        const barH = stackMode === "percent" ? (v / rowSum) * plotH : (v / maxStack) * plotH;
+        if (barH < 0.25) continue;
+        ctx.fillStyle = cols[si % cols.length];
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        roundedRect(ctx, x0, yCursor - barH, bw, barH, cornerR);
+        ctx.fill();
+        yCursor -= barH;
+      }
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = axisLabelColor;
+      ctx.font = `9px '${fontFamily}', sans-serif`;
+      ctx.textAlign = "center";
+      ctx.save();
+      ctx.translate(pad + gi * groupW + groupW / 2, h - pad + 10);
+      ctx.rotate(-0.5);
+      const lab = xk.length > 10 ? xk.slice(0, 9) + "\u2026" : xk;
+      ctx.fillText(lab, 0, 0);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+    return;
+  }
+
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
   const groups = new Map<string, number[]>();
   for (const r of rows) {
@@ -2023,7 +2302,7 @@ function renderFullBar(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
   const barW = Math.max(4, (w - 2 * pad) / entries.length - 4);
 
   entries.forEach(([label, val], i) => {
-    const barH = (val / maxVal) * (h - 2 * pad - 20);
+    const barH = (val / maxVal) * plotH;
     const x = pad + i * ((w - 2 * pad) / entries.length) + 2;
     ctx.fillStyle = cols[i % cols.length];
     ctx.globalAlpha = alpha;
@@ -2196,6 +2475,7 @@ function renderFullStrip(
     ctx.fillText(label.length > 12 ? label.slice(0, 11) + "\u2026" : label, pad - 6, pad + 20 + i * bandH + bandH / 2 + 3);
   });
 
+  const ciMap = ci >= 0 ? new Map([...new Set(rows.map(r => String(r[ci])))].map((k, i) => [k, i])) : null;
   let pointIdx = 0;
   for (const r of rows) {
     const x = Number(r[xi]);
@@ -2215,7 +2495,7 @@ function renderFullStrip(
     ctx.beginPath();
     ctx.moveTo(sx, sy - bandH * 0.35);
     ctx.lineTo(sx, sy + bandH * 0.35);
-    ctx.strokeStyle = cols[yiL % cols.length];
+    ctx.strokeStyle = cols[(ciMap && ci >= 0 ? (ciMap.get(String(r[ci])) ?? 0) : yiL) % cols.length];
     ctx.globalAlpha = alpha;
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -2451,6 +2731,1052 @@ function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
   entries.slice(0, 6).forEach(([label], i) => {
     ctx.fillText(label.length > 10 ? label.slice(0, 9) + "\u2026" : label, cx, h - pad - 8 - (6 - i) * 12);
   });
+}
+
+// --- Bubble (scatter with size) ---
+
+function renderFullBubble(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  columnNames: string[],
+  xi: number,
+  yi: number,
+  ci: number,
+  sizeIdx: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  if (yi < 0) return;
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.5;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const [xMin, xMax] = numRange(rows, xi);
+  const [yMin, yMax] = numRange(rows, yi);
+  const [sizeMin, sizeMax] = sizeIdx >= 0 ? numRange(rows, sizeIdx) : [0, 1];
+  const sizeRange = sizeMax - sizeMin || 1;
+  const minR = 3;
+  const maxR = Math.min(w, h) * 0.055;
+  const xRange = xMax - xMin || 1;
+  const yRange = yMax - yMin || 1;
+
+  drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
+
+  const catMap = new Map<string, number>();
+  let nextCat = 0;
+
+  type Bubble = { sx: number; sy: number; r: number; cat: number };
+  const bubbles: Bubble[] = [];
+  for (const r of rows) {
+    const x = Number(r[xi]), y = Number(r[yi]);
+    if (isNaN(x) || isNaN(y)) continue;
+    let cat = 0;
+    if (ci >= 0) {
+      const k = String(r[ci]);
+      if (!catMap.has(k)) catMap.set(k, nextCat++);
+      cat = catMap.get(k)!;
+    }
+    let radius = (minR + maxR) / 2;
+    if (sizeIdx >= 0) {
+      const s = Number(r[sizeIdx]);
+      if (!isNaN(s)) {
+        const t = (s - sizeMin) / sizeRange;
+        radius = minR + Math.sqrt(t) * (maxR - minR);
+      }
+    }
+    const sx = pad + ((x - xMin) / xRange) * (w - 2 * pad);
+    const sy = h - pad - ((y - yMin) / yRange) * (h - 2 * pad);
+    bubbles.push({ sx, sy, r: radius, cat });
+  }
+
+  bubbles.sort((a, b) => b.r - a.r);
+
+  for (const b of bubbles) {
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = palette[b.cat % palette.length];
+    ctx.beginPath();
+    ctx.arc(b.sx, b.sy, b.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = Math.min(alpha + 0.3, 0.9);
+    ctx.strokeStyle = palette[b.cat % palette.length];
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+
+  drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
+
+  if (sizeIdx >= 0) {
+    const sizeLabel = sizeIdx < columnNames.length ? columnNames[sizeIdx] : "size";
+    const legendX = w - pad - 10;
+    let legendY = pad + 60;
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    ctx.font = `9px '${fontFamily}', sans-serif`;
+    ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+    ctx.textAlign = "right";
+    ctx.fillText(`size: ${sizeLabel}`, legendX, legendY);
+    legendY += 14;
+
+    const steps = [0.25, 0.5, 1.0];
+    for (const t of steps) {
+      const r = minR + Math.sqrt(t) * (maxR - minR);
+      const val = sizeMin + t * sizeRange;
+      ctx.globalAlpha = 0.25;
+      ctx.strokeStyle = opts?.axisLabelColor ?? "#8b8b98";
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(legendX - maxR - 4, legendY, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.6;
+      ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+      ctx.textAlign = "left";
+      ctx.fillText(val >= 1000 ? `${(val / 1000).toFixed(1)}k` : val % 1 === 0 ? String(val) : val.toFixed(1), legendX - maxR + r + 2, legendY + 3);
+      legendY += Math.max(r * 2 + 4, 14);
+    }
+    ctx.restore();
+  }
+
+  if (ci >= 0 && catMap.size > 1 && catMap.size <= 12) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.font = `9px '${fontFamily}', sans-serif`;
+    let legendY = pad + 60;
+    const legendX = pad + 8;
+    for (const [label, idx] of catMap) {
+      ctx.fillStyle = palette[idx % palette.length];
+      ctx.beginPath();
+      ctx.arc(legendX + 4, legendY - 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+      ctx.textAlign = "left";
+      ctx.fillText(label.length > 12 ? label.slice(0, 11) + "\u2026" : label, legendX + 12, legendY + 1);
+      legendY += 14;
+    }
+    ctx.restore();
+  }
+}
+
+// --- Violin ---
+
+function renderFullViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  if (yi < 0) return;
+  const cols = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.65;
+  const groups = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    const v = Number(r[yi]);
+    if (isNaN(v)) continue;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(v);
+  }
+  const entries = [...groups.entries()].slice(0, 12);
+  if (entries.length === 0) return;
+  const allVals = entries.flatMap(([, vs]) => vs);
+  const gMin = Math.min(...allVals);
+  const gMax = Math.max(...allVals);
+  const range = gMax - gMin || 1;
+  const bandW = (w - 2 * pad) / entries.length;
+  const bins = 20;
+
+  drawGridLines(ctx, gMin, gMax, gMin, gMax, w, h, pad, opts);
+
+  entries.forEach(([, vals], gi) => {
+    const sorted = [...vals].sort((a, b) => a - b);
+    const counts = new Array(bins).fill(0);
+    for (const v of sorted) {
+      const b = Math.min(bins - 1, Math.floor(((v - gMin) / range) * bins));
+      counts[b]++;
+    }
+    const maxC = Math.max(...counts, 1);
+    const cx = pad + (gi + 0.5) * bandW;
+    const halfW = bandW * 0.4;
+
+    ctx.fillStyle = cols[gi % cols.length];
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    for (let b = 0; b < bins; b++) {
+      const y = h - pad - (b / bins) * (h - 2 * pad);
+      const dx = (counts[b] / maxC) * halfW;
+      if (b === 0) ctx.moveTo(cx - dx, y);
+      else ctx.lineTo(cx - dx, y);
+    }
+    for (let b = bins - 1; b >= 0; b--) {
+      const y = h - pad - (b / bins) * (h - 2 * pad);
+      const dx = (counts[b] / maxC) * halfW;
+      ctx.lineTo(cx + dx, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = opts?.themeBorder ?? "#2a2a30";
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    const median = sorted[Math.floor(sorted.length / 2)] ?? gMin;
+    const my = h - pad - ((median - gMin) / range) * (h - 2 * pad);
+    ctx.fillStyle = "#fff";
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.arc(cx, my, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+
+  ctx.globalAlpha = 1;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  ctx.font = `${opts?.axisFontSize ?? 9}px '${fontFamily}', sans-serif`;
+  ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+  ctx.textAlign = "center";
+  entries.forEach(([label], i) => {
+    const cx = pad + (i + 0.5) * bandW;
+    ctx.fillText(label.length > 8 ? label.slice(0, 7) + "\u2026" : label, cx, h - pad + 12);
+  });
+}
+
+// --- Radar / Spider ---
+
+function renderFullRadar(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  columnNames: string[],
+  xi: number,
+  yi: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+
+  if (!rows.length || !columnNames.length) return;
+
+  const numericAxes: { idx: number; name: string }[] = [];
+  for (let c = 0; c < columnNames.length; c++) {
+    if (c === ci) continue;
+    const sample = rows.slice(0, 20);
+    const numCount = sample.filter(r => !isNaN(Number(r[c])) && r[c] !== null && r[c] !== "" && typeof r[c] !== "boolean").length;
+    if (numCount >= sample.length * 0.5) {
+      numericAxes.push({ idx: c, name: columnNames[c] });
+    }
+  }
+  if (numericAxes.length < 3) return;
+  const axes = numericAxes.slice(0, 8);
+  const n = axes.length;
+
+  const ranges = axes.map(a => numRange(rows, a.idx));
+
+  const groups = new Map<string, unknown[][]>();
+  if (ci >= 0) {
+    for (const r of rows) {
+      const k = String(r[ci]);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(r as unknown[]);
+    }
+  } else {
+    groups.set("all", rows as unknown[][]);
+  }
+  const groupEntries = [...groups.entries()].slice(0, 6);
+
+  const radarPad = pad + 40;
+  const cx = w / 2;
+  const cy = h / 2;
+  const radius = Math.min(w - 2 * radarPad, h - 2 * radarPad) / 2;
+  if (radius < 20) return;
+
+  const rings = 4;
+  ctx.save();
+  ctx.strokeStyle = opts?.themeBorder ?? "#2a2a30";
+  ctx.lineWidth = 0.5;
+  for (let ring = 1; ring <= rings; ring++) {
+    const r = radius * (ring / rings);
+    ctx.globalAlpha = ring === rings ? 0.4 : 0.15;
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const angle = (Math.PI * 2 * (i % n)) / n - Math.PI / 2;
+      const px = cx + Math.cos(angle) * r;
+      const py = cy + Math.sin(angle) * r;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 0.25;
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.save();
+  ctx.font = `${opts?.axisFontSize ?? 10}px '${fontFamily}', sans-serif`;
+  ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+  ctx.globalAlpha = 1;
+  for (let i = 0; i < n; i++) {
+    const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+    const labelR = radius + 14;
+    const lx = cx + Math.cos(angle) * labelR;
+    const ly = cy + Math.sin(angle) * labelR;
+    const name = axes[i].name;
+    const label = name.length > 12 ? name.slice(0, 11) + "\u2026" : name;
+    ctx.textAlign = Math.abs(Math.cos(angle)) < 0.1 ? "center" : Math.cos(angle) > 0 ? "left" : "right";
+    ctx.textBaseline = Math.abs(Math.sin(angle)) < 0.1 ? "middle" : Math.sin(angle) > 0 ? "top" : "bottom";
+    ctx.fillText(label, lx, ly);
+  }
+  ctx.restore();
+
+  groupEntries.forEach(([, gRows], gi) => {
+    const normals = axes.map((a, ai) => {
+      const vals = gRows.map(r => Number(r[a.idx])).filter(v => !isNaN(v));
+      const avg = vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
+      const [mn, mx] = ranges[ai];
+      return mx === mn ? 0.5 : (avg - mn) / (mx - mn);
+    });
+
+    const color = palette[gi % palette.length];
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.15;
+    ctx.beginPath();
+    normals.forEach((v, i) => {
+      const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+      const r = Math.max(0.04, v) * radius;
+      const px = cx + Math.cos(angle) * r;
+      const py = cy + Math.sin(angle) * r;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    normals.forEach((v, i) => {
+      const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+      const r = Math.max(0.04, v) * radius;
+      const px = cx + Math.cos(angle) * r;
+      const py = cy + Math.sin(angle) * r;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    });
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 1;
+    normals.forEach((v, i) => {
+      const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+      const r = Math.max(0.04, v) * radius;
+      const px = cx + Math.cos(angle) * r;
+      const py = cy + Math.sin(angle) * r;
+      ctx.beginPath();
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  });
+
+  if (ci >= 0 && groupEntries.length > 1) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.font = `9px '${fontFamily}', sans-serif`;
+    const legendX = w - pad - 8;
+    let legendY = pad + 8;
+    groupEntries.forEach(([label], gi) => {
+      ctx.fillStyle = palette[gi % palette.length];
+      ctx.fillRect(legendX - 50, legendY - 6, 8, 8);
+      ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+      ctx.textAlign = "left";
+      ctx.fillText(label.length > 8 ? label.slice(0, 7) + "\u2026" : label, legendX - 38, legendY + 1);
+      legendY += 14;
+    });
+    ctx.restore();
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+// --- Waterfall ---
+
+function renderFullWaterfall(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const alpha = opts?.opacity ?? 0.85;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+  const groups = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(yi >= 0 ? Number(r[yi]) : 1);
+  }
+  const entries = [...groups.entries()]
+    .map(([label, vals]) => [label, aggregateValues(vals.filter(v => !isNaN(v)), agg)] as [string, number])
+    .slice(0, 20);
+  if (entries.length === 0) return;
+
+  let running = 0;
+  const bars: { label: string; start: number; end: number; value: number }[] = [];
+  for (const [label, val] of entries) {
+    bars.push({ label, start: running, end: running + val, value: val });
+    running += val;
+  }
+  const allY = bars.flatMap(b => [b.start, b.end]);
+  const yMin = Math.min(0, ...allY);
+  const yMax = Math.max(...allY);
+  const range = yMax - yMin || 1;
+  const barW = Math.max(4, (w - 2 * pad) / bars.length - 4);
+
+  drawGridLines(ctx, 0, bars.length, yMin, yMax, w, h, pad, opts);
+
+  const toY = (v: number) => h - pad - ((v - yMin) / range) * (h - 2 * pad);
+
+  bars.forEach((bar, i) => {
+    const x = pad + i * ((w - 2 * pad) / bars.length) + 2;
+    const top = Math.min(toY(bar.start), toY(bar.end));
+    const bottom = Math.max(toY(bar.start), toY(bar.end));
+    ctx.fillStyle = bar.value >= 0 ? "#00d68f" : "#ff6b6b";
+    ctx.globalAlpha = alpha;
+    ctx.fillRect(x, top, barW, Math.max(1, bottom - top));
+
+    if (i > 0) {
+      ctx.strokeStyle = opts?.themeBorder ?? "#3a3a40";
+      ctx.lineWidth = 0.5;
+      ctx.setLineDash([3, 2]);
+      const prevEnd = toY(bars[i - 1].end);
+      ctx.beginPath();
+      ctx.moveTo(x - 2, prevEnd);
+      ctx.lineTo(x + barW + 2, prevEnd);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  });
+
+  ctx.globalAlpha = 1;
+  ctx.font = `${opts?.axisFontSize ?? 9}px '${fontFamily}', sans-serif`;
+  ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+  ctx.textAlign = "center";
+  const rotation = (opts?.tickRotation ?? 0) * Math.PI / 180;
+  bars.forEach((bar, i) => {
+    const x = pad + (i + 0.5) * ((w - 2 * pad) / bars.length);
+    const label = bar.label.length > 8 ? bar.label.slice(0, 7) + "\u2026" : bar.label;
+    if (rotation) {
+      ctx.save();
+      ctx.translate(x, h - pad + 12);
+      ctx.rotate(rotation);
+      ctx.fillText(label, 0, 0);
+      ctx.restore();
+    } else {
+      ctx.fillText(label, x, h - pad + 12);
+    }
+  });
+  drawAxisTicks(ctx, yMin, yMax, yMin, yMax, w, h, pad, opts);
+}
+
+// --- Lollipop ---
+
+function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.85;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+
+  const catColorMap = new Map<string, number>();
+  let nextCat = 0;
+  if (ci >= 0) {
+    for (const r of rows) {
+      const k = String(r[ci]);
+      if (!catColorMap.has(k)) catColorMap.set(k, nextCat++);
+    }
+  }
+
+  const groups = new Map<string, { vals: number[]; cat: string }>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "" });
+    groups.get(k)!.vals.push(yi >= 0 ? Number(r[yi]) : 1);
+  }
+  const entries = [...groups.entries()]
+    .map(([label, g]) => ({ label, value: aggregateValues(g.vals.filter(v => !isNaN(v)), agg), cat: g.cat }))
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 20);
+  if (entries.length === 0) return;
+  const maxVal = Math.max(...entries.map(e => e.value), 1);
+
+  drawGridLines(ctx, 0, maxVal, 0, maxVal, w, h, pad, opts);
+
+  const bandH = (h - 2 * pad) / entries.length;
+  entries.forEach(({ label, value, cat }, i) => {
+    const cy = pad + (i + 0.5) * bandH;
+    const barEnd = pad + (value / maxVal) * (w - 2 * pad);
+    const baseline = pad;
+    const colorIdx = ci >= 0 ? (catColorMap.get(cat) ?? 0) : i;
+
+    ctx.strokeStyle = palette[colorIdx % palette.length];
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = alpha * 0.6;
+    ctx.beginPath();
+    ctx.moveTo(baseline, cy);
+    ctx.lineTo(barEnd, cy);
+    ctx.stroke();
+
+    ctx.fillStyle = palette[colorIdx % palette.length];
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(barEnd, cy, 5, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+    ctx.globalAlpha = 1;
+    ctx.font = `${opts?.axisFontSize ?? 9}px '${fontFamily}', sans-serif`;
+    ctx.textAlign = "right";
+    ctx.fillText(label.length > 12 ? label.slice(0, 11) + "\u2026" : label, baseline - 4, cy + 3);
+  });
+
+  if (ci >= 0 && catColorMap.size > 1 && catColorMap.size <= 12) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.font = `9px '${fontFamily}', sans-serif`;
+    let legendY = pad + 8;
+    const legendX = w - pad - 8;
+    for (const [label, idx] of catColorMap) {
+      ctx.fillStyle = palette[idx % palette.length];
+      ctx.beginPath();
+      ctx.arc(legendX - 50, legendY - 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+      ctx.textAlign = "left";
+      ctx.fillText(label.length > 8 ? label.slice(0, 7) + "\u2026" : label, legendX - 42, legendY + 1);
+      legendY += 14;
+    }
+    ctx.restore();
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+// --- Treemap ---
+
+function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.8;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+
+  const groups = new Map<string, { val: number; cat: string }>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    const v = yi >= 0 ? Number(r[yi]) : 1;
+    const prev = groups.get(k);
+    const catVal = ci >= 0 ? String(r[ci]) : "";
+    if (prev) {
+      if (agg === "count") prev.val++;
+      else if (agg === "sum" || agg === "mean") prev.val += (isNaN(v) ? 0 : v);
+      else if (agg === "min") prev.val = Math.min(prev.val, isNaN(v) ? Infinity : v);
+      else if (agg === "max") prev.val = Math.max(prev.val, isNaN(v) ? -Infinity : v);
+    } else {
+      groups.set(k, { val: agg === "count" ? 1 : (isNaN(v) ? 0 : v), cat: catVal });
+    }
+  }
+
+  const entries = [...groups.entries()]
+    .map(([label, g]) => ({ label, value: Math.abs(g.val), cat: g.cat }))
+    .filter(e => e.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 40);
+  if (entries.length === 0) return;
+
+  const catMap = new Map<string, number>();
+  let nextCat = 0;
+  if (ci >= 0) {
+    for (const e of entries) {
+      if (!catMap.has(e.cat)) catMap.set(e.cat, nextCat++);
+    }
+  }
+
+  const total = entries.reduce((s, e) => s + e.value, 0);
+  const rects: { x: number; y: number; w: number; h: number; label: string; cat: string; value: number }[] = [];
+
+  const treemapLayout = (items: typeof entries, x0: number, y0: number, w0: number, h0: number) => {
+    if (items.length === 0 || w0 <= 0 || h0 <= 0) return;
+    if (items.length === 1) {
+      rects.push({ x: x0, y: y0, w: w0, h: h0, label: items[0].label, cat: items[0].cat, value: items[0].value });
+      return;
+    }
+    const itemTotal = items.reduce((s, e) => s + e.value, 0);
+    if (itemTotal <= 0) return;
+    const horizontal = w0 >= h0;
+    let cumSum = 0;
+    let splitIdx = 0;
+    const half = itemTotal / 2;
+    for (let i = 0; i < items.length; i++) {
+      cumSum += items[i].value;
+      if (cumSum >= half) { splitIdx = i; break; }
+    }
+    splitIdx = Math.max(0, Math.min(items.length - 2, splitIdx));
+    const left = items.slice(0, splitIdx + 1);
+    const right = items.slice(splitIdx + 1);
+    const leftSum = left.reduce((s, e) => s + e.value, 0);
+    const ratio = leftSum / itemTotal;
+    if (horizontal) {
+      const splitX = x0 + w0 * ratio;
+      treemapLayout(left, x0, y0, splitX - x0, h0);
+      treemapLayout(right, splitX, y0, x0 + w0 - splitX, h0);
+    } else {
+      const splitY = y0 + h0 * ratio;
+      treemapLayout(left, x0, y0, w0, splitY - y0);
+      treemapLayout(right, x0, splitY, w0, y0 + h0 - splitY);
+    }
+  };
+
+  treemapLayout(entries, pad, pad + 10, w - 2 * pad, h - 2 * pad - 10);
+
+  for (const rect of rects) {
+    const colorIdx = ci >= 0 ? (catMap.get(rect.cat) ?? 0) : (rects.indexOf(rect) % palette.length);
+    ctx.fillStyle = palette[colorIdx % palette.length];
+    ctx.globalAlpha = alpha;
+    ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+    ctx.strokeStyle = opts?.themeBg ?? "#0e0e12";
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 1;
+    ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+
+    if (rect.w > 30 && rect.h > 16) {
+      ctx.fillStyle = "#fff";
+      ctx.globalAlpha = 0.9;
+      const fontSize = Math.max(8, Math.min(12, rect.w / 8));
+      ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      const maxLen = Math.floor(rect.w / (fontSize * 0.55));
+      const label = rect.label.length > maxLen ? rect.label.slice(0, maxLen - 1) + "\u2026" : rect.label;
+      ctx.fillText(label, rect.x + 4, rect.y + 4);
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+// --- Sunburst ---
+
+function renderFullSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.8;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+
+  const outerGroups = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const outer = String(r[xi]);
+    const inner = ci >= 0 ? String(r[ci]) : "__all__";
+    const v = yi >= 0 ? Number(r[yi]) : 1;
+    if (!outerGroups.has(outer)) outerGroups.set(outer, new Map());
+    const innerMap = outerGroups.get(outer)!;
+    innerMap.set(inner, (innerMap.get(inner) ?? 0) + (isNaN(v) ? 0 : (agg === "count" ? 1 : v)));
+  }
+
+  const outerEntries = [...outerGroups.entries()]
+    .map(([label, innerMap]) => ({
+      label,
+      total: [...innerMap.values()].reduce((s, v) => s + Math.abs(v), 0),
+      children: [...innerMap.entries()].map(([k, v]) => ({ label: k, value: Math.abs(v) })).filter(c => c.value > 0),
+    }))
+    .filter(e => e.total > 0)
+    .sort((a, b) => b.total - a.total)
+    .slice(0, 20);
+  if (outerEntries.length === 0) return;
+
+  const grandTotal = outerEntries.reduce((s, e) => s + e.total, 0);
+  const cx = w / 2;
+  const cy = h / 2;
+  const outerR = Math.min(w - 2 * pad, h - 2 * pad) / 2 - 10;
+  const innerR = outerR * 0.45;
+  const hasInner = ci >= 0 && outerEntries.some(e => e.children.length > 1);
+  const midR = hasInner ? outerR * 0.7 : outerR;
+
+  let angle = -Math.PI / 2;
+  outerEntries.forEach((entry, ei) => {
+    const sweep = (entry.total / grandTotal) * Math.PI * 2;
+    ctx.fillStyle = palette[ei % palette.length];
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(cx, cy, midR, angle, angle + sweep);
+    ctx.arc(cx, cy, innerR, angle + sweep, angle, true);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = opts?.themeBg ?? "#0e0e12";
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 1;
+    ctx.stroke();
+
+    if (sweep > 0.2 && midR - innerR > 20) {
+      const midAngle = angle + sweep / 2;
+      const labelR = (innerR + midR) / 2;
+      ctx.fillStyle = "#fff";
+      ctx.globalAlpha = 0.9;
+      ctx.font = `${Math.max(8, Math.min(11, sweep * 30))}px '${fontFamily}', sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const lbl = entry.label.length > 10 ? entry.label.slice(0, 9) + "\u2026" : entry.label;
+      ctx.fillText(lbl, cx + Math.cos(midAngle) * labelR, cy + Math.sin(midAngle) * labelR);
+    }
+
+    if (hasInner) {
+      let childAngle = angle;
+      entry.children.sort((a, b) => b.value - a.value);
+      for (const child of entry.children) {
+        const childSweep = (child.value / entry.total) * sweep;
+        ctx.fillStyle = palette[ei % palette.length];
+        ctx.globalAlpha = alpha * 0.65;
+        ctx.beginPath();
+        ctx.arc(cx, cy, outerR, childAngle, childAngle + childSweep);
+        ctx.arc(cx, cy, midR, childAngle + childSweep, childAngle, true);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = opts?.themeBg ?? "#0e0e12";
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.6;
+        ctx.stroke();
+        childAngle += childSweep;
+      }
+    }
+
+    angle += sweep;
+  });
+
+  ctx.fillStyle = opts?.themeBg ?? "#0e0e12";
+  ctx.globalAlpha = 1;
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerR * 0.6, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalAlpha = 1;
+}
+
+// --- Choropleth (simple grid map fallback) ---
+
+function renderFullChoropleth(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.85;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+
+  const groups = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(yi >= 0 ? Number(r[yi]) : 1);
+  }
+  const entries = [...groups.entries()].map(([label, vals]) => ({
+    label,
+    value: aggregateValues(vals.filter(v => !isNaN(v)), agg),
+  })).sort((a, b) => b.value - a.value).slice(0, 60);
+  if (entries.length === 0) return;
+
+  const maxVal = Math.max(...entries.map(e => e.value), 1);
+  const minVal = Math.min(...entries.map(e => e.value), 0);
+  const range = maxVal - minVal || 1;
+
+  const cols = Math.ceil(Math.sqrt(entries.length * (w / h)));
+  const rowCount = Math.ceil(entries.length / cols);
+  const cellW = (w - 2 * pad) / cols;
+  const cellH = (h - 2 * pad - 10) / rowCount;
+
+  entries.forEach((entry, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const x = pad + col * cellW;
+    const y = pad + 10 + row * cellH;
+    const t = (entry.value - minVal) / range;
+    const hue = 220 - t * 180;
+    const sat = 50 + t * 30;
+    const lit = 15 + t * 40;
+    ctx.fillStyle = `hsl(${hue}, ${sat}%, ${lit}%)`;
+    ctx.globalAlpha = alpha;
+    const rx = 3;
+    ctx.beginPath();
+    ctx.roundRect(x + 1, y + 1, cellW - 2, cellH - 2, rx);
+    ctx.fill();
+
+    if (cellW > 28 && cellH > 14) {
+      ctx.fillStyle = t > 0.5 ? "#000" : "#fff";
+      ctx.globalAlpha = 0.85;
+      const fs = Math.max(7, Math.min(10, cellW / 5));
+      ctx.font = `${fs}px '${fontFamily}', sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const lbl = entry.label.length > Math.floor(cellW / (fs * 0.6)) ? entry.label.slice(0, Math.floor(cellW / (fs * 0.6)) - 1) + "\u2026" : entry.label;
+      ctx.fillText(lbl, x + cellW / 2, y + cellH / 2);
+    }
+  });
+
+  ctx.globalAlpha = 1;
+  const legendW = Math.min(120, w - 2 * pad);
+  const legendH = 8;
+  const lx = w - pad - legendW;
+  const ly = h - pad + 4;
+  const grad = ctx.createLinearGradient(lx, 0, lx + legendW, 0);
+  grad.addColorStop(0, "hsl(220, 50%, 15%)");
+  grad.addColorStop(0.5, "hsl(130, 65%, 35%)");
+  grad.addColorStop(1, "hsl(40, 80%, 55%)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(lx, ly, legendW, legendH);
+  ctx.font = `8px '${fontFamily}', sans-serif`;
+  ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+  ctx.textAlign = "left";
+  ctx.fillText(minVal >= 1000 ? `${(minVal/1000).toFixed(1)}k` : String(Math.round(minVal)), lx, ly + legendH + 10);
+  ctx.textAlign = "right";
+  ctx.fillText(maxVal >= 1000 ? `${(maxVal/1000).toFixed(1)}k` : String(Math.round(maxVal)), lx + legendW, ly + legendH + 10);
+}
+
+// --- Force Bubble (packed circles) ---
+
+function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.75;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+
+  const groups = new Map<string, { val: number; cat: string }>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    const v = yi >= 0 ? Number(r[yi]) : 1;
+    const catVal = ci >= 0 ? String(r[ci]) : "";
+    const prev = groups.get(k);
+    if (prev) {
+      if (agg === "count") prev.val++;
+      else prev.val += (isNaN(v) ? 0 : v);
+    } else {
+      groups.set(k, { val: agg === "count" ? 1 : (isNaN(v) ? 0 : v), cat: catVal });
+    }
+  }
+
+  const entries = [...groups.entries()]
+    .map(([label, g]) => ({ label, value: Math.abs(g.val), cat: g.cat }))
+    .filter(e => e.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 50);
+  if (entries.length === 0) return;
+
+  const catMap = new Map<string, number>();
+  let nextCat = 0;
+  if (ci >= 0) {
+    for (const e of entries) {
+      if (!catMap.has(e.cat)) catMap.set(e.cat, nextCat++);
+    }
+  }
+
+  const maxVal = Math.max(...entries.map(e => e.value));
+  const areaScale = Math.min(w - 2 * pad, h - 2 * pad) / 2;
+  const totalArea = entries.reduce((s, e) => s + Math.sqrt(e.value / maxVal), 0);
+  const scaleFactor = (areaScale * 0.85) / Math.max(totalArea * 0.18, 1);
+
+  type Circle = { x: number; y: number; r: number; label: string; cat: string; value: number };
+  const circles: Circle[] = entries.map(e => ({
+    x: w / 2 + (Math.random() - 0.5) * 20,
+    y: h / 2 + (Math.random() - 0.5) * 20,
+    r: Math.max(8, Math.sqrt(e.value / maxVal) * scaleFactor),
+    label: e.label,
+    cat: e.cat,
+    value: e.value,
+  }));
+
+  for (let iter = 0; iter < 120; iter++) {
+    for (let i = 0; i < circles.length; i++) {
+      const a = circles[i];
+      a.x += (w / 2 - a.x) * 0.02;
+      a.y += (h / 2 - a.y) * 0.02;
+      for (let j = i + 1; j < circles.length; j++) {
+        const b = circles[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+        const minDist = a.r + b.r + 2;
+        if (dist < minDist) {
+          const overlap = (minDist - dist) / 2;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          a.x -= nx * overlap;
+          a.y -= ny * overlap;
+          b.x += nx * overlap;
+          b.y += ny * overlap;
+        }
+      }
+    }
+  }
+
+  circles.sort((a, b) => b.r - a.r);
+  for (const c of circles) {
+    const colorIdx = ci >= 0 ? (catMap.get(c.cat) ?? 0) : (circles.indexOf(c) % palette.length);
+    ctx.fillStyle = palette[colorIdx % palette.length];
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = palette[colorIdx % palette.length];
+    ctx.globalAlpha = Math.min(alpha + 0.2, 1);
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    if (c.r > 18) {
+      ctx.fillStyle = "#fff";
+      ctx.globalAlpha = 0.9;
+      const fs = Math.max(7, Math.min(11, c.r * 0.45));
+      ctx.font = `${fs}px '${fontFamily}', sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const maxChars = Math.floor(c.r * 2 / (fs * 0.55));
+      const lbl = c.label.length > maxChars ? c.label.slice(0, maxChars - 1) + "\u2026" : c.label;
+      ctx.fillText(lbl, c.x, c.y);
+    }
+  }
+
+  if (ci >= 0 && catMap.size > 1 && catMap.size <= 12) {
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.font = `9px '${fontFamily}', sans-serif`;
+    let legendY = pad + 8;
+    const legendX = w - pad - 8;
+    for (const [label, idx] of catMap) {
+      ctx.fillStyle = palette[idx % palette.length];
+      ctx.beginPath();
+      ctx.arc(legendX - 50, legendY - 2, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+      ctx.textAlign = "left";
+      ctx.fillText(label.length > 8 ? label.slice(0, 7) + "\u2026" : label, legendX - 42, legendY + 1);
+      legendY += 14;
+    }
+    ctx.restore();
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+// --- Sankey ---
+
+function renderFullSankey(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.4;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+
+  const targetIdx = ci >= 0 ? ci : yi;
+  if (targetIdx < 0) return;
+
+  const flows = new Map<string, number>();
+  const sourceSet = new Set<string>();
+  const targetSet = new Set<string>();
+  for (const r of rows) {
+    const src = String(r[xi]);
+    const tgt = String(r[targetIdx]);
+    const v = yi >= 0 && targetIdx !== yi ? Number(r[yi]) : 1;
+    const key = `${src}\0${tgt}`;
+    flows.set(key, (flows.get(key) ?? 0) + (isNaN(v) ? 1 : Math.abs(v)));
+    sourceSet.add(src);
+    targetSet.add(tgt);
+  }
+
+  const sources = [...sourceSet].slice(0, 15);
+  const targets = [...targetSet].slice(0, 15);
+  if (sources.length === 0 || targets.length === 0) return;
+
+  const sourceTotals = new Map<string, number>();
+  const targetTotals = new Map<string, number>();
+  for (const [key, val] of flows) {
+    const [src, tgt] = key.split("\0");
+    sourceTotals.set(src, (sourceTotals.get(src) ?? 0) + val);
+    targetTotals.set(tgt, (targetTotals.get(tgt) ?? 0) + val);
+  }
+
+  const sortedSources = sources.sort((a, b) => (sourceTotals.get(b) ?? 0) - (sourceTotals.get(a) ?? 0));
+  const sortedTargets = targets.sort((a, b) => (targetTotals.get(b) ?? 0) - (targetTotals.get(a) ?? 0));
+
+  const grandTotal = [...sourceTotals.values()].reduce((s, v) => s + v, 0) || 1;
+  const nodeW = 14;
+  const leftX = pad + 50;
+  const rightX = w - pad - 50;
+  const plotH = h - 2 * pad - 20;
+  const nodeGap = 3;
+
+  const sourceY = new Map<string, { y: number; h: number }>();
+  let srcCursor = pad + 10;
+  const totalSrcGap = nodeGap * (sortedSources.length - 1);
+  const srcScale = (plotH - totalSrcGap) / grandTotal;
+  for (const s of sortedSources) {
+    const sh = Math.max(4, (sourceTotals.get(s) ?? 0) * srcScale);
+    sourceY.set(s, { y: srcCursor, h: sh });
+    srcCursor += sh + nodeGap;
+  }
+
+  const grandTargetTotal = [...targetTotals.values()].reduce((s, v) => s + v, 0) || 1;
+  const targetYMap = new Map<string, { y: number; h: number }>();
+  let tgtCursor = pad + 10;
+  const totalTgtGap = nodeGap * (sortedTargets.length - 1);
+  const tgtScale = (plotH - totalTgtGap) / grandTargetTotal;
+  for (const t of sortedTargets) {
+    const th = Math.max(4, (targetTotals.get(t) ?? 0) * tgtScale);
+    targetYMap.set(t, { y: tgtCursor, h: th });
+    tgtCursor += th + nodeGap;
+  }
+
+  const srcOffsets = new Map<string, number>();
+  const tgtOffsets = new Map<string, number>();
+  for (const s of sortedSources) srcOffsets.set(s, 0);
+  for (const t of sortedTargets) tgtOffsets.set(t, 0);
+
+  for (const [key, val] of [...flows.entries()].sort((a, b) => b[1] - a[1])) {
+    const [src, tgt] = key.split("\0");
+    const sRect = sourceY.get(src);
+    const tRect = targetYMap.get(tgt);
+    if (!sRect || !tRect) continue;
+    const sOff = srcOffsets.get(src) ?? 0;
+    const tOff = tgtOffsets.get(tgt) ?? 0;
+    const bandH = Math.max(1, val * srcScale);
+    const bandHT = Math.max(1, val * tgtScale);
+
+    const sIdx = sortedSources.indexOf(src);
+    ctx.fillStyle = palette[sIdx % palette.length];
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    const sy1 = sRect.y + sOff;
+    const sy2 = sy1 + bandH;
+    const ty1 = tRect.y + tOff;
+    const ty2 = ty1 + bandHT;
+    const mx = (leftX + nodeW + rightX) / 2;
+    ctx.moveTo(leftX + nodeW, sy1);
+    ctx.bezierCurveTo(mx, sy1, mx, ty1, rightX, ty1);
+    ctx.lineTo(rightX, ty2);
+    ctx.bezierCurveTo(mx, ty2, mx, sy2, leftX + nodeW, sy2);
+    ctx.closePath();
+    ctx.fill();
+
+    srcOffsets.set(src, sOff + bandH);
+    tgtOffsets.set(tgt, tOff + bandHT);
+  }
+
+  ctx.globalAlpha = 1;
+  for (const [i, s] of sortedSources.entries()) {
+    const r = sourceY.get(s)!;
+    ctx.fillStyle = palette[i % palette.length];
+    ctx.fillRect(leftX, r.y, nodeW, r.h);
+    ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+    ctx.font = `9px '${fontFamily}', sans-serif`;
+    ctx.textAlign = "right";
+    ctx.fillText(s.length > 12 ? s.slice(0, 11) + "\u2026" : s, leftX - 4, r.y + r.h / 2 + 3);
+  }
+
+  for (const [i, t] of sortedTargets.entries()) {
+    const r = targetYMap.get(t)!;
+    ctx.fillStyle = palette[i % palette.length];
+    ctx.globalAlpha = 0.7;
+    ctx.fillRect(rightX, r.y, nodeW, r.h);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
+    ctx.font = `9px '${fontFamily}', sans-serif`;
+    ctx.textAlign = "left";
+    ctx.fillText(t.length > 12 ? t.slice(0, 11) + "\u2026" : t, rightX + nodeW + 4, r.y + r.h / 2 + 3);
+  }
 }
 
 // --- Helpers ---

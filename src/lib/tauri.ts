@@ -129,14 +129,32 @@ export async function saveCsvToFolder(
   });
 }
 
-/** Fetch recent Data.gov (US) datasets that contain CSV resources (Tauri only). */
-export async function fetchDataGovRecentCsv(rows = 40): Promise<DataGovDataset[]> {
-  return invoke<DataGovDataset[]>("fetch_data_gov_recent_csv", { rows });
+/** CKAN sort keys passed through to the desktop command (allowlisted server-side). */
+export type DataGovSortKey = "newest" | "updated" | "relevance" | "title_az" | "title_za";
+
+export interface FetchDataGovOptions {
+  rows?: number;
+  /** Full-text search on the portal (CKAN `q`). */
+  query?: string;
+  sort?: DataGovSortKey;
 }
 
-/** Fetch recent data.gov.uk datasets that contain CSV resources (Tauri only). */
-export async function fetchUkDataRecentCsv(rows = 40): Promise<DataGovDataset[]> {
-  return invoke<DataGovDataset[]>("fetch_uk_data_recent_csv", { rows });
+/** Fetch Data.gov (US) datasets with CSV resources — optional search, sort, row cap (Tauri only). */
+export async function fetchDataGovRecentCsv(opts?: FetchDataGovOptions): Promise<DataGovDataset[]> {
+  return invoke<DataGovDataset[]>("fetch_data_gov_recent_csv", {
+    rows: opts?.rows ?? 40,
+    query: opts?.query?.trim() || null,
+    sort: opts?.sort ?? null,
+  });
+}
+
+/** Fetch data.gov.uk datasets with CSV resources (Tauri only). */
+export async function fetchUkDataRecentCsv(opts?: FetchDataGovOptions): Promise<DataGovDataset[]> {
+  return invoke<DataGovDataset[]>("fetch_uk_data_recent_csv", {
+    rows: opts?.rows ?? 40,
+    query: opts?.query?.trim() || null,
+    sort: opts?.sort ?? null,
+  });
 }
 
 /** Base URL and label for a portal (for preview modal "Open on …"). */

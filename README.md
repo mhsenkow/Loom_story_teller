@@ -31,7 +31,7 @@
 ### App
 - **Theming** — Dark, light, high-contrast, colorblind; font scale; reduced motion. Tokens in `globals.css`.
 - **Onboarding** — First-run modal: add data, then explore.
-- **Data & sources** — Data.gov / data.gov.uk recent CSVs (Tauri), save CSV to folder, **Wikipedia live stream** (SSE → `wiki_stream`), and **poll-based feeds** (USGS earthquakes, Open-Meteo weather, NWS alerts, World Bank indicators) with sidebar cards and Query-view SQL against virtual `stream://…` sources.
+- **Data & sources** — Data.gov / data.gov.uk **catalog search**, **sort**, **larger result sets** (up to 200), and a quick **page filter** (Tauri); save CSV to folder; **Wikipedia live stream** (SSE → `wiki_stream`); **poll-based feeds** (USGS earthquakes, Open-Meteo weather, NWS alerts, World Bank indicators) with sidebar cards and Query-view SQL against virtual `stream://…` sources.
 
 ---
 
@@ -271,7 +271,7 @@ Frontend calls go through `src/lib/tauri.ts`; do not use raw `invoke()`.
 | `get_sample_rows` | `{ filePath, limit? }` | `QueryResult` |
 | `inspect_file` | `{ filePath, limit? }` | `InspectResult` (stats + sample) |
 | `save_csv_to_folder` | `{ folder_path, url, filename }` | `string` (saved path) |
-| `fetch_data_gov_recent_csv` | `{ rows?: number }` | `DataGovDataset[]` |
+| `fetch_data_gov_recent_csv`, `fetch_uk_data_recent_csv` | `{ rows?, query?, sort? }` | `DataGovDataset[]` (CKAN CSV search) |
 | `stream_*` | (see `tauri.ts`) | Wikipedia SSE ingest → `wiki_stream` |
 | `source_*` | `kind: usgs \| meteo \| nws \| world_bank` | Poll-based APIs → per-source tables |
 

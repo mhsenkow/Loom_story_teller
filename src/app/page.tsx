@@ -304,6 +304,56 @@ export default function Home() {
 
 const PANEL_TABS = ["stats", "chart", "export", "smart", "dashboards", "settings"] as const;
 
+/** GitHub issue bodies must stay small; base64 images blow past limits quickly. */
+const FEEDBACK_IMAGE_MAX_MARKDOWN_CHARS = 48_000;
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result as string);
+    r.onerror = () => reject(r.error ?? new Error("Could not read file"));
+    r.readAsDataURL(file);
+  });
+}
+
+/** Resize / re-encode as JPEG so data URL fits in issue body (best-effort). */
+async function shrinkImageDataUrlForGithub(dataUrl: string, maxLen: number): Promise<string | null> {
+  if (typeof Image === "undefined" || typeof document === "undefined") {
+    return dataUrl.length <= maxLen ? dataUrl : null;
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      let maxSide = 1280;
+      let quality = 0.82;
+      const encode = (): string => {
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+        if (w <= 0 || h <= 0) return "";
+        const scale = Math.min(1, maxSide / Math.max(w, h));
+        const cw = Math.max(1, Math.round(w * scale));
+        const ch = Math.max(1, Math.round(h * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = cw;
+        canvas.height = ch;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return "";
+        ctx.drawImage(img, 0, 0, cw, ch);
+        return canvas.toDataURL("image/jpeg", quality);
+      };
+      let out = encode();
+      while (out.length > maxLen && maxSide > 400) {
+        maxSide = Math.round(maxSide * 0.72);
+        quality = Math.max(0.35, quality - 0.12);
+        out = encode();
+      }
+      resolve(out && out.length <= maxLen ? out : null);
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
 function HomeContent({
   viewMode,
   setViewMode,
@@ -373,12 +423,23 @@ function HomeContent({
     try {
       let imageBase64: string | null = null;
       if (feedbackImage) {
-        imageBase64 = await new Promise<string>((resolve, reject) => {
-          const r = new FileReader();
-          r.onload = () => resolve(r.result as string);
-          r.onerror = () => reject(r.error);
-          r.readAsDataURL(feedbackImage);
-        });
+        try {
+          let dataUrl = await readFileAsDataUrl(feedbackImage);
+          if (dataUrl.length > FEEDBACK_IMAGE_MAX_MARKDOWN_CHARS) {
+            const smaller = await shrinkImageDataUrlForGithub(dataUrl, FEEDBACK_IMAGE_MAX_MARKDOWN_CHARS);
+            if (smaller) {
+              dataUrl = smaller;
+              setToast("Screenshot was resized for GitHub.");
+            } else {
+              setToast("Screenshot too large for GitHub; opening issue without it — add the image on the issue page.");
+              dataUrl = "";
+            }
+          }
+          imageBase64 = dataUrl.length > 0 ? dataUrl : null;
+        } catch (err) {
+          console.error("Feedback image read failed:", err);
+          setToast("Could not read that image. Try PNG or JPEG.");
+        }
       }
       if (isTauri()) {
         try {
@@ -390,10 +451,17 @@ function HomeContent({
           setFeedbackImage(null);
           if (feedbackFileRef.current) feedbackFileRef.current.value = "";
           setShortcutsOpen(false);
-        } catch {
+        } catch (e) {
+          console.error("createGitHubIssue:", e);
           const url = getGitHubNewIssueUrl(title, body);
           await openUrl(url);
-          setToast(feedbackImage ? "Open the issue and paste your screenshot (Ctrl+V)" : "Opening GitHub to submit feedback");
+          setToast(
+            feedbackImage && imageBase64
+              ? "GitHub returned an error (often body too large). Browser opened — paste your screenshot there."
+              : feedbackImage
+                ? "Open the issue and paste your screenshot (Ctrl+V or drag the file)."
+                : "Opening GitHub to submit feedback",
+          );
         }
       } else {
         const url = getGitHubNewIssueUrl(title, body);
@@ -474,25 +542,29 @@ function HomeContent({
                   rows={3}
                   className="loom-input w-full text-xs px-2 py-1.5 resize-y min-h-[72px]"
                 />
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <input
                     ref={feedbackFileRef}
+                    id="loom-feedback-screenshot"
                     type="file"
-                    accept="image/*"
-                    className="hidden"
+                    accept="image/png,image/jpeg,image/jpg,image/gif,image/webp"
+                    className="sr-only"
                     onChange={(e) => setFeedbackImage(e.target.files?.[0] ?? null)}
                   />
-                  <button
-                    type="button"
-                    onClick={() => feedbackFileRef.current?.click()}
-                    className="loom-btn-ghost text-xs px-2 py-1"
+                  <label
+                    htmlFor="loom-feedback-screenshot"
+                    className="loom-btn-ghost text-xs px-2 py-1 cursor-pointer shrink-0"
                   >
-                    {feedbackImage ? `📎 ${feedbackImage.name}` : "Attach screenshot"}
-                  </button>
+                    {feedbackImage ? `Attached: ${feedbackImage.name}` : "Attach screenshot"}
+                  </label>
                   {feedbackImage && (
                     <button
                       type="button"
-                      onClick={() => { setFeedbackImage(null); feedbackFileRef.current && (feedbackFileRef.current.value = ""); }}
+                      onClick={() => {
+                        setFeedbackImage(null);
+                        const el = feedbackFileRef.current;
+                        if (el) el.value = "";
+                      }}
                       className="text-loom-muted hover:text-loom-text text-xs"
                     >
                       Clear

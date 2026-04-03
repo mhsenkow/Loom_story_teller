@@ -189,24 +189,59 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
     Ok(())
 }
 
-/// Fetch recent Data.gov datasets that have CSV resources.
+fn sanitize_ckan_q(q: Option<String>) -> Option<String> {
+    let s = q?.trim().to_string();
+    if s.is_empty() || s.len() > 500 {
+        return None;
+    }
+    if s.contains('\n') || s.contains('\r') {
+        return None;
+    }
+    Some(s)
+}
+
+/// Maps UI sort keys to CKAN `sort` parameter (allowlist only).
+fn ckan_sort_param(sort: Option<String>) -> &'static str {
+    match sort.as_deref() {
+        Some("newest") => "metadata_created desc",
+        Some("updated") => "metadata_modified desc",
+        Some("relevance") => "score desc",
+        Some("title_az") => "title_string asc",
+        Some("title_za") => "title_string desc",
+        _ => "metadata_created desc",
+    }
+}
+
+/// Fetch Data.gov datasets that have CSV resources (search, sort, and row limit).
 #[tauri::command]
-pub async fn fetch_data_gov_recent_csv(rows: Option<u32>) -> Result<Vec<DataGovDataset>, String> {
-    let rows = rows.unwrap_or(40).clamp(1, 100);
+pub async fn fetch_data_gov_recent_csv(
+    rows: Option<u32>,
+    query: Option<String>,
+    sort: Option<String>,
+) -> Result<Vec<DataGovDataset>, String> {
+    let rows = rows.unwrap_or(40).clamp(1, 200);
+    let sort_s = ckan_sort_param(sort);
+    let q = sanitize_ckan_q(query);
+
     let client = reqwest::Client::builder()
         .user_agent("Loom-Data-Storyteller/1.0")
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
+    let mut url = reqwest::Url::parse("https://catalog.data.gov/api/3/action/package_search")
+        .map_err(|e| format!("Data.gov URL: {}", e))?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs.append_pair("rows", &rows.to_string());
+        pairs.append_pair("sort", sort_s);
+        pairs.append_pair("fq", "res_format:CSV");
+        if let Some(ref query_str) = q {
+            pairs.append_pair("q", query_str);
+        }
+    }
+
     let res = client
-        .get("https://catalog.data.gov/api/3/action/package_search")
-        // Match the catalog behavior from:
-        // https://catalog.data.gov/dataset/?q=&sort=metadata_created+desc&res_format=CSV
-        .query(&[
-            ("rows", rows.to_string()),
-            ("sort", "metadata_created desc".to_string()),
-            ("fq", "res_format:CSV".to_string()),
-        ])
+        .get(url)
         .send()
         .await
         .map_err(|e| format!("Data.gov request failed: {}", e))?;
@@ -299,21 +334,34 @@ pub async fn fetch_data_gov_recent_csv(rows: Option<u32>) -> Result<Vec<DataGovD
 
 /// UK open data (CKAN). Same shape as Data.gov for unified UI.
 #[tauri::command]
-pub async fn fetch_uk_data_recent_csv(rows: Option<u32>) -> Result<Vec<DataGovDataset>, String> {
-    let rows = rows.unwrap_or(40).clamp(1, 100);
+pub async fn fetch_uk_data_recent_csv(
+    rows: Option<u32>,
+    query: Option<String>,
+    sort: Option<String>,
+) -> Result<Vec<DataGovDataset>, String> {
+    let rows = rows.unwrap_or(40).clamp(1, 200);
+    let sort_s = ckan_sort_param(sort);
+    let q = sanitize_ckan_q(query);
+
     let client = reqwest::Client::builder()
         .user_agent("Loom-Data-Storyteller/1.0")
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    // data.gov.uk CKAN: /api/action/ (see guidance.data.gov.uk)
+    let mut url = reqwest::Url::parse("https://data.gov.uk/api/action/package_search")
+        .map_err(|e| format!("UK data URL: {}", e))?;
+    {
+        let mut pairs = url.query_pairs_mut();
+        pairs.append_pair("rows", &rows.to_string());
+        pairs.append_pair("sort", sort_s);
+        pairs.append_pair("fq", "res_format:CSV");
+        if let Some(ref query_str) = q {
+            pairs.append_pair("q", query_str);
+        }
+    }
+
     let res = client
-        .get("https://data.gov.uk/api/action/package_search")
-        .query(&[
-            ("rows", rows.to_string()),
-            ("sort", "metadata_created desc".to_string()),
-            ("fq", "res_format:CSV".to_string()),
-        ])
+        .get(url)
         .send()
         .await
         .map_err(|e| format!("UK data request failed: {}", e))?;

@@ -8,7 +8,7 @@
 
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
 import { COLOR_PALETTES } from "@/lib/chartPalettes";
@@ -17,12 +17,16 @@ import {
   CHART_KIND_OPTIONS,
   Y_AGGREGATE_OPTIONS,
   getRecommendationReason,
-  getRandomChartAndEncoding,
+  getRandomEncoding,
+  chartKindDataSupport,
+  tryBuildRandomChartRec,
+  recommend,
   recommendStorySequence,
   recommendStreamStory,
   type ChartKind,
   type YAggregateOption,
 } from "@/lib/recommendations";
+import { computeDataQualityHints, formatChartAggregationSummary } from "@/lib/chartSupport";
 import {
   runAnomaly,
   runForecast,
@@ -781,8 +785,9 @@ function DropZone({
 }
 
 function StatsView() {
-  const { columnStats } = useLoomStore();
+  const { columnStats, sampleRows } = useLoomStore();
   const stats = columnStats ?? [];
+  const dq = useMemo(() => computeDataQualityHints(stats, sampleRows), [stats, sampleRows]);
 
   if (stats.length === 0) {
     return (
@@ -794,6 +799,29 @@ function StatsView() {
 
   return (
     <div className="p-3 space-y-2">
+      {(dq.nullHeavy.length > 0 || dq.constantCols.length > 0 || dq.duplicateSummary) && (
+        <div className="loom-card border border-loom-border/80 p-2 space-y-1.5">
+          <p className="text-xs font-semibold text-loom-text">Data health</p>
+          {dq.nullHeavy.length > 0 && (
+            <div className="text-2xs text-loom-muted">
+              <span className="text-loom-text font-medium">High nulls: </span>
+              {dq.nullHeavy.map((h) => `${h.name} (${h.pct}%)`).join(", ")}
+            </div>
+          )}
+          {dq.constantCols.length > 0 && (
+            <div className="text-2xs text-loom-muted">
+              <span className="text-loom-text font-medium">Constant / single value: </span>
+              {dq.constantCols.join(", ")}
+            </div>
+          )}
+          {dq.duplicateSummary && (
+            <div className="text-2xs text-loom-muted">
+              <span className="text-loom-text font-medium">Duplicates: </span>
+              {dq.duplicateSummary}
+            </div>
+          )}
+        </div>
+      )}
       {stats.map((col) => (
         <div key={String(col.name)} className="loom-card space-y-1.5">
           <div className="flex items-center justify-between">
@@ -1486,8 +1514,21 @@ function ChartPanelView() {
       outlineField: activeChart?.outlineField ?? null,
       opacityField: activeChart?.opacityField ?? null,
       yAggregate: activeChart?.yAggregate ?? null,
+      tooltipFields: activeChart?.tooltipFields,
+      tooltipKeyField: activeChart?.tooltipKeyField ?? null,
+      barStackMode,
     }),
-    [activeChart?.sizeField, activeChart?.rowField, activeChart?.glowField, activeChart?.outlineField, activeChart?.opacityField, activeChart?.yAggregate],
+    [
+      activeChart?.sizeField,
+      activeChart?.rowField,
+      activeChart?.glowField,
+      activeChart?.outlineField,
+      activeChart?.opacityField,
+      activeChart?.yAggregate,
+      activeChart?.tooltipFields,
+      activeChart?.tooltipKeyField,
+      barStackMode,
+    ],
   );
 
   const handleDrop = useCallback(
@@ -1556,7 +1597,16 @@ function ChartPanelView() {
         activeChart.yField,
         activeChart.colorField,
         tableName,
-        { sizeField, rowField, glowField, outlineField, opacityField, yAggregate: activeChart.yAggregate ?? null },
+        {
+          sizeField,
+          rowField,
+          glowField,
+          outlineField,
+          opacityField,
+          yAggregate: activeChart.yAggregate ?? null,
+          tooltipFields: activeChart.tooltipFields,
+          tooltipKeyField: activeChart.tooltipKeyField ?? null,
+        },
       );
       if (rec) setActiveChart(rec);
     },
@@ -1597,20 +1647,70 @@ function ChartPanelView() {
     [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
   );
 
+  const applyTooltipFields = useCallback(
+    (fields: string[]) => {
+      if (!activeChart || columnStats.length === 0) return;
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        activeChart.colorField,
+        tableName,
+        { ...extraFromChart(), tooltipFields: fields.length > 0 ? fields : undefined },
+      );
+      if (rec) setActiveChart(rec);
+    },
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+  );
+
+  const applyTooltipKeyField = useCallback(
+    (col: string | null) => {
+      if (!activeChart || columnStats.length === 0) return;
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        activeChart.colorField,
+        tableName,
+        { ...extraFromChart(), tooltipKeyField: col === null ? undefined : col },
+      );
+      if (rec) setActiveChart(rec);
+    },
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+  );
+
   const handleRandomize = useCallback(() => {
     if (columnStats.length === 0) return;
-    const random = getRandomChartAndEncoding(columnStats);
-    if (!random) return;
-    const rec = createChartRec(
-      random.kind,
-      columnStats,
-      random.xField,
-      random.yField,
-      random.colorField,
-      tableName,
-    );
+    const rec = tryBuildRandomChartRec(columnStats, tableName);
     if (rec) setActiveChart(rec);
   }, [columnStats, tableName, setActiveChart]);
+
+  const handleRandomizeEncoding = useCallback(() => {
+    if (columnStats.length === 0 || !activeChart) return;
+    for (let i = 0; i < 48; i++) {
+      const enc = getRandomEncoding(columnStats, activeChart.kind);
+      if (!enc) continue;
+      const extra: Parameters<typeof createChartRec>[6] = {};
+      if (enc.sizeField) extra.sizeField = enc.sizeField;
+      if (activeChart.tooltipFields?.length) extra.tooltipFields = activeChart.tooltipFields;
+      if (activeChart.tooltipKeyField) extra.tooltipKeyField = activeChart.tooltipKeyField;
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        enc.xField,
+        enc.yField,
+        enc.colorField,
+        tableName,
+        extra,
+      );
+      if (rec) {
+        setActiveChart(rec);
+        return;
+      }
+    }
+  }, [columnStats, tableName, setActiveChart, activeChart]);
 
   if (!activeChart) {
     return (
@@ -1623,9 +1723,11 @@ function ChartPanelView() {
 
   const specJson = vegaSpec ? JSON.stringify(vegaSpec, null, 2) : "{}";
   const rowCount = sampleRows?.rows.length ?? 0;
+  const totalRows = sampleRows?.total_rows ?? rowCount;
+  const aggSummary = formatChartAggregationSummary(activeChart);
   const showY = activeChart.kind !== "histogram";
   const showColor = !["histogram", "pie"].includes(activeChart.kind);
-  const showSize = activeChart.kind === "scatter" || activeChart.kind === "strip";
+  const showSize = activeChart.kind === "scatter" || activeChart.kind === "strip" || activeChart.kind === "bubble";
   const showAggregate = ["bar", "line", "area", "pie"].includes(activeChart.kind);
   const effectiveAggregate: YAggregateOption = !activeChart.yField
     ? "count"
@@ -1660,27 +1762,58 @@ function ChartPanelView() {
         </button>
         {encodingOpen && (
           <div className="space-y-2 px-2 pb-2">
-            <div className="flex justify-end">
-              <button
-                type="button"
-                onClick={handleRandomize}
-                className="text-2xs py-1 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text transition-colors"
-                title="Random chart type and column combo"
-              >
-                Randomize
-              </button>
-            </div>
+            {(() => {
+              const curSupport = chartKindDataSupport(columnStats, activeChart.kind);
+              if (!curSupport.ok) {
+                return (
+                  <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-2xs text-amber-200/90">
+                    <span className="font-medium">Current chart doesn’t fit this table:</span> {curSupport.reason}
+                  </div>
+                );
+              }
+              return null;
+            })()}
             <div>
               <label className="block text-2xs text-loom-muted mb-1">Chart type</label>
               <select
                 value={activeChart.kind}
-                onChange={(e) => applyChartType(e.target.value as ChartKind)}
+                onChange={(e) => {
+                  const v = e.target.value as ChartKind;
+                  if (!chartKindDataSupport(columnStats, v).ok) return;
+                  applyChartType(v);
+                }}
                 className="loom-input w-full text-xs py-1.5 font-mono"
+                title="Types that don’t match your columns are disabled"
               >
-                {CHART_KIND_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
+                {CHART_KIND_OPTIONS.map((opt) => {
+                  const { ok, reason } = chartKindDataSupport(columnStats, opt.value);
+                  return (
+                    <option key={opt.value} value={opt.value} disabled={!ok} title={!ok ? reason : undefined}>
+                      {!ok ? `${opt.label} — ${reason}` : opt.label}
+                    </option>
+                  );
+                })}
               </select>
+              <p className="text-2xs text-loom-muted mt-0.5">Grayed options need different column types or cardinality.</p>
+            </div>
+            <div className="flex rounded border border-loom-border overflow-hidden">
+              <button
+                type="button"
+                onClick={handleRandomizeEncoding}
+                className="flex-1 text-2xs py-1.5 px-2 text-loom-muted hover:bg-loom-elevated hover:text-loom-text transition-colors text-left"
+                title="Keep chart type, shuffle columns"
+              >
+                ⟳ Shuffle fields
+              </button>
+              <span className="w-px bg-loom-border" />
+              <button
+                type="button"
+                onClick={handleRandomize}
+                className="text-2xs py-1.5 px-2.5 text-loom-muted hover:bg-loom-elevated hover:text-loom-accent transition-colors"
+                title="Randomize chart type and columns"
+              >
+                🎲
+              </button>
             </div>
             <p className="text-2xs text-loom-muted">Drag columns from footer Schema tab, or choose below.</p>
             <div className="space-y-2">
@@ -1774,6 +1907,11 @@ function ChartPanelView() {
                   {activeChart.colorField && colType(activeChart.colorField) && (
                     <p className="text-2xs text-loom-muted mt-0.5 font-mono">{colType(activeChart.colorField)}</p>
                   )}
+                  {activeChart.kind === "bar" && activeChart.colorField && (
+                    <p className="text-2xs text-loom-muted mt-0.5">
+                      Use as subcategory: dodged / stacked / percent bars (see Active chart).
+                    </p>
+                  )}
                 </div>
               )}
               {showSize && (
@@ -1849,6 +1987,54 @@ function ChartPanelView() {
                   </div>
                 </>
               )}
+              <div className="pt-2 mt-2 border-t border-loom-border space-y-2">
+                <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Tooltip</p>
+                <p className="text-2xs text-loom-muted">
+                  Hover shows values. Leave all unchecked to mirror encoding fields. Press L on the chart to lock or clear a row filter by link key.
+                </p>
+                <div className="max-h-32 overflow-y-auto space-y-1 border border-loom-border rounded p-1.5">
+                  {columnStats.map((c) => (
+                    <label key={c.name} className="flex items-center gap-2 text-2xs text-loom-text cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={activeChart.tooltipFields?.includes(c.name) ?? false}
+                        onChange={(e) => {
+                          const cur = new Set(activeChart.tooltipFields ?? []);
+                          if (e.target.checked) cur.add(c.name);
+                          else cur.delete(c.name);
+                          applyTooltipFields([...cur]);
+                        }}
+                        className="rounded border-loom-border accent-loom-accent"
+                      />
+                      {c.name}
+                    </label>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => applyTooltipFields([])}
+                  className="text-2xs text-loom-muted hover:text-loom-text"
+                >
+                  Reset tooltip columns (encoding default)
+                </button>
+                <div>
+                  <label className="block text-2xs text-loom-muted mb-1">Link key for L</label>
+                  <select
+                    value={activeChart.tooltipKeyField ?? "__default__"}
+                    onChange={(e) =>
+                      applyTooltipKeyField(e.target.value === "__default__" ? null : e.target.value)
+                    }
+                    className="loom-input w-full text-xs py-1.5 font-mono"
+                  >
+                    <option value="__default__">Same as X field</option>
+                    {columnStats.map((c) => (
+                      <option key={c.name} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -1884,15 +2070,49 @@ function ChartPanelView() {
               {activeChart.glowField && <p>Glow: {activeChart.glowField}</p>}
               {activeChart.outlineField && <p>Outline: {activeChart.outlineField}</p>}
               {activeChart.opacityField && <p>Opacity: {activeChart.opacityField}</p>}
-              <p>{rowCount.toLocaleString()} rows (preview)</p>
+              <p className="text-loom-text">
+                Showing {rowCount.toLocaleString()}
+                {totalRows > rowCount ? ` of ${totalRows.toLocaleString()}` : ""} rows in chart
+              </p>
+              <p className="text-loom-muted">{aggSummary}</p>
             </div>
             {/* Chart-specific toggles */}
             {activeChart.kind === "bar" && activeChart.colorField && (
               <div className="mt-2">
-                <label className="block text-2xs text-loom-muted mb-1">Bar stacking</label>
-                <div className="flex gap-1">
+                <label className="block text-2xs text-loom-muted mb-1">Bar layout (Color = subcategory)</label>
+                <div className="flex gap-1 flex-wrap">
                   {(["grouped", "stacked", "percent"] as const).map((m) => (
-                    <button key={m} type="button" onClick={() => setBarStackMode(m)} className={`px-1.5 py-0.5 text-2xs rounded ${barStackMode === m ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}>{m}</button>
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => {
+                        setBarStackMode(m);
+                        if (columnStats.length === 0) return;
+                        const rec = createChartRec(
+                          activeChart.kind,
+                          columnStats,
+                          activeChart.xField,
+                          activeChart.yField,
+                          activeChart.colorField,
+                          tableName,
+                          {
+                            sizeField: activeChart.sizeField ?? null,
+                            rowField: activeChart.rowField ?? null,
+                            glowField: activeChart.glowField ?? null,
+                            outlineField: activeChart.outlineField ?? null,
+                            opacityField: activeChart.opacityField ?? null,
+                            yAggregate: activeChart.yAggregate ?? null,
+                            tooltipFields: activeChart.tooltipFields,
+                            tooltipKeyField: activeChart.tooltipKeyField ?? null,
+                            barStackMode: m,
+                          },
+                        );
+                        if (rec) setActiveChart(rec);
+                      }}
+                      className={`px-1.5 py-0.5 text-2xs rounded ${barStackMode === m ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
+                    >
+                      {m}
+                    </button>
                   ))}
                 </div>
               </div>

@@ -265,6 +265,8 @@ interface LoomState {
   chartAnnotations: Record<string, { id: string; text: string; x: number; y: number }[]>;
   /** Hovered row index for linked highlighting between table and chart. null = none. */
   hoveredRowIndex: number | null;
+  /** Locked tooltip identity (column value) shared across charts; set/clear with L when hovering. */
+  tooltipLink: { field: string; value: string } | null;
   /** Pinned tooltips on chart (persist until dismissed). */
   pinnedTooltips: { id: string; chartId: string; x: number; y: number; rowIndex: number; row: (string | number | boolean | null)[]; columns: string[] }[];
   /** User-placed reference lines on chart (chartId -> lines). */
@@ -377,6 +379,7 @@ interface LoomState {
   addChartAnnotation: (chartId: string, text: string, x?: number, y?: number) => void;
   removeChartAnnotation: (chartId: string, id: string) => void;
   setHoveredRowIndex: (idx: number | null) => void;
+  setTooltipLink: (link: { field: string; value: string } | null) => void;
   addPinnedTooltip: (tt: { chartId: string; x: number; y: number; rowIndex: number; row: (string | number | boolean | null)[]; columns: string[] }) => void;
   removePinnedTooltip: (id: string) => void;
   clearPinnedTooltips: () => void;
@@ -487,6 +490,7 @@ const initialState = {
   queryResultPageSize: 500,
   chartAnnotations: {} as Record<string, { id: string; text: string; x: number; y: number }[]>,
   hoveredRowIndex: null as number | null,
+  tooltipLink: null as { field: string; value: string } | null,
   pinnedTooltips: [] as { id: string; chartId: string; x: number; y: number; rowIndex: number; row: (string | number | boolean | null)[]; columns: string[] }[],
   customRefLines: {} as Record<string, { id: string; axis: "x" | "y"; value: number; label: string }[]>,
   chartInteractionMode: "pan" as "pan" | "crosshair" | "lasso",
@@ -694,6 +698,7 @@ export const useLoomStore = create<LoomState>((set, get) => ({
       },
     })),
   setHoveredRowIndex: (idx) => set({ hoveredRowIndex: idx }),
+  setTooltipLink: (link) => set({ tooltipLink: link }),
   addPinnedTooltip: (tt) =>
     set((s) => ({
       pinnedTooltips: [...s.pinnedTooltips.slice(-4), { ...tt, id: `pt-${Date.now()}` }],

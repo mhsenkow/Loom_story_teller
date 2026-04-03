@@ -11,7 +11,7 @@
 
 import { useRef, useState, useEffect, useMemo } from "react";
 import { useLoomStore, type FileEntry } from "@/lib/store";
-import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, sourceStart, sourceStop, sourceStatus, sourceSnapshot, sourceClear, type SourceKind } from "@/lib/tauri";
+import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset, type DataGovSortKey, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, sourceStart, sourceStop, sourceStatus, sourceSnapshot, sourceClear, type SourceKind } from "@/lib/tauri";
 import { recommend, recommendStreamStory, recommendSourceStory } from "@/lib/recommendations";
 import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
@@ -735,7 +735,118 @@ function SourceCard({ def }: { def: SourceCardDef }) {
   );
 }
 
-const DATA_GOV_ROWS = 80;
+const DATA_GOV_ROW_OPTIONS = [40, 80, 120, 200] as const;
+
+const DATA_GOV_SORT_OPTIONS: { value: DataGovSortKey; label: string }[] = [
+  { value: "newest", label: "Newest listed" },
+  { value: "updated", label: "Recently updated" },
+  { value: "relevance", label: "Relevance" },
+  { value: "title_az", label: "Title A–Z" },
+  { value: "title_za", label: "Title Z–A" },
+];
+
+function filterDatasetsLocal(datasets: DataGovDataset[], text: string): DataGovDataset[] {
+  const q = text.trim().toLowerCase();
+  if (!q) return datasets;
+  return datasets.filter((d) => {
+    const hay = `${d.title} ${d.organization ?? ""} ${d.name}`.toLowerCase();
+    return hay.includes(q);
+  });
+}
+
+function CkanDiscoverToolbar({
+  queryDraft,
+  onQueryDraftChange,
+  onSearch,
+  sort,
+  onSortChange,
+  rowLimit,
+  onRowLimitChange,
+  localFilter,
+  onLocalFilterChange,
+  loading,
+}: {
+  queryDraft: string;
+  onQueryDraftChange: (s: string) => void;
+  onSearch: () => void;
+  sort: DataGovSortKey;
+  onSortChange: (s: DataGovSortKey) => void;
+  rowLimit: (typeof DATA_GOV_ROW_OPTIONS)[number];
+  onRowLimitChange: (n: (typeof DATA_GOV_ROW_OPTIONS)[number]) => void;
+  localFilter: string;
+  onLocalFilterChange: (s: string) => void;
+  loading: boolean;
+}) {
+  return (
+    <div className="space-y-2 px-1 mb-2">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          onSearch();
+        }}
+        className="space-y-0.5"
+      >
+        <label className="text-2xs text-loom-muted">Search catalog</label>
+        <div className="flex gap-1.5 mt-0.5">
+          <input
+            type="search"
+            value={queryDraft}
+            onChange={(e) => onQueryDraftChange(e.target.value)}
+            placeholder="Keywords, agency, topic…"
+            className="loom-input flex-1 min-w-0 text-xs py-1.5"
+            disabled={loading}
+            enterKeyHint="search"
+          />
+          <button type="submit" className="loom-btn-primary text-2xs px-2.5 py-1.5 shrink-0" disabled={loading}>
+            Search
+          </button>
+        </div>
+      </form>
+      <div className="flex flex-wrap gap-2 items-end">
+        <div className="min-w-0 flex-1 sm:flex-initial">
+          <label className="text-2xs text-loom-muted block mb-0.5">Sort</label>
+          <select
+            value={sort}
+            onChange={(e) => onSortChange(e.target.value as DataGovSortKey)}
+            className="loom-input w-full sm:w-[11rem] text-xs py-1.5"
+            disabled={loading}
+          >
+            {DATA_GOV_SORT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-2xs text-loom-muted block mb-0.5">Max results</label>
+          <select
+            value={rowLimit}
+            onChange={(e) => onRowLimitChange(Number(e.target.value) as (typeof DATA_GOV_ROW_OPTIONS)[number])}
+            className="loom-input text-xs py-1.5 w-full sm:w-[5.5rem]"
+            disabled={loading}
+          >
+            {DATA_GOV_ROW_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div>
+        <label className="text-2xs text-loom-muted">Filter this page</label>
+        <input
+          type="search"
+          value={localFilter}
+          onChange={(e) => onLocalFilterChange(e.target.value)}
+          placeholder="Match title or publisher (instant)"
+          className="loom-input w-full text-xs py-1.5 mt-0.5"
+        />
+      </div>
+    </div>
+  );
+}
 
 function DataRegionView({
   onBack,
@@ -763,12 +874,34 @@ function DataRegionView({
   const [dataGovDatasets, setDataGovDatasets] = useState<DataGovDataset[]>([]);
   const [dataGovLoading, setDataGovLoading] = useState(false);
   const [dataGovError, setDataGovError] = useState<string | null>(null);
+  const [dataGovRequest, setDataGovRequest] = useState<{ q: string; sort: DataGovSortKey; rows: (typeof DATA_GOV_ROW_OPTIONS)[number] }>({
+    q: "",
+    sort: "newest",
+    rows: 80,
+  });
+  const [dataGovQueryDraft, setDataGovQueryDraft] = useState("");
+  const [dataGovLocalFilter, setDataGovLocalFilter] = useState("");
+
   const [ukDatasets, setUkDatasets] = useState<DataGovDataset[]>([]);
   const [ukLoading, setUkLoading] = useState(false);
   const [ukError, setUkError] = useState<string | null>(null);
+  const [ukRequest, setUkRequest] = useState<{ q: string; sort: DataGovSortKey; rows: (typeof DATA_GOV_ROW_OPTIONS)[number] }>({
+    q: "",
+    sort: "newest",
+    rows: 80,
+  });
+  const [ukQueryDraft, setUkQueryDraft] = useState("");
+  const [ukLocalFilter, setUkLocalFilter] = useState("");
+
   const [savingId, setSavingId] = useState<string | null>(null);
   const [previewDataset, setPreviewDataset] = useState<DataGovDataset | null>(null);
   const isTauriEnv = isTauri();
+
+  const dataGovFiltered = useMemo(
+    () => filterDatasetsLocal(dataGovDatasets, dataGovLocalFilter),
+    [dataGovDatasets, dataGovLocalFilter],
+  );
+  const ukFiltered = useMemo(() => filterDatasetsLocal(ukDatasets, ukLocalFilter), [ukDatasets, ukLocalFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -780,7 +913,11 @@ function DataRegionView({
       setDataGovLoading(false);
       return () => { cancelled = true; };
     }
-    fetchDataGovRecentCsv(DATA_GOV_ROWS)
+    fetchDataGovRecentCsv({
+      rows: dataGovRequest.rows,
+      query: dataGovRequest.q || undefined,
+      sort: dataGovRequest.sort,
+    })
       .then((datasets) => {
         if (cancelled) return;
         setDataGovDatasets(datasets);
@@ -794,7 +931,7 @@ function DataRegionView({
         if (!cancelled) setDataGovLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isTauriEnv]);
+  }, [isTauriEnv, dataGovRequest]);
 
   useEffect(() => {
     let cancelled = false;
@@ -806,7 +943,11 @@ function DataRegionView({
     }
     setUkLoading(true);
     setUkError(null);
-    fetchUkDataRecentCsv(DATA_GOV_ROWS)
+    fetchUkDataRecentCsv({
+      rows: ukRequest.rows,
+      query: ukRequest.q || undefined,
+      sort: ukRequest.sort,
+    })
       .then((datasets) => {
         if (!cancelled) setUkDatasets(datasets);
       })
@@ -820,7 +961,7 @@ function DataRegionView({
         if (!cancelled) setUkLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isTauriEnv]);
+  }, [isTauriEnv, ukRequest]);
 
   async function handleSaveToFolder(url: string, filename: string, resourceId: string) {
     if (!mountedFolder || mountedFolder.startsWith("mock://") || mountedFolder.startsWith("web://")) return;
@@ -907,19 +1048,36 @@ function DataRegionView({
 
         {/* Data.gov: discover recent CSVs — list or grid when expanded */}
         <section className={expanded ? "flex-1 min-h-0 flex flex-col" : ""}>
-          <div className="flex items-center justify-between gap-2 mb-2 px-1">
+          <div className="flex items-center justify-between gap-2 mb-1 px-1">
             <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">
               Discover — Data.gov
             </h3>
             {!dataGovLoading && dataGovDatasets.length > 0 && (
-              <span className="text-2xs text-loom-muted">{dataGovDatasets.length} datasets</span>
+              <span className="text-2xs text-loom-muted shrink-0 text-right">
+                {dataGovLocalFilter.trim()
+                  ? `${dataGovFiltered.length} / ${dataGovDatasets.length}`
+                  : dataGovDatasets.length}{" "}
+                shown
+              </span>
             )}
           </div>
           {!expanded && (
             <p className="text-2xs text-loom-muted px-1 mb-2">
-              Recent CSV datasets. Download or save to your folder.
+              Search the catalog, change sort or result count, then narrow the list with the page filter.
             </p>
           )}
+          <CkanDiscoverToolbar
+            queryDraft={dataGovQueryDraft}
+            onQueryDraftChange={setDataGovQueryDraft}
+            onSearch={() => setDataGovRequest((r) => ({ ...r, q: dataGovQueryDraft.trim() }))}
+            sort={dataGovRequest.sort}
+            onSortChange={(sort) => setDataGovRequest((r) => ({ ...r, sort }))}
+            rowLimit={dataGovRequest.rows}
+            onRowLimitChange={(rows) => setDataGovRequest((r) => ({ ...r, rows }))}
+            localFilter={dataGovLocalFilter}
+            onLocalFilterChange={setDataGovLocalFilter}
+            loading={dataGovLoading}
+          />
           {dataGovLoading && (
             <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>
           )}
@@ -927,10 +1085,10 @@ function DataRegionView({
             <p className="text-2xs text-amber-500/90 px-1 py-1">{dataGovError}</p>
           )}
           {!dataGovLoading && !dataGovError && dataGovDatasets.length === 0 && (
-            <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found.</p>
+            <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found. Try different search terms.</p>
           )}
           <div className={expanded ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 flex-1 content-start overflow-y-auto min-h-0" : "space-y-3"}>
-            {dataGovDatasets.map((ds) => (
+            {dataGovFiltered.map((ds) => (
               <div key={ds.id} className={`loom-card p-2.5 space-y-1.5 ${expanded ? "flex flex-col min-w-0" : ""}`}>
                 <div className="flex items-start justify-between gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
@@ -1004,26 +1162,41 @@ function DataRegionView({
 
         {/* data.gov.uk — same card UI + preview modal */}
         <section>
-          <div className="flex items-center justify-between gap-2 mb-2 px-1">
+          <div className="flex items-center justify-between gap-2 mb-1 px-1">
             <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">
               Discover — data.gov.uk
             </h3>
             {!ukLoading && ukDatasets.length > 0 && (
-              <span className="text-2xs text-loom-muted">{ukDatasets.length} datasets</span>
+              <span className="text-2xs text-loom-muted shrink-0 text-right">
+                {ukLocalFilter.trim() ? `${ukFiltered.length} / ${ukDatasets.length}` : ukDatasets.length}{" "}
+                shown
+              </span>
             )}
           </div>
           {!expanded && (
             <p className="text-2xs text-loom-muted px-1 mb-2">
-              UK government open data. Recent CSVs.
+              Same controls as Data.gov: search, sort, more results, and quick page filter.
             </p>
           )}
+          <CkanDiscoverToolbar
+            queryDraft={ukQueryDraft}
+            onQueryDraftChange={setUkQueryDraft}
+            onSearch={() => setUkRequest((r) => ({ ...r, q: ukQueryDraft.trim() }))}
+            sort={ukRequest.sort}
+            onSortChange={(sort) => setUkRequest((r) => ({ ...r, sort }))}
+            rowLimit={ukRequest.rows}
+            onRowLimitChange={(rows) => setUkRequest((r) => ({ ...r, rows }))}
+            localFilter={ukLocalFilter}
+            onLocalFilterChange={setUkLocalFilter}
+            loading={ukLoading}
+          />
           {ukLoading && <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>}
           {ukError && <p className="text-2xs text-amber-500/90 px-1 py-1">{ukError}</p>}
           {!ukLoading && !ukError && ukDatasets.length === 0 && (
-            <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found.</p>
+            <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found. Try different search terms.</p>
           )}
           <div className={expanded ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 content-start" : "space-y-3"}>
-            {ukDatasets.map((ds) => (
+            {ukFiltered.map((ds) => (
               <div key={ds.id} className={`loom-card p-2.5 space-y-1.5 ${expanded ? "flex flex-col min-w-0" : ""}`}>
                 <div className="flex items-start justify-between gap-2 min-w-0">
                   <div className="min-w-0 flex-1">
@@ -1211,20 +1384,19 @@ function FilesView({
             <>
               <input
                 ref={fileInputRef}
+                id="loom-web-csv-files"
                 type="file"
                 accept=".csv"
                 multiple
-                className="hidden"
+                className="sr-only"
                 onChange={onLoadFiles}
               />
-              <button
-                type="button"
-                onClick={() => fileInputRef?.current?.click()}
-                disabled={isScanning}
-                className="loom-btn-primary w-full text-xs"
+              <label
+                htmlFor="loom-web-csv-files"
+                className={`loom-btn-primary w-full text-xs flex items-center justify-center cursor-pointer ${isScanning ? "pointer-events-none opacity-60" : ""}`}
               >
                 {isScanning ? "Loading…" : "Load files"}
-              </button>
+              </label>
               <p className="text-2xs text-loom-muted mt-1.5 px-0.5">
                 Pick CSV files from your device.
               </p>
