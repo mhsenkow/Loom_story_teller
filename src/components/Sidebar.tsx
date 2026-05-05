@@ -19,6 +19,16 @@ import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
 const SIDEBAR_WIDTH = 260;
 const DATA_REGION_WIDTH = 340;
 
+/** Tauri invoke rejects with string errors from Rust — normalize for UI. */
+function ipcErrorMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  if (e && typeof e === "object" && "message" in e && typeof (e as { message: unknown }).message === "string") {
+    return (e as { message: string }).message;
+  }
+  return String(e);
+}
+
 export function Sidebar() {
   const {
     mountedFolder, files, isScanning, selectedFile, inspectingFilePath, sidebarOpen, dataRegionOpen, dataSourcesExpanded,
@@ -924,7 +934,7 @@ function DataRegionView({
       })
       .catch((e) => {
         if (cancelled) return;
-        setDataGovError(e instanceof Error ? e.message : "Failed to load Data.gov datasets");
+        setDataGovError(ipcErrorMessage(e) || "Failed to load Data.gov datasets");
         setDataGovDatasets([]);
       })
       .finally(() => {
@@ -953,7 +963,7 @@ function DataRegionView({
       })
       .catch((e) => {
         if (!cancelled) {
-          setUkError(e instanceof Error ? e.message : "Failed to load UK datasets");
+          setUkError(ipcErrorMessage(e) || "Failed to load UK datasets");
           setUkDatasets([]);
         }
       })

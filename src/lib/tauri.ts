@@ -139,7 +139,7 @@ export interface FetchDataGovOptions {
   sort?: DataGovSortKey;
 }
 
-/** Fetch Data.gov (US) datasets with CSV resources — optional search, sort, row cap (Tauri only). */
+/** Fetch Data.gov (US) datasets with CSV resources — Catalog `/search` API (Tauri only). */
 export async function fetchDataGovRecentCsv(opts?: FetchDataGovOptions): Promise<DataGovDataset[]> {
   return invoke<DataGovDataset[]>("fetch_data_gov_recent_csv", {
     rows: opts?.rows ?? 40,

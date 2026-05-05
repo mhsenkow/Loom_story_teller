@@ -200,7 +200,7 @@ fn sanitize_ckan_q(q: Option<String>) -> Option<String> {
     Some(s)
 }
 
-/// Maps UI sort keys to CKAN `sort` parameter (allowlist only).
+/// Maps UI sort keys to CKAN `sort` parameter (allowlist only) — UK portal.
 fn ckan_sort_param(sort: Option<String>) -> &'static str {
     match sort.as_deref() {
         Some("newest") => "metadata_created desc",
@@ -212,7 +212,139 @@ fn ckan_sort_param(sort: Option<String>) -> &'static str {
     }
 }
 
-/// Fetch Data.gov datasets that have CSV resources (search, sort, and row limit).
+/// Data.gov Catalog API `sort` query value (not CKAN — see resources.data.gov/catalog-api).
+fn catalog_data_gov_sort(sort: Option<String>) -> &'static str {
+    match sort.as_deref() {
+        Some("relevance") => "relevance",
+        Some("popularity") => "popularity",
+        Some("newest") | Some("updated") | Some("title_az") | Some("title_za") | None => {
+            "last_harvested_date"
+        }
+        _ => "last_harvested_date",
+    }
+}
+
+fn distribution_http_url(dist: &Value) -> Option<String> {
+    let du = dist.get("downloadURL").and_then(|v| v.as_str())?;
+    if du.starts_with("http://") || du.starts_with("https://") {
+        return Some(du.to_string());
+    }
+    None
+}
+
+fn distribution_access_fallback(dist: &Value) -> Option<String> {
+    let u = dist.get("accessURL").and_then(|v| v.as_str())?;
+    if u.starts_with("http://") || u.starts_with("https://") {
+        return Some(u.to_string());
+    }
+    None
+}
+
+/// True if this DCAT distribution points to CSV data (new Catalog API shape).
+fn is_csv_distribution(dist: &Value) -> bool {
+    let fmt = dist
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_uppercase();
+    let mt = dist
+        .get("mediaType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let du = dist.get("downloadURL").and_then(|v| v.as_str()).unwrap_or("");
+    let ac = dist.get("accessURL").and_then(|v| v.as_str()).unwrap_or("");
+    let title = dist.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    if fmt.contains("CSV") || mt.contains("csv") {
+        return true;
+    }
+    if du.to_lowercase().ends_with(".csv") || ac.to_lowercase().ends_with(".csv") {
+        return true;
+    }
+    if du.contains("format=csv") || du.contains("format=CSV") {
+        return true;
+    }
+    // Common DCAT pattern: title "CSV" with a direct download link
+    title.trim().eq_ignore_ascii_case("csv")
+        && !du.is_empty()
+        && (du.starts_with("http://") || du.starts_with("https://"))
+}
+
+fn csv_resources_from_catalog_dcat(dcat: Option<&Value>, slug: &str) -> Vec<DataGovResource> {
+    let mut out = Vec::new();
+    let Some(dcat) = dcat else {
+        return out;
+    };
+    let Some(arr) = dcat.get("distribution").and_then(|d| d.as_array()) else {
+        return out;
+    };
+    for (idx, dist) in arr.iter().enumerate() {
+        if !is_csv_distribution(dist) {
+            continue;
+        }
+        let url = distribution_http_url(dist)
+            .or_else(|| distribution_access_fallback(dist));
+        let Some(url) = url else {
+            continue;
+        };
+        let name = dist
+            .get("title")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or("CSV")
+            .to_string();
+        let id = format!("{}-{}", slug, idx);
+        out.push(DataGovResource {
+            id,
+            name,
+            format: "CSV".to_string(),
+            url,
+        });
+    }
+    out
+}
+
+fn data_gov_from_catalog_row(row: &Value) -> Option<DataGovDataset> {
+    let identifier = row.get("identifier").and_then(|v| v.as_str())?;
+    let slug = row.get("slug").and_then(|v| v.as_str()).unwrap_or("");
+    let name = if slug.is_empty() {
+        identifier.to_string()
+    } else {
+        slug.to_string()
+    };
+    let title = row
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&name)
+        .to_string();
+    let organization = row
+        .get("organization")
+        .and_then(|o| o.get("name"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or_else(|| row.get("publisher").and_then(|v| v.as_str()).map(|s| s.to_string()));
+    let notes = row
+        .get("description")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_string());
+    let dcat = row.get("dcat");
+    let resources = csv_resources_from_catalog_dcat(dcat, &name);
+    if resources.is_empty() {
+        return None;
+    }
+    Some(DataGovDataset {
+        id: identifier.to_string(),
+        name,
+        title,
+        organization,
+        notes,
+        resources,
+        portal_id: "data.gov".to_string(),
+    })
+}
+
+/// Fetch Data.gov datasets that have CSV resources (new Catalog `/search` API + DCAT distributions).
 #[tauri::command]
 pub async fn fetch_data_gov_recent_csv(
     rows: Option<u32>,
@@ -220,7 +352,7 @@ pub async fn fetch_data_gov_recent_csv(
     sort: Option<String>,
 ) -> Result<Vec<DataGovDataset>, String> {
     let rows = rows.unwrap_or(40).clamp(1, 200);
-    let sort_s = ckan_sort_param(sort);
+    let sort_api = catalog_data_gov_sort(sort.clone());
     let q = sanitize_ckan_q(query);
 
     let client = reqwest::Client::builder()
@@ -228,108 +360,81 @@ pub async fn fetch_data_gov_recent_csv(
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    let mut url = reqwest::Url::parse("https://catalog.data.gov/api/3/action/package_search")
-        .map_err(|e| format!("Data.gov URL: {}", e))?;
-    {
-        let mut pairs = url.query_pairs_mut();
-        pairs.append_pair("rows", &rows.to_string());
-        pairs.append_pair("sort", sort_s);
-        pairs.append_pair("fq", "res_format:CSV");
-        if let Some(ref query_str) = q {
-            pairs.append_pair("q", query_str);
+    let mut collected: Vec<DataGovDataset> = Vec::new();
+    let mut after_cursor: Option<String> = None;
+
+    for _page in 0..25 {
+        if collected.len() >= rows as usize {
+            break;
         }
-    }
 
-    let res = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| format!("Data.gov request failed: {}", e))?;
-
-    if !res.status().is_success() {
-        return Err(format!("Data.gov returned {}", res.status()));
-    }
-
-    let body: Value = res
-        .json()
-        .await
-        .map_err(|e| format!("Invalid Data.gov response: {}", e))?;
-
-    let results = body
-        .get("result")
-        .and_then(|r| r.get("results"))
-        .and_then(|r| r.as_array())
-        .ok_or_else(|| "Unexpected Data.gov payload".to_string())?;
-
-    let mut out: Vec<DataGovDataset> = Vec::new();
-    for pkg in results {
-        let pkg_id = pkg.get("id").and_then(|v| v.as_str()).unwrap_or_default();
-        let pkg_name = pkg.get("name").and_then(|v| v.as_str()).unwrap_or_default();
-        if pkg_id.is_empty() || pkg_name.is_empty() {
-            continue;
-        }
-        let pkg_title = pkg
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or(pkg_name)
-            .to_string();
-        let organization = pkg
-            .get("organization")
-            .and_then(|o| o.get("title"))
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-        let notes = pkg
-            .get("notes")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.trim().is_empty())
-            .map(|s| s.to_string());
-
-        let mut csv_resources: Vec<DataGovResource> = Vec::new();
-        if let Some(resources) = pkg.get("resources").and_then(|r| r.as_array()) {
-            for (idx, res) in resources.iter().enumerate() {
-                let format = res.get("format").and_then(|v| v.as_str()).unwrap_or("");
-                if format.to_uppercase() != "CSV" {
-                    continue;
-                }
-                let url = match res.get("url").and_then(|v| v.as_str()) {
-                    Some(u) if u.starts_with("http://") || u.starts_with("https://") => u.to_string(),
-                    _ => continue,
-                };
-                let id = res
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string())
-                    .unwrap_or_else(|| format!("{}-{}", pkg_id, idx));
-                let name = res
-                    .get("name")
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.trim().is_empty())
-                    .unwrap_or("CSV")
-                    .to_string();
-
-                csv_resources.push(DataGovResource {
-                    id,
-                    name,
-                    format: "CSV".to_string(),
-                    url,
-                });
+        let mut url = reqwest::Url::parse("https://catalog.data.gov/search")
+            .map_err(|e| format!("Data.gov URL: {}", e))?;
+        {
+            let mut pairs = url.query_pairs_mut();
+            pairs.append_pair("per_page", "100");
+            pairs.append_pair("sort", sort_api);
+            if let Some(ref query_str) = q {
+                pairs.append_pair("q", query_str);
+            }
+            if let Some(ref a) = after_cursor {
+                pairs.append_pair("after", a);
             }
         }
 
-        if !csv_resources.is_empty() {
-            out.push(DataGovDataset {
-                id: pkg_id.to_string(),
-                name: pkg_name.to_string(),
-                title: pkg_title,
-                organization,
-                notes,
-                resources: csv_resources,
-                portal_id: "data.gov".to_string(),
-            });
+        let res = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| format!("Data.gov request failed: {}", e))?;
+
+        if !res.status().is_success() {
+            return Err(format!("Data.gov returned {}", res.status()));
+        }
+
+        let body: Value = res
+            .json()
+            .await
+            .map_err(|e| format!("Invalid Data.gov response: {}", e))?;
+
+        let results = body
+            .get("results")
+            .and_then(|r| r.as_array())
+            .ok_or_else(|| "Unexpected Data.gov payload (missing results)".to_string())?;
+
+        for item in results {
+            if collected.len() >= rows as usize {
+                break;
+            }
+            if let Some(ds) = data_gov_from_catalog_row(item) {
+                collected.push(ds);
+            }
+        }
+
+        after_cursor = body
+            .get("after")
+            .and_then(|a| a.as_str())
+            .map(|s| s.to_string());
+        if after_cursor.is_none() || results.is_empty() {
+            break;
         }
     }
 
-    Ok(out)
+    match sort.as_deref() {
+        Some("title_az") => collected.sort_by(|a, b| {
+            a.title
+                .to_lowercase()
+                .cmp(&b.title.to_lowercase())
+        }),
+        Some("title_za") => collected.sort_by(|a, b| {
+            b.title
+                .to_lowercase()
+                .cmp(&a.title.to_lowercase())
+        }),
+        _ => {}
+    }
+
+    Ok(collected)
 }
 
 /// UK open data (CKAN). Same shape as Data.gov for unified UI.
@@ -348,7 +453,7 @@ pub async fn fetch_uk_data_recent_csv(
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
 
-    let mut url = reqwest::Url::parse("https://data.gov.uk/api/action/package_search")
+    let mut url = reqwest::Url::parse("https://www.data.gov.uk/api/action/package_search")
         .map_err(|e| format!("UK data URL: {}", e))?;
     {
         let mut pairs = url.query_pairs_mut();
