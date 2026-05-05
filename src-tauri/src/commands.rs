@@ -270,7 +270,79 @@ fn is_csv_distribution(dist: &Value) -> bool {
         && (du.starts_with("http://") || du.starts_with("https://"))
 }
 
-fn csv_resources_from_catalog_dcat(dcat: Option<&Value>, slug: &str) -> Vec<DataGovResource> {
+/// Skip portal landing HTML; keep tabular / archive / API distributions (Catalog API mix).
+fn is_usable_catalog_distribution(dist: &Value, url: &str) -> bool {
+    if is_csv_distribution(dist) {
+        return true;
+    }
+    let mt = dist
+        .get("mediaType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let fmt = dist
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_uppercase();
+    let ul = url.to_lowercase();
+    if mt == "text/html"
+        && !ul.ends_with(".csv")
+        && !ul.contains("format=csv")
+        && !fmt.contains("CSV")
+    {
+        return false;
+    }
+    if fmt.contains("ZIP") || mt.contains("zip") || ul.ends_with(".zip") {
+        return true;
+    }
+    if mt.contains("json")
+        || fmt.contains("JSON")
+        || ul.ends_with(".json")
+        || ul.ends_with(".geojson")
+    {
+        return true;
+    }
+    if mt.contains("geo+json") || fmt.contains("GEOJSON") {
+        return true;
+    }
+    if mt.contains("spreadsheet") || fmt.contains("XLSX") || fmt.contains("XLS") {
+        return true;
+    }
+    false
+}
+
+fn catalog_distribution_format(dist: &Value) -> String {
+    if is_csv_distribution(dist) {
+        return "CSV".to_string();
+    }
+    let fmt = dist
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_uppercase();
+    let mt = dist
+        .get("mediaType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_lowercase();
+    if fmt.contains("ZIP") || mt.contains("zip") {
+        return "ZIP".to_string();
+    }
+    if mt.contains("geo+json") || fmt.contains("GEOJSON") {
+        return "GeoJSON".to_string();
+    }
+    if mt.contains("json") || fmt.contains("JSON") {
+        return "JSON".to_string();
+    }
+    if fmt.contains("XLSX") || mt.contains("spreadsheet") {
+        return "XLSX".to_string();
+    }
+    "File".to_string()
+}
+
+/// ZIP/JSON/CSV/etc. from DCAT `distribution`; empty if only HTML links.
+fn data_resources_from_catalog_dcat(dcat: Option<&Value>, slug: &str) -> Vec<DataGovResource> {
     let mut out = Vec::new();
     let Some(dcat) = dcat else {
         return out;
@@ -279,27 +351,44 @@ fn csv_resources_from_catalog_dcat(dcat: Option<&Value>, slug: &str) -> Vec<Data
         return out;
     };
     for (idx, dist) in arr.iter().enumerate() {
-        if !is_csv_distribution(dist) {
-            continue;
-        }
-        let url = distribution_http_url(dist)
-            .or_else(|| distribution_access_fallback(dist));
-        let Some(url) = url else {
+        let Some(url) = distribution_http_url(dist).or_else(|| distribution_access_fallback(dist)) else {
             continue;
         };
+        if !is_usable_catalog_distribution(dist, &url) {
+            continue;
+        }
+        let fmt_label = catalog_distribution_format(dist);
         let name = dist
             .get("title")
             .and_then(|v| v.as_str())
             .filter(|s| !s.trim().is_empty())
-            .unwrap_or("CSV")
+            .unwrap_or(fmt_label.as_str())
             .to_string();
         let id = format!("{}-{}", slug, idx);
         out.push(DataGovResource {
             id,
             name,
-            format: "CSV".to_string(),
+            format: fmt_label,
             url,
         });
+    }
+    out
+}
+
+fn catalog_row_resources(row: &Value, dcat: Option<&Value>, slug: &str) -> Vec<DataGovResource> {
+    let mut out = data_resources_from_catalog_dcat(dcat, slug);
+    if !out.is_empty() {
+        return out;
+    }
+    if let Some(u) = row.get("harvest_record").and_then(|v| v.as_str()) {
+        if u.starts_with("http://") || u.starts_with("https://") {
+            out.push(DataGovResource {
+                id: format!("{}-harvest", slug),
+                name: "Catalog record (metadata)".to_string(),
+                format: "Metadata".to_string(),
+                url: u.to_string(),
+            });
+        }
     }
     out
 }
@@ -329,7 +418,7 @@ fn data_gov_from_catalog_row(row: &Value) -> Option<DataGovDataset> {
         .filter(|s| !s.trim().is_empty())
         .map(|s| s.to_string());
     let dcat = row.get("dcat");
-    let resources = csv_resources_from_catalog_dcat(dcat, &name);
+    let resources = catalog_row_resources(row, dcat, &name);
     if resources.is_empty() {
         return None;
     }
@@ -344,7 +433,7 @@ fn data_gov_from_catalog_row(row: &Value) -> Option<DataGovDataset> {
     })
 }
 
-/// Fetch Data.gov datasets that have CSV resources (new Catalog `/search` API + DCAT distributions).
+/// Fetch Data.gov datasets (Catalog `/search`): CSV/ZIP/JSON/XLSX downloads, else harvest metadata link.
 #[tauri::command]
 pub async fn fetch_data_gov_recent_csv(
     rows: Option<u32>,

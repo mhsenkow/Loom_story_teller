@@ -29,6 +29,11 @@ function ipcErrorMessage(e: unknown): string {
   return String(e);
 }
 
+/** Save-to-folder writes .csv bytes — only safe for real CSV URLs. */
+function dataGovResourceSaveable(res: { format: string; url: string }): boolean {
+  return res.format === "CSV" || /\.csv(\?|$)/i.test(res.url);
+}
+
 export function Sidebar() {
   const {
     mountedFolder, files, isScanning, selectedFile, inspectingFilePath, sidebarOpen, dataRegionOpen, dataSourcesExpanded,
@@ -339,12 +344,12 @@ function DatasetPreviewModal({
           )}
           <div>
             <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-1">
-              {dataset.resources.length} CSV resource{dataset.resources.length !== 1 ? "s" : ""}
+              {dataset.resources.length} file{dataset.resources.length !== 1 ? "s" : ""} / link{dataset.resources.length !== 1 ? "s" : ""}
             </p>
             <ul className="text-2xs text-loom-muted space-y-0.5">
               {dataset.resources.slice(0, 5).map((r) => (
                 <li key={r.id} className="truncate" title={r.url}>
-                  {r.name !== "CSV" ? r.name : "CSV file"}
+                  {r.format}: {r.name}
                 </li>
               ))}
               {dataset.resources.length > 5 && (
@@ -1073,7 +1078,8 @@ function DataRegionView({
           </div>
           {!expanded && (
             <p className="text-2xs text-loom-muted px-1 mb-2">
-              Search the catalog, change sort or result count, then narrow the list with the page filter.
+              Search lists CSV, ZIP, JSON, and other downloads (Data.gov retired the old CKAN-only CSV filter). Use{" "}
+              <span className="font-mono text-loom-text/90">Save to folder</span> for CSV links only.
             </p>
           )}
           <CkanDiscoverToolbar
@@ -1095,7 +1101,7 @@ function DataRegionView({
             <p className="text-2xs text-amber-500/90 px-1 py-1">{dataGovError}</p>
           )}
           {!dataGovLoading && !dataGovError && dataGovDatasets.length === 0 && (
-            <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found. Try different search terms.</p>
+            <p className="text-2xs text-loom-muted px-1 py-2">No datasets matched. Try different search terms.</p>
           )}
           <div className={expanded ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 flex-1 content-start overflow-y-auto min-h-0" : "space-y-3"}>
             {dataGovFiltered.map((ds) => (
@@ -1117,8 +1123,12 @@ function DataRegionView({
                 </div>
                 <div className="space-y-1">
                   {ds.resources.slice(0, expanded ? 2 : 3).map((res) => {
-                    const label = res.name !== "CSV" ? res.name : `${ds.title.slice(0, 30)}.csv`;
-                    const filename = (res.name !== "CSV" ? res.name : ds.title).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) + ".csv";
+                    const saveable = dataGovResourceSaveable(res);
+                    const label = `${res.format}: ${res.name}`;
+                    const filename =
+                      (saveable ? (res.name !== "CSV" ? res.name : ds.title) : "")
+                        .replace(/[^a-zA-Z0-9._-]/g, "_")
+                        .slice(0, 80) + ".csv";
                     return (
                       <div key={res.id} className="flex items-center gap-2 flex-wrap text-2xs">
                         <span className={`text-loom-muted truncate ${expanded ? "max-w-full" : "max-w-[180px]"}`} title={res.url}>
@@ -1130,9 +1140,9 @@ function DataRegionView({
                           rel="noopener noreferrer"
                           className="text-loom-accent hover:underline shrink-0"
                         >
-                          Download
+                          Open
                         </a>
-                        {canSaveToFolder && (
+                        {canSaveToFolder && saveable && (
                           <span className="shrink-0 flex flex-col items-start">
                             <button
                               type="button"
