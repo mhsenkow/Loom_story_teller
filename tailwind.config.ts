@@ -7,6 +7,9 @@ const config: Config = {
   darkMode: "class",
   theme: {
     extend: {
+      fontSize: {
+        "2xs": ["0.6875rem", { lineHeight: "1rem", letterSpacing: "0.01em" }],
+      },
       colors: {
         loom: {
           bg:       "var(--loom-bg)",
@@ -15,6 +18,7 @@ const config: Config = {
           border:   "var(--loom-border)",
           text:     "var(--loom-text)",
           muted:    "var(--loom-muted)",
+          label:    "var(--loom-label)",
           accent:   "var(--loom-accent)",
           "accent-dim": "var(--loom-accent-dim)",
           success:  "var(--loom-success)",
@@ -25,9 +29,6 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
         mono: ["var(--font-mono)", "SF Mono", "Menlo", "monospace"],
-      },
-      fontSize: {
-        "2xs": ["0.625rem", { lineHeight: "0.875rem" }],
       },
       spacing: {
         "sidebar": "var(--sidebar-width)",

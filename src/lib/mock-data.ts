@@ -113,60 +113,184 @@ export function mockQuery(filePath: string, limit: number): QueryResult {
   };
 }
 
-/** Parse CSV text (with header) into columns and rows. Used for web file loading. */
+/** True when bytes look like Excel/OOXML (often mislabeled as .csv on open-data portals). */
+export function looksLikeSpreadsheetBinary(text: string): boolean {
+  if (!text || text.length < 4) return false;
+  // PK zip signature (xlsx/ods) — also catches UTF-8 BOM then PK
+  const s = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  return s.charCodeAt(0) === 0x50 && s.charCodeAt(1) === 0x4b;
+}
+
+/**
+ * RFC4180-ish CSV split that keeps commas/newlines inside quotes.
+ * Returns rows of string cells (header included as row 0).
+ */
+export function parseCsvRecords(text: string): string[][] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  const src = trimToCompleteCsvRecords(text);
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (inQuotes) {
+      if (ch === '"') {
+        if (src[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      continue;
+    }
+    if (ch === ",") {
+      row.push(cur);
+      cur = "";
+      continue;
+    }
+    if (ch === "\n") {
+      row.push(cur);
+      cur = "";
+      if (row.some((c) => c.trim() !== "")) rows.push(row);
+      row = [];
+      continue;
+    }
+    if (ch === "\r") continue;
+    cur += ch;
+  }
+  row.push(cur);
+  if (row.some((c) => c.trim() !== "")) rows.push(row);
+  return rows;
+}
+
+/**
+ * Drop a trailing incomplete record (common when the Worker Range-truncates
+ * mid-row / mid-quoted-field). Without this, later cells shift and lat/lon
+ * become garbage like 30405 / -87878.
+ */
+export function trimToCompleteCsvRecords(text: string): string {
+  const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  let inQuotes = false;
+  let lastSafe = 0;
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (ch === '"') {
+      if (inQuotes && src[i + 1] === '"') {
+        i++;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if ((ch === "\n" || ch === "\r") && !inQuotes) {
+      // Treat \r\n as one boundary; mark end after the linebreak(s)
+      let end = i + 1;
+      if (ch === "\r" && src[i + 1] === "\n") end = i + 2;
+      lastSafe = end;
+    }
+  }
+  return lastSafe > 0 ? src.slice(0, lastSafe) : src;
+}
+
+/** Coerce CSV cell → number when it looks numeric (gov data often uses "1,203,514" / " 10.9 "). */
+export function coerceCsvNumber(raw: string): number | null {
+  let s = raw.trim();
+  if (!s || s === "null" || s === "NULL" || s === "NaN" || s === "-") return null;
+  s = s.replace(/^[$£€]/, "").replace(/%$/, "").replace(/\u00a0/g, "").replace(/ /g, "").trim();
+  // US thousands: 1,234,567.89
+  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) {
+    s = s.replace(/,/g, "");
+  } else if (/^-?\d{1,3}(\.\d{3}){2,}(,\d+)?$/.test(s)) {
+    // EU thousands with ≥2 groups: 1.234.567 or 1.234.567,89
+    // (do NOT treat 72.923 / 30.405 as thousands — those are US decimals)
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(s)) {
+    // EU: 1.234,56
+    s = s.replace(/\./g, "").replace(",", ".");
+  } else if (/^-?\d+,\d+$/.test(s)) {
+    // Decimal comma without thousands grouping: 10,9
+    s = s.replace(",", ".");
+  }
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function parseCsvToInspectResult(
   _name: string,
   text: string,
   maxRows = 2000,
 ): { stats: ColumnInfo[]; sample: QueryResult } {
-  const lines = text.trim().split(/\r?\n/).filter(Boolean);
-  if (lines.length === 0) {
+  if (looksLikeSpreadsheetBinary(text)) {
+    throw new Error(
+      "This download is an Excel workbook (xlsx), not CSV. Pick a CSV resource, or export CSV from the portal.",
+    );
+  }
+
+  const records = parseCsvRecords(text);
+  if (records.length === 0) {
     return { stats: [], sample: { columns: [], types: [], rows: [], total_rows: 0 } };
   }
-  const header = lines[0];
-  const columns = header.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
-  const rows: (string | number | null)[][] = [];
-  for (let i = 1; i < Math.min(lines.length, maxRows + 1); i++) {
-    const line = lines[i];
-    const values = parseCsvLine(line);
+
+  const columns = records[0]!.map((c) => c.trim());
+  const dataRows = records.slice(1);
+  const totalRows = dataRows.length;
+  const slice = dataRows.slice(0, maxRows);
+
+  const rows: (string | number | null)[][] = slice.map((values) => {
     const row: (string | number | null)[] = [];
     for (let c = 0; c < columns.length; c++) {
-      const v = values[c] ?? "";
-      const num = Number(v);
-      row.push(v === "" || v === "null" ? null : Number.isNaN(num) ? v : num);
+      const v = (values[c] ?? "").trim();
+      if (v === "" || v.toLowerCase() === "null") {
+        row.push(null);
+        continue;
+      }
+      const num = coerceCsvNumber(v);
+      row.push(num !== null ? num : v);
     }
-    rows.push(row);
-  }
-  const types = columns.map((_, i) => {
-    const nums = rows.map((r) => r[i]).filter((v): v is number => typeof v === "number");
-    return nums.length > rows.length * 0.5 ? "DOUBLE" : "VARCHAR";
+    return row;
   });
+
+  const types = columns.map((name, i) => {
+    const cells = rows.map((r) => r[i]);
+    const nonNull = cells.filter((v) => v !== null);
+    if (nonNull.length === 0) return "VARCHAR";
+    const nums = nonNull.filter((v): v is number => typeof v === "number");
+    if (nums.length > nonNull.length * 0.5) return "DOUBLE";
+    // Name hints for years / amounts when sample was mostly null-ish strings
+    const n = name.toLowerCase();
+    if (/(amount|award|budget|count|latitude|longitude|lat|lon|year|rate|percent|proportion|households)/i.test(n)) {
+      const coerced = nonNull
+        .map((v) => (typeof v === "number" ? v : coerceCsvNumber(String(v))))
+        .filter((v): v is number => v != null);
+      if (coerced.length > nonNull.length * 0.4) {
+        for (let r = 0; r < rows.length; r++) {
+          const cell = rows[r]![i];
+          if (typeof cell === "string") {
+            const n2 = coerceCsvNumber(cell);
+            if (n2 != null) rows[r]![i] = n2;
+          }
+        }
+        return "DOUBLE";
+      }
+    }
+    return "VARCHAR";
+  });
+
   const data = { columns, types, rows };
   const stats = statsFromData(data);
   const sample: QueryResult = {
     columns,
     types,
     rows: rows.slice(0, 500),
-    total_rows: lines.length - 1,
+    total_rows: totalRows,
   };
   return { stats, sample };
-}
-
-function parseCsvLine(line: string): string[] {
-  const out: string[] = [];
-  let cur = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if ((ch === "," && !inQuotes) || ch === "\n" || ch === "\r") {
-      out.push(cur.trim());
-      cur = "";
-    } else {
-      cur += ch;
-    }
-  }
-  out.push(cur.trim());
-  return out;
 }

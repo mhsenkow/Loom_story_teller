@@ -46,6 +46,7 @@ export function ChartCard({
   isActive,
   onClick,
   compact = false,
+  hero = false,
 }: {
   rec: ChartRecommendation;
   data: QueryResult | null;
@@ -53,6 +54,8 @@ export function ChartCard({
   onClick: () => void;
   /** Narrow fixed-width card for mobile horizontal rails */
   compact?: boolean;
+  /** Large preview for deep-scan swipe deck */
+  hero?: boolean;
 }) {
   const theme = useLoomStore((s) => s.appSettings.theme);
   const colorblind = useLoomStore((s) => s.appSettings.colorblindCharts);
@@ -167,16 +170,26 @@ export function ChartCard({
         border bg-loom-elevated hover:border-loom-accent text-left
         ${isActive ? "border-loom-accent ring-1 ring-loom-accent/40" : "border-loom-border"}
         ${compact ? "w-[152px] shrink-0 snap-start rounded-md" : "w-full"}
+        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-xl" : ""}
       `}
     >
-      <div ref={containerRef} className={`relative w-full bg-loom-bg ${compact ? "aspect-[5/3] min-h-[72px] rounded-t-md" : "aspect-[4/3] min-h-[80px]"}`}>
+      <div
+        ref={containerRef}
+        className={`relative w-full bg-loom-bg ${
+          hero
+            ? "aspect-[4/3] min-h-[200px] sm:min-h-[260px] rounded-t-xl"
+            : compact
+              ? "aspect-[5/3] min-h-[72px] rounded-t-md"
+              : "aspect-[4/3] min-h-[80px]"
+        }`}
+      >
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full"
         />
       </div>
-      <div className={`flex flex-col gap-0.5 text-left ${compact ? "px-2 py-1.5" : "px-2.5 py-2"}`}>
-        {!compact && (
+      <div className={`flex flex-col gap-0.5 text-left ${hero ? "px-4 py-3" : compact ? "px-2 py-1.5" : "px-2.5 py-2"}`}>
+        {(!compact || hero) && (
           <div className="flex items-center gap-1.5">
             <span className={`
               inline-block px-1.5 py-0.5 text-2xs font-mono font-semibold rounded
@@ -186,8 +199,8 @@ export function ChartCard({
             </span>
           </div>
         )}
-        <p className={`font-medium text-loom-text truncate leading-tight ${compact ? "text-2xs" : "text-xs"}`}>{rec.title}</p>
-        {!compact && <p className="text-2xs text-loom-muted truncate">{rec.subtitle}</p>}
+        <p className={`font-medium text-loom-text truncate leading-tight ${hero ? "text-sm" : compact ? "text-2xs" : "text-xs"}`}>{rec.title}</p>
+        {(!compact || hero) && <p className={`text-loom-muted ${hero ? "text-xs line-clamp-2" : "text-2xs truncate"}`}>{rec.subtitle}</p>}
       </div>
     </button>
   );

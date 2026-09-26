@@ -399,11 +399,25 @@ export async function fetchCsvTextWeb(csvUrl: string): Promise<{ text: string; t
       );
       if (res.status === 404 && origin === "") continue;
       if (!res.ok) {
-        const msg = await res.text().catch(() => res.statusText);
-        throw new Error(msg || `Fetch CSV failed (${res.status})`);
+        const raw = await res.text().catch(() => res.statusText);
+        let msg = raw || `Fetch CSV failed (${res.status})`;
+        try {
+          const j = JSON.parse(raw) as { error?: string };
+          if (j.error) msg = j.error;
+        } catch {
+          /* plain text */
+        }
+        throw new Error(msg);
+      }
+      // Client-side guard when proxy hasn't been redeployed yet
+      const text = await res.text();
+      if (text.length >= 2 && text.charCodeAt(0) === 0x50 && text.charCodeAt(1) === 0x4b) {
+        throw new Error(
+          "This download is an Excel workbook (xlsx), not CSV. Pick a CSV resource from the portal.",
+        );
       }
       const truncated = res.headers.get("X-Loom-Truncated") === "1";
-      return { text: await res.text(), truncated };
+      return { text, truncated };
     } catch (e) {
       lastErr = e instanceof Error ? e : new Error(String(e));
     }

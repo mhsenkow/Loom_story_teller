@@ -17,6 +17,11 @@
 
 import type { ColumnInfo, QueryResult } from "./store";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
+import {
+  applyPreferenceBoosts,
+  getCachedVizPreferences,
+  type VizPreferenceModel,
+} from "./vizPreferences";
 
 const COLORS = VIZ_CATEGORICAL;
 
@@ -104,6 +109,28 @@ function inferType(dt: string, colName?: string): ColType {
   const name = (colName ?? "").toUpperCase();
   if (["DATE", "TIME", "YEAR", "MONTH", "DAY", "INCIDENT_DATE", "CREATED_AT", "UPDATED_AT", "TIMESTAMP"].some(n => name.includes(n))) return "temporal";
   return "nominal";
+}
+
+/** Rates/% should use mean (or median), not sum — summing 10.9% across regions is nonsense. */
+function isRateLikeField(name: string): boolean {
+  return /(percent|percentage|proportion|ratio|rate|pct|\(%\)|%)/i.test(name);
+}
+
+/** Prefer human labels over opaque codes when both exist as categories. */
+function nominalQualityBoost(name: string): number {
+  const n = name.toLowerCase();
+  if (/\b(name|title|label|region|state|city|county|country)\b/.test(n)) return 8;
+  if (/\b(code|id|uuid|key|ref|index)\b/.test(n) || /(_id|_code)$/.test(n)) return -12;
+  return 0;
+}
+
+/** Geographic coordinate pair — prefer as map-like scatter even when Pearson r is low. */
+function isLatLonPair(a: string, b: string): boolean {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  const lat = (s: string) => /^(lat|latitude)$/.test(s) || s.includes("latitude");
+  const lon = (s: string) => /^(lon|lng|long|longitude)$/.test(s) || s.includes("longitude");
+  return (lat(x) && lon(y)) || (lon(x) && lat(y));
 }
 
 /** Prefer 3–12 categories for color legends; avoid one-hot noise and binary-only when better options exist. */
@@ -610,6 +637,7 @@ export function recommend(
   columns: ColumnInfo[],
   data: QueryResult | null,
   fileName: string,
+  prefs?: VizPreferenceModel | null,
 ): ChartRecommendation[] {
   const recs: ChartRecommendation[] = [];
   const name = fileName.replace(/\.\w+$/, "");
@@ -661,10 +689,14 @@ export function recommend(
       else if (colorCol) score += 6;
       if (dense) score += 4;
 
+      const geoPair = isLatLonPair(x.name, y.name);
       // Sample correlation: strong relationships beat arbitrary numeric pairs
       const pair = sampleNumericPair(data, x.name, y.name);
       let corrNote = "numeric relationship";
-      if (pair) {
+      if (geoPair) {
+        score += 28; // map-like layout beats noise correlation penalty
+        corrNote = "geographic coordinates";
+      } else if (pair) {
         const absR = pearsonAbs(pair.xs, pair.ys);
         if (absR >= 0.75) {
           score += 22;
@@ -684,7 +716,9 @@ export function recommend(
       recs.push({
         id: `scatter-${x.name}-${y.name}`,
         kind: "scatter",
-        title: `${x.name} vs ${y.name}`,
+        title: geoPair
+          ? (x.name.toLowerCase().includes("lon") ? `${y.name} × ${x.name}` : `${x.name} × ${y.name}`)
+          : `${x.name} vs ${y.name}`,
         subtitle: colorCol ? `${corrNote} · colored by ${colorCol.name}` : corrNote,
         score,
         spec: {
@@ -705,14 +739,17 @@ export function recommend(
   for (const nom of nomCols.slice(0, 5)) {
     if (nom.distinct_count < 2 || nom.distinct_count > 50) continue;
     for (const num of numCols.slice(0, 4)) {
+      const rate = isRateLikeField(num.name);
       let score = 62;
       if (nom.distinct_count >= 3 && nom.distinct_count <= 20) score += 15;
+      score += nominalQualityBoost(nom.name);
+      if (rate) score -= 35; // summing %/rates is almost always wrong
 
       recs.push({
         id: `bar-sum-${nom.name}-${num.name}`,
         kind: "bar",
         title: `Sum of ${num.name} by ${nom.name}`,
-        subtitle: `total ${num.name}, grouped`,
+        subtitle: rate ? `⚠ sum of rates — prefer average` : `total ${num.name}, grouped`,
         score,
         spec: {
           $schema: "https://vega.github.io/schema/vega-lite/v5.json",
@@ -728,20 +765,29 @@ export function recommend(
         xField: nom.name,
         yField: num.name,
         colorField: null,
+        yAggregate: "sum",
       });
     }
   }
 
-  // --- BAR: nominal × numeric (mean) — good for "average cost by state" etc. ---
+  // --- BAR: nominal × numeric (mean) — good for "average cost by state" / rates ---
   for (const nom of nomCols.slice(0, 4)) {
     if (nom.distinct_count < 2 || nom.distinct_count > 40) continue;
     for (const num of numCols.slice(0, 4)) {
+      const rate = isRateLikeField(num.name);
+      let score = 58;
+      if (nom.distinct_count >= 3 && nom.distinct_count <= 20) score += 10;
+      score += nominalQualityBoost(nom.name);
+      if (rate) score += 30; // prefer mean for % / proportion columns
+
       recs.push({
         id: `bar-mean-${nom.name}-${num.name}`,
         kind: "bar",
-        title: `Average ${num.name} by ${nom.name}`,
-        subtitle: `mean per group`,
-        score: 58,
+        title: rate
+          ? `${num.name.replace(/\s*\(%\)\s*$/, "").replace(/\s+/g, " ").trim()} by ${nom.name}`
+          : `Average ${num.name} by ${nom.name}`,
+        subtitle: rate ? `rate / proportion (mean)` : `mean per group`,
+        score,
         spec: {
           $schema: "https://vega.github.io/schema/vega-lite/v5.json",
           mark: { type: "bar", cornerRadiusTopLeft: 3, cornerRadiusTopRight: 3 },
@@ -756,6 +802,7 @@ export function recommend(
         xField: nom.name,
         yField: num.name,
         colorField: null,
+        yAggregate: "mean",
       });
     }
   }
@@ -793,13 +840,15 @@ export function recommend(
       if (cNom.name === xNom.name) continue;
       if (cNom.distinct_count < 2 || cNom.distinct_count > 18) continue;
       for (const num of numCols.slice(0, 3)) {
+        const rate = isRateLikeField(num.name);
         let score = 64;
         if (xNom.distinct_count <= 8 && cNom.distinct_count >= 3) score += 8;
+        if (rate) score -= 35;
         recs.push({
           id: `bar-facet-sum-${xNom.name}-${cNom.name}-${num.name}`,
           kind: "bar",
           title: `Sum of ${num.name} by ${xNom.name} × ${cNom.name}`,
-          subtitle: `grouped by ${cNom.name}`,
+          subtitle: rate ? `⚠ sum of rates — prefer average` : `grouped by ${cNom.name}`,
           score,
           spec: {
             $schema: "https://vega.github.io/schema/vega-lite/v5.json",
@@ -1258,8 +1307,10 @@ export function recommend(
     }
   }
 
-  // Sort by score, then diversify so Suggest / rail aren't 20 near-identical bars
-  return diversifyRecommendations(recs, 40);
+  // Sort by score (with local viz preference boost), then diversify so Suggest / rail aren't 20 near-identical bars
+  const model = prefs !== undefined ? prefs : getCachedVizPreferences();
+  const boosted = applyPreferenceBoosts(recs, model, columns);
+  return diversifyRecommendations(boosted, 40);
 }
 
 export interface StorySequence {

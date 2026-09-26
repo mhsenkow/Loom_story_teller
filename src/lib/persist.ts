@@ -15,6 +15,7 @@ const KEY_TABLE_VIEWS = "loom-table-views";
 const KEY_CHART_VIEWS = "loom-chart-views";
 const KEY_QUERY_VIEWS = "loom-query-views";
 const KEY_DASHBOARDS = "loom-dashboards";
+const KEY_VIZ_PREFERENCES = "loom-viz-preferences";
 const MAX_RECENT_FILES = 20;
 const MAX_QUERY_HISTORY = 50;
 const MAX_QUERY_SNIPPETS = 30;
@@ -281,4 +282,12 @@ export function getDashboards(): DashboardItemPersist[] {
 
 export function setPersistedDashboards(items: DashboardItemPersist[]): void {
   safeSetItem(KEY_DASHBOARDS, JSON.stringify(items.slice(0, 20)));
+}
+
+export function getVizPreferencesRaw(): string | null {
+  return safeGetItem(KEY_VIZ_PREFERENCES);
+}
+
+export function setPersistedVizPreferences(model: object): void {
+  safeSetItem(KEY_VIZ_PREFERENCES, JSON.stringify(model));
 }

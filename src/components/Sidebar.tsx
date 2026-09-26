@@ -1012,7 +1012,8 @@ function filterDatasetsLocal(datasets: DataGovDataset[], text: string): DataGovD
 
 function exploreFilename(ds: DataGovDataset, res: { name: string }): string {
   const base = res.name !== "CSV" ? res.name : ds.title;
-  return base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) + ".csv";
+  const cleaned = base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  return cleaned.toLowerCase().endsWith(".csv") ? cleaned : `${cleaned}.csv`;
 }
 
 /** Discovery card — web puts Explore first so grab→chart feels like desktop open. */

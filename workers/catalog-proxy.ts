@@ -141,6 +141,17 @@ async function handleFetchCsv(requestUrl: URL): Promise<Response> {
     offset += c.byteLength;
   }
 
+  // Many open-data portals label Excel workbooks as .csv — reject early
+  if (total >= 2 && out[0] === 0x50 && out[1] === 0x4b) {
+    return json(
+      {
+        error:
+          "This download is an Excel workbook (xlsx), not CSV. Pick a CSV resource from the portal.",
+      },
+      415,
+    );
+  }
+
   const truncated = useRange || total >= MAX_CSV_BYTES;
   return new Response(out, {
     status: 200,

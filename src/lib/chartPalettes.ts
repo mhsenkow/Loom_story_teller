@@ -55,16 +55,16 @@ export type ThemeUiColors = { bg: string; text: string; muted: string; border: s
 
 /** Canonical UI colors per look theme (keep in sync with globals.css). */
 export const THEME_UI: Record<LookTheme, ThemeUiColors> = {
-  light: { bg: "#f2f2f0", text: "#111111", muted: "#757575", border: "#c8c8c4", accent: "#c45c26" },
-  dark: { bg: "#0a0a0c", text: "#e8e8ec", muted: "#6b6b78", border: "#2a2a30", accent: "#1877F2" },
-  contrast: { bg: "#000000", text: "#ffffff", muted: "#b0b0b0", border: "#ffffff", accent: "#ffff00" },
-  paper: { bg: "#e8e2d6", text: "#1c1914", muted: "#6e685c", border: "#c4bbaa", accent: "#8b4510" },
-  glass: { bg: "#e8eef8", text: "#0f172a", muted: "#64748b", border: "#94a3b8", accent: "#5A24C7" },
-  frost: { bg: "#070b16", text: "#e2e8f0", muted: "#94a3b8", border: "#475569", accent: "#A87CFF" },
-  brutal: { bg: "#ffffff", text: "#000000", muted: "#333333", border: "#000000", accent: "#ff0000" },
-  loom: { bg: "#0a0a0f", text: "#e8e6e3", muted: "#a8a5a0", border: "#2a2a35", accent: "#d4a84b" },
-  tank: { bg: "#0b1a22", text: "#c5e2e7", muted: "#69a1b3", border: "#23475a", accent: "#32A84F" },
-  nes: { bg: "#209cee", text: "#000000", muted: "#1a1a1a", border: "#000000", accent: "#e4002b" },
+  light: { bg: "#f0efeb", text: "#141414", muted: "#5a5a5a", border: "#c4c4be", accent: "#b84e1f" },
+  dark: { bg: "#0a0a0c", text: "#ececf1", muted: "#8b8b9a", border: "#2e2e36", accent: "#7b6cf0" },
+  contrast: { bg: "#000000", text: "#ffffff", muted: "#c8c8c8", border: "#ffffff", accent: "#ffff00" },
+  paper: { bg: "#e6dfd2", text: "#1a1610", muted: "#5c5548", border: "#bdb3a0", accent: "#7a3d0f" },
+  glass: { bg: "#dce6f4", text: "#0b1220", muted: "#4b5b70", border: "#64748b", accent: "#6d28d9" },
+  frost: { bg: "#060a14", text: "#f1f5f9", muted: "#a8b8cc", border: "#64748b", accent: "#c4b5fd" },
+  brutal: { bg: "#ffffff", text: "#000000", muted: "#2a2a2a", border: "#000000", accent: "#e00000" },
+  loom: { bg: "#0a0a0f", text: "#f0ede8", muted: "#b0aca4", border: "#2e2e3c", accent: "#e0b45a" },
+  tank: { bg: "#0a161c", text: "#d4eef2", muted: "#7eb4c4", border: "#2a5266", accent: "#6bb866" },
+  nes: { bg: "#1a8ad4", text: "#0a0a0a", muted: "#333333", border: "#000000", accent: "#d40028" },
 };
 
 /** First 8 categorical stops — dark/frost/glass shell chart tokens. */
@@ -72,16 +72,16 @@ const VIZ_CAT_8 = VIZ_CATEGORICAL.slice(0, 8);
 
 /** Chart series colors per look theme (keep in sync with globals.css --chart-*). */
 export const THEME_CHART: Record<LookTheme, string[]> = {
-  light: ["#c45c26", "#00b87c", "#c62828", "#d4a017", "#0096b7", "#7c71d8", "#5a9fd4", "#6e685c"],
+  light: ["#b84e1f", "#008f62", "#b71c1c", "#c49200", "#007a96", "#6b5fd4", "#4a8fc0", "#5c574e"],
   dark: VIZ_CAT_8,
   contrast: ["#ffff00", "#00ff9d", "#ff5555", "#00ccff", "#ff8844", "#bb99ff", "#66bbff", "#ffffff"],
-  paper: ["#8b4510", "#3d6b4f", "#9b2c2c", "#a67c00", "#2c5f7c", "#6b4c7a", "#5c6e4a", "#6e685c"],
-  glass: VIZ_CAT_8,
-  frost: ["#A87CFF", "#3EA096", "#E42C87", "#F0701A", "#5FAAFF", "#850550", "#0099B8", "#94a3b8"],
-  brutal: ["#ff0000", "#0000ff", "#008000", "#ffaa00", "#000000", "#ff00ff", "#00ffff", "#808080"],
-  loom: ["#d4a84b", "#A87CFF", "#E42C87", "#3EA096", "#1877F2", "#F0701A", "#5A24C7", "#a8a5a0"],
-  tank: ["#32A84F", "#F7B60B", "#D31E3C", "#1877F2", "#3EA096", "#F0701A", "#0099B8", "#69a1b3"],
-  nes: ["#e4002b", "#fce100", "#209cee", "#00a800", "#000000", "#fc9838", "#b8f8d8", "#881400"],
+  paper: ["#7a3d0f", "#2f5a40", "#8a2424", "#8a6800", "#24526a", "#5c4068", "#4e5e3e", "#5c5548"],
+  glass: ["#6d28d9", "#047857", "#b91c1c", "#b45309", "#1d4ed8", "#be185d", "#0e7490", "#4b5b70"],
+  frost: ["#c4b5fd", "#34d399", "#f87171", "#fbbf24", "#38bdf8", "#fb7185", "#a78bfa", "#94a3b8"],
+  brutal: ["#e00000", "#0000cc", "#006600", "#cc8800", "#000000", "#cc00cc", "#008888", "#555555"],
+  loom: ["#e0b45a", "#a78bfa", "#ef8a8a", "#7ed687", "#74b9ff", "#ff8a65", "#ce93d8", "#b0aca4"],
+  tank: ["#6bb866", "#f0d44a", "#ef8a8a", "#64b5f6", "#8ed07a", "#ff8a65", "#4dd0e1", "#7eb4c4"],
+  nes: ["#d40028", "#e8c800", "#1a8ad4", "#008800", "#000000", "#e88828", "#88d8b0", "#881400"],
 };
 
 /** Full palette catalog — system primary, then research adjuncts. */

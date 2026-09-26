@@ -73,11 +73,16 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
     selectedFile,
     appSettings,
     setAppSettings,
+    columnStats,
+    sampleRows,
+    queryResult,
+    startDeepScan,
   } = useLoomStore();
   const viewportW = useViewportWidth();
   const aspect = appSettings.chartAspect ?? "free";
   const devicePreset = appSettings.chartDevice ?? "auto";
   const effectiveDevice = resolveDevice(devicePreset, viewportW);
+  const hasData = columnStats.length > 0 && Boolean(sampleRows ?? queryResult);
 
   const openSettings = () => {
     if (!panelOpen) togglePanel();
@@ -221,17 +226,29 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       )}
 
       {viewMode === "chart" && (
-        <button
-          type="button"
-          onClick={() => {
-            setPanelTab("chart");
-            if (!panelOpen) togglePanel();
-          }}
-          className="md:hidden loom-btn-ghost min-h-10 px-2.5 text-2xs font-medium text-loom-accent border border-loom-accent/40 rounded-md"
-          aria-label="Edit chart encoding"
-        >
-          Edit
-        </button>
+        <>
+          <button
+            type="button"
+            onClick={() => startDeepScan()}
+            disabled={!hasData}
+            className="md:hidden loom-btn-ghost min-h-10 px-2.5 text-2xs font-medium text-loom-accent border border-loom-accent/40 rounded-md disabled:opacity-40"
+            aria-label="Deep scan visualizations"
+            title="Deep scan · swipe Keep / Skip"
+          >
+            Scan
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPanelTab("chart");
+              if (!panelOpen) togglePanel();
+            }}
+            className="md:hidden loom-btn-ghost min-h-10 px-2.5 text-2xs font-medium text-loom-accent border border-loom-accent/40 rounded-md"
+            aria-label="Edit chart encoding"
+          >
+            Edit
+          </button>
+        </>
       )}
 
       {onOpenShortcuts && (

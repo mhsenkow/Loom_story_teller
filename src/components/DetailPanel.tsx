@@ -758,7 +758,7 @@ function SettingsView() {
       </div>
       <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">Theme</h3>
-        <p className="text-2xs text-loom-muted mb-2">
+        <p className="text-2xs text-loom-label mb-2">
           Shared ibm.io look spectrum · double-click to cycle
         </p>
         <div className="grid grid-cols-2 gap-1.5">
@@ -778,8 +778,8 @@ function SettingsView() {
               }}
               className={`px-2 py-1.5 text-2xs rounded-md border text-left transition-colors ${
                 currentTheme === t
-                  ? "border-loom-accent bg-loom-accent/15 text-loom-text"
-                  : "border-loom-border text-loom-muted hover:text-loom-text"
+                  ? "border-loom-accent bg-loom-accent/15 text-loom-text font-medium"
+                  : "border-loom-border text-loom-label hover:text-loom-text"
               }`}
             >
               {THEME_LABEL[t]}
@@ -790,7 +790,7 @@ function SettingsView() {
 
       <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">Chrome</h3>
-        <p className="text-2xs text-loom-muted mb-2">Shell face (type + borders)</p>
+        <p className="text-2xs text-loom-label mb-2">Shell face (type + borders)</p>
         <div className="grid grid-cols-2 gap-1.5">
           {UI_CHROMES.map((u) => (
             <button
@@ -799,8 +799,8 @@ function SettingsView() {
               onClick={() => setAppSettings((prev) => ({ ...prev, uiChrome: u as UiChrome }))}
               className={`px-2 py-1.5 text-2xs rounded-md border text-left transition-colors ${
                 appSettings.uiChrome === u
-                  ? "border-loom-accent bg-loom-accent/15 text-loom-text"
-                  : "border-loom-border text-loom-muted hover:text-loom-text"
+                  ? "border-loom-accent bg-loom-accent/15 text-loom-text font-medium"
+                  : "border-loom-border text-loom-label hover:text-loom-text"
               }`}
             >
               {UI_CHROME_LABEL[u]}

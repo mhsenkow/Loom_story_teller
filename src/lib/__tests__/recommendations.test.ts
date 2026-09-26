@@ -291,5 +291,69 @@ describe("recommendations", () => {
       expect(kinds.size).toBeGreaterThanOrEqual(Math.min(3, tops.length));
       expect(getBestSuggestion(recs)?.id).toBe(diversifyRecommendations(recs, 1)[0]?.id);
     });
+
+    it("prefers mean over sum for proportion / percent fields", () => {
+      const cols: ColumnInfo[] = [
+        { name: "Region", data_type: "VARCHAR", null_count: 0, distinct_count: 9, min_value: null, max_value: null },
+        {
+          name: "Proportion of households fuel poor (%)",
+          data_type: "DOUBLE",
+          null_count: 0,
+          distinct_count: 9,
+          min_value: "8",
+          max_value: "20",
+        },
+        {
+          name: "Number of households",
+          data_type: "DOUBLE",
+          null_count: 0,
+          distinct_count: 9,
+          min_value: "1000000",
+          max_value: "9000000",
+        },
+      ];
+      const recs = recommend(cols, null, "fuel_region.csv");
+      const meanRate = recs.find(
+        (r) => r.id.includes("bar-mean") && r.yField?.includes("Proportion"),
+      );
+      const sumRate = recs.find(
+        (r) => r.id.includes("bar-sum") && r.yField?.includes("Proportion"),
+      );
+      expect(meanRate).toBeDefined();
+      expect(sumRate).toBeDefined();
+      expect(meanRate!.score).toBeGreaterThan(sumRate!.score);
+      const rateCharts = recs.filter((r) => r.yField?.includes("Proportion"));
+      const bestRate = [...rateCharts].sort((a, b) => b.score - a.score)[0];
+      expect(bestRate?.id).toContain("bar-mean");
+    });
+
+    it("boosts latitude × longitude scatter", () => {
+      const cols: ColumnInfo[] = [
+        { name: "Latitude", data_type: "DOUBLE", null_count: 0, distinct_count: 200, min_value: "24", max_value: "49" },
+        { name: "Longitude", data_type: "DOUBLE", null_count: 0, distinct_count: 200, min_value: "-125", max_value: "-66" },
+        { name: "AwardOutright", data_type: "DOUBLE", null_count: 0, distinct_count: 180, min_value: "0", max_value: "1e6" },
+        { name: "InstState", data_type: "VARCHAR", null_count: 0, distinct_count: 50, min_value: null, max_value: null },
+      ];
+      const rows: QueryResult["rows"] = [];
+      for (let i = 0; i < 80; i++) {
+        rows.push([30 + (i % 20), -100 - (i % 30), i * 1000, `S${i % 10}`]);
+      }
+      const data: QueryResult = {
+        columns: ["Latitude", "Longitude", "AwardOutright", "InstState"],
+        types: ["DOUBLE", "DOUBLE", "DOUBLE", "VARCHAR"],
+        rows,
+        total_rows: rows.length,
+      };
+      const recs = recommend(cols, data, "neh.csv");
+      const geo = recs.find(
+        (r) =>
+          r.kind === "scatter" &&
+          ((r.xField === "Latitude" && r.yField === "Longitude") ||
+            (r.xField === "Longitude" && r.yField === "Latitude")),
+      );
+      expect(geo).toBeDefined();
+      expect(geo!.score).toBeGreaterThan(90);
+      expect(geo!.subtitle).toMatch(/geographic/i);
+    });
   });
 });

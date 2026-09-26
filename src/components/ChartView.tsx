@@ -102,6 +102,7 @@ export function ChartView() {
     rulerPins, setRulerPins,
     addChartView, setPromptDialog, querySql,
     createStoryDashboard, setDashboardsExpanded,
+    startDeepScan,
   } = useLoomStore();
 
   const isMobile = useIsMobile();
@@ -1736,13 +1737,24 @@ export function ChartView() {
         </div>
         <div className="flex items-center gap-1 shrink-0">
           {isMobile && (
-            <button
-              type="button"
-              onClick={openChartEditor}
-              className="text-2xs py-1.5 px-2.5 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium min-h-9"
-            >
-              Edit
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => startDeepScan()}
+                disabled={columnStats.length === 0 || !sampleRows}
+                className="text-2xs py-1.5 px-2.5 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium min-h-9 disabled:opacity-40"
+                title="Deep scan · swipe Keep / Skip"
+              >
+                Scan
+              </button>
+              <button
+                type="button"
+                onClick={openChartEditor}
+                className="text-2xs py-1.5 px-2.5 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium min-h-9"
+              >
+                Edit
+              </button>
+            </>
           )}
           <button
             type="button"
@@ -1804,6 +1816,20 @@ export function ChartView() {
               ) : null}
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => startDeepScan()}
+            disabled={columnStats.length === 0 || !(sampleRows)}
+            className={`
+              text-2xs py-1.5 px-2 rounded border border-loom-border text-loom-muted
+              hover:border-loom-accent hover:text-loom-accent transition-colors font-medium text-center
+              disabled:opacity-45 disabled:cursor-not-allowed
+              ${suggestionsExpanded ? "shrink-0" : "w-full"}
+            `}
+            title="Deep scan · swipe Keep / Skip to train suggestions"
+          >
+            Deep scan
+          </button>
           <div
             className={`
               gap-1.5

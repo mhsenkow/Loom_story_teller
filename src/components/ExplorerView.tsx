@@ -1005,7 +1005,7 @@ function EmptyState() {
       </div>
       <div className="text-center">
         <p className="text-sm font-medium text-loom-text">Mount a data folder</p>
-        <p className="text-xs text-loom-muted mt-1">
+        <p className="text-xs text-loom-label mt-1 max-w-[260px] mx-auto leading-relaxed">
           Select a folder containing .csv or .parquet files to begin exploring
         </p>
       </div>

@@ -20,6 +20,15 @@ import type {
   ClusterResult,
 } from "./smartAnalytics";
 import type { ChartAspectId, ChartDeviceId } from "./chartViewport";
+import type { VizPreferenceModel } from "./vizPreferences";
+import {
+  emptyVizPreferenceModel,
+  extractVizFeatures,
+  recordVizSwipe,
+  setCachedVizPreferences,
+} from "./vizPreferences";
+import { deepRecommend, type DeepScanSource } from "./deepScan";
+import { setPersistedVizPreferences } from "./persist";
 
 export type { ChartAspectId, ChartDeviceId };
 
@@ -400,6 +409,17 @@ interface LoomState {
   // --- Poll-based sources (USGS, Open-Meteo, NWS, World Bank) ---
   sourceStatuses: Record<string, { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; uptime_secs: number }>;
 
+  // --- Deep scan / viz swipe ---
+  vizPreferences: VizPreferenceModel;
+  vizSwipeOpen: boolean;
+  vizSwipeDeck: ChartRecommendation[];
+  vizSwipeIndex: number;
+  vizScanStatus: "idle" | "scanning" | "ready" | "done";
+  vizScanMessage: string | null;
+  vizSwipeKept: number;
+  vizSwipeSkipped: number;
+  vizSchemaSignature: string | null;
+
   // Actions
   setMountedFolder: (folder: string | null) => void;
   setFiles: (files: FileEntry[]) => void;
@@ -521,6 +541,10 @@ interface LoomState {
   setStreamStatus: (status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; wikis_seen: number; started_at: number | null; uptime_secs: number }) => void;
   setStreamActive: (v: boolean) => void;
   setSourceStatus: (kind: string, status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; uptime_secs: number }) => void;
+  setVizPreferences: (model: VizPreferenceModel) => void;
+  startDeepScan: () => void;
+  swipeViz: (direction: "left" | "right") => void;
+  closeVizSwipe: () => void;
   reset: () => void;
 }
 
@@ -607,6 +631,15 @@ const initialState = {
   streamUptimeSecs: 0,
   streamActive: false,
   sourceStatuses: {} as Record<string, { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; uptime_secs: number }>,
+  vizPreferences: emptyVizPreferenceModel(),
+  vizSwipeOpen: false,
+  vizSwipeDeck: [] as ChartRecommendation[],
+  vizSwipeIndex: 0,
+  vizScanStatus: "idle" as const,
+  vizScanMessage: null as string | null,
+  vizSwipeKept: 0,
+  vizSwipeSkipped: 0,
+  vizSchemaSignature: null as string | null,
 };
 
 export const useLoomStore = create<LoomState>((set, get) => ({
@@ -1093,5 +1126,111 @@ export const useLoomStore = create<LoomState>((set, get) => ({
   setStreamActive: (v) => set({ streamActive: v }),
   setSourceStatus: (kind, status) =>
     set((s) => ({ sourceStatuses: { ...s.sourceStatuses, [kind]: status } })),
+  setVizPreferences: (model) => {
+    setCachedVizPreferences(model);
+    set({ vizPreferences: model });
+  },
+  startDeepScan: () => {
+    const s = get();
+    const columns = s.columnStats;
+    const data = s.sampleRows ?? s.queryResult;
+    if (!columns.length || !data) {
+      get().setToast("Load a dataset before scanning");
+      return;
+    }
+
+    set({
+      vizSwipeOpen: true,
+      vizScanStatus: "scanning",
+      vizScanMessage: "Profiling columns…",
+      vizSwipeDeck: [],
+      vizSwipeIndex: 0,
+      vizSwipeKept: 0,
+      vizSwipeSkipped: 0,
+      vizSchemaSignature: null,
+    });
+
+    // Yield so the overlay can paint scanning UI
+    const run = () => {
+      set({ vizScanMessage: "Scoring charts…" });
+      const path = s.selectedFile?.path ?? "";
+      let source: DeepScanSource = {
+        kind: "file",
+        fileName: s.selectedFile?.name ?? "data",
+      };
+      if (path === "stream://wiki" || s.streamActive) {
+        source = { kind: "stream" };
+      } else if (path.startsWith("stream://")) {
+        source = { kind: "source", sourceKind: path.replace("stream://", "") };
+      }
+
+      set({ vizScanMessage: "Ranking for you…" });
+      const result = deepRecommend(columns, data, s.vizPreferences, source, 16);
+      set({
+        vizSwipeDeck: result.deck,
+        vizSwipeIndex: 0,
+        vizScanStatus: result.deck.length ? "ready" : "done",
+        vizScanMessage: null,
+        vizSchemaSignature: result.profile.schemaSignature,
+        chartRecs: result.deck.length ? result.deck : s.chartRecs,
+      });
+    };
+
+    if (typeof requestAnimationFrame !== "undefined") {
+      requestAnimationFrame(() => {
+        setTimeout(run, 40);
+      });
+    } else {
+      setTimeout(run, 0);
+    }
+  },
+  swipeViz: (direction) => {
+    const s = get();
+    const rec = s.vizSwipeDeck[s.vizSwipeIndex];
+    if (!rec || s.vizScanStatus !== "ready") return;
+
+    const features = extractVizFeatures(rec, s.columnStats, s.vizSchemaSignature ?? undefined);
+    const action = direction === "right" ? "like" : "dislike";
+    const nextPrefs = recordVizSwipe(s.vizPreferences, action, features);
+    setCachedVizPreferences(nextPrefs);
+    try {
+      setPersistedVizPreferences(nextPrefs);
+    } catch {
+      // quota
+    }
+
+    const patch: Partial<LoomState> = {
+      vizPreferences: nextPrefs,
+      vizSwipeKept: s.vizSwipeKept + (direction === "right" ? 1 : 0),
+      vizSwipeSkipped: s.vizSwipeSkipped + (direction === "left" ? 1 : 0),
+    };
+
+    if (direction === "right") {
+      patch.activeChart = rec;
+      patch.vegaSpec = rec.spec ?? null;
+      patch.aiSuggestionReason = null;
+      // Promote liked charts toward the front of the rail
+      const rest = s.chartRecs.filter((r) => r.id !== rec.id);
+      patch.chartRecs = [rec, ...rest];
+    }
+
+    const nextIndex = s.vizSwipeIndex + 1;
+    if (nextIndex >= s.vizSwipeDeck.length) {
+      patch.vizSwipeIndex = nextIndex;
+      patch.vizScanStatus = "done";
+    } else {
+      patch.vizSwipeIndex = nextIndex;
+    }
+
+    set(patch);
+  },
+  closeVizSwipe: () =>
+    set({
+      vizSwipeOpen: false,
+      vizScanStatus: "idle",
+      vizScanMessage: null,
+      vizSwipeDeck: [],
+      vizSwipeIndex: 0,
+    }),
   reset: () => set(initialState),
 }));

@@ -26,6 +26,7 @@ import { Toast } from "@/components/Toast";
 import { PromptDialog } from "@/components/PromptDialog";
 import { Onboarding } from "@/components/Onboarding";
 import { FeedbackNotes } from "@/components/FeedbackNotes";
+import { VizSwipeDeck } from "@/components/VizSwipeDeck";
 import { WebSessionResume } from "@/components/WebSessionResume";
 import { useEffect, useCallback } from "react";
 import { createGitHubIssue, getGitHubNewIssueUrl, isTauri, openExternalUrl } from "@/lib/tauri";
@@ -393,6 +394,7 @@ export default function Home() {
       </ErrorBoundary>
       <PromptDialog />
       <FeedbackNotes />
+      <VizSwipeDeck />
       <Toast />
     </>
   );
@@ -668,7 +670,7 @@ function HomeContent({
                 <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">[</kbd> Sidebar · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">]</kbd> Right panel</li>
                 <li className="pt-1 text-loom-muted font-medium">Scatter</li>
                 <li>Two-finger scroll pans · pinch / mouse wheel zooms toward cursor · double-click resets</li>
-                <li className="md:hidden">On phone: chart fills the screen · swipe the Charts strip · Edit opens Encoding</li>
+                <li className="md:hidden">On phone: chart fills the screen · Scan for viz cards · swipe Keep / Skip · Edit opens Encoding</li>
                 <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">+</kbd>/<kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">−</kbd> Zoom · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">0</kbd> Reset · arrows pan (Shift = faster)</li>
                 <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">V</kbd> Pan · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">C</kbd> Crosshair · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">G</kbd> Lasso</li>
                 <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">Shift</kbd>+drag brush select · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">L</kbd> Link tooltip · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">Esc</kbd> Clear</li>

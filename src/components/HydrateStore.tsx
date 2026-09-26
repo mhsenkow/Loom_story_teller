@@ -31,6 +31,8 @@ import {
   setPersistedQueryViews,
   setPersistedDashboards,
   setTablePrefs as persistTablePrefs,
+  getVizPreferencesRaw,
+  setPersistedVizPreferences,
 } from "@/lib/persist";
 import type { ChartViewItem, QueryViewItem, DashboardItem } from "@/lib/store";
 import {
@@ -40,6 +42,11 @@ import {
   normalizeFont,
   normalizeFaces,
 } from "@/lib/lookSystem";
+import {
+  parseVizPreferenceModel,
+  setCachedVizPreferences,
+  emptyVizPreferenceModel,
+} from "@/lib/vizPreferences";
 
 export function HydrateStore() {
   const hydrated = useRef(false);
@@ -52,6 +59,7 @@ export function HydrateStore() {
     chartViews: true,
     queryViews: true,
     dashboards: true,
+    vizPreferences: true,
   });
   const hasPersistedChartViews = useRef(false);
   const hasPersistedTableViews = useRef(false);
@@ -68,6 +76,7 @@ export function HydrateStore() {
     setChartViews,
     setQueryViews,
     setDashboards,
+    setVizPreferences,
     appSettings,
     recentFiles,
     lastSession,
@@ -78,6 +87,7 @@ export function HydrateStore() {
     chartViews,
     queryViews,
     dashboards,
+    vizPreferences,
   } = useLoomStore();
 
   useEffect(() => {
@@ -169,6 +179,22 @@ export function HydrateStore() {
 
     const db = getDashboards();
     if (db.length) setDashboards(db as DashboardItem[]);
+
+    const vizRaw = getVizPreferencesRaw();
+    if (vizRaw) {
+      try {
+        const model = parseVizPreferenceModel(JSON.parse(vizRaw));
+        setCachedVizPreferences(model);
+        setVizPreferences(model);
+      } catch {
+        const empty = emptyVizPreferenceModel();
+        setCachedVizPreferences(empty);
+        setVizPreferences(empty);
+      }
+    } else {
+      const empty = emptyVizPreferenceModel();
+      setCachedVizPreferences(empty);
+    }
   }, []);
 
   useEffect(() => {
@@ -294,6 +320,19 @@ export function HydrateStore() {
       // localStorage full or disabled
     }
   }, [dashboards]);
+
+  useEffect(() => {
+    if (skipFirstPersist.current.vizPreferences) {
+      skipFirstPersist.current.vizPreferences = false;
+      return;
+    }
+    try {
+      setPersistedVizPreferences(vizPreferences);
+      setCachedVizPreferences(vizPreferences);
+    } catch (_) {
+      // localStorage full or disabled
+    }
+  }, [vizPreferences]);
 
   return null;
 }
