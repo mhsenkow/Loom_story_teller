@@ -2,7 +2,7 @@
 // DetailPanel — Stats / Chart (Vega & visual)
 // =================================================================
 // Right panel: Stats and Chart tabs. Schema lives in the footer.
-// Chart tab: encoding slots (select + drop), Visual presets, Vega JSON.
+// Chart tab: Encoding | Visual secondary header; encoding slots, Visual presets, Vega JSON.
 // =================================================================
 
 "use client";
@@ -2048,9 +2048,9 @@ function ChartPanelView() {
   const [specExpanded, setSpecExpanded] = useState(true);
   const [specCopyOk, setSpecCopyOk] = useState(false);
   const [dragOverSlot, setDragOverSlot] = useState<"x" | "y" | "color" | null>(null);
-  const [encodingOpen, setEncodingOpen] = useState(true);
+  /** Chart panel secondary nav — Encoding (data) vs Visual (look). */
+  const [chartPanelSection, setChartPanelSection] = useState<"encoding" | "visual">("encoding");
   const [activeChartOpen, setActiveChartOpen] = useState(true);
-  const [visualOpen, setVisualOpen] = useState(true);
   const [vegaOpen, setVegaOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
   const [moreChannelsOpen, setMoreChannelsOpen] = useState(() =>
@@ -2389,19 +2389,61 @@ function ChartPanelView() {
   ].filter(Boolean).length;
 
   return (
-    <div className="flex flex-col gap-3 p-3">
-      {/* Encoding — collapsible */}
-      <div className="loom-card overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setEncodingOpen((o) => !o)}
-          className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-loom-elevated/50 transition-colors"
+    <div className="flex flex-col min-h-0">
+      {/* Sticky Encoding | Visual secondary header */}
+      <div
+        role="tablist"
+        aria-label="Chart panel sections"
+        className="sticky top-0 z-10 flex items-center gap-0.5 px-2 py-1.5 border-b border-loom-border bg-loom-surface shrink-0"
+      >
+        <div className="flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5 w-full">
+          {(
+            [
+              { id: "encoding" as const, label: "Encoding" },
+              { id: "visual" as const, label: "Visual" },
+            ]
+          ).map((sec) => (
+            <button
+              key={sec.id}
+              type="button"
+              role="tab"
+              id={`chart-section-${sec.id}`}
+              aria-controls={`chart-section-panel-${sec.id}`}
+              aria-selected={chartPanelSection === sec.id}
+              tabIndex={chartPanelSection === sec.id ? 0 : -1}
+              onClick={() => setChartPanelSection(sec.id)}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                  e.preventDefault();
+                  const next = chartPanelSection === "encoding" ? "visual" : "encoding";
+                  setChartPanelSection(next);
+                  queueMicrotask(() => document.getElementById(`chart-section-${next}`)?.focus());
+                }
+              }}
+              className={`
+                flex-1 min-h-9 px-3 py-1.5 text-xs font-medium rounded transition-colors
+                ${chartPanelSection === sec.id
+                  ? "bg-loom-surface text-loom-text shadow-sm border border-loom-border"
+                  : "text-loom-muted hover:text-loom-text border border-transparent"}
+              `}
+            >
+              {sec.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-3 p-3">
+      {chartPanelSection === "encoding" && (
+        <div
+          role="tabpanel"
+          id="chart-section-panel-encoding"
+          aria-labelledby="chart-section-encoding"
+          className="flex flex-col gap-3"
         >
-          <span className="text-xs font-semibold text-loom-text">Encoding</span>
-          <span className="text-loom-muted text-xs">{encodingOpen ? "▼" : "▶"}</span>
-        </button>
-        {encodingOpen && (
-          <div className="space-y-2.5 px-2.5 pb-3">
+      {/* Encoding */}
+      <div className="loom-card overflow-hidden">
+        <div className="space-y-2.5 px-2.5 py-3">
             {(() => {
               const curSupport = chartKindDataSupport(columnStats, activeChart.kind);
               if (!curSupport.ok) {
@@ -2748,7 +2790,6 @@ function ChartPanelView() {
               <SaveChartViewButton />
             </div>
           </div>
-        )}
       </div>
 
       {/* Active chart — toggles & annotations */}
@@ -2818,18 +2859,54 @@ function ChartPanelView() {
         )}
       </div>
 
-      {/* Visual — collapsible */}
+      {/* Vega-Lite spec — under Encoding */}
       <div className="loom-card overflow-hidden">
         <button
           type="button"
-          onClick={() => setVisualOpen((o) => !o)}
+          onClick={() => setVegaOpen((o) => !o)}
           className="w-full flex items-center justify-between px-2 py-1.5 text-left hover:bg-loom-elevated/50 rounded transition-colors"
         >
-          <span className="text-xs font-semibold text-loom-text">Visual</span>
-          <span className="text-loom-muted text-xs">{visualOpen ? "▼" : "▶"}</span>
+          <span className="text-xs font-semibold text-loom-text">Vega-Lite spec</span>
+          <span className="text-loom-muted text-xs">{vegaOpen ? "▼" : "▶"}</span>
         </button>
-        {visualOpen && (
-          <div className="space-y-4 px-2 pb-2">
+        {vegaOpen && (
+          <div className="space-y-2 px-2 pb-2">
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setSpecExpanded(!specExpanded)}
+                className="text-2xs text-loom-muted hover:text-loom-accent transition-colors"
+              >
+                {specExpanded ? "Collapse JSON" : "Expand JSON"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCopySpec}
+                className="text-2xs px-2 py-1 rounded border border-loom-border hover:border-loom-accent text-loom-muted hover:text-loom-text transition-colors"
+              >
+                {specCopyOk ? "Copied" : "Copy JSON"}
+              </button>
+            </div>
+            {specExpanded && (
+              <pre className="text-2xs font-mono text-loom-muted bg-loom-bg rounded p-2 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
+                {specJson}
+              </pre>
+            )}
+          </div>
+        )}
+      </div>
+        </div>
+      )}
+
+      {chartPanelSection === "visual" && (
+        <div
+          role="tabpanel"
+          id="chart-section-panel-visual"
+          aria-labelledby="chart-section-visual"
+        >
+      {/* Visual */}
+      <div className="loom-card overflow-hidden">
+        <div className="space-y-4 px-2.5 py-3">
             {/* Presets — full replace */}
             <div className="space-y-1.5">
               <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Design system</p>
@@ -3587,44 +3664,9 @@ function ChartPanelView() {
               </div>
             </div>
           </div>
-        )}
       </div>
-
-      {/* Vega-Lite spec — collapsible */}
-      <div className="loom-card overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setVegaOpen((o) => !o)}
-          className="w-full flex items-center justify-between px-2 py-1.5 text-left hover:bg-loom-elevated/50 rounded transition-colors"
-        >
-          <span className="text-xs font-semibold text-loom-text">Vega-Lite spec</span>
-          <span className="text-loom-muted text-xs">{vegaOpen ? "▼" : "▶"}</span>
-        </button>
-        {vegaOpen && (
-          <div className="space-y-2 px-2 pb-2">
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={() => setSpecExpanded(!specExpanded)}
-                className="text-2xs text-loom-muted hover:text-loom-accent transition-colors"
-              >
-                {specExpanded ? "Collapse JSON" : "Expand JSON"}
-              </button>
-              <button
-                type="button"
-                onClick={handleCopySpec}
-                className="text-2xs px-2 py-1 rounded border border-loom-border hover:border-loom-accent text-loom-muted hover:text-loom-text transition-colors"
-              >
-                {specCopyOk ? "Copied" : "Copy JSON"}
-              </button>
-            </div>
-            {specExpanded && (
-              <pre className="text-2xs font-mono text-loom-muted bg-loom-bg rounded p-2 overflow-x-auto max-h-48 overflow-y-auto whitespace-pre-wrap break-all">
-                {specJson}
-              </pre>
-            )}
-          </div>
-        )}
+        </div>
+      )}
       </div>
     </div>
   );

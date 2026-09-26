@@ -26,6 +26,7 @@ import { useIsMobile, useViewportWidth } from "@/lib/useMediaQuery";
 import { fitChartFrame, resolveDevice, aspectLabel } from "@/lib/chartViewport";
 import {
   getBestSuggestion,
+  getTopSuggestions,
   getRecommendationReason,
   createChartRec,
   recommendStorySequence,
@@ -433,19 +434,33 @@ export function ChartView() {
   const [showTitleEditButton, setShowTitleEditButton] = useState(false);
   const titleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bestSuggestion = useMemo(() => getBestSuggestion(chartRecs), [chartRecs]);
+  const topSuggestions = useMemo(() => getTopSuggestions(chartRecs, 6), [chartRecs]);
+  const suggestCycleRef = useRef(0);
   const tableName = selectedFile?.name?.replace(/\.\w+$/, "") ?? "";
 
   const displayTitle = activeChart
     ? (chartTitleOverrides[activeChart.id] ?? activeChart.title)
     : "Select a chart";
 
+  useEffect(() => {
+    suggestCycleRef.current = 0;
+  }, [selectedFile?.path, chartRecs]);
+
   const handleSuggestChart = useCallback(() => {
-    if (bestSuggestion) {
-      setActiveChart(bestSuggestion);
-      setPanelTab("chart");
-      setToast(`Applied best: ${bestSuggestion.title}`);
-    }
-  }, [bestSuggestion, setActiveChart, setPanelTab, setToast]);
+    const picks = topSuggestions.length > 0 ? topSuggestions : (bestSuggestion ? [bestSuggestion] : []);
+    if (picks.length === 0) return;
+    const idx = suggestCycleRef.current % picks.length;
+    const pick = picks[idx]!;
+    suggestCycleRef.current = idx + 1;
+    setActiveChart(pick);
+    setPanelTab("chart");
+    const n = picks.length;
+    setToast(
+      n > 1
+        ? `Suggested ${idx + 1}/${n}: ${pick.title} — click again for another`
+        : `Applied best: ${pick.title}`,
+    );
+  }, [topSuggestions, bestSuggestion, setActiveChart, setPanelTab, setToast]);
 
   const handleTellStory = useCallback(async () => {
     if (!selectedFile) {
@@ -1768,7 +1783,7 @@ export function ChartView() {
               : "grid grid-cols-1"}
           `}
         >
-          {bestSuggestion && (
+          {(bestSuggestion || topSuggestions.length > 0) && (
             <button
               type="button"
               onClick={handleSuggestChart}
@@ -1777,9 +1792,16 @@ export function ChartView() {
                 hover:bg-loom-accent/20 transition-colors font-medium text-center
                 ${suggestionsExpanded ? "shrink-0" : "w-full"}
               `}
-              title={`Apply best by score: ${bestSuggestion.title}`}
+              title={
+                topSuggestions.length > 1
+                  ? `Cycle ${topSuggestions.length} top picks (score + variety). First: ${topSuggestions[0]?.title}`
+                  : `Apply best by score: ${bestSuggestion?.title ?? ""}`
+              }
             >
               Suggest chart
+              {topSuggestions.length > 1 ? (
+                <span className="opacity-70 font-mono ml-1">{topSuggestions.length}</span>
+              ) : null}
             </button>
           )}
           <div

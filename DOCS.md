@@ -79,7 +79,7 @@ Adding a new command:
 
 Chart look and feel is controlled by `chartVisualOverrides` in the store and applied in `ChartView.tsx` via `chartRenderOpts`. Grouped as:
 
-- **Color** — `src/lib/chartPalettes.ts` is the system of record (system + research palettes). Kinds: categorical, sequential, diverging, spectrum, semantic, reference. `colorPalette: "auto"` (default) picks scale from chart kind / color field (heatmap → sequential blue, waterfall → semantic, else categorical). `resolveChartColors` + `sampleContinuous` drive canvas/WebGPU; heatmaps interpolate sequential stops. Settings → colorblind charts forces Okabe–Ito / Cividis unless a palette is locked. Visual → Color shows swatch grid + reverse. Shuffle look respects per-section locks (Color / Design / Marks / …).
+- **Color** — `src/lib/chartPalettes.ts` is the system of record (system + research palettes). Kinds: categorical, sequential, diverging, spectrum, semantic, reference. `colorPalette: "auto"` (default) picks scale from chart kind / color field (heatmap → sequential blue, waterfall → semantic, else categorical). `resolveChartColors` + `sampleContinuous` drive canvas/WebGPU; heatmaps interpolate sequential stops. Settings → colorblind charts forces Okabe–Ito / Cividis unless a palette is locked. Chart → Visual → Color shows swatch grid + reverse. Shuffle look respects per-section locks (Color / Design / Marks / …).
 - **Typography** — `fontFamily`, `titleFontWeight`, `titleItalic`, `tickRotation`; applied to title and axis labels.
 - **Marks** — `markShape` (circle, square, diamond, triangle, cross, star, …), `markStroke` / `markStrokeWidth`, `markJitter`, `sizeScale` (for size encoding), `barCornerRadius`, `lineStrokeStyle`, `lineCurveSmooth`.
 - **Axes & grid** — `axisLineColor`, `axisLineWidth`, `gridStyle`, `gridOpacity`, `tickCount`, `axisLabelColor`.
@@ -149,7 +149,7 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 | `src/lib/ollama.ts` | Ollama API for “Suggest with AI”. |
 | `src/lib/webgpu.ts` | WebGPU device, pipeline, buffer upload, draw for scatter. |
 | `src/components/ChartView.tsx` | Main chart area, suggestion grid, Smart overlays (anomaly/trend/forecast/ref lines/clusters), title edit, export handler registration. |
-| `src/components/DetailPanel.tsx` | Right panel: Stats, Chart (encoding, Visual, bar stack, ref lines, trail, marginals), Export, Smart (anomaly, forecast, trend, ref lines, clustering, correlation matrix). |
+| `src/components/DetailPanel.tsx` | Right panel: Stats, Chart (Encoding \| Visual secondary header; encoding, Visual, bar stack, ref lines, trail, marginals), Export, Smart (anomaly, forecast, trend, ref lines, clustering, correlation matrix). |
 | `src/lib/smartAnalytics.ts` | Anomaly, forecast, trend, reference lines, clustering; pure functions over rows/columns. |
 | `src/components/ExplorerView.tsx` | Virtualized data table, filters, saved views, undo/redo, column profiling, linked highlight. |
 | `src/components/QueryView.tsx` | SQL editor, schema browser, validation, paginated results, snippets, snapshots, diff, NL-to-SQL input. |

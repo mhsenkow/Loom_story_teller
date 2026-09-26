@@ -106,6 +106,116 @@ function inferType(dt: string, colName?: string): ColType {
   return "nominal";
 }
 
+/** Prefer 3–12 categories for color legends; avoid one-hot noise and binary-only when better options exist. */
+function pickColorColumn(nomCols: ColumnInfo[]): ColumnInfo | null {
+  const candidates = nomCols.filter((c) => c.distinct_count >= 2 && c.distinct_count <= 20);
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => {
+    const score = (c: ColumnInfo) => {
+      let s = 0;
+      const d = c.distinct_count;
+      if (d >= 3 && d <= 12) s += 30;
+      else if (d >= 2 && d <= 16) s += 15;
+      else s += 5;
+      // Mild preference for denser (less null-heavy) columns when stats exist
+      if (c.null_count === 0) s += 4;
+      return s;
+    };
+    return score(b) - score(a);
+  });
+  return candidates[0] ?? null;
+}
+
+function colIndex(data: QueryResult, name: string): number {
+  return data.columns.indexOf(name);
+}
+
+/** Sample paired numeric values from a QueryResult (cap for speed). */
+function sampleNumericPair(
+  data: QueryResult | null,
+  xName: string,
+  yName: string,
+  maxPoints = 800,
+): { xs: number[]; ys: number[] } | null {
+  if (!data?.rows?.length) return null;
+  const xi = colIndex(data, xName);
+  const yi = colIndex(data, yName);
+  if (xi < 0 || yi < 0) return null;
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const rows = data.rows;
+  const step = Math.max(1, Math.floor(rows.length / maxPoints));
+  for (let i = 0; i < rows.length && xs.length < maxPoints; i += step) {
+    const xv = Number(rows[i][xi]);
+    const yv = Number(rows[i][yi]);
+    if (Number.isFinite(xv) && Number.isFinite(yv)) {
+      xs.push(xv);
+      ys.push(yv);
+    }
+  }
+  return xs.length >= 12 ? { xs, ys } : null;
+}
+
+/** Absolute Pearson correlation in [0, 1]; 0 when undefined. */
+function pearsonAbs(xs: number[], ys: number[]): number {
+  const n = Math.min(xs.length, ys.length);
+  if (n < 12) return 0;
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const x = xs[i]!;
+    const y = ys[i]!;
+    sx += x;
+    sy += y;
+    sxx += x * x;
+    syy += y * y;
+    sxy += x * y;
+  }
+  const cov = sxy - (sx * sy) / n;
+  const vx = sxx - (sx * sx) / n;
+  const vy = syy - (sy * sy) / n;
+  if (vx <= 0 || vy <= 0) return 0;
+  const r = cov / Math.sqrt(vx * vy);
+  return Number.isFinite(r) ? Math.min(1, Math.abs(r)) : 0;
+}
+
+/**
+ * Re-rank recommendations for variety: keep high scores but avoid flooding
+ * the list with the same kind / field pair. Used for Suggest chart top picks
+ * and the Suggestions rail.
+ */
+export function diversifyRecommendations(
+  recs: ChartRecommendation[],
+  limit = 40,
+): ChartRecommendation[] {
+  if (recs.length <= 1) return recs.slice(0, limit);
+  const sorted = [...recs].sort((a, b) => b.score - a.score);
+  const out: ChartRecommendation[] = [];
+  const kindCount = new Map<ChartKind, number>();
+  const fieldKeys = new Set<string>();
+
+  const fieldKey = (r: ChartRecommendation) =>
+    `${r.kind}|${r.xField}|${r.yField ?? ""}|${r.colorField ?? ""}`;
+
+  // First pass: prefer new kinds / encodings
+  for (const r of sorted) {
+    if (out.length >= limit) break;
+    const kc = kindCount.get(r.kind) ?? 0;
+    const fk = fieldKey(r);
+    if (kc >= 4 && out.length >= Math.min(8, limit)) continue;
+    if (fieldKeys.has(fk)) continue;
+    out.push(r);
+    kindCount.set(r.kind, kc + 1);
+    fieldKeys.add(fk);
+  }
+  // Second pass: fill remaining slots by score
+  for (const r of sorted) {
+    if (out.length >= limit) break;
+    if (out.some((o) => o.id === r.id)) continue;
+    out.push(r);
+  }
+  return out;
+}
+
 function baseConfig() {
   return {
     background: "transparent",
@@ -531,30 +641,51 @@ export function recommend(
   }
 
   // --- SCATTER: every pair of numeric columns ---
-  for (let i = 0; i < numCols.length && i < 4; i++) {
-    for (let j = i + 1; j < numCols.length && j < 5; j++) {
-      const x = numCols[i];
-      const y = numCols[j];
-      const colorCol = nomCols.length > 0 ? nomCols[0] : null;
+  const colorCol = pickColorColumn(nomCols);
+  for (let i = 0; i < numCols.length && i < 5; i++) {
+    for (let j = i + 1; j < numCols.length && j < 6; j++) {
+      const x = numCols[i]!;
+      const y = numCols[j]!;
 
       const encoding: Record<string, unknown> = {
         x: { field: x.name, type: "quantitative" },
         y: { field: y.name, type: "quantitative" },
       };
-      if (colorCol && colorCol.distinct_count <= 20) {
+      if (colorCol) {
         encoding.color = { field: colorCol.name, type: "nominal", scale: { range: COLORS } };
       }
 
-      let score = 70;
-      if (x.distinct_count > 50 && y.distinct_count > 50) score += 15;
-      if (colorCol && colorCol.distinct_count >= 2 && colorCol.distinct_count <= 10) score += 10;
-      if (dense) score += 6; // scatter + density-aware marks beats bubbles when crowded
+      let score = 68;
+      if (x.distinct_count > 50 && y.distinct_count > 50) score += 12;
+      if (colorCol && colorCol.distinct_count >= 3 && colorCol.distinct_count <= 12) score += 12;
+      else if (colorCol) score += 6;
+      if (dense) score += 4;
+
+      // Sample correlation: strong relationships beat arbitrary numeric pairs
+      const pair = sampleNumericPair(data, x.name, y.name);
+      let corrNote = "numeric relationship";
+      if (pair) {
+        const absR = pearsonAbs(pair.xs, pair.ys);
+        if (absR >= 0.75) {
+          score += 22;
+          corrNote = `strong correlation (|r|≈${absR.toFixed(2)})`;
+        } else if (absR >= 0.45) {
+          score += 14;
+          corrNote = `moderate correlation (|r|≈${absR.toFixed(2)})`;
+        } else if (absR >= 0.2) {
+          score += 6;
+          corrNote = `weak correlation (|r|≈${absR.toFixed(2)})`;
+        } else {
+          score -= 4; // near-noise pair: still show, but rank lower
+          corrNote = "loose cloud (low correlation)";
+        }
+      }
 
       recs.push({
         id: `scatter-${x.name}-${y.name}`,
         kind: "scatter",
         title: `${x.name} vs ${y.name}`,
-        subtitle: colorCol ? `colored by ${colorCol.name}` : "numeric relationship",
+        subtitle: colorCol ? `${corrNote} · colored by ${colorCol.name}` : corrNote,
         score,
         spec: {
           $schema: "https://vega.github.io/schema/vega-lite/v5.json",
@@ -755,9 +886,9 @@ export function recommend(
 
   // --- LINE (time series): temporal × numeric ---
   for (const time of timeCols.slice(0, 2)) {
-    for (const num of numCols.slice(0, 3)) {
-      const groupCol = nomCols.length > 0 && nomCols[0].distinct_count <= 12 ? nomCols[0] : null;
-      let score = 75;
+    for (const num of numCols.slice(0, 4)) {
+      const groupCol = pickColorColumn(nomCols.filter((c) => c.distinct_count <= 12));
+      let score = 82; // time trends are usually the most actionable story
       if (groupCol) score += 10;
 
       const encoding: Record<string, unknown> = {
@@ -1127,9 +1258,8 @@ export function recommend(
     }
   }
 
-  // Sort by score descending, cap at 30 so new types show up too
-  recs.sort((a, b) => b.score - a.score);
-  return recs.slice(0, 30);
+  // Sort by score, then diversify so Suggest / rail aren't 20 near-identical bars
+  return diversifyRecommendations(recs, 40);
 }
 
 export interface StorySequence {
@@ -1220,7 +1350,35 @@ export function recommendStorySequence(
 /** Picks the single best recommendation (highest score). Use for "Suggest chart". */
 export function getBestSuggestion(recs: ChartRecommendation[]): ChartRecommendation | null {
   if (recs.length === 0) return null;
-  return recs.reduce((best, r) => (r.score > best.score ? r : best), recs[0]);
+  return diversifyRecommendations(recs, 1)[0] ?? null;
+}
+
+/**
+ * Top suggestions for Suggest chart cycling — high score + kind/encoding variety.
+ * Clicking Suggest repeatedly walks this list.
+ */
+export function getTopSuggestions(
+  recs: ChartRecommendation[],
+  limit = 6,
+): ChartRecommendation[] {
+  if (recs.length === 0) return [];
+  // Soften per-kind cap for the short Suggest cycle so we get ~6 distinct stories
+  const sorted = [...recs].sort((a, b) => b.score - a.score);
+  const out: ChartRecommendation[] = [];
+  const kindCount = new Map<ChartKind, number>();
+  for (const r of sorted) {
+    if (out.length >= limit) break;
+    const kc = kindCount.get(r.kind) ?? 0;
+    if (kc >= 2) continue;
+    out.push(r);
+    kindCount.set(r.kind, kc + 1);
+  }
+  for (const r of sorted) {
+    if (out.length >= limit) break;
+    if (out.some((o) => o.id === r.id)) continue;
+    out.push(r);
+  }
+  return out;
 }
 
 export type EncodingShuffleLocks = {

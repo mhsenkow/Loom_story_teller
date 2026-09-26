@@ -10,9 +10,13 @@ import {
   tryBuildRandomChartRec,
   getRandomEncoding,
   chartKindDataSupport,
+  recommend,
+  getBestSuggestion,
+  getTopSuggestions,
+  diversifyRecommendations,
 } from "../recommendations";
 import { chartCapabilities, encodingChannelLabels } from "../chartSupport";
-import type { ColumnInfo } from "../store";
+import type { ColumnInfo, QueryResult } from "../store";
 
 const numericColumns: ColumnInfo[] = [
   { name: "x", data_type: "INTEGER", null_count: 0, distinct_count: 100, min_value: "0", max_value: "99" },
@@ -246,6 +250,46 @@ describe("recommendations", () => {
         const rec = createChartRec(kind, catsOnly, enc!.xField, enc!.yField, enc!.colorField, "test");
         expect(rec).not.toBeNull();
       }
+    });
+  });
+
+  describe("scoring and Suggest chart picks", () => {
+    it("recommend returns diversified list and prefers correlated scatter pairs", () => {
+      const cols: ColumnInfo[] = [
+        { name: "x", data_type: "DOUBLE", null_count: 0, distinct_count: 100, min_value: "0", max_value: "100" },
+        { name: "y_linked", data_type: "DOUBLE", null_count: 0, distinct_count: 100, min_value: "0", max_value: "200" },
+        { name: "noise", data_type: "DOUBLE", null_count: 0, distinct_count: 100, min_value: "-50", max_value: "50" },
+        { name: "cluster", data_type: "VARCHAR", null_count: 0, distinct_count: 5, min_value: null, max_value: null },
+      ];
+      const rows: QueryResult["rows"] = [];
+      for (let i = 0; i < 120; i++) {
+        const x = i;
+        rows.push([x, x * 2 + 1, (i * 17) % 97 - 48, `g${i % 5}`]);
+      }
+      const data: QueryResult = {
+        columns: ["x", "y_linked", "noise", "cluster"],
+        types: ["DOUBLE", "DOUBLE", "DOUBLE", "VARCHAR"],
+        rows,
+        total_rows: rows.length,
+      };
+      const recs = recommend(cols, data, "corr.csv");
+      expect(recs.length).toBeGreaterThan(5);
+      expect(recs.length).toBeLessThanOrEqual(40);
+      const linked = recs.find((r) => r.kind === "scatter" && r.yField === "y_linked");
+      const noisy = recs.find((r) => r.kind === "scatter" && r.yField === "noise");
+      expect(linked).toBeDefined();
+      expect(noisy).toBeDefined();
+      expect(linked!.score).toBeGreaterThan(noisy!.score);
+    });
+
+    it("getTopSuggestions returns varied kinds", () => {
+      const recs = recommend(mixedColumns, null, "mixed.csv");
+      const tops = getTopSuggestions(recs, 6);
+      expect(tops.length).toBeGreaterThan(1);
+      expect(tops.length).toBeLessThanOrEqual(6);
+      const kinds = new Set(tops.map((t) => t.kind));
+      expect(kinds.size).toBeGreaterThanOrEqual(Math.min(3, tops.length));
+      expect(getBestSuggestion(recs)?.id).toBe(diversifyRecommendations(recs, 1)[0]?.id);
     });
   });
 });
