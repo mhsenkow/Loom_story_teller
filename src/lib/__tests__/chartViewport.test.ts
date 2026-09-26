@@ -35,4 +35,28 @@ describe("chartViewport", () => {
     expect(f.width).toBeLessThanOrEqual(390);
     expect(f.height).toBe(800 - 24); // default gutter 12*2
   });
+
+  it("fills a squeezed host instead of 16:9 postage-stamp letterbox", () => {
+    const f = fitChartFrame({
+      hostW: 300,
+      hostH: 600,
+      aspectId: "16:9",
+      device: "mobile",
+    });
+    expect(f.aspectLocked).toBe(false);
+    expect(f.width).toBeGreaterThan(250);
+    expect(f.height).toBeGreaterThan(500);
+  });
+
+  it("keeps intentional phone 16:9 preview on a wide host", () => {
+    const f = fitChartFrame({
+      hostW: 1000,
+      hostH: 700,
+      aspectId: "16:9",
+      device: "mobile",
+    });
+    expect(f.aspectLocked).toBe(true);
+    expect(f.width).toBeLessThanOrEqual(390);
+    expect(f.height / f.width).toBeCloseTo(9 / 16, 2);
+  });
 });

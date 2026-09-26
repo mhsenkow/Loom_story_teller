@@ -103,6 +103,17 @@ export function fitChartFrame(args: {
     width = height * aspect;
   }
 
+  // Host is already as narrow as the device cap (squeezed stage / real phone).
+  // Locking aspect then only letterboxes height into a postage stamp — fill instead.
+  const hostAlreadyDeviceWide = maxW >= hostW * 0.9;
+  if (hostAlreadyDeviceWide && height < hostH * 0.6) {
+    return {
+      width: Math.round(hostW),
+      height: Math.round(hostH),
+      aspectLocked: false,
+    };
+  }
+
   return {
     width: Math.round(width),
     height: Math.round(height),

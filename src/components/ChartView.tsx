@@ -105,12 +105,14 @@ export function ChartView() {
 
   const isMobile = useIsMobile();
   const viewportW = useViewportWidth();
-  // On phones, always fill the stage — social aspect framing is a desktop authoring tool
-  // and leaves a postage-stamp chart with a huge letterbox on narrow screens.
-  const chartAspect = isMobile ? "free" : (appSettings.chartAspect ?? "free");
   // Framing uses the chart host width when Auto — window width would say
   // "desktop" while side panels leave a phone-sized stage.
   const [hostSize, setHostSize] = useState({ w: 800, h: 500 });
+  // Phones (and panel-squeezed hosts) always fill — social aspect framing on a
+  // already-narrow stage becomes a postage-stamp letterbox (e.g. 16:9 → 278×156).
+  const hostIsNarrow = hostSize.w > 0 && hostSize.w < 768;
+  const chartAspect =
+    isMobile || hostIsNarrow ? "free" : (appSettings.chartAspect ?? "free");
   const chartDevice = isMobile
     ? "mobile"
     : resolveDevice(
