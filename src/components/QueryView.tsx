@@ -182,13 +182,14 @@ export function QueryView() {
   return (
     <div className="flex flex-col h-full animate-fade-in">
       {/* Editor */}
-      <div className="border-b border-loom-border bg-loom-surface/50 p-3 space-y-2">
-        <div className="flex items-center gap-2 mb-2">
-          <span className="text-xs text-loom-muted font-mono">SQL</span>
-          <span className="text-2xs text-loom-muted">
-            Table: <code className="text-loom-accent">loom_active</code> = {selectedFile.name}
+      <div className="border-b border-loom-border bg-loom-surface/50 p-2.5 sm:p-3 space-y-2">
+        <div className="flex items-center gap-1.5 sm:gap-2 mb-1 sm:mb-2 flex-wrap">
+          <span className="text-xs text-loom-muted font-mono shrink-0">SQL</span>
+          <span className="text-2xs text-loom-muted truncate min-w-0 max-w-[42vw] sm:max-w-none">
+            <code className="text-loom-accent">loom_active</code>
+            <span className="hidden sm:inline"> = {selectedFile.name}</span>
           </span>
-          <div className="flex-1" />
+          <div className="flex-1 min-w-0" />
           {queryHistory.length > 0 && (
             <select
               className="loom-input text-2xs font-mono max-w-[140px] py-1"
@@ -275,10 +276,11 @@ export function QueryView() {
                 }
               });
             }}
-            className="loom-btn-ghost text-2xs py-1 px-2"
+            className="loom-btn-ghost text-2xs min-h-9 sm:min-h-0 py-1 px-2"
             title="Save current SQL as named snippet"
           >
-            Save snippet
+            <span className="sm:hidden">Snippet</span>
+            <span className="hidden sm:inline">Save snippet</span>
           </button>
           <button
             type="button"
@@ -294,18 +296,19 @@ export function QueryView() {
                 }
               });
             }}
-            className="loom-btn-ghost text-2xs py-1 px-2"
+            className="loom-btn-ghost text-2xs min-h-9 sm:min-h-0 py-1 px-2"
             title="Save as view for dashboards"
           >
-            Save view
+            <span className="sm:hidden">View</span>
+            <span className="hidden sm:inline">Save view</span>
           </button>
           <button
             onClick={handleExecute}
             disabled={isQuerying}
-            className="loom-btn-primary text-xs"
+            className="loom-btn-primary text-xs min-h-9 sm:min-h-0 px-3"
           >
             {isQuerying ? "Running..." : "Execute"}
-            <span className="text-2xs opacity-60 ml-1 font-mono">&#x21B5;</span>
+            <span className="text-2xs opacity-60 ml-1 font-mono hidden sm:inline">&#x21B5;</span>
           </button>
         </div>
         {/* NL-to-SQL */}

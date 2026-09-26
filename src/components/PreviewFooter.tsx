@@ -41,26 +41,26 @@ export function PreviewFooter() {
       style={{ paddingBottom: expanded ? undefined : undefined }}
     >
       {/* Tab bar + expand toggle */}
-      <div className="flex items-center justify-between h-[var(--statusbar-height)] min-h-[28px]">
+      <div className="flex items-center justify-between min-h-11 sm:min-h-[var(--statusbar-height)] sm:h-[var(--statusbar-height)]">
         <div className="flex items-center gap-0.5 px-2">
           <button
             type="button"
             onClick={() => setFooterTab("preview")}
-            className={`px-2.5 py-1 text-2xs font-medium rounded transition-colors ${footerTab === "preview" ? "bg-loom-elevated text-loom-text" : "text-loom-muted hover:text-loom-text"}`}
+            className={`min-h-9 sm:min-h-0 px-3 sm:px-2.5 py-1.5 sm:py-1 text-2xs font-medium rounded transition-colors ${footerTab === "preview" ? "bg-loom-elevated text-loom-text" : "text-loom-muted hover:text-loom-text"}`}
           >
             Preview
           </button>
           <button
             type="button"
             onClick={() => setFooterTab("schema")}
-            className={`px-2.5 py-1 text-2xs font-medium rounded transition-colors ${footerTab === "schema" ? "bg-loom-elevated text-loom-text" : "text-loom-muted hover:text-loom-text"}`}
+            className={`min-h-9 sm:min-h-0 px-3 sm:px-2.5 py-1.5 sm:py-1 text-2xs font-medium rounded transition-colors ${footerTab === "schema" ? "bg-loom-elevated text-loom-text" : "text-loom-muted hover:text-loom-text"}`}
           >
             Schema
           </button>
         </div>
         <div className="flex items-center gap-2 pr-2">
           {activeChart && (
-            <span className="text-2xs font-mono text-loom-accent truncate max-w-[200px]" title={chartTitleOverrides[activeChart.id] ?? activeChart.title}>
+            <span className="text-2xs font-mono text-loom-accent truncate max-w-[120px] sm:max-w-[200px]" title={chartTitleOverrides[activeChart.id] ?? activeChart.title}>
               Chart: {chartTitleOverrides[activeChart.id] ?? activeChart.title}
             </span>
           )}
@@ -70,13 +70,14 @@ export function PreviewFooter() {
             </span>
           )}
           {footerTab === "schema" && hasSchema && (
-            <span className="text-2xs font-mono text-loom-muted">Drag into Chart → Encoding</span>
+            <span className="text-2xs font-mono text-loom-muted hidden sm:inline">Drag into Chart → Encoding</span>
           )}
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="text-2xs text-loom-muted hover:text-loom-text p-0.5"
+            className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-2xs text-loom-muted hover:text-loom-text grid place-items-center"
             title={expanded ? "Collapse" : "Expand"}
+            aria-label={expanded ? "Collapse preview" : "Expand preview"}
           >
             {expanded ? "▼" : "▶"}
           </button>

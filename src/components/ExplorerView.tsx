@@ -165,6 +165,8 @@ export function ExplorerView() {
   const { selectedFile, sampleRows, columnStats, tablePrefs, setTablePrefs, setViewMode, setPanelTab, panelOpen, togglePanel, smartResults, tableFilterRowIndices, setTableFilterRowIndices, tableColumnFilters, setTableColumnFilter, selectedRowIndices, setSelectedRowIndices, tableViews, addTableView, removeTableView, applyTableView, tableUndoStack, tableRedoStack, pushTableUndo, undoTable, redoTable, hoveredRowIndex, setHoveredRowIndex, setToast, setPromptDialog, querySql } = useLoomStore();
   const isMobile = useIsMobile();
   const [displayOpen, setDisplayOpen] = useState(false);
+  /** Column filter row is opt-in on phones so the grid gets more vertical room. */
+  const [showColumnFilters, setShowColumnFilters] = useState(false);
   const [profilingCol, setProfilingCol] = useState<string | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const selectedSet = useMemo(() => new Set(selectedRowIndices), [selectedRowIndices]);
@@ -615,6 +617,13 @@ export function ExplorerView() {
                   {label}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => setShowColumnFilters((v) => !v)}
+                className={`min-h-9 px-2 rounded text-2xs ${showColumnFilters ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-loom-border"}`}
+              >
+                Filters
+              </button>
             </div>
           )}
           {!isMobile && <span className="text-loom-muted">|</span>}
@@ -878,6 +887,7 @@ export function ExplorerView() {
                   );
                 })}
               </tr>
+              {(!isMobile || showColumnFilters) && (
               <tr className="bg-loom-surface/50">
                 <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-20 bg-loom-surface w-8" style={{ top: 40 }} />
                 <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-20 bg-loom-surface w-10" style={{ top: 40 }} />
@@ -888,12 +898,13 @@ export function ExplorerView() {
                       value={filterInputValues[col] ?? ""}
                       onChange={(e) => setFilterInputAndDebounce(col, e.target.value)}
                       placeholder="Filter..."
-                      className="loom-input w-full text-2xs py-0.5 px-1 min-w-0"
+                      className="loom-input w-full text-2xs py-0.5 px-1 min-w-0 min-h-8 sm:min-h-0"
                       aria-label={`Filter ${col}`}
                     />
                   </th>
                 ))}
               </tr>
+              )}
             </thead>
             <tbody>
               {useVirtual
