@@ -247,9 +247,10 @@ function drawScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numbe
     const sx = pad + ((x - xMin) / (xMax - xMin)) * (w - 2 * pad);
     const sy = h - pad - ((y - yMin) / (yMax - yMin)) * (h - 2 * pad);
     ctx.beginPath();
-    ctx.arc(sx, sy, 1.5, 0, Math.PI * 2);
+    // Slightly larger marks read better in 4:3 thumbs without blobbing
+    ctx.arc(sx, sy, Math.max(1.75, Math.min(w, h) * 0.012), 0, Math.PI * 2);
     ctx.fillStyle = COL[cat % COL.length];
-    ctx.globalAlpha = 0.6;
+    ctx.globalAlpha = 0.72;
     ctx.fill();
   }
   ctx.globalAlpha = 1;

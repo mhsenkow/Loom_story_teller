@@ -110,12 +110,15 @@ fn vertex_main(
   );
 
   let offset = quad[vertex_idx];
-  let pixel_size = point.size / render_uniforms.viewport_width;
+  // Convert pixel diameter → NDC half-extents separately for X/Y so marks stay
+  // circular on non-square viewports (same ΔNDC on both axes stretches ovals).
+  let half_x = point.size / max(render_uniforms.viewport_width, 1.0);
+  let half_y = point.size / max(render_uniforms.viewport_height, 1.0);
 
   var out: VertexOutput;
   out.clip_pos = vec4<f32>(
-    point.pos_x + offset.x * pixel_size,
-    point.pos_y + offset.y * pixel_size,
+    point.pos_x + offset.x * half_x,
+    point.pos_y + offset.y * half_y,
     0.0,
     1.0,
   );
@@ -136,8 +139,8 @@ fn fragment_main(in: VertexOutput) -> @location(0) vec4<f32> {
     discard;
   }
 
-  // Soft anti-aliased edge
-  let edge_softness = 0.05;
+  // Soft anti-aliased edge (slightly wider for crisp circles at small sizes)
+  let edge_softness = 0.07;
   let alpha = smoothstep(0.5, 0.5 - edge_softness, dist) * in.color.a;
 
   return vec4<f32>(in.color.rgb, alpha);

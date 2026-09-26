@@ -353,10 +353,11 @@ export const VISUAL_PRESETS: Record<VisualPresetId, { name: string; overrides: C
   clarity: {
     name: "Clarity",
     overrides: {
-      colorPalette: "seq-blue",
-      opacity: 0.28,
-      pointSize: 5,
-      sizeScale: 0.55,
+      colorPalette: "auto",
+      // Dense-data friendly but still crisp circles (was too faint/tiny)
+      opacity: 0.55,
+      pointSize: 7,
+      sizeScale: 0.85,
       chartPadding: 48,
       showGrid: true,
       gridStyle: "dotted",
