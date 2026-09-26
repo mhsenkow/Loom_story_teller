@@ -143,21 +143,9 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         ))}
       </nav>
 
+      {/* Aspect / device framing — desktop & tablet authoring only (phones always fill) */}
       {viewMode === "chart" && (
         <>
-          <label className="md:hidden flex items-center gap-1 text-2xs text-loom-muted">
-            <span className="sr-only">Aspect</span>
-            <select
-              value={aspect}
-              onChange={(e) => setAspect(e.target.value as ChartAspectId)}
-              className="loom-input text-2xs py-1 pl-1.5 pr-6 max-w-[5.5rem]"
-              aria-label="Chart aspect ratio"
-            >
-              {CHART_ASPECTS.map((a) => (
-                <option key={a.id} value={a.id}>{a.label}</option>
-              ))}
-            </select>
-          </label>
           <div
             className="hidden md:flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5 max-w-[min(52vw,36rem)] overflow-x-auto scrollbar-none"
             role="group"
@@ -183,13 +171,12 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           </div>
 
           <div
-            className="flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5"
+            className="hidden md:flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5"
             role="group"
             aria-label="Chart width preview"
           >
             <span className="hidden lg:inline text-2xs text-loom-muted px-1.5 select-none">Width</span>
             {DEVICES.map((d) => {
-              // When auto: highlight Auto chip; soft-mark the detected device
               const soft =
                 devicePreset === "auto" && d.id !== "auto" && effectiveDevice === d.id;
               const pressed = devicePreset === d.id;

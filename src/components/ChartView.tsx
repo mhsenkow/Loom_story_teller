@@ -105,14 +105,18 @@ export function ChartView() {
 
   const isMobile = useIsMobile();
   const viewportW = useViewportWidth();
-  const chartAspect = appSettings.chartAspect ?? "free";
+  // On phones, always fill the stage — social aspect framing is a desktop authoring tool
+  // and leaves a postage-stamp chart with a huge letterbox on narrow screens.
+  const chartAspect = isMobile ? "free" : (appSettings.chartAspect ?? "free");
   // Framing uses the chart host width when Auto — window width would say
   // "desktop" while side panels leave a phone-sized stage.
   const [hostSize, setHostSize] = useState({ w: 800, h: 500 });
-  const chartDevice = resolveDevice(
-    appSettings.chartDevice ?? "auto",
-    (appSettings.chartDevice ?? "auto") === "auto" ? hostSize.w || viewportW : viewportW,
-  );
+  const chartDevice = isMobile
+    ? "mobile"
+    : resolveDevice(
+      appSettings.chartDevice ?? "auto",
+      (appSettings.chartDevice ?? "auto") === "auto" ? hostSize.w || viewportW : viewportW,
+    );
 
   const openChartEditor = useCallback(() => {
     setPanelTab("chart");
@@ -1700,14 +1704,17 @@ export function ChartView() {
 
   // Always show suggestions panel when a file is selected. Expand toggles full-browse grid.
   const suggestionHeader = (
-    <div className="flex flex-col gap-2 px-2.5 py-2 border-b border-loom-border flex-shrink-0">
-      <div className="flex items-start gap-2">
-        <div className="min-w-0 flex-1">
+    <div className={`flex flex-col border-b border-loom-border flex-shrink-0 ${isMobile && !suggestionsExpanded ? "gap-0 px-2 py-1.5" : "gap-2 px-2.5 py-2"}`}>
+      <div className="flex items-center gap-2">
+        <div className="min-w-0 flex-1 flex items-baseline gap-2">
           <p className="text-xs font-semibold text-loom-text leading-tight">
             {isMobile && !suggestionsExpanded ? "Charts" : "Suggestions"}
           </p>
-          <p className="text-2xs text-loom-muted mt-0.5 tabular-nums">
-            {chartRecs.length} {chartRecs.length === 1 ? "chart" : "charts"}
+          <p className="text-2xs text-loom-muted tabular-nums">
+            {chartRecs.length}
+            {(!isMobile || suggestionsExpanded) && (
+              <> {chartRecs.length === 1 ? "chart" : "charts"}</>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -1715,7 +1722,7 @@ export function ChartView() {
             <button
               type="button"
               onClick={openChartEditor}
-              className="text-2xs py-1.5 px-2.5 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium min-h-8"
+              className="text-2xs py-1.5 px-2.5 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium min-h-9"
             >
               Edit
             </button>
@@ -1724,7 +1731,7 @@ export function ChartView() {
             type="button"
             onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
             className={`
-              loom-btn-ghost p-1.5 rounded border transition-colors min-h-8 min-w-8 flex items-center justify-center
+              loom-btn-ghost p-1.5 rounded border transition-colors min-h-9 min-w-9 flex items-center justify-center
               ${suggestionsExpanded
                 ? "border-loom-accent bg-loom-accent/10 text-loom-accent"
                 : "border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-accent hover:bg-loom-accent/10"}
@@ -1836,7 +1843,7 @@ export function ChartView() {
           ${suggestionsExpanded
             ? "order-1 w-full flex-1 flex flex-col min-h-0 border-b border-loom-border"
             : mobileRail
-              ? "order-2 shrink-0 border-t border-loom-border flex flex-col max-h-[min(42%,14.5rem)]"
+              ? "order-2 shrink-0 border-t border-loom-border flex flex-col max-h-[min(30%,10.5rem)] pb-[env(safe-area-inset-bottom,0px)]"
               : "w-[220px] flex-shrink-0 overflow-y-auto border-r border-loom-border"}
         `}
       >
@@ -1847,7 +1854,7 @@ export function ChartView() {
             ${suggestionsExpanded
               ? "overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 content-start"
               : mobileRail
-                ? "overflow-x-auto overflow-y-hidden flex flex-row gap-2 px-2 pb-2 scrollbar-none snap-x snap-mandatory"
+                ? "overflow-x-auto overflow-y-hidden flex flex-row gap-2 px-2 pb-1.5 scrollbar-none snap-x snap-mandatory"
                 : "overflow-y-auto p-2 grid grid-cols-1 gap-2"}
           `}
         >
@@ -1875,7 +1882,7 @@ export function ChartView() {
               : "flex-1"}
         `}
       >
-        <div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2 border-b border-loom-border bg-loom-surface/50 flex-wrap">
+        <div className="flex items-center gap-1.5 sm:gap-3 px-2 sm:px-4 py-1.5 sm:py-2 border-b border-loom-border bg-loom-surface/50 flex-wrap">
           <div className="flex flex-col gap-0.5 min-w-0 flex-1">
             <div
               className="flex items-center gap-2 min-w-0 group"
@@ -1929,7 +1936,7 @@ export function ChartView() {
                 </>
               )}
             </div>
-            {activeChart && !titleEditing && (
+            {activeChart && !titleEditing && !isMobile && (
               <span
                 className="text-2xs text-loom-muted pl-4 cursor-help border-b border-dotted border-loom-muted/50"
                 title={aiSuggestionReason ?? getRecommendationReason(activeChart)}
@@ -1941,21 +1948,14 @@ export function ChartView() {
           <div className="flex-1 min-w-2" />
           {activeChart && (
             <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap justify-end">
-              {isMobile && (
-                <button
-                  type="button"
-                  onClick={openChartEditor}
-                  className="px-2 py-1 text-2xs font-medium rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent min-h-8"
-                >
-                  Encoding
-                </button>
-              )}
               {activeChart.kind === "scatter" && (
                 <div className="flex items-center gap-0.5 mr-0.5 sm:mr-1" role="group" aria-label="Chart interaction mode">
                   {([
-                    { mode: "pan" as const, label: "Pan", tip: "Drag to pan · wheel/pinch to zoom · Shift+drag brush (V)" },
-                    { mode: "crosshair" as const, label: "Cross", tip: "Read values · click to pin ruler (C)" },
-                    { mode: "lasso" as const, label: "Lasso", tip: "Draw to select points (G)" },
+                    { mode: "pan" as const, label: "Pan", tip: "Drag to pan · pinch to zoom · Shift+drag brush" },
+                    { mode: "crosshair" as const, label: "Cross", tip: "Read values · tap to pin ruler" },
+                    ...(isMobile
+                      ? []
+                      : [{ mode: "lasso" as const, label: "Lasso", tip: "Draw to select points (G)" }]),
                   ]).map(({ mode, label, tip }) => (
                     <button
                       key={mode}
@@ -1963,7 +1963,7 @@ export function ChartView() {
                       onClick={() => setChartInteractionMode(mode)}
                       aria-pressed={chartInteractionMode === mode}
                       title={tip}
-                      className={`px-2 py-1 sm:px-1.5 sm:py-0.5 text-2xs rounded min-h-8 sm:min-h-0 ${chartInteractionMode === mode ? "bg-loom-accent/25 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
+                      className={`px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 text-2xs rounded min-h-9 sm:min-h-0 ${chartInteractionMode === mode ? "bg-loom-accent/25 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
                     >
                       {label}
                     </button>
@@ -1973,7 +1973,7 @@ export function ChartView() {
               <button
                 type="button"
                 onClick={handleRefresh}
-                className="px-2 py-1 sm:px-1.5 sm:py-0.5 text-2xs font-mono text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded min-h-8 sm:min-h-0"
+                className="hidden sm:inline-flex px-1.5 py-0.5 text-2xs font-mono text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded"
                 title="Redraw chart"
               >
                 Refresh
@@ -2023,10 +2023,10 @@ export function ChartView() {
                   Canvas look
                 </span>
               )}
-              <span className="loom-badge text-2xs max-w-[120px] sm:max-w-[200px] truncate" title={`${sampleHonestyLabel}${aggregationHint ? ` · ${aggregationHint}` : ""}`}>
+              <span className="loom-badge text-2xs max-w-[200px] truncate hidden sm:inline-flex" title={`${sampleHonestyLabel}${aggregationHint ? ` · ${aggregationHint}` : ""}`}>
                 {sampleHonestyLabel || "—"}
               </span>
-              {densityHint && (
+              {densityHint && !isMobile && (
                 <>
                   <span
                     className="loom-badge text-2xs text-loom-accent border-loom-accent/30 max-w-[140px] truncate"
@@ -2059,7 +2059,10 @@ export function ChartView() {
             backgroundSize: "10px 10px",
           }}
         >
-          {(chartAspect !== "free" || chartDevice !== "desktop" || (appSettings.chartDevice ?? "auto") !== "auto") && (
+          {!isMobile &&
+            (chartAspect !== "free" ||
+              chartDevice !== "desktop" ||
+              (appSettings.chartDevice ?? "auto") !== "auto") && (
             <div className="absolute top-1.5 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
               <span className="text-2xs font-mono text-loom-muted bg-loom-surface/90 border border-loom-border/60 rounded px-1.5 py-0.5 shadow-sm">
                 {aspectLabel(chartAspect)}
@@ -2363,7 +2366,7 @@ export function ChartView() {
           </div>
         )}
 
-        {activeChart && (
+        {activeChart && !isMobile && (
           <div className="flex flex-wrap items-center gap-2 px-3 h-[var(--statusbar-height)] border-t border-loom-border text-2xs text-loom-muted font-mono">
             <span>Vega-Lite spec: {activeChart.kind}</span>
             <span className="text-loom-border">|</span>

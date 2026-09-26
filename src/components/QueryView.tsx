@@ -370,7 +370,7 @@ export function QueryView() {
             )}
           </div>
           {(columnStats?.length ?? 0) > 0 && (
-            <div className="w-44 flex-shrink-0 border border-loom-border rounded overflow-hidden bg-loom-elevated/50">
+            <div className="hidden sm:block w-44 flex-shrink-0 border border-loom-border rounded overflow-hidden bg-loom-elevated/50">
               <button
                 type="button"
                 onClick={() => setSchemaOpen((o) => !o)}

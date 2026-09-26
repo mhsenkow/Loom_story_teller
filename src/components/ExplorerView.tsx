@@ -15,6 +15,7 @@ import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { isDateColumn, formatDateCell } from "@/lib/dateFormat";
 import { TableSkeleton } from "@/components/Skeleton";
 import { requestDiscoverScan } from "@/lib/discoverStories";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 const ROW_HEIGHT = 28;
 const VIRTUALIZE_THRESHOLD = 30;
@@ -162,6 +163,8 @@ const DEFAULT_TABLE_ENHANCE = {
 
 export function ExplorerView() {
   const { selectedFile, sampleRows, columnStats, tablePrefs, setTablePrefs, setViewMode, setPanelTab, panelOpen, togglePanel, smartResults, tableFilterRowIndices, setTableFilterRowIndices, tableColumnFilters, setTableColumnFilter, selectedRowIndices, setSelectedRowIndices, tableViews, addTableView, removeTableView, applyTableView, tableUndoStack, tableRedoStack, pushTableUndo, undoTable, redoTable, hoveredRowIndex, setHoveredRowIndex, setToast, setPromptDialog, querySql } = useLoomStore();
+  const isMobile = useIsMobile();
+  const [displayOpen, setDisplayOpen] = useState(false);
   const [profilingCol, setProfilingCol] = useState<string | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const selectedSet = useMemo(() => new Set(selectedRowIndices), [selectedRowIndices]);
@@ -186,6 +189,17 @@ export function ExplorerView() {
   const [sortCol, setSortCol] = useState<number | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [tableEnhance, setTableEnhance] = useState(DEFAULT_TABLE_ENHANCE);
+  // On phones, keep header cells lean so columns stay scannable
+  const enhance = isMobile
+    ? {
+      ...tableEnhance,
+      showSparklines: false,
+      showTrendCue: false,
+      showNullRate: false,
+      showValueBars: tableEnhance.showValueBars,
+      showHeat: tableEnhance.showHeat,
+    }
+    : tableEnhance;
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number; colIndex: number } | null>(null);
   const [columnsOpen, setColumnsOpen] = useState(false);
   const [viewsOpen, setViewsOpen] = useState(false);
@@ -438,8 +452,8 @@ export function ExplorerView() {
       const numVal = typeof cell === "number" ? cell : Number(cell);
       const isNumCell = !(cell === null || cell === "") && !Number.isNaN(numVal);
       const pct = isNumCell && colData && colData.max > colData.min ? (numVal - colData.min) / (colData.max - colData.min) : 0;
-      const heatOpacity = tableEnhance.showHeat && isNumCell && colData ? pct * 0.12 : 0;
-      const showBar = tableEnhance.showValueBars && isNum;
+      const heatOpacity = enhance.showHeat && isNumCell && colData ? pct * 0.12 : 0;
+      const showBar = enhance.showValueBars && isNum;
       const heatStyle =
         heatOpacity > 0 && typeof document !== "undefined"
           ? { background: `color-mix(in srgb, var(--loom-accent) ${Math.round(heatOpacity * 100)}%, transparent)` }
@@ -481,7 +495,7 @@ export function ExplorerView() {
         </td>
       );
     },
-    [allColumns, numericColSet, numericData, tableEnhance, setContextMenu, columnStats]
+    [allColumns, numericColSet, numericData, enhance, setContextMenu, columnStats]
   );
 
   if (!selectedFile) {
@@ -544,7 +558,7 @@ export function ExplorerView() {
         <button
           type="button"
           onClick={() => { setViewMode("chart"); if (!panelOpen) togglePanel(); setPanelTab("chart"); }}
-          className="loom-btn-primary py-0.5 px-2 shrink-0"
+          className="loom-btn-primary min-h-9 sm:min-h-0 py-1 sm:py-0.5 px-3 sm:px-2 shrink-0 text-xs"
         >
           Chart
         </button>
@@ -558,24 +572,52 @@ export function ExplorerView() {
         </div>
       )}
       {sampleRows && sampleRows.rows.length > 0 && (
-        <div className="flex items-center gap-1.5 px-3 py-1 border-b border-loom-border/50 bg-loom-surface/30 text-2xs overflow-x-auto whitespace-nowrap min-h-0 shrink-0">
-          {[
-            { key: "showSparklines" as const, label: "Spark" },
-            { key: "showValueBars" as const, label: "Bars" },
-            { key: "showHeat" as const, label: "Heat" },
-            { key: "showTrendCue" as const, label: "Trend" },
-            { key: "showNullRate" as const, label: "Null%" },
-          ].map(({ key, label }) => (
+        <div className="flex items-center gap-1.5 px-2 sm:px-3 py-1 border-b border-loom-border/50 bg-loom-surface/30 text-2xs overflow-x-auto whitespace-nowrap min-h-0 shrink-0">
+          {isMobile ? (
             <button
-              key={key}
               type="button"
-              onClick={() => toggleEnhance(key)}
-              className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance[key] ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
+              onClick={() => setDisplayOpen((o) => !o)}
+              aria-expanded={displayOpen}
+              className={`min-h-9 px-2.5 rounded border text-2xs ${displayOpen ? "border-loom-accent bg-loom-accent/20 text-loom-text" : "border-loom-border text-loom-muted"}`}
             >
-              {label}
+              Display
             </button>
-          ))}
-          <span className="text-loom-muted">|</span>
+          ) : (
+            [
+              { key: "showSparklines" as const, label: "Spark" },
+              { key: "showValueBars" as const, label: "Bars" },
+              { key: "showHeat" as const, label: "Heat" },
+              { key: "showTrendCue" as const, label: "Trend" },
+              { key: "showNullRate" as const, label: "Null%" },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => toggleEnhance(key)}
+                className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance[key] ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
+              >
+                {label}
+              </button>
+            ))
+          )}
+          {isMobile && displayOpen && (
+            <div className="flex items-center gap-1">
+              {[
+                { key: "showValueBars" as const, label: "Bars" },
+                { key: "showHeat" as const, label: "Heat" },
+              ].map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => toggleEnhance(key)}
+                  className={`min-h-9 px-2 rounded text-2xs ${tableEnhance[key] ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-loom-border"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+          {!isMobile && <span className="text-loom-muted">|</span>}
           <div className="relative">
             <button
               type="button"
@@ -583,7 +625,7 @@ export function ExplorerView() {
               aria-expanded={columnsOpen}
               aria-haspopup="dialog"
               aria-label="Choose which columns to show"
-              className={`px-2 py-0.5 rounded border text-loom-text ${columnsOpen ? "border-loom-accent bg-loom-accent/20" : "border-loom-border hover:border-loom-muted"}`}
+              className={`min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-0.5 rounded border text-loom-text ${columnsOpen ? "border-loom-accent bg-loom-accent/20" : "border-loom-border hover:border-loom-muted"}`}
             >
               Columns
             </button>
@@ -629,7 +671,7 @@ export function ExplorerView() {
               type="button"
               onClick={() => setViewsOpen((o) => !o)}
               aria-expanded={viewsOpen}
-              className={`px-2 py-0.5 rounded border text-loom-text ${viewsOpen ? "border-loom-accent bg-loom-accent/20" : "border-loom-border hover:border-loom-muted"}`}
+              className={`min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-0.5 rounded border text-loom-text ${viewsOpen ? "border-loom-accent bg-loom-accent/20" : "border-loom-border hover:border-loom-muted"}`}
             >
               Views
             </button>
@@ -669,12 +711,16 @@ export function ExplorerView() {
               </>
             )}
           </div>
-          <span className="text-loom-border/50">|</span>
-          <button type="button" onClick={undoTable} disabled={tableUndoStack.length === 0} className="px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Undo">↶</button>
-          <button type="button" onClick={redoTable} disabled={tableRedoStack.length === 0} className="px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Redo">↷</button>
-          <span className="text-loom-border/50">|</span>
-          <button type="button" onClick={() => toggleEnhance("sparklineViz", "line")} className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance.sparklineViz === "line" ? "bg-loom-accent/20 text-loom-text" : "text-loom-muted"}`}>Line</button>
-          <button type="button" onClick={() => toggleEnhance("sparklineViz", "histogram")} className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance.sparklineViz === "histogram" ? "bg-loom-accent/20 text-loom-text" : "text-loom-muted"}`}>Hist</button>
+          <span className="text-loom-border/50 hidden sm:inline">|</span>
+          <button type="button" onClick={undoTable} disabled={tableUndoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Undo">↶</button>
+          <button type="button" onClick={redoTable} disabled={tableRedoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Redo">↷</button>
+          {!isMobile && (
+            <>
+              <span className="text-loom-border/50">|</span>
+              <button type="button" onClick={() => toggleEnhance("sparklineViz", "line")} className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance.sparklineViz === "line" ? "bg-loom-accent/20 text-loom-text" : "text-loom-muted"}`}>Line</button>
+              <button type="button" onClick={() => toggleEnhance("sparklineViz", "histogram")} className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance.sparklineViz === "histogram" ? "bg-loom-accent/20 text-loom-text" : "text-loom-muted"}`}>Hist</button>
+            </>
+          )}
         </div>
       )}
 
@@ -781,8 +827,8 @@ export function ExplorerView() {
                   const isNum = numericColSet.has(ci);
                   const colData = numericData?.[ci];
                   const isSorted = sortCol === ci;
-                  const nullP = tableEnhance.showNullRate ? nullPct(col) : null;
-                  const trend = isNum && colData && tableEnhance.showTrendCue ? trendDirection(colData.values) : null;
+                  const nullP = enhance.showNullRate ? nullPct(col) : null;
+                  const trend = isNum && colData && enhance.showTrendCue ? trendDirection(colData.values) : null;
                   return (
                     <th
                       key={col}
@@ -812,12 +858,12 @@ export function ExplorerView() {
                             </span>
                           )}
                         </span>
-                        {isNum && colData && tableEnhance.showSparklines && (
+                        {isNum && colData && enhance.showSparklines && (
                           <>
-                            {colData.values.length >= 2 && tableEnhance.sparklineViz === "line" && (
+                            {colData.values.length >= 2 && enhance.sparklineViz === "line" && (
                               <Sparkline values={colData.values} className="opacity-70" />
                             )}
-                            {colData.values.length >= 2 && tableEnhance.sparklineViz === "histogram" && (
+                            {colData.values.length >= 2 && enhance.sparklineViz === "histogram" && (
                               <MiniHistogram values={colData.values} className="opacity-80" />
                             )}
                             <span className="text-[10px] text-loom-muted/80 font-normal normal-case">

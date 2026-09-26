@@ -79,6 +79,7 @@ async function openUrl(url: string) {
 
 export function FeedbackNotes() {
   const setToast = useLoomStore((s) => s.setToast);
+  const viewMode = useLoomStore((s) => s.viewMode);
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<Kind>("ux");
   const [title, setTitle] = useState("");
@@ -155,7 +156,11 @@ export function FeedbackNotes() {
             aria-label="Leave a note"
             title="Leave a note"
             onClick={() => setOpen(true)}
-            className="fixed bottom-[max(2rem,calc(var(--safe-bottom)+0.75rem))] left-[max(0.75rem,var(--safe-left))] z-[60] grid size-11 place-items-center rounded-md border border-loom-border bg-loom-surface text-loom-muted shadow-md transition-colors hover:text-loom-text hover:border-loom-accent/50 md:size-9"
+            className={`fixed left-[max(0.75rem,var(--safe-left))] z-[60] grid size-11 place-items-center rounded-md border border-loom-border bg-loom-surface text-loom-muted shadow-md transition-colors hover:text-loom-text hover:border-loom-accent/50 md:size-9 ${
+              viewMode === "chart"
+                ? "bottom-[max(11.5rem,calc(var(--safe-bottom)+10.75rem))] md:bottom-[max(2rem,calc(var(--safe-bottom)+0.75rem))]"
+                : "bottom-[max(2rem,calc(var(--safe-bottom)+0.75rem))]"
+            }`}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />

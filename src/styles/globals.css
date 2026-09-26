@@ -695,3 +695,26 @@ html {
                 color var(--transition-base);
   }
 }
+
+/* Mobile exploration — larger taps, less chrome density */
+@media (max-width: 767px) {
+  :root {
+    --topbar-height: 52px;
+    --statusbar-height: 0px;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    overscroll-behavior-y: none;
+  }
+
+  .loom-input,
+  .loom-btn-primary,
+  .loom-btn-ghost {
+    min-height: 2.25rem;
+  }
+}
