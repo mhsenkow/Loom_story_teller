@@ -165,12 +165,14 @@ export function ChartCard({
     <button
       type="button"
       onClick={onClick}
+      tabIndex={hero ? -1 : undefined}
+      aria-hidden={hero || undefined}
       className={`
         group flex flex-col rounded-lg overflow-hidden transition-all duration-150
-        border bg-loom-elevated hover:border-loom-accent text-left
-        ${isActive ? "border-loom-accent ring-1 ring-loom-accent/40" : "border-loom-border"}
+        border bg-loom-elevated text-left
+        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-xl hover:border-transparent" : "hover:border-loom-accent"}
+        ${!hero && isActive ? "border-loom-accent ring-1 ring-loom-accent/40" : !hero ? "border-loom-border" : ""}
         ${compact ? "w-[152px] shrink-0 snap-start rounded-md" : "w-full"}
-        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-xl" : ""}
       `}
     >
       <div

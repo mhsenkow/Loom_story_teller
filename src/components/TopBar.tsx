@@ -231,7 +231,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             type="button"
             onClick={() => startDeepScan()}
             disabled={!hasData}
-            className="md:hidden loom-btn-ghost min-h-10 px-2.5 text-2xs font-medium text-loom-accent border border-loom-accent/40 rounded-md disabled:opacity-40"
+            className="md:hidden min-h-10 px-2.5 text-2xs font-semibold rounded-md bg-loom-accent text-white disabled:opacity-40 shadow-sm"
             aria-label="Deep scan visualizations"
             title="Deep scan · swipe Keep / Skip"
           >

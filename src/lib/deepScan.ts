@@ -339,7 +339,18 @@ function applyProfileBoosts(
   });
 }
 
-/** Emit a few extra high-signal candidates from the profile. */
+/** Drop duplicate recommendation ids (stream/source seeds often overlap generics). */
+function dedupeById(recs: ChartRecommendation[]): ChartRecommendation[] {
+  const seen = new Set<string>();
+  const out: ChartRecommendation[] = [];
+  for (const r of recs) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push(r);
+  }
+  return out;
+}
+
 function expandFromProfile(
   columns: ColumnInfo[],
   profile: DatasetProfile,
@@ -414,11 +425,11 @@ export function deepRecommend(
     seed = recommendStreamStory(columns, data).charts;
     // Pass null so recommend skips prefs; we boost once after profile scoring
     const generic = recommend(columns, data, "wiki_stream", null);
-    seed = [...seed, ...generic];
+    seed = dedupeById([...seed, ...generic]);
   } else if (source.kind === "source") {
     seed = recommendSourceStory(source.sourceKind, columns, data).charts;
     const generic = recommend(columns, data, source.sourceKind, null);
-    seed = [...seed, ...generic];
+    seed = dedupeById([...seed, ...generic]);
   } else {
     seed = recommend(columns, data, source.fileName, null);
   }
