@@ -7,7 +7,11 @@ import {
   createScatterRec,
   CHART_KIND_OPTIONS,
   getRecommendationReason,
+  tryBuildRandomChartRec,
+  getRandomEncoding,
+  chartKindDataSupport,
 } from "../recommendations";
+import { chartCapabilities, encodingChannelLabels } from "../chartSupport";
 import type { ColumnInfo } from "../store";
 
 const numericColumns: ColumnInfo[] = [
@@ -19,7 +23,15 @@ const numericColumns: ColumnInfo[] = [
 const mixedColumns: ColumnInfo[] = [
   ...numericColumns,
   { name: "category", data_type: "VARCHAR", null_count: 0, distinct_count: 5, min_value: null, max_value: null },
+  { name: "group", data_type: "VARCHAR", null_count: 0, distinct_count: 4, min_value: null, max_value: null },
+  { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 8, min_value: null, max_value: null },
   { name: "date", data_type: "DATE", null_count: 0, distinct_count: 30, min_value: "2024-01-01", max_value: "2024-12-31" },
+];
+
+/** Extra numeric so radar / bubble size always have headroom. */
+const richColumns: ColumnInfo[] = [
+  ...mixedColumns,
+  { name: "z", data_type: "FLOAT", null_count: 0, distinct_count: 40, min_value: "1", max_value: "40" },
 ];
 
 describe("recommendations", () => {
@@ -161,6 +173,79 @@ describe("recommendations", () => {
       const reason = getRecommendationReason(rec);
       expect(typeof reason).toBe("string");
       expect(reason.length).toBeGreaterThan(0);
+    });
+  });
+
+  describe("kind coverage", () => {
+    it("lists all 19 chart kinds", () => {
+      expect(CHART_KIND_OPTIONS.map((o) => o.value).sort()).toEqual([
+        "area", "bar", "box", "bubble", "choropleth", "forceBubble", "heatmap",
+        "histogram", "line", "lollipop", "pie", "radar", "sankey", "scatter",
+        "strip", "sunburst", "treemap", "violin", "waterfall",
+      ].sort());
+    });
+
+    it("every selectable kind has support check + encoding labels + capabilities", () => {
+      for (const { value: kind } of CHART_KIND_OPTIONS) {
+        const support = chartKindDataSupport(richColumns, kind);
+        expect(typeof support.ok).toBe("boolean");
+        const labels = encodingChannelLabels(kind);
+        expect(labels.x.length).toBeGreaterThan(0);
+        expect(labels.y.length).toBeGreaterThan(0);
+        const caps = chartCapabilities(kind);
+        expect(typeof caps.cartesian).toBe("boolean");
+        expect(typeof caps.xChannel).toBe("boolean");
+      }
+    });
+
+    it("every supported kind can randomize encoding through createChartRec", () => {
+      for (const { value: kind } of CHART_KIND_OPTIONS) {
+        const support = chartKindDataSupport(richColumns, kind);
+        expect(support.ok).toBe(true);
+        let built = false;
+        for (let i = 0; i < 40; i++) {
+          const enc = getRandomEncoding(richColumns, kind);
+          expect(enc).not.toBeNull();
+          const extra: { sizeField?: string | null } = {};
+          if (enc!.sizeField) extra.sizeField = enc!.sizeField;
+          const rec = createChartRec(kind, richColumns, enc!.xField, enc!.yField, enc!.colorField, "test", extra);
+          if (rec) {
+            built = true;
+            expect(rec.kind).toBe(kind);
+            break;
+          }
+        }
+        expect(built).toBe(true);
+      }
+    });
+
+    it("tryBuildRandomChartRec returns a supported kind for mixed columns", () => {
+      const rec = tryBuildRandomChartRec(richColumns, "test");
+      expect(rec).not.toBeNull();
+      expect(chartKindDataSupport(richColumns, rec!.kind).ok).toBe(true);
+      expect(createChartRec(rec!.kind, richColumns, rec!.xField, rec!.yField, rec!.colorField, "test")).not.toBeNull();
+    });
+
+    it("getRandomEncoding for line always has an X and createChartRec succeeds", () => {
+      const enc = getRandomEncoding(mixedColumns, "line");
+      expect(enc).not.toBeNull();
+      const rec = createChartRec("line", mixedColumns, enc!.xField, enc!.yField, enc!.colorField, "test");
+      expect(rec).not.toBeNull();
+    });
+
+    it("waterfall / treemap / forceBubble work with count-only (no numeric Y)", () => {
+      const catsOnly: ColumnInfo[] = [
+        { name: "category", data_type: "VARCHAR", null_count: 0, distinct_count: 6, min_value: null, max_value: null },
+        { name: "group", data_type: "VARCHAR", null_count: 0, distinct_count: 4, min_value: null, max_value: null },
+      ];
+      for (const kind of ["waterfall", "treemap", "forceBubble", "sunburst"] as const) {
+        expect(chartKindDataSupport(catsOnly, kind).ok).toBe(true);
+        const enc = getRandomEncoding(catsOnly, kind);
+        expect(enc).not.toBeNull();
+        expect(enc!.yField).toBeNull();
+        const rec = createChartRec(kind, catsOnly, enc!.xField, enc!.yField, enc!.colorField, "test");
+        expect(rec).not.toBeNull();
+      }
     });
   });
 });

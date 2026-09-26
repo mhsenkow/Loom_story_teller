@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Loom MCP</title>
+<style>
+  body { font: 400 15px/1.6 Helvetica, Arial, sans-serif; max-width: 42em; margin: 40px auto; padding: 0 20px; color: #111; }
+  h1 { font-size: 1.25rem; font-weight: 500; }
+  h2 { font-size: 1rem; font-weight: 500; margin-top: 1.5em; }
+  a { color: #6c5ce7; }
+  code { font-size: 0.9em; }
+</style>
+</head>
+<body>
+<h1>Privacy policy — Loom MCP</h1>
+<p><strong>Last updated:</strong> September 25, 2026</p>
+<p>This policy covers the MCP server at <code>loom-mcp.mhsenkow.workers.dev</code> and related demo pages. The Loom app at <a href="https://loom.ibm.io/">loom.ibm.io</a> and the desktop app keep data local unless you explicitly load remote open-data sources.</p>
+
+<h2>MCP server</h2>
+<ul>
+  <li>CSV, JSON samples, or column schemas are sent only when you (or an AI assistant on your behalf) call a Loom tool.</li>
+  <li>Payloads are profiled and turned into chart recommendations / Vega-Lite specs <strong>in memory</strong>.</li>
+  <li>Data is <strong>not stored</strong>, logged as draft content, or used for training.</li>
+  <li>Request size is capped (~400 KB / 500 rows) and truncated if larger.</li>
+  <li>No accounts are required for the authless MCP endpoint.</li>
+</ul>
+
+<h2>Loom web &amp; desktop</h2>
+<ul>
+  <li>Desktop Loom keeps DuckDB and files on your machine.</li>
+  <li>The web UI at loom.ibm.io runs in your browser; optional catalog proxies fetch public open-data listings.</li>
+</ul>
+
+<h2>Contact</h2>
+<p>Questions: <a href="https://loom.ibm.io/">loom.ibm.io</a></p>
+</body>
+</html>

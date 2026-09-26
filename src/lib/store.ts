@@ -19,6 +19,9 @@ import type {
   ReferenceLinesResult,
   ClusterResult,
 } from "./smartAnalytics";
+import type { ChartAspectId, ChartDeviceId } from "./chartViewport";
+
+export type { ChartAspectId, ChartDeviceId };
 
 export interface SmartResults {
   anomaly?: AnomalyResult | null;
@@ -34,6 +37,8 @@ export interface FileEntry {
   extension: string;
   row_count: number;
   size_bytes: number;
+  /** Remote CSV URL (web catalog / proxy). Used to re-fetch when session cache is cold. */
+  sourceUrl?: string;
 }
 
 export interface ColumnInfo {
@@ -130,61 +135,123 @@ export interface DashboardItem {
   lastRefreshedAt?: number;
 }
 
-export type AppTheme = "dark" | "light" | "high-contrast" | "colorblind";
+export type AppTheme =
+  | "light"
+  | "dark"
+  | "contrast"
+  | "paper"
+  | "glass"
+  | "frost"
+  | "brutal"
+  | "loom"
+  | "tank"
+  | "nes"
+  /** @deprecated use contrast */
+  | "high-contrast"
+  /** @deprecated use data-a11y colorblind */
+  | "colorblind";
+
 export type FontScale = 0.9 | 1 | 1.1 | 1.15;
+
+export type UiChrome =
+  | "braun"
+  | "monocle"
+  | "bauhaus"
+  | "noyes"
+  | "ikea"
+  | "military"
+  | "terminal"
+  | "nyt";
+
+export type AppFontId =
+  | "libre-baskerville"
+  | "lora"
+  | "ibm-plex"
+  | "inter"
+  | "geist"
+  | "jetbrains-mono"
+  | "fira-code";
+
+export type FacesSource = "auto" | "web" | "local";
 
 export interface AppSettings {
   theme: AppTheme;
+  uiChrome: UiChrome;
+  font: AppFontId;
+  faces: FacesSource;
   fontScale: FontScale;
   reducedMotion: boolean;
+  /** Colorblind-safe chart series (does not change shell theme). */
+  colorblindCharts: boolean;
+  /** Chart stage aspect (social presets). Default free. */
+  chartAspect: ChartAspectId;
+  /** Device width preview; `auto` follows viewport. */
+  chartDevice: ChartDeviceId;
 }
 
 export interface ChartVisualOverrides {
   // — Existing —
   pointSize?: number;
   opacity?: number;
+  /** Palette id from chartPalettes (`auto` | `categorical` | `seq-blue` | …). */
   colorPalette?: string;
+  /** UI filter / force scale family; `auto` defers to resolveChartColors. */
+  colorScaleKind?: "auto" | "categorical" | "sequential" | "diverging" | "semantic" | "reference" | "spectrum";
+  /** Reverse continuous / categorical stop order. */
+  colorPaletteReverse?: boolean;
   axisFontSize?: number;
   showGrid?: boolean;
 
   // — Typography —
-  fontFamily?: string;           // e.g. "Inter", "JetBrains Mono", "Space Grotesk", "DM Sans", "Instrument Serif"
-  titleFontWeight?: number;      // 300 | 400 | 600 | 700
+  fontFamily?: string;
+  titleFontWeight?: number;
   titleItalic?: boolean;
-  tickRotation?: number;         // degrees: 0, 30, 45, 60, 90
+  tickRotation?: number;
 
   // — Mark Shapes & Representation —
-  markShape?: string;            // "circle" | "square" | "diamond" | "triangle" | "cross" | "star" | "hexagon" | "ring"
-  markStroke?: boolean;          // outline on marks
-  markStrokeWidth?: number;      // 0.5–3
-  markStrokeColor?: string;      // hex color or "auto" (derives from fill)
-  markJitter?: number;           // 0–10 px random displacement
-  sizeScale?: number;            // 0.5–2: scale for size encoding (ratio min–max)
-  barCornerRadius?: number;     // 0–16 px
-  lineStrokeStyle?: string;      // "solid" | "dashed" | "dotted"
-  lineCurveSmooth?: boolean;     // monotone interpolation
-  lineWidth?: number;            // 0.5–5
+  markShape?: string;
+  markStroke?: boolean;
+  markStrokeWidth?: number;
+  markStrokeColor?: string;
+  markJitter?: number;
+  sizeScale?: number;
+  barCornerRadius?: number;
+  lineStrokeStyle?: string;
+  lineCurveSmooth?: boolean;
+  lineWidth?: number;
 
   // — Axes & Grid —
   axisLineColor?: string;
-  axisLineWidth?: number;        // 0.5–4
-  gridStyle?: string;            // "solid" | "dashed" | "dotted"
-  gridOpacity?: number;          // 0–1
-  tickCount?: number;            // 3–12
+  axisLineWidth?: number;
+  gridStyle?: string;
+  gridOpacity?: number;
+  tickCount?: number;
   axisLabelColor?: string;
 
   // — Layout —
-  chartPadding?: number;         // 20–80
-  legendPosition?: string;       // "none" | "top-right" | "bottom" | "right"
+  chartPadding?: number;
+  legendPosition?: string;
   showDataLabels?: boolean;
-  facetField?: string | null;    // column name for small multiples; null = off
+  /** @deprecated unused — kept for saved views; prefer chartFrame */
+  facetField?: string | null;
 
   // — Atmosphere —
-  backgroundStyle?: string;      // "default" | "gradient" | "paper" | "transparent"
-  blendMode?: GlobalCompositeOperation; // "source-over" | "screen" | "multiply" | "lighten"
+  backgroundStyle?: string;
+  blendMode?: GlobalCompositeOperation;
   glowEnabled?: boolean;
-  glowIntensity?: number;        // 1–20
+  glowIntensity?: number;
   animateEntrance?: boolean;
+
+  // — Wordcount-inspired Chart Look spectrum —
+  chartDetail?: "plain" | "viz" | "deep";
+  markMotif?: "dots" | "squares" | "ticks" | "bar" | "ring";
+  axisStyle?: "rule" | "ladder" | "mercury" | "spine" | "index" | "tape";
+  emphasisStyle?: "tint" | "wash" | "dot" | "alarm" | "tag";
+  ghostEnabled?: boolean;
+  ghostWeight?: "whisper" | "soft" | "firm";
+  ghostPlace?: "se" | "sw" | "ne" | "nw";
+  titleLayout?: "pair" | "stack" | "spine" | "caption" | "ticket" | "slab";
+  chartFrame?: "hero" | "compact" | "focus";
 }
 
 interface LoomState {
@@ -301,6 +368,13 @@ interface LoomState {
   activeDashboardId: string | null;
   /** When true, main area shows dashboard canvas (focus/expand). */
   dashboardsExpanded: boolean;
+  /** Progress while capturing story / dashboard chart PNG thumbnails. */
+  previewCapture: {
+    dashboardId: string;
+    current: number;
+    total: number;
+    label: string;
+  } | null;
 
   /** Global prompt dialog state for replacing window.prompt. */
   promptDialog: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null;
@@ -433,6 +507,14 @@ interface LoomState {
   removeDashboardSlot: (dashboardId: string, slotId: string) => void;
   setActiveDashboardId: (id: string | null) => void;
   setDashboardsExpanded: (v: boolean) => void;
+  setPreviewCapture: (
+    v: {
+      dashboardId: string;
+      current: number;
+      total: number;
+      label: string;
+    } | null,
+  ) => void;
   applyQuerySnapshot: (id: string) => void;
   setPromptDialog: (config: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null) => void;
   // Live stream actions
@@ -472,8 +554,14 @@ const initialState = {
   smartResults: null as SmartResults | null,
   appSettings: {
     theme: "dark" as AppTheme,
+    uiChrome: "noyes",
+    font: "inter",
+    faces: "auto",
     fontScale: 1 as FontScale,
     reducedMotion: false,
+    colorblindCharts: false,
+    chartAspect: "free",
+    chartDevice: "auto",
   } as AppSettings,
   recentFiles: [] as FileEntry[],
   lastSession: null as { folderPath: string | null; filePath: string | null; viewMode: ViewMode } | null,
@@ -508,6 +596,7 @@ const initialState = {
   dashboards: [] as DashboardItem[],
   activeDashboardId: null as string | null,
   dashboardsExpanded: false,
+  previewCapture: null,
   promptDialog: null as { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null,
   streamRunning: false,
   streamTotalEvents: 0,
@@ -581,8 +670,13 @@ export const useLoomStore = create<LoomState>((set, get) => ({
   setRecentFiles: (files) => set({ recentFiles: files }),
   addRecentFile: (file) =>
     set((s) => {
+      const prev = s.recentFiles.find((f) => f.path === file.path);
+      const merged = {
+        ...file,
+        sourceUrl: file.sourceUrl ?? prev?.sourceUrl,
+      };
       const list = s.recentFiles.filter((f) => f.path !== file.path);
-      list.unshift(file);
+      list.unshift(merged);
       return { recentFiles: list.slice(0, 20) };
     }),
   setLastSession: (sess) => set({ lastSession: sess }),
@@ -961,6 +1055,7 @@ export const useLoomStore = create<LoomState>((set, get) => ({
     })),
   setActiveDashboardId: (id) => set({ activeDashboardId: id }),
   setDashboardsExpanded: (v) => set({ dashboardsExpanded: v }),
+  setPreviewCapture: (v) => set({ previewCapture: v }),
   applyQuerySnapshot: (id) =>
     set((s) => {
       const snap = s.querySnapshots.find((x) => x.id === id);

@@ -10,11 +10,9 @@
 // =================================================================
 
 import type { ColumnInfo } from "./store";
-import type { ChartKind } from "./recommendations";
+import { CHART_KIND_OPTIONS, type ChartKind } from "./recommendations";
 
-const CHART_KINDS: ChartKind[] = [
-  "scatter", "bar", "histogram", "line", "heatmap", "strip", "box", "area", "pie",
-];
+const CHART_KINDS: ChartKind[] = CHART_KIND_OPTIONS.map((o) => o.value);
 
 function getBaseUrl(): string {
   return process.env.NEXT_PUBLIC_OLLAMA_URL ?? "http://localhost:11434";

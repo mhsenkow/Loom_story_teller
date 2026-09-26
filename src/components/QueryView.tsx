@@ -14,6 +14,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { QueryResultsSkeleton } from "@/components/Skeleton";
 import { validateQuery } from "@/lib/queryValidate";
+import { requestDiscoverScan } from "@/lib/discoverStories";
 
 export function QueryView() {
   const {
@@ -32,7 +33,15 @@ export function QueryView() {
   } = useLoomStore();
 
   const isStream = selectedFile?.path === "stream://wiki";
-  const sourceTableMap: Record<string, string> = { "stream://usgs": "usgs_quakes", "stream://meteo": "meteo_weather", "stream://nws": "nws_alerts", "stream://world_bank": "world_bank" };
+  const sourceTableMap: Record<string, string> = {
+    "stream://usgs": "usgs_quakes",
+    "stream://meteo": "meteo_weather",
+    "stream://nws": "nws_alerts",
+    "stream://world_bank": "world_bank",
+    "stream://iss": "iss_track",
+    "stream://hn": "hn_stories",
+    "stream://crypto": "crypto_markets",
+  };
   const sourceTable = selectedFile?.path ? sourceTableMap[selectedFile.path] : undefined;
   const defaultSql = isStream
     ? "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT 100"
@@ -103,7 +112,7 @@ export function QueryView() {
     setQuerySql(localSql);
     try {
       const isStream = selectedFile.path === "stream://wiki";
-      const sourceKindMatch = selectedFile.path.match(/^stream:\/\/(usgs|meteo|nws|world_bank)$/);
+      const sourceKindMatch = selectedFile.path.match(/^stream:\/\/(usgs|meteo|nws|world_bank|iss|hn|crypto)$/);
       const result = isStream
         ? await streamQuery(localSql, 10000)
         : sourceKindMatch
@@ -146,7 +155,7 @@ export function QueryView() {
 
   if (!selectedFile) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4 px-6">
+      <div className="relative flex flex-col items-center justify-center h-full gap-4 px-6">
         <div className="w-16 h-16 rounded-xl bg-loom-elevated border border-loom-border flex items-center justify-center text-loom-muted">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
             <path d="M4 4h16v4l-6 6 4 4-2 2-4-4-6-6v-4z" strokeLinecap="round" strokeLinejoin="round" />
@@ -154,6 +163,18 @@ export function QueryView() {
         </div>
         <p className="text-sm font-medium text-loom-text">No file selected</p>
         <p className="text-xs text-loom-muted text-center max-w-sm">Select a file from the sidebar, then run SQL against <code className="text-loom-accent">loom_active</code>.</p>
+        <button
+          type="button"
+          onClick={() => {
+            requestDiscoverScan();
+            setToast("Scanning live feeds…");
+          }}
+          className="absolute bottom-3 right-3 text-2xs text-loom-muted/50 hover:text-loom-accent transition-colors px-1.5 py-1 rounded"
+          title="Scan live feeds for something chartable"
+          aria-label="What’s interesting right now"
+        >
+          ✦ ideas
+        </button>
       </div>
     );
   }
@@ -222,7 +243,7 @@ export function QueryView() {
             </select>
           )}
           {(() => {
-            const m = selectedFile?.path?.match(/^stream:\/\/(usgs|meteo|nws|world_bank)$/);
+            const m = selectedFile?.path?.match(/^stream:\/\/(usgs|meteo|nws|world_bank|iss|hn|crypto)$/);
             const sk = m?.[1] as string | undefined;
             const snippets = sk ? SOURCE_SQL_SNIPPETS[sk] : undefined;
             if (!snippets?.length) return null;

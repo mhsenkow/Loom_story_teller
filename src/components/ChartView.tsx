@@ -15,7 +15,15 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useLoomStore, type SmartResults } from "@/lib/store";
 import { ChartCard } from "@/components/ChartCard";
 import { LoomRenderer, type GPUScatterPoint } from "@/lib/webgpu";
-import { getPaletteColors, getThemeUiColors, hexToRgb01 } from "@/lib/chartPalettes";
+import {
+  discreteSeriesColors,
+  getThemeUiColors,
+  hexToRgb01,
+  resolveChartColors,
+  sampleContinuous,
+} from "@/lib/chartPalettes";
+import { useIsMobile, useViewportWidth } from "@/lib/useMediaQuery";
+import { fitChartFrame, resolveDevice, aspectLabel } from "@/lib/chartViewport";
 import {
   getBestSuggestion,
   getRecommendationReason,
@@ -24,8 +32,26 @@ import {
   recommend,
   tryBuildRandomChartRec,
   type YAggregateOption,
+  type ChartRecommendation,
 } from "@/lib/recommendations";
-import { getChartRenderIssue, formatChartAggregationSummary } from "@/lib/chartSupport";
+import { getChartRenderIssue, formatChartAggregationSummary, chartCapabilities } from "@/lib/chartSupport";
+import {
+  resolveChartPad,
+  contrastingInk,
+  isCartesianKind,
+  densityAwarePointMarks,
+  subsampleRowsForDensity,
+} from "@/lib/chartLayout";
+import {
+  drawChartBackground,
+  drawAxisFrame,
+  drawChartGrid,
+  drawChartTicks,
+  drawAxisFieldLabels,
+  drawChartTitleBlock,
+} from "@/lib/chartLooks";
+import { VISUAL_PRESETS } from "@/lib/lookSystem";
+import { requestDiscoverScan } from "@/lib/discoverStories";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
 import { suggestChartFromOllama } from "@/lib/ollama";
 import {
@@ -37,7 +63,10 @@ import {
 } from "@/lib/chartTooltip";
 import { buildBarFacetGrid, type BarFacetHitPayload, type Canvas2DHitContext } from "@/lib/chartTooltip";
 
-const DEFAULT_COLORS = ["#6c5ce7", "#00d68f", "#ff6b6b", "#ffd93d", "#00b4d8", "#e77c5c", "#a29bfe", "#74b9ff"];
+const DEFAULT_COLORS = discreteSeriesColors(
+  resolveChartColors({ paletteId: "categorical" }),
+  8,
+);
 
 function pointInPolygon(px: number, py: number, poly: { x: number; y: number }[]): boolean {
   let inside = false;
@@ -48,7 +77,7 @@ function pointInPolygon(px: number, py: number, poly: { x: number; y: number }[]
   return inside;
 }
 
-const DEFAULT_PAD = 50;
+const DEFAULT_PAD = 56;
 
 function isNumericType(dt: string): boolean {
   const t = dt.toUpperCase();
@@ -74,63 +103,190 @@ export function ChartView() {
     createStoryDashboard, setDashboardsExpanded,
   } = useLoomStore();
 
-  const colors = useMemo(
-    () => getPaletteColors(chartVisualOverrides.colorPalette ?? "theme"),
-    [chartVisualOverrides.colorPalette, appSettings.theme],
+  const isMobile = useIsMobile();
+  const viewportW = useViewportWidth();
+  const chartAspect = appSettings.chartAspect ?? "free";
+  // Framing uses the chart host width when Auto — window width would say
+  // "desktop" while side panels leave a phone-sized stage.
+  const [hostSize, setHostSize] = useState({ w: 800, h: 500 });
+  const chartDevice = resolveDevice(
+    appSettings.chartDevice ?? "auto",
+    (appSettings.chartDevice ?? "auto") === "auto" ? hostSize.w || viewportW : viewportW,
   );
+
+  const openChartEditor = useCallback(() => {
+    setPanelTab("chart");
+    if (!useLoomStore.getState().panelOpen) useLoomStore.getState().togglePanel();
+  }, [setPanelTab]);
+
+  const colors = useMemo(() => {
+    const colorField = activeChart?.colorField;
+    const col = colorField
+      ? columnStats.find((c) => c.name === colorField)
+      : undefined;
+    const colorFieldType = col
+      ? (isNumericType(col.data_type) ? "quantitative" : "nominal")
+      : null;
+    const resolved = resolveChartColors({
+      paletteId: chartVisualOverrides.colorPalette ?? "auto",
+      theme: appSettings.theme,
+      colorblind: !!appSettings.colorblindCharts,
+      chartKind: activeChart?.kind ?? null,
+      colorFieldType,
+      reverse: !!chartVisualOverrides.colorPaletteReverse,
+      scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
+    });
+    return discreteSeriesColors(resolved, Math.max(8, resolved.colors.length));
+  }, [
+    chartVisualOverrides.colorPalette,
+    chartVisualOverrides.colorPaletteReverse,
+    chartVisualOverrides.colorScaleKind,
+    appSettings.theme,
+    appSettings.colorblindCharts,
+    activeChart?.kind,
+    activeChart?.colorField,
+    columnStats,
+  ]);
+
+  const continuousStops = useMemo(() => {
+    const colorField = activeChart?.colorField;
+    const col = colorField
+      ? columnStats.find((c) => c.name === colorField)
+      : undefined;
+    const colorFieldType = col
+      ? (isNumericType(col.data_type) ? "quantitative" : "nominal")
+      : null;
+    return resolveChartColors({
+      paletteId: chartVisualOverrides.colorPalette ?? "auto",
+      theme: appSettings.theme,
+      colorblind: !!appSettings.colorblindCharts,
+      chartKind: activeChart?.kind ?? null,
+      colorFieldType,
+      reverse: !!chartVisualOverrides.colorPaletteReverse,
+      scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
+    }).colors;
+  }, [
+    chartVisualOverrides.colorPalette,
+    chartVisualOverrides.colorPaletteReverse,
+    chartVisualOverrides.colorScaleKind,
+    appSettings.theme,
+    appSettings.colorblindCharts,
+    activeChart?.kind,
+    activeChart?.colorField,
+    columnStats,
+  ]);
   const opacity = chartVisualOverrides.opacity ?? 0.7;
   const pointSize = chartVisualOverrides.pointSize ?? 12;
 
-  const themeUi = useMemo(() => getThemeUiColors(), [appSettings.theme]);
+  const themeUi = useMemo(() => getThemeUiColors(appSettings.theme), [appSettings.theme]);
 
-  const [containerWidth, setContainerWidth] = useState(800);
+  // Chart stage pixel size — must be in draw-effect deps so aspect/device
+  // framing (and any resize that clears canvases) triggers a redraw.
+  const [containerSize, setContainerSize] = useState({ w: 800, h: 500 });
+  const containerWidth = containerSize.w;
   const isCompact = containerWidth < 400;
   const isMedium = containerWidth < 600;
 
-  const chartRenderOpts = useMemo((): ChartRenderOpts => ({
-    colors,
-    opacity,
-    pointSize: isCompact ? Math.max(4, pointSize * 0.7) : pointSize,
-    fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-    titleFontWeight: chartVisualOverrides.titleFontWeight ?? 600,
-    titleItalic: chartVisualOverrides.titleItalic ?? false,
-    tickRotation: chartVisualOverrides.tickRotation ?? 0,
-    axisFontSize: isCompact ? 8 : (chartVisualOverrides.axisFontSize ?? 10),
-    markShape: chartVisualOverrides.markShape ?? "circle",
-    markStroke: chartVisualOverrides.markStroke ?? false,
-    markStrokeWidth: chartVisualOverrides.markStrokeWidth ?? 1,
-    markStrokeColor: chartVisualOverrides.markStrokeColor ?? "auto",
-    markJitter: chartVisualOverrides.markJitter ?? 0,
-    sizeScale: chartVisualOverrides.sizeScale ?? 1,
-    barCornerRadius: chartVisualOverrides.barCornerRadius ?? 3,
-    lineStrokeStyle: chartVisualOverrides.lineStrokeStyle ?? "solid",
-    lineCurveSmooth: chartVisualOverrides.lineCurveSmooth ?? false,
-    lineWidth: chartVisualOverrides.lineWidth ?? 1.5,
-    axisLineColor: chartVisualOverrides.axisLineColor ?? themeUi.border,
-    axisLineWidth: chartVisualOverrides.axisLineWidth ?? 1,
-    gridStyle: chartVisualOverrides.gridStyle ?? "solid",
-    gridOpacity: chartVisualOverrides.gridOpacity ?? 0.5,
-    tickCount: chartVisualOverrides.tickCount ?? 5,
-    axisLabelColor: chartVisualOverrides.axisLabelColor ?? themeUi.muted,
-    showGrid: isCompact ? false : (chartVisualOverrides.showGrid !== false),
-    chartPadding: isCompact ? 25 : isMedium ? 35 : (chartVisualOverrides.chartPadding ?? DEFAULT_PAD),
-    legendPosition: isCompact ? "none" : (chartVisualOverrides.legendPosition ?? "none"),
-    showDataLabels: chartVisualOverrides.showDataLabels ?? false,
-    backgroundStyle: chartVisualOverrides.backgroundStyle ?? "default",
-    blendMode: chartVisualOverrides.blendMode ?? "source-over",
-    glowEnabled: chartVisualOverrides.glowEnabled ?? false,
-    glowIntensity: chartVisualOverrides.glowIntensity ?? 8,
-    themeBg: themeUi.bg,
-    themeText: themeUi.text,
-    themeMuted: themeUi.muted,
-    themeBorder: themeUi.border,
-    yAggregate: (() => {
-      if (!activeChart) return undefined;
-      if (!activeChart.yField) return "count" as YAggregateOption;
-      return activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum");
-    })(),
-    barStackMode: activeChart?.kind === "bar" ? barStackMode : undefined,
-  }), [colors, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart?.yField, activeChart?.yAggregate, activeChart?.kind, barStackMode]);
+  const chartRenderOpts = useMemo((): ChartRenderOpts => {
+    const frame = chartVisualOverrides.chartFrame ?? "focus";
+    // Base pad from frame; final pad resolved at draw time against canvas size + title band
+    const framePad =
+      frame === "hero"
+        ? Math.max(chartVisualOverrides.chartPadding ?? DEFAULT_PAD, 56)
+        : frame === "compact"
+          ? Math.min(Math.max(chartVisualOverrides.chartPadding ?? 44, 40), 48)
+          : (chartVisualOverrides.chartPadding ?? DEFAULT_PAD);
+    const axisStyle = chartVisualOverrides.axisStyle ?? "rule";
+    const axisFromStyle =
+      axisStyle === "ladder"
+        ? { axisLineWidth: 2, gridStyle: "solid" as const, gridOpacity: 0.7 }
+        : axisStyle === "mercury"
+          ? { axisLineWidth: 3, gridStyle: "none" as const, gridOpacity: 0 }
+          : axisStyle === "spine"
+            ? { axisLineWidth: 1.5, gridStyle: "dashed" as const, gridOpacity: 0.35 }
+            : axisStyle === "index"
+              ? { axisLineWidth: 1, gridStyle: "dotted" as const, gridOpacity: 0.45 }
+              : axisStyle === "tape"
+                ? { axisLineWidth: 1, gridStyle: "solid" as const, gridOpacity: 0.25 }
+                : {};
+    const motif = chartVisualOverrides.markMotif ?? "dots";
+    const motifShape =
+      chartVisualOverrides.markShape ??
+      (motif === "squares" ? "square" : motif === "ring" ? "ring" : motif === "ticks" ? "cross" : "circle");
+    const detail = chartVisualOverrides.chartDetail ?? "viz";
+    const showDataLabels =
+      chartVisualOverrides.showDataLabels ?? (detail === "deep");
+    const caps = activeChart ? chartCapabilities(activeChart.kind) : null;
+    const showGrid =
+      !caps?.cartesian || isCompact
+        ? false
+        : chartVisualOverrides.showGrid !== false &&
+          (chartVisualOverrides.gridStyle ?? axisFromStyle.gridStyle ?? "solid") !== "none" &&
+          detail !== "plain";
+
+    // Never use screen/multiply blends as defaults — they wreck light themes
+    const rawBlend = chartVisualOverrides.blendMode ?? "source-over";
+    const blendMode =
+      rawBlend === "screen" || rawBlend === "multiply" || rawBlend === "color-dodge"
+        ? "source-over"
+        : rawBlend;
+
+    return {
+      colors,
+      continuousStops,
+      opacity,
+      opacityUserSet: typeof chartVisualOverrides.opacity === "number",
+      pointSize: isCompact ? Math.max(4, pointSize * 0.7) : pointSize,
+      fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+      titleFontWeight: chartVisualOverrides.titleFontWeight ?? 600,
+      titleItalic: chartVisualOverrides.titleItalic ?? false,
+      tickRotation: chartVisualOverrides.tickRotation ?? 0,
+      axisFontSize: isCompact ? 8 : (chartVisualOverrides.axisFontSize ?? 10),
+      markShape: motifShape,
+      markStroke: chartVisualOverrides.markStroke ?? motif === "ring",
+      markStrokeWidth: chartVisualOverrides.markStrokeWidth ?? 1,
+      markStrokeColor: chartVisualOverrides.markStrokeColor ?? "auto",
+      markJitter: chartVisualOverrides.markJitter ?? 0,
+      sizeScale: chartVisualOverrides.sizeScale ?? 1,
+      barCornerRadius: chartVisualOverrides.barCornerRadius ?? (motif === "bar" ? 0 : 3),
+      lineStrokeStyle: chartVisualOverrides.lineStrokeStyle ?? "solid",
+      lineCurveSmooth: chartVisualOverrides.lineCurveSmooth ?? false,
+      lineWidth: chartVisualOverrides.lineWidth ?? (motif === "ticks" ? 1 : 1.5),
+      axisLineColor: chartVisualOverrides.axisLineColor ?? themeUi.border,
+      axisLineWidth: chartVisualOverrides.axisLineWidth ?? axisFromStyle.axisLineWidth ?? 1,
+      gridStyle: chartVisualOverrides.gridStyle ?? axisFromStyle.gridStyle ?? "solid",
+      gridOpacity: chartVisualOverrides.gridOpacity ?? axisFromStyle.gridOpacity ?? 0.5,
+      tickCount: chartVisualOverrides.tickCount ?? 5,
+      axisLabelColor: chartVisualOverrides.axisLabelColor ?? themeUi.muted,
+      showGrid,
+      chartPadding: isCompact ? 36 : isMedium ? 46 : framePad,
+      legendPosition: isCompact || !caps?.legend ? "none" : (chartVisualOverrides.legendPosition ?? "none"),
+      showDataLabels: detail === "plain" ? false : showDataLabels,
+      backgroundStyle: chartVisualOverrides.backgroundStyle ?? "default",
+      blendMode,
+      glowEnabled: caps?.markPoints ? (chartVisualOverrides.glowEnabled ?? false) : false,
+      glowIntensity: chartVisualOverrides.glowIntensity ?? 8,
+      chartDetail: detail,
+      markMotif: motif,
+      axisStyle,
+      emphasisStyle: chartVisualOverrides.emphasisStyle ?? "tint",
+      ghostEnabled: chartVisualOverrides.ghostEnabled ?? false,
+      ghostWeight: chartVisualOverrides.ghostWeight ?? "soft",
+      ghostPlace: chartVisualOverrides.ghostPlace ?? "se",
+      titleLayout: chartVisualOverrides.titleLayout ?? "pair",
+      chartFrame: frame,
+      themeBg: themeUi.bg,
+      themeText: themeUi.text,
+      themeMuted: themeUi.muted,
+      themeBorder: themeUi.border,
+      yAggregate: (() => {
+        if (!activeChart) return undefined;
+        if (!activeChart.yField) return "count" as YAggregateOption;
+        return activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum");
+      })(),
+      barStackMode: activeChart?.kind === "bar" ? barStackMode : undefined,
+    };
+  }, [colors, continuousStops, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart, barStackMode]);
 
   const renderIssue = useMemo(
     () => getChartRenderIssue(activeChart, sampleRows),
@@ -144,6 +300,21 @@ export function ChartView() {
     if (t > n) return `${n.toLocaleString()} / ${t.toLocaleString()} rows`;
     return `${n.toLocaleString()} rows`;
   }, [sampleRows]);
+
+  const densityHint = useMemo(() => {
+    if (!sampleRows || !activeChart) return null;
+    if (activeChart.kind !== "scatter" && activeChart.kind !== "bubble") return null;
+    const n = sampleRows.rows.length;
+    if (n < 800) return null;
+    return n >= 5000
+      ? "Dense · thinned"
+      : "Crowded · softened";
+  }, [sampleRows, activeChart]);
+
+  const applyClarity = useCallback(() => {
+    useLoomStore.getState().setChartVisualOverrides({ ...VISUAL_PRESETS.clarity.overrides });
+    useLoomStore.getState().setToast("Applied Clarity look");
+  }, []);
 
   const aggregationHint = useMemo(
     () => (activeChart ? formatChartAggregationSummary(activeChart) : ""),
@@ -162,7 +333,19 @@ export function ChartView() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const canvas2DRef = useRef<HTMLCanvasElement>(null);
   const axesOverlayRef = useRef<HTMLCanvasElement>(null);
+  const stageHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartFrameSize = useMemo(
+    () =>
+      fitChartFrame({
+        hostW: hostSize.w,
+        hostH: hostSize.h,
+        aspectId: chartAspect,
+        device: chartDevice,
+        gutter: 10,
+      }),
+    [hostSize.w, hostSize.h, chartAspect, chartDevice],
+  );
   const rendererRef = useRef<LoomRenderer | null>(null);
   const [gpuReady, setGpuReady] = useState(false);
   const hasSmartOverlays =
@@ -172,9 +355,13 @@ export function ChartView() {
       (smartResults.forecast?.points?.length ?? 0) > 0 ||
       (smartResults.referenceLines?.lines?.length ?? 0) > 0 ||
       (smartResults.clusters && Object.keys(smartResults.clusters.rowToCluster).length > 0));
+  // Story/dashboard PNG capture must use Canvas 2D — WebGPU readback often
+  // yields axes-only frames (grid, no points) when tiles are snapped quickly.
+  const previewCaptureActive = useLoomStore((s) => !!s.previewCapture);
   const useWebGPUScatter =
     activeChart?.kind === "scatter" &&
     gpuReady &&
+    !previewCaptureActive &&
     !hasSmartOverlays &&
     (chartVisualOverrides.markShape ?? "circle") === "circle" &&
     !chartVisualOverrides.markStroke &&
@@ -189,6 +376,35 @@ export function ChartView() {
   const sampleRowsRef = useRef(sampleRows);
   sampleRowsRef.current = sampleRows;
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
+
+  const getEffectiveScatterBounds = useCallback(
+    (sd: { xMin: number; xMax: number; yMin: number; yMax: number }, view: { scale: number; panX: number; panY: number }) => {
+      const { scale, panX, panY } = view;
+      const cx = (sd.xMin + sd.xMax) / 2;
+      const cy = (sd.yMin + sd.yMax) / 2;
+      const halfX = (sd.xMax - sd.xMin) / 2;
+      const halfY = (sd.yMax - sd.yMin) / 2;
+      return {
+        xMin: cx + panX - halfX / scale,
+        xMax: cx + panX + halfX / scale,
+        yMin: cy + panY - halfY / scale,
+        yMax: cy + panY + halfY / scale,
+      };
+    },
+    [],
+  );
+
+  const selectRecommendation = useCallback(
+    (rec: ChartRecommendation) => {
+      setActiveChart(rec);
+      if (isMobile) {
+        setSuggestionsExpanded(false);
+      } else {
+        setPanelTab("chart");
+      }
+    },
+    [isMobile, setActiveChart, setPanelTab],
+  );
   const [refreshKey, setRefreshKey] = useState(0);
   const [aiSuggesting, setAiSuggesting] = useState(false);
   const [scatterTooltip, setScatterTooltip] = useState<{ clientX: number; clientY: number; rowIndex: number; row: (string | number | boolean | null)[]; columns: string[] } | null>(null);
@@ -221,8 +437,51 @@ export function ChartView() {
     if (bestSuggestion) {
       setActiveChart(bestSuggestion);
       setPanelTab("chart");
+      setToast(`Applied best: ${bestSuggestion.title}`);
     }
-  }, [bestSuggestion, setActiveChart, setPanelTab]);
+  }, [bestSuggestion, setActiveChart, setPanelTab, setToast]);
+
+  const handleTellStory = useCallback(async () => {
+    if (!selectedFile) {
+      setToast("Select a file first");
+      return;
+    }
+    const story = recommendStorySequence(columnStats, sampleRows, selectedFile.name);
+    if (story.charts.length === 0) {
+      setToast("Not enough data variety to build a story");
+      return;
+    }
+    const id = createStoryDashboard(
+      selectedFile.path,
+      selectedFile.name,
+      story.title,
+      story.charts,
+      sampleRows,
+    );
+    if (!id) {
+      setToast("Could not create story dashboard");
+      return;
+    }
+    const dashboard = useLoomStore.getState().dashboards.find((d) => d.id === id);
+    const chartIds = dashboard?.slots.filter((s) => s.viewType === "chart").map((s) => s.viewId) ?? [];
+    setPanelTab("dashboards");
+    if (isMobile && !useLoomStore.getState().panelOpen) useLoomStore.getState().togglePanel();
+    if (chartIds.length > 0) {
+      setToast(`Building "${story.title}" — capturing ${chartIds.length} previews…`);
+      await captureStoryDashboardPreviews(id);
+    } else {
+      useLoomStore.getState().setDashboardsExpanded(true);
+      setToast(`Created "${story.title}" with ${story.charts.length} charts`);
+    }
+  }, [
+    selectedFile,
+    columnStats,
+    sampleRows,
+    createStoryDashboard,
+    setPanelTab,
+    setToast,
+    isMobile,
+  ]);
 
   const handleSuggestWithAI = useCallback(async () => {
     if (columnStats.length === 0) return;
@@ -249,23 +508,21 @@ export function ChartView() {
         if (rec) {
           setActiveChart(rec, { fromAI: true, aiReason: suggestion.reason });
           setPanelTab("chart");
-        } else {
-          if (bestSuggestion) {
-            setActiveChart(bestSuggestion);
-            setPanelTab("chart");
-          }
+          setToast(suggestion.reason ? `AI: ${suggestion.reason}` : "AI chart applied");
+          return;
         }
+      }
+      if (bestSuggestion) {
+        setActiveChart(bestSuggestion);
+        setPanelTab("chart");
+        setToast("Ollama unavailable — applied best scored chart");
       } else {
-        if (bestSuggestion) {
-          setActiveChart(bestSuggestion);
-          setPanelTab("chart");
-        }
+        setToast("Ollama unavailable. Start it locally, then try again.");
       }
     } finally {
       setAiSuggesting(false);
     }
-  }, [columnStats, tableName, activeChart, bestSuggestion, setActiveChart, setPanelTab]);
-
+  }, [columnStats, tableName, activeChart, bestSuggestion, setActiveChart, setPanelTab, setToast]);
   const handleTitleStartEdit = useCallback(() => {
     if (!activeChart) return;
     setTitleEditValue(displayTitle);
@@ -316,37 +573,125 @@ export function ChartView() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.repeat) return;
-      if (e.key !== "l" && e.key !== "L") return;
       const el = e.target as HTMLElement;
       if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable) return;
 
-      if (tooltipLink) {
+      // Tooltip link (L)
+      if (e.key === "l" || e.key === "L") {
+        if (tooltipLink) {
+          e.preventDefault();
+          setTooltipLink(null);
+          return;
+        }
+        const chart = activeChart;
+        const rows = sampleRows?.rows;
+        const cols = sampleRows?.columns;
+        if (!chart || !rows || !cols) return;
+        const tt = scatterTooltip ?? chartTooltip;
+        if (!tt) return;
+        const keyField = chart.tooltipKeyField ?? chart.xField;
+        const kidx = cols.indexOf(keyField);
+        if (kidx < 0) return;
+        const rawRow = rows[tt.rowIndex];
+        if (!rawRow) return;
         e.preventDefault();
-        setTooltipLink(null);
+        setTooltipLink({ field: keyField, value: String(rawRow[kidx] ?? "") });
         return;
       }
 
-      const chart = activeChart;
-      const rows = sampleRows?.rows;
-      const cols = sampleRows?.columns;
-      if (!chart || !rows || !cols) return;
+      if (!activeChart || activeChart.kind !== "scatter") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
 
-      const tt = scatterTooltip ?? chartTooltip;
-      if (!tt) return;
+      if (e.key === "=" || e.key === "+" || e.key === "-" || e.key === "_" || e.key === "0") {
+        e.preventDefault();
+        if (e.key === "0") {
+          setScatterView({ scale: 1, panX: 0, panY: 0 });
+          return;
+        }
+        const zoomOut = e.key === "-" || e.key === "_";
+        setScatterView((v) => {
+          const d = scatterDataRef.current;
+          const newScale = Math.max(0.5, Math.min(20, v.scale * (zoomOut ? 0.85 : 1.18)));
+          if (!d) return { ...v, scale: newScale };
+          const bounds = getEffectiveScatterBounds(d, v);
+          const midX = (bounds.xMin + bounds.xMax) / 2;
+          const midY = (bounds.yMin + bounds.yMax) / 2;
+          const cx = (d.xMin + d.xMax) / 2;
+          const cy = (d.yMin + d.yMax) / 2;
+          return { scale: newScale, panX: midX - cx, panY: midY - cy };
+        });
+        return;
+      }
 
-      const keyField = chart.tooltipKeyField ?? chart.xField;
-      const kidx = cols.indexOf(keyField);
-      if (kidx < 0) return;
+      if (
+        e.key === "ArrowLeft" ||
+        e.key === "ArrowRight" ||
+        e.key === "ArrowUp" ||
+        e.key === "ArrowDown"
+      ) {
+        e.preventDefault();
+        const d = scatterDataRef.current;
+        if (!d) return;
+        const step = e.shiftKey ? 0.12 : 0.05;
+        const spanX = (d.xMax - d.xMin) * step;
+        const spanY = (d.yMax - d.yMin) * step;
+        setScatterView((v) => {
+          let { panX, panY } = v;
+          if (e.key === "ArrowLeft") panX -= spanX / v.scale;
+          if (e.key === "ArrowRight") panX += spanX / v.scale;
+          if (e.key === "ArrowUp") panY += spanY / v.scale;
+          if (e.key === "ArrowDown") panY -= spanY / v.scale;
+          return { ...v, panX, panY };
+        });
+        return;
+      }
 
-      const rawRow = rows[tt.rowIndex];
-      if (!rawRow) return;
-
-      e.preventDefault();
-      setTooltipLink({ field: keyField, value: String(rawRow[kidx] ?? "") });
+      if (e.key === "v" || e.key === "V") {
+        e.preventDefault();
+        setChartInteractionMode("pan");
+        return;
+      }
+      if (e.key === "c" || e.key === "C") {
+        e.preventDefault();
+        setChartInteractionMode("crosshair");
+        return;
+      }
+      if (e.key === "g" || e.key === "G") {
+        e.preventDefault();
+        setChartInteractionMode("lasso");
+        return;
+      }
+      if (e.key === "b" || e.key === "B") {
+        e.preventDefault();
+        setChartInteractionMode("pan");
+        setToast("Brush: hold Shift and drag");
+        return;
+      }
+      if (e.key === "Escape") {
+        setSelectedRowIndices([]);
+        setLassoPoints([]);
+        setBrushRect(null);
+        setRulerPins([]);
+        setCrosshairPos(null);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tooltipLink, setTooltipLink, activeChart, sampleRows, scatterTooltip, chartTooltip]);
+  }, [
+    tooltipLink,
+    setTooltipLink,
+    activeChart,
+    sampleRows,
+    scatterTooltip,
+    chartTooltip,
+    getEffectiveScatterBounds,
+    setChartInteractionMode,
+    setToast,
+    setSelectedRowIndices,
+    setLassoPoints,
+    setRulerPins,
+    setCrosshairPos,
+  ]);
 
   // Initialize WebGPU on its own canvas (a canvas can only have one context: webgpu OR 2d)
   useEffect(() => {
@@ -357,6 +702,22 @@ export function ChartView() {
     renderer.init(canvas).then((ok) => { if (ok) setGpuReady(true); });
     return () => { renderer.destroy(); rendererRef.current = null; setGpuReady(false); };
   }, []);
+
+  // Measure the stage host so we can fit social / device frames inside it.
+  useEffect(() => {
+    if (suggestionsExpanded) return;
+    const host = stageHostRef.current;
+    if (!host) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width < 40 || height < 40) continue;
+        setHostSize({ w: width, h: height });
+      }
+    });
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [suggestionsExpanded]);
 
   // Resize all three canvases (WebGPU, 2D, axes overlay). Re-attach when chart panel is visible again.
   useEffect(() => {
@@ -380,22 +741,24 @@ export function ChartView() {
           c.style.height = `${height}px`;
         });
         setCanvasSized(true);
-        setContainerWidth(width);
+        setContainerSize({ w: width, h: height });
       }
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [suggestionsExpanded]);
+  }, [suggestionsExpanded, chartFrameSize.width, chartFrameSize.height]);
 
   // Register PNG/SVG export handlers for the Export tab
   useEffect(() => {
     setPngExportHandler(async (): Promise<Blob | null> => {
       const { activeChart: ac, gpuReady: gpu, chartVisualOverrides: overrides } = exportStateRef.current;
-      const container = containerRef.current;
       const canvas = canvasRef.current;
       const canvas2D = canvas2DRef.current;
-      if (!container || !canvas || !canvas2D || !ac) return null;
+      const axesOverlay = axesOverlayRef.current;
+      if (!canvas || !canvas2D || !ac) return null;
+      const capturing = !!useLoomStore.getState().previewCapture;
       const useWebGPU =
+        !capturing &&
         ac.kind === "scatter" &&
         gpu &&
         (overrides.markShape ?? "circle") === "circle" &&
@@ -405,9 +768,9 @@ export function ChartView() {
         !ac.glowField &&
         !ac.outlineField &&
         !ac.opacityField;
-      const sourceCanvas = useWebGPU ? canvas : canvas2D;
-      const w = sourceCanvas.width;
-      const h = sourceCanvas.height;
+      // Prefer the layer that actually holds pixels; size from whichever is ready
+      const w = Math.max(canvas2D.width, useWebGPU ? canvas.width : 0);
+      const h = Math.max(canvas2D.height, useWebGPU ? canvas.height : 0);
       if (w === 0 || h === 0) return null;
       try {
         const off = document.createElement("canvas");
@@ -415,9 +778,29 @@ export function ChartView() {
         off.height = h;
         const ctx = off.getContext("2d");
         if (!ctx) return null;
-        ctx.fillStyle = "#0a0a0c";
+        const themeBg = getThemeUiColors(useLoomStore.getState().appSettings.theme).bg;
+        ctx.fillStyle = themeBg;
         ctx.fillRect(0, 0, w, h);
-        ctx.drawImage(sourceCanvas, 0, 0);
+        // 2D layer first (theme fill / full chart); WebGPU scatter on top; axes last
+        try {
+          ctx.drawImage(canvas2D, 0, 0);
+        } catch {
+          /* tainted / lost context */
+        }
+        if (useWebGPU) {
+          try {
+            ctx.drawImage(canvas, 0, 0);
+          } catch {
+            /* WebGPU readback can fail mid-resize */
+          }
+        }
+        if (axesOverlay && axesOverlay.width > 0 && axesOverlay.height > 0) {
+          try {
+            ctx.drawImage(axesOverlay, 0, 0);
+          } catch {
+            /* ignore */
+          }
+        }
         return new Promise<Blob | null>((resolve) => {
           off.toBlob((blob) => resolve(blob), "image/png");
         });
@@ -569,16 +952,115 @@ export function ChartView() {
   }, [setHoveredRowIndex]);
 
   const panStartRef = useRef<{ x: number; y: number } | null>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
+  const [isPanning, setIsPanning] = useState(false);
+  const pinchRef = useRef<{ dist: number; scale: number; midX: number; midY: number } | null>(null);
+
+  const touchDistance = (a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }) =>
+    Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+  const applyPinchZoom = useCallback(
+    (clientX: number, clientY: number, newScale: number, baseScale: number) => {
+      const d = scatterDataRef.current;
+      const el = overlayRef.current;
+      if (!d || !el || baseScale <= 0) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const px = ((clientX - rect.left) / rect.width) * d.w;
+      const py = ((clientY - rect.top) / rect.height) * d.h;
+      const chartW = d.w - 2 * d.pad;
+      const chartH = d.h - 2 * d.pad;
+      if (chartW <= 0 || chartH <= 0) return;
+      setScatterView((v) => {
+        const bounds = getEffectiveScatterBounds(d, { ...v, scale: baseScale });
+        const t = (px - d.pad) / chartW;
+        const u = (py - d.pad) / chartH;
+        const dataX = bounds.xMin + t * (bounds.xMax - bounds.xMin);
+        const dataY = bounds.yMax - u * (bounds.yMax - bounds.yMin);
+        const scale = Math.max(0.5, Math.min(20, newScale));
+        const cx = (d.xMin + d.xMax) / 2;
+        const cy = (d.yMin + d.yMax) / 2;
+        const halfX = (d.xMax - d.xMin) / 2;
+        const halfY = (d.yMax - d.yMin) / 2;
+        return {
+          scale,
+          panX: dataX - cx - (halfX / scale) * (2 * t - 1),
+          panY: dataY - cy - (halfY / scale) * (1 - 2 * u),
+        };
+      });
+    },
+    [getEffectiveScatterBounds],
+  );
+
+  useEffect(() => {
+    const endPan = () => {
+      if (panStartRef.current) {
+        panStartRef.current = null;
+        setIsPanning(false);
+      }
+    };
+    window.addEventListener("mouseup", endPan);
+    window.addEventListener("blur", endPan);
+    return () => {
+      window.removeEventListener("mouseup", endPan);
+      window.removeEventListener("blur", endPan);
+    };
+  }, []);
+
   const handleScatterWheel = useCallback(
     (e: WheelEvent) => {
       if (!activeChart || activeChart.kind !== "scatter") return;
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.15 : 0.15;
-      setScatterView((v) => ({ ...v, scale: Math.max(0.5, Math.min(20, v.scale + delta)) }));
+      const d = scatterDataRef.current;
+      const el = overlayRef.current;
+      if (!d || !el) return;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const px = ((e.clientX - rect.left) / rect.width) * d.w;
+      const py = ((e.clientY - rect.top) / rect.height) * d.h;
+      const chartW = d.w - 2 * d.pad;
+      const chartH = d.h - 2 * d.pad;
+      if (chartW <= 0 || chartH <= 0) return;
+
+      // Pinch (ctrl+wheel) or discrete mouse wheel → zoom toward cursor.
+      // Trackpad two-finger scroll → pan the view.
+      const looksLikeMouseWheel =
+        e.deltaMode === 1 ||
+        (e.deltaMode === 0 && Math.abs(e.deltaY) >= 40 && Math.abs(e.deltaX) < 1);
+      const doZoom = e.ctrlKey || e.metaKey || looksLikeMouseWheel;
+
+      if (doZoom) {
+        const zoomOut = e.deltaY > 0;
+        setScatterView((v) => {
+          const bounds = getEffectiveScatterBounds(d, v);
+          const t = (px - d.pad) / chartW;
+          const u = (py - d.pad) / chartH;
+          const dataX = bounds.xMin + t * (bounds.xMax - bounds.xMin);
+          const dataY = bounds.yMax - u * (bounds.yMax - bounds.yMin);
+          const factor = zoomOut ? 0.9 : 1.11;
+          const newScale = Math.max(0.5, Math.min(20, v.scale * factor));
+          const cx = (d.xMin + d.xMax) / 2;
+          const cy = (d.yMin + d.yMax) / 2;
+          const halfX = (d.xMax - d.xMin) / 2;
+          const halfY = (d.yMax - d.yMin) / 2;
+          const panX = dataX - cx - (halfX / newScale) * (2 * t - 1);
+          const panY = dataY - cy - (halfY / newScale) * (1 - 2 * u);
+          return { scale: newScale, panX, panY };
+        });
+        return;
+      }
+
+      const dataPerPxX = (d.xMax - d.xMin) / chartW;
+      const dataPerPxY = (d.yMax - d.yMin) / chartH;
+      setScatterView((v) => ({
+        ...v,
+        panX: v.panX + (e.deltaX * dataPerPxX) / v.scale,
+        panY: v.panY - (e.deltaY * dataPerPxY) / v.scale,
+      }));
     },
-    [activeChart, useWebGPUScatter]
+    [activeChart, getEffectiveScatterBounds],
   );
-  const overlayRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = overlayRef.current;
     if (!el) return;
@@ -602,6 +1084,7 @@ export function ChartView() {
         }
       } else {
         panStartRef.current = { x: e.clientX, y: e.clientY };
+        setIsPanning(true);
       }
     },
     [activeChart, chartInteractionMode, crosshairPos, rulerPins, setRulerPins]
@@ -649,13 +1132,18 @@ export function ChartView() {
           const ch = d.h - 2 * d.pad;
           const dataPerPxX = cw > 0 ? (d.xMax - d.xMin) / cw : 0;
           const dataPerPxY = ch > 0 ? (d.yMax - d.yMin) / ch : 0;
-          setScatterView((v) => ({ ...v, panX: v.panX + dx * dataPerPxX, panY: v.panY - dy * dataPerPxY }));
+          setScatterView((v) => ({
+            ...v,
+            panX: v.panX + (dx * dataPerPxX) / v.scale,
+            panY: v.panY - (dy * dataPerPxY) / v.scale,
+          }));
         }
       }
     },
-    [handleScatterPointer]
+    [handleScatterPointer, chartInteractionMode, lassoPoints, setLassoPoints, setCrosshairPos],
   );
   const handleScatterMouseUp = useCallback(() => {
+    setIsPanning(false);
     if (brushStartRef.current && chartInteractionMode === "lasso" && lassoPoints.length > 2 && containerRef.current) {
       const data = scatterDataRef.current;
       if (data) {
@@ -714,23 +1202,6 @@ export function ChartView() {
     }
     panStartRef.current = null;
   }, [setSelectedRowIndices, setToast, chartInteractionMode, lassoPoints, setLassoPoints]);
-
-  const getEffectiveScatterBounds = useCallback(
-    (sd: { xMin: number; xMax: number; yMin: number; yMax: number }, view: { scale: number; panX: number; panY: number }) => {
-      const { scale, panX, panY } = view;
-      const cx = (sd.xMin + sd.xMax) / 2;
-      const cy = (sd.yMin + sd.yMax) / 2;
-      const halfX = (sd.xMax - sd.xMin) / 2;
-      const halfY = (sd.yMax - sd.yMin) / 2;
-      return {
-        xMin: cx + panX - halfX / scale,
-        xMax: cx + panX + halfX / scale,
-        yMin: cy + panY - halfY / scale,
-        yMax: cy + panY + halfY / scale,
-      };
-    },
-    []
-  );
 
   const extractScatterData = useCallback((): { points: GPUScatterPoint[]; rowIndices: number[]; xMin: number; xMax: number; yMin: number; yMax: number } | null => {
     if (!sampleRows || !activeChart) return null;
@@ -814,24 +1285,54 @@ export function ChartView() {
         }
       }
       const sd = extractScatterData();
-      const sizeScale = chartVisualOverrides.sizeScale ?? 1;
       if (sd && rendererRef.current) {
-        const eff = getEffectiveScatterBounds(sd, scatterView);
-        rendererRef.current.uploadData(sd.points, {
-          pointSize: pointSize * 0.35,
+        const canvas = canvasRef.current;
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas ? canvas.width / dpr : 800;
+        const h = canvas ? canvas.height / dpr : 600;
+        const pad = resolveChartPad({
+          kind: "scatter",
+          width: w,
+          height: h,
+          basePad: chartRenderOpts.chartPadding ?? DEFAULT_PAD,
+          titleLayout: chartRenderOpts.titleLayout,
+          tickRotation: chartRenderOpts.tickRotation,
+          chartFrame: chartRenderOpts.chartFrame,
+          isCompact,
+          legendPosition: chartRenderOpts.legendPosition,
+          axisFontSize: chartRenderOpts.axisFontSize,
+        });
+        const subPts = subsampleRowsForDensity(sd.points, 4500, scatterView.scale);
+        const subIdx = subsampleRowsForDensity(sd.rowIndices, 4500, scatterView.scale);
+        const marks = densityAwarePointMarks({
+          n: subPts.rows.length,
+          plotW: Math.max(1, w - 2 * pad),
+          plotH: Math.max(1, h - 2 * pad),
+          hasSizeEncoding: !!activeChart.sizeField,
+          sizeScale: chartVisualOverrides.sizeScale ?? 1,
+          pointSize,
           opacity,
-          sizeScale,
+          opacityUserSet: typeof chartVisualOverrides.opacity === "number",
+        });
+        const eff = getEffectiveScatterBounds(sd, scatterView);
+        rendererRef.current.uploadData(subPts.rows, {
+          pointSize: marks.maxR * 2,
+          opacity: marks.opacity,
+          sizeScale: 1,
           palette: colors,
           clearColor: hexToRgb01(themeUi.bg),
         });
         rendererRef.current.render(eff.xMin, eff.xMax, eff.yMin, eff.yMax);
-        const canvas = canvasRef.current;
         if (canvas) {
-          const dpr = window.devicePixelRatio || 1;
-          const w = canvas.width / dpr;
-          const h = canvas.height / dpr;
-          const pad = chartRenderOpts.chartPadding ?? DEFAULT_PAD;
-          scatterDataRef.current = { points: sd.points, rowIndices: sd.rowIndices, ...eff, pad, w, h, columns: sampleRows.columns };
+          scatterDataRef.current = {
+            points: subPts.rows,
+            rowIndices: subIdx.rows,
+            ...eff,
+            pad,
+            w,
+            h,
+            columns: sampleRows.columns,
+          };
         }
       }
       return;
@@ -853,15 +1354,33 @@ export function ChartView() {
     const w = cw / dpr;
     const h = ch / dpr;
 
-    const rows = sampleRows?.rows;
+    const rowsAll = sampleRows?.rows;
     const cols = sampleRows?.columns;
-    if (!Array.isArray(rows) || !Array.isArray(cols)) return;
+    if (!Array.isArray(rowsAll) || !Array.isArray(cols)) return;
+
+    const zoomScale = activeChart.kind === "scatter" ? scatterView.scale : 1;
+    const densityKinds = activeChart.kind === "scatter" || activeChart.kind === "bubble";
+    const sub = densityKinds
+      ? subsampleRowsForDensity(rowsAll, 3500, zoomScale)
+      : { rows: rowsAll, sampled: false, shown: rowsAll.length, total: rowsAll.length };
+    const rows = sub.rows;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
     const opts = chartRenderOpts;
-    const pad = opts.chartPadding ?? DEFAULT_PAD;
+    const pad = resolveChartPad({
+      kind: activeChart.kind,
+      width: w,
+      height: h,
+      basePad: opts.chartPadding ?? DEFAULT_PAD,
+      titleLayout: opts.titleLayout,
+      tickRotation: opts.tickRotation,
+      chartFrame: opts.chartFrame,
+      isCompact,
+      legendPosition: opts.legendPosition,
+      axisFontSize: opts.axisFontSize,
+    });
     const xIdx = cols.indexOf(activeChart.xField);
     const yIdx = activeChart.yField ? cols.indexOf(activeChart.yField) : -1;
     const cIdx = activeChart.colorField ? cols.indexOf(activeChart.colorField) : -1;
@@ -872,15 +1391,12 @@ export function ChartView() {
     if (xIdx === -1) return;
 
     const fontFamily = opts.fontFamily ?? "Inter";
-    const titleWeight = opts.titleFontWeight ?? 600;
-    const titleItalic = opts.titleItalic ? "italic" : "normal";
-    const axisLabelColor = opts.axisLabelColor ?? "#6b6b78";
 
     const drawOneFrame = (clipProgress: number) => {
       try {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
-        drawBackground(ctx, w, h, opts.backgroundStyle, opts.themeBg);
+        drawChartBackground(ctx, w, h, opts.backgroundStyle, opts.themeBg);
         if (clipProgress < 1) {
           ctx.save();
           ctx.beginPath();
@@ -889,34 +1405,24 @@ export function ChartView() {
         }
         ctx.globalCompositeOperation = (opts.blendMode as GlobalCompositeOperation) ?? "source-over";
 
-        ctx.strokeStyle = opts.axisLineColor ?? opts.themeBorder ?? "#2a2a30";
-        ctx.lineWidth = opts.axisLineWidth ?? 1;
-        ctx.beginPath();
-        ctx.moveTo(pad, pad);
-        ctx.lineTo(pad, h - pad);
-        ctx.lineTo(w - pad, h - pad);
-        ctx.stroke();
+        const isCartesian = isCartesianKind(activeChart.kind);
 
-        ctx.fillStyle = axisLabelColor;
-        ctx.font = `${opts.axisFontSize ?? 10}px '${fontFamily}', sans-serif`;
-        ctx.textAlign = "center";
-        ctx.fillText(activeChart.xField, w / 2, h - 12);
-        if (activeChart.yField) {
-          ctx.save();
-          ctx.translate(14, h / 2);
-          ctx.rotate(-Math.PI / 2);
-          ctx.fillText(activeChart.yField, 0, 0);
-          ctx.restore();
+        if (isCartesian) {
+          drawAxisFrame(ctx, w, h, pad, opts);
+          drawAxisFieldLabels(ctx, w, h, pad, activeChart.xField, activeChart.yField, opts);
         }
 
         const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
-        ctx.fillStyle = opts.themeText ?? "#e8e8ec";
-        ctx.font = `${titleItalic} ${titleWeight} 13px ${fontFamily}, sans-serif`;
-        ctx.textAlign = "left";
-        ctx.fillText(titleText, pad, 28);
-        ctx.fillStyle = axisLabelColor;
-        ctx.font = `11px ${fontFamily}, sans-serif`;
-        ctx.fillText(activeChart.subtitle, pad, 44);
+        drawChartTitleBlock(ctx, w, h, pad, titleText, activeChart.subtitle, {
+          titleLayout: opts.titleLayout,
+          fontFamily,
+          titleFontWeight: opts.titleFontWeight,
+          titleItalic: opts.titleItalic,
+          themeText: opts.themeText,
+          themeMuted: opts.themeMuted,
+          themeBorder: opts.themeBorder,
+          axisLabelColor: opts.axisLabelColor,
+        });
 
         let scatterViewBounds: { xMin: number; xMax: number; yMin: number; yMax: number } | undefined;
         if (activeChart.kind === "scatter") {
@@ -973,7 +1479,7 @@ export function ChartView() {
           case "area": renderFullArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "pie": renderFullPie(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
           case "bubble": renderFullBubble(ctx, rows, cols, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, opts); break;
-          case "violin": renderFullViolin(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "violin": renderFullViolin(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "radar": renderFullRadar(ctx, rows, cols, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "waterfall": renderFullWaterfall(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
           case "lollipop": renderFullLollipop(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
@@ -1016,6 +1522,27 @@ export function ChartView() {
         if (opts.legendPosition && opts.legendPosition !== "none") {
           drawLegend(ctx, catMap, opts.colors, opts.legendPosition, w, h, pad, fontFamily, opts.themeBg, opts.themeBorder, opts.themeMuted);
         }
+        if (opts.ghostEnabled) {
+          const weight = opts.ghostWeight === "whisper" ? 0.12 : opts.ghostWeight === "firm" ? 0.35 : 0.22;
+          const place = opts.ghostPlace ?? "se";
+          const gw = Math.min(160, w * 0.28);
+          const gh = 48;
+          const gx =
+            place === "sw" || place === "nw" ? pad : w - pad - gw;
+          const gy =
+            place === "ne" || place === "nw" ? pad + 8 : h - pad - gh - 8;
+          ctx.save();
+          ctx.globalAlpha = weight;
+          ctx.fillStyle = opts.themeText ?? "#e8e8ec";
+          ctx.font = `600 28px ${fontFamily}, sans-serif`;
+          ctx.textAlign = place.endsWith("e") ? "right" : "left";
+          const tx = place.endsWith("e") ? gx + gw : gx;
+          ctx.fillText(String(rows.length), tx, gy + 30);
+          ctx.globalAlpha = weight * 0.8;
+          ctx.font = `10px ${fontFamily}, sans-serif`;
+          ctx.fillText("rows", tx, gy + 44);
+          ctx.restore();
+        }
         if (smartResults) {
           drawSmartOverlays(ctx, w, h, pad, rows, cols, xIdx, yIdx, activeChart, smartResults);
         }
@@ -1046,7 +1573,7 @@ export function ChartView() {
     }
 
     drawOneFrame(1);
-  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi]);
+  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h]);
 
   // Axes overlay for WebGPU scatter; clear when not scatter so overlay doesn't sit on top of line/bar
   useEffect(() => {
@@ -1064,9 +1591,20 @@ export function ChartView() {
     if (!canvasSized || !activeChart || activeChart.kind !== "scatter" || !gpuReady || !useWebGPUScatter) return;
     const sd = extractScatterData();
     if (!sd) return;
-    const overlayPad = chartVisualOverrides.chartPadding ?? DEFAULT_PAD;
+    const overlayPad = resolveChartPad({
+      kind: "scatter",
+      width: w,
+      height: h,
+      basePad: chartVisualOverrides.chartPadding ?? DEFAULT_PAD,
+      titleLayout: chartVisualOverrides.titleLayout,
+      tickRotation: chartVisualOverrides.tickRotation,
+      chartFrame: chartVisualOverrides.chartFrame,
+      isCompact,
+      legendPosition: chartVisualOverrides.legendPosition,
+      axisFontSize: chartVisualOverrides.axisFontSize ?? 10,
+    });
     const eff = getEffectiveScatterBounds(sd, scatterView);
-    const ui = getThemeUiColors();
+    const ui = getThemeUiColors(appSettings.theme);
     const overlayOpts: ChartRenderOpts = {
       colors: [],
       opacity: 1,
@@ -1076,42 +1614,41 @@ export function ChartView() {
       axisLabelColor: chartVisualOverrides.axisLabelColor ?? ui.muted,
       axisLineColor: chartVisualOverrides.axisLineColor ?? ui.border,
       axisLineWidth: chartVisualOverrides.axisLineWidth ?? 1,
+      axisStyle: chartVisualOverrides.axisStyle ?? "rule",
       tickCount: chartVisualOverrides.tickCount ?? 5,
       tickRotation: chartVisualOverrides.tickRotation ?? 0,
       showGrid: chartVisualOverrides.showGrid !== false,
       gridStyle: chartVisualOverrides.gridStyle ?? "solid",
       gridOpacity: chartVisualOverrides.gridOpacity ?? 0.5,
       chartPadding: overlayPad,
+      titleLayout: chartVisualOverrides.titleLayout ?? "pair",
+      titleFontWeight: chartVisualOverrides.titleFontWeight ?? 600,
+      titleItalic: chartVisualOverrides.titleItalic ?? false,
       themeBg: ui.bg,
       themeText: ui.text,
       themeMuted: ui.muted,
       themeBorder: ui.border,
     };
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.strokeStyle = overlayOpts.axisLineColor ?? ui.border;
-    ctx.lineWidth = overlayOpts.axisLineWidth ?? 1;
-    ctx.beginPath();
-    ctx.moveTo(overlayPad, overlayPad);
-    ctx.lineTo(overlayPad, h - overlayPad);
-    ctx.lineTo(w - overlayPad, h - overlayPad);
-    ctx.stroke();
-    ctx.fillStyle = overlayOpts.axisLabelColor ?? ui.muted;
-    ctx.font = `${overlayOpts.axisFontSize}px '${overlayOpts.fontFamily}', sans-serif`;
-    ctx.textAlign = "center";
-    ctx.fillText(activeChart.xField, w / 2, h - 12);
-    if (activeChart.yField) {
-      ctx.save();
-      ctx.translate(14, h / 2);
-      ctx.rotate(-Math.PI / 2);
-      ctx.fillText(activeChart.yField, 0, 0);
-      ctx.restore();
-    }
+    drawAxisFrame(ctx, w, h, overlayPad, overlayOpts);
+    drawAxisFieldLabels(ctx, w, h, overlayPad, activeChart.xField, activeChart.yField, overlayOpts);
+    const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
+    drawChartTitleBlock(ctx, w, h, overlayPad, titleText, activeChart.subtitle, {
+      titleLayout: overlayOpts.titleLayout,
+      fontFamily: overlayOpts.fontFamily,
+      titleFontWeight: overlayOpts.titleFontWeight,
+      titleItalic: overlayOpts.titleItalic,
+      themeText: ui.text,
+      themeMuted: ui.muted,
+      themeBorder: ui.border,
+      axisLabelColor: overlayOpts.axisLabelColor,
+    });
     if (overlayOpts.showGrid) {
       drawGridLines(ctx, eff.xMin, eff.xMax, eff.yMin, eff.yMax, w, h, overlayPad, overlayOpts);
     }
     drawAxisTicks(ctx, eff.xMin, eff.xMax, eff.yMin, eff.yMax, w, h, overlayPad, overlayOpts);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, extractScatterData, getEffectiveScatterBounds, scatterView, chartVisualOverrides, refreshKey, appSettings.theme]);
+  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, extractScatterData, getEffectiveScatterBounds, scatterView, chartVisualOverrides, refreshKey, appSettings.theme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h]);
 
   useEffect(() => {
     if (activeChart?.kind === "scatter") setScatterView({ scale: 1, panX: 0, panY: 0 });
@@ -1120,102 +1657,156 @@ export function ChartView() {
   // --- Empty states ---
   if (!selectedFile) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-4 px-6">
+      <div className="relative flex flex-col items-center justify-center h-full gap-4 px-6">
         <div className="w-16 h-16 rounded-xl bg-loom-elevated border border-loom-border flex items-center justify-center text-loom-muted">
           <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
             <path d="M3 3v18h18M7 16l4-8 4 4 4-8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
         <div className="text-center max-w-sm">
-          <p className="text-sm font-medium text-loom-text">No file selected</p>
-          <p className="text-xs text-loom-muted mt-1">Select a file from the sidebar to see chart suggestions and visualize your data.</p>
-          <p className="text-2xs text-loom-muted mt-3">Use Data & sources to add a folder or load CSV files.</p>
+          <p className="text-sm font-medium text-loom-text">Nothing loaded yet</p>
+          <p className="text-xs text-loom-muted mt-1">
+            Open Data &amp; sources and tap Connect on a feed (Hacker News, quakes, crypto…) — it jumps straight into a chart.
+          </p>
+          <button
+            type="button"
+            className="loom-btn-primary text-xs px-3 py-2 mt-4"
+            onClick={() => {
+              const s = useLoomStore.getState();
+              if (!s.sidebarOpen) s.toggleSidebar();
+              s.setDataRegionOpen(true);
+              s.setDataSourcesExpanded(true);
+            }}
+          >
+            Open data sources
+          </button>
         </div>
+        {/* Quiet re-entry for the live-feed discover modal */}
+        <button
+          type="button"
+          onClick={() => {
+            requestDiscoverScan();
+            setToast("Scanning live feeds…");
+          }}
+          className="absolute bottom-3 right-3 text-2xs text-loom-muted/50 hover:text-loom-accent transition-colors px-1.5 py-1 rounded"
+          title="Scan live feeds for something chartable"
+          aria-label="What’s interesting right now"
+        >
+          ✦ ideas
+        </button>
       </div>
     );
   }
 
-  // Always show suggestions panel when a file is selected. Expand (first) stays visible; clicking it expands suggestions into the full view.
+  // Always show suggestions panel when a file is selected. Expand toggles full-browse grid.
   const suggestionHeader = (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-loom-border flex-shrink-0 flex-wrap">
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-loom-text">Suggestions</p>
-        <p className="text-2xs text-loom-muted">{chartRecs.length} charts found</p>
+    <div className="flex flex-col gap-2 px-2.5 py-2 border-b border-loom-border flex-shrink-0">
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-loom-text leading-tight">
+            {isMobile && !suggestionsExpanded ? "Charts" : "Suggestions"}
+          </p>
+          <p className="text-2xs text-loom-muted mt-0.5 tabular-nums">
+            {chartRecs.length} {chartRecs.length === 1 ? "chart" : "charts"}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {isMobile && (
+            <button
+              type="button"
+              onClick={openChartEditor}
+              className="text-2xs py-1.5 px-2.5 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium min-h-8"
+            >
+              Edit
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
+            className={`
+              loom-btn-ghost p-1.5 rounded border transition-colors min-h-8 min-w-8 flex items-center justify-center
+              ${suggestionsExpanded
+                ? "border-loom-accent bg-loom-accent/10 text-loom-accent"
+                : "border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-accent hover:bg-loom-accent/10"}
+            `}
+            title={suggestionsExpanded ? "Back to chart" : "Browse all suggestions"}
+            aria-label={suggestionsExpanded ? "Back to chart" : "Browse all suggestions"}
+            aria-pressed={suggestionsExpanded}
+          >
+            {suggestionsExpanded ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+              </svg>
+            )}
+          </button>
+        </div>
       </div>
-      {/* Expand first so it's never cut off; icon-only to save space */}
-      <button
-        type="button"
-        onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
-        className="loom-btn-ghost p-2 rounded border border-loom-border hover:border-loom-accent hover:bg-loom-accent/10 transition-colors shrink-0"
-        title={suggestionsExpanded ? "Collapse to sidebar" : "Expand to full grid — suggestions fill the view"}
-        aria-label={suggestionsExpanded ? "Collapse" : "Expand"}
-      >
-        {suggestionsExpanded ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M18 15l-6-6-6 6" /></svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /></svg>
-        )}
-      </button>
-      {bestSuggestion && (
-        <button
-          type="button"
-          onClick={handleSuggestChart}
-          className="text-2xs py-1.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 transition-colors font-medium shrink-0"
-          title="Apply best recommendation by score"
+
+      {/* Actions: full stack in desktop rail; hide on compact mobile rail to keep thumbnails usable */}
+      {(!isMobile || suggestionsExpanded) && (
+        <div
+          className={`
+            gap-1.5
+            ${suggestionsExpanded
+              ? "flex flex-wrap items-center"
+              : "grid grid-cols-1"}
+          `}
         >
-          Suggest chart
-        </button>
+          {bestSuggestion && (
+            <button
+              type="button"
+              onClick={handleSuggestChart}
+              className={`
+                text-2xs py-1.5 px-2 rounded border border-loom-accent/45 bg-loom-accent/10 text-loom-accent
+                hover:bg-loom-accent/20 transition-colors font-medium text-center
+                ${suggestionsExpanded ? "shrink-0" : "w-full"}
+              `}
+              title={`Apply best by score: ${bestSuggestion.title}`}
+            >
+              Suggest chart
+            </button>
+          )}
+          <div
+            className={`
+              gap-1.5
+              ${suggestionsExpanded ? "flex flex-wrap" : "grid grid-cols-2"}
+            `}
+          >
+            <button
+              type="button"
+              onClick={() => void handleTellStory()}
+              disabled={!selectedFile || chartRecs.length === 0}
+              className="text-2xs py-1.5 px-1.5 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-accent transition-colors font-medium text-center disabled:opacity-45 disabled:cursor-not-allowed"
+              title="Build a multi-chart dashboard story (trend → breakdown → distribution → relationship)"
+            >
+              Tell a story
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSuggestWithAI()}
+              disabled={aiSuggesting || columnStats.length === 0}
+              className="text-2xs py-1.5 px-1.5 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text hover:bg-loom-accent/10 transition-colors font-medium text-center disabled:opacity-45 disabled:cursor-not-allowed"
+              title="Local Ollama chart suggestion (requires ollama serve)"
+            >
+              {aiSuggesting ? "Asking…" : "Suggest with AI"}
+            </button>
+          </div>
+        </div>
       )}
-      <button
-        type="button"
-        onClick={async () => {
-          if (!selectedFile) {
-            setToast("Select a file first");
-            return;
-          }
-          const story = recommendStorySequence(columnStats, sampleRows, selectedFile.name);
-          if (story.charts.length === 0) {
-            setToast("Not enough data variety to build a story");
-            return;
-          }
-          const id = createStoryDashboard(selectedFile.path, selectedFile.name, story.title, story.charts, sampleRows);
-          if (!id) {
-            setToast("Could not create story dashboard");
-            return;
-          }
-          const dashboard = useLoomStore.getState().dashboards.find((d) => d.id === id);
-          const chartIds = dashboard?.slots.filter((s) => s.viewType === "chart").map((s) => s.viewId) ?? [];
-          if (chartIds.length > 0) {
-            setToast("Capturing chart previews…");
-            await captureStoryDashboardPreviews(id);
-          } else {
-            useLoomStore.getState().setDashboardsExpanded(true);
-          }
-          setPanelTab("dashboards");
-          setToast(`Created "${story.title}" with ${story.charts.length} charts`);
-        }}
-        disabled={!selectedFile || chartRecs.length === 0}
-        className="text-2xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-accent transition-colors font-medium shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-        title="Create a dashboard of charts that tell a story (trend → breakdown → distribution → relationship)"
-      >
-        Tell a story
-      </button>
-      <button
-        type="button"
-        onClick={handleSuggestWithAI}
-        disabled={aiSuggesting || columnStats.length === 0}
-        className="text-2xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text hover:bg-loom-accent/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-        title="Use local Ollama model to suggest a chart (requires Ollama running)"
-      >
-        {aiSuggesting ? "…" : "Suggest with AI"}
-      </button>
     </div>
   );
 
   if (chartRecs.length === 0) {
     return (
-      <div className="flex h-full animate-fade-in">
-        <div className="w-[220px] flex-shrink-0 border-r border-loom-border bg-loom-surface flex flex-col overflow-hidden">
+      <div className="flex h-full animate-fade-in flex-col md:flex-row">
+        <div className="hidden md:flex w-[220px] flex-shrink-0 border-r border-loom-border bg-loom-surface flex-col overflow-hidden">
           {suggestionHeader}
           <div className="flex-1 flex items-center justify-center p-4">
             <div className="text-center">
@@ -1224,29 +1815,40 @@ export function ChartView() {
             </div>
           </div>
         </div>
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <p className="text-sm text-loom-muted">Select encodings in the Chart tab to build a chart</p>
-          </div>
+        <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
+          <p className="text-sm text-loom-muted text-center">Build a chart with Encoding in the Chart panel</p>
+          <button type="button" onClick={openChartEditor} className="loom-btn-primary text-xs py-2 px-4 min-h-10">
+            Open Chart editor
+          </button>
         </div>
       </div>
     );
   }
 
+  const mobileRail = isMobile && !suggestionsExpanded;
+
   return (
-    <div className={`flex h-full animate-fade-in ${suggestionsExpanded ? "flex-col" : ""}`}>
-      {/* Recommendation panel — narrow sidebar or expanded full-width grid */}
+    <div className={`flex h-full animate-fade-in ${suggestionsExpanded || isMobile ? "flex-col" : ""}`}>
+      {/* Recommendation panel — desktop sidebar, mobile bottom rail, or full browse grid */}
       <div
         className={`
-          border-r border-loom-border bg-loom-surface overflow-hidden transition-[width] duration-200 ease-out
-          ${suggestionsExpanded ? "w-full flex-1 flex flex-col min-h-0 border-r-0 border-b border-loom-border" : "w-[220px] flex-shrink-0 overflow-y-auto"}
+          bg-loom-surface overflow-hidden transition-[width,height] duration-200 ease-out
+          ${suggestionsExpanded
+            ? "order-1 w-full flex-1 flex flex-col min-h-0 border-b border-loom-border"
+            : mobileRail
+              ? "order-2 shrink-0 border-t border-loom-border flex flex-col max-h-[min(42%,14.5rem)]"
+              : "w-[220px] flex-shrink-0 overflow-y-auto border-r border-loom-border"}
         `}
       >
         {suggestionHeader}
         <div
           className={`
-            overflow-y-auto flex-1 min-h-0
-            ${suggestionsExpanded ? "p-4 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4 content-start" : "p-2 grid grid-cols-1 gap-2"}
+            flex-1 min-h-0
+            ${suggestionsExpanded
+              ? "overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 content-start"
+              : mobileRail
+                ? "overflow-x-auto overflow-y-hidden flex flex-row gap-2 px-2 pb-2 scrollbar-none snap-x snap-mandatory"
+                : "overflow-y-auto p-2 grid grid-cols-1 gap-2"}
           `}
         >
           {chartRecs.map((rec) => (
@@ -1255,23 +1857,25 @@ export function ChartView() {
               rec={rec}
               data={sampleRows}
               isActive={activeChart?.id === rec.id}
-              onClick={() => {
-                setActiveChart(rec);
-                setPanelTab("chart");
-              }}
+              compact={mobileRail}
+              onClick={() => selectRecommendation(rec)}
             />
           ))}
         </div>
       </div>
 
-      {/* Full-size chart — always in DOM so refs/ResizeObserver stay valid; zero width when expanded */}
+      {/* Full-size chart — always in DOM so refs/ResizeObserver stay valid; zero size when browsing all */}
       <div
         className={`
-          flex flex-col min-w-0 overflow-hidden transition-[width] duration-200 ease-out
-          ${suggestionsExpanded ? "w-0 flex-shrink-0" : "flex-1"}
+          flex flex-col min-w-0 overflow-hidden transition-[width,height] duration-200 ease-out
+          ${suggestionsExpanded
+            ? "w-0 h-0 flex-shrink-0 overflow-hidden pointer-events-none"
+            : isMobile
+              ? "order-1 flex-1 min-h-0"
+              : "flex-1"}
         `}
       >
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-loom-border bg-loom-surface/50">
+        <div className="flex items-center gap-2 sm:gap-3 px-2 sm:px-4 py-2 border-b border-loom-border bg-loom-surface/50 flex-wrap">
           <div className="flex flex-col gap-0.5 min-w-0 flex-1">
             <div
               className="flex items-center gap-2 min-w-0 group"
@@ -1336,17 +1940,32 @@ export function ChartView() {
           </div>
           <div className="flex-1 min-w-2" />
           {activeChart && (
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap justify-end">
+              {isMobile && (
+                <button
+                  type="button"
+                  onClick={openChartEditor}
+                  className="px-2 py-1 text-2xs font-medium rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent min-h-8"
+                >
+                  Encoding
+                </button>
+              )}
               {activeChart.kind === "scatter" && (
-                <div className="flex items-center gap-0.5 mr-1">
-                  {(["pan", "crosshair", "lasso"] as const).map((mode) => (
+                <div className="flex items-center gap-0.5 mr-0.5 sm:mr-1" role="group" aria-label="Chart interaction mode">
+                  {([
+                    { mode: "pan" as const, label: "Pan", tip: "Drag to pan · wheel/pinch to zoom · Shift+drag brush (V)" },
+                    { mode: "crosshair" as const, label: "Cross", tip: "Read values · click to pin ruler (C)" },
+                    { mode: "lasso" as const, label: "Lasso", tip: "Draw to select points (G)" },
+                  ]).map(({ mode, label, tip }) => (
                     <button
                       key={mode}
                       type="button"
                       onClick={() => setChartInteractionMode(mode)}
-                      className={`px-1.5 py-0.5 text-2xs rounded ${chartInteractionMode === mode ? "bg-loom-accent/25 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
+                      aria-pressed={chartInteractionMode === mode}
+                      title={tip}
+                      className={`px-2 py-1 sm:px-1.5 sm:py-0.5 text-2xs rounded min-h-8 sm:min-h-0 ${chartInteractionMode === mode ? "bg-loom-accent/25 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
                     >
-                      {mode === "pan" ? "Pan" : mode === "crosshair" ? "Cross" : "Lasso"}
+                      {label}
                     </button>
                   ))}
                 </div>
@@ -1354,7 +1973,7 @@ export function ChartView() {
               <button
                 type="button"
                 onClick={handleRefresh}
-                className="px-1.5 py-0.5 text-2xs font-mono text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded"
+                className="px-2 py-1 sm:px-1.5 sm:py-0.5 text-2xs font-mono text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded min-h-8 sm:min-h-0"
                 title="Redraw chart"
               >
                 Refresh
@@ -1388,25 +2007,94 @@ export function ChartView() {
                       }
                     });
                   }}
-                  className="px-1.5 py-0.5 text-2xs text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded"
+                  className="hidden sm:inline-flex px-1.5 py-0.5 text-2xs text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded"
                   title="Save this chart for dashboards"
                 >
                   Save view
                 </button>
               )}
-              <span className="loom-badge text-2xs" title={aggregationHint || undefined}>{useWebGPUScatter ? "GPU" : "2D"}</span>
-              <span className="loom-badge text-2xs max-w-[200px] truncate" title={`${sampleHonestyLabel}${aggregationHint ? ` · ${aggregationHint}` : ""}`}>
+              <span className="loom-badge text-2xs hidden sm:inline-flex" title={aggregationHint || undefined}>{useWebGPUScatter ? "GPU" : "Canvas"}</span>
+              {!useWebGPUScatter &&
+                (!!chartVisualOverrides.markStroke ||
+                  !!chartVisualOverrides.glowEnabled ||
+                  (chartVisualOverrides.markJitter ?? 0) > 0 ||
+                  (!!chartVisualOverrides.markShape && chartVisualOverrides.markShape !== "circle")) && (
+                <span className="text-2xs text-loom-muted hidden md:inline" title="Mark style / glow / stroke use the Canvas renderer">
+                  Canvas look
+                </span>
+              )}
+              <span className="loom-badge text-2xs max-w-[120px] sm:max-w-[200px] truncate" title={`${sampleHonestyLabel}${aggregationHint ? ` · ${aggregationHint}` : ""}`}>
                 {sampleHonestyLabel || "—"}
               </span>
+              {densityHint && (
+                <>
+                  <span
+                    className="loom-badge text-2xs text-loom-accent border-loom-accent/30 max-w-[140px] truncate"
+                    title="Point size and opacity scale down when many rows would overplot. Zoom in to reveal more points."
+                  >
+                    {densityHint}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={applyClarity}
+                    className="px-2 py-1 text-2xs font-medium rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent min-h-8"
+                    title="One-click Clarity preset: small marks, low opacity, no stroke"
+                  >
+                    Clarity
+                  </button>
+                </>
+              )}
             </div>
           )}
         </div>
 
-        <div ref={containerRef} className="flex-1 relative min-h-0 min-h-[200px]">
+        <div
+          ref={stageHostRef}
+          className="flex-1 relative min-h-0 min-h-[200px] flex items-center justify-center px-2 py-2"
+          style={{
+            // Letterbox matte — reads as a stage, not a broken black void
+            backgroundColor: "color-mix(in srgb, var(--loom-bg) 88%, var(--loom-border))",
+            backgroundImage:
+              "radial-gradient(color-mix(in srgb, var(--loom-border) 55%, transparent) 0.6px, transparent 0.6px)",
+            backgroundSize: "10px 10px",
+          }}
+        >
+          {(chartAspect !== "free" || chartDevice !== "desktop" || (appSettings.chartDevice ?? "auto") !== "auto") && (
+            <div className="absolute top-1.5 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
+              <span className="text-2xs font-mono text-loom-muted bg-loom-surface/90 border border-loom-border/60 rounded px-1.5 py-0.5 shadow-sm">
+                {aspectLabel(chartAspect)}
+                {" · "}
+                {chartDevice}
+                {" · "}
+                {chartFrameSize.width}×{chartFrameSize.height}
+              </span>
+            </div>
+          )}
+          <div
+            ref={containerRef}
+            className={`relative overflow-hidden ${
+              chartFrameSize.aspectLocked || chartDevice !== "desktop"
+                ? "rounded-md border border-loom-border shadow-sm"
+                : ""
+            }`}
+            style={{
+              width: chartFrameSize.width,
+              height: chartFrameSize.height,
+              maxWidth: "100%",
+              maxHeight: "100%",
+              background: themeUi.bg,
+            }}
+          >
           <canvas
             ref={canvasRef}
             className="absolute inset-0 w-full h-full"
-            style={{ zIndex: useWebGPUScatter ? 1 : 0 }}
+            style={{
+              zIndex: useWebGPUScatter ? 1 : 0,
+              // Default WebGPU clear is near-black; hide when Canvas 2D owns the frame
+              // so aspect/device resizes never flash a black slab through a cleared 2D layer.
+              visibility: useWebGPUScatter ? "visible" : "hidden",
+              pointerEvents: useWebGPUScatter ? "auto" : "none",
+            }}
           />
           <canvas
             ref={canvas2DRef}
@@ -1433,7 +2121,10 @@ export function ChartView() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setPanelTab("chart")}
+                    onClick={() => {
+                      setPanelTab("chart");
+                      if (!useLoomStore.getState().panelOpen) useLoomStore.getState().togglePanel();
+                    }}
                     className="text-2xs py-1.5 px-3 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text"
                   >
                     Open Encoding
@@ -1446,17 +2137,88 @@ export function ChartView() {
             <div
               ref={overlayRef}
               className="absolute inset-0 w-full h-full"
-              style={{ zIndex: 3, cursor: chartInteractionMode === "crosshair" ? "crosshair" : chartInteractionMode === "lasso" ? "default" : "grab" }}
+              tabIndex={0}
+              role="application"
+              aria-label="Scatter chart. Two-finger scroll pans, pinch or mouse wheel zooms toward cursor. Arrows pan, plus and minus zoom, zero resets. V pan, C crosshair, G lasso. Shift-drag to brush."
+              style={{
+                zIndex: 3,
+                touchAction: "none",
+                cursor:
+                  chartInteractionMode === "crosshair"
+                    ? "crosshair"
+                    : chartInteractionMode === "lasso"
+                      ? "crosshair"
+                      : isPanning
+                        ? "grabbing"
+                        : "grab",
+              }}
               onMouseMove={handleScatterMouseMove}
               onMouseLeave={() => {
                 handleScatterPointerLeave();
                 panStartRef.current = null;
+                setIsPanning(false);
                 if (brushStartRef.current) { brushStartRef.current = null; setBrushRect(null); setLassoPoints([]); }
                 setCrosshairPos(null);
               }}
               onMouseDown={handleScatterMouseDown}
               onMouseUp={handleScatterMouseUp}
               onMouseOut={handleScatterMouseUp}
+              onTouchStart={(e) => {
+                if (e.touches.length === 2) {
+                  panStartRef.current = null;
+                  setIsPanning(false);
+                  const [a, b] = [e.touches[0], e.touches[1]];
+                  pinchRef.current = {
+                    dist: touchDistance(a, b),
+                    scale: scatterView.scale,
+                    midX: (a.clientX + b.clientX) / 2,
+                    midY: (a.clientY + b.clientY) / 2,
+                  };
+                } else if (e.touches.length === 1 && chartInteractionMode === "pan") {
+                  const t = e.touches[0];
+                  panStartRef.current = { x: t.clientX, y: t.clientY };
+                  setIsPanning(true);
+                }
+              }}
+              onTouchMove={(e) => {
+                if (e.touches.length === 2 && pinchRef.current) {
+                  e.preventDefault();
+                  const [a, b] = [e.touches[0], e.touches[1]];
+                  const dist = touchDistance(a, b);
+                  if (pinchRef.current.dist < 1) return;
+                  const factor = dist / pinchRef.current.dist;
+                  const midX = (a.clientX + b.clientX) / 2;
+                  const midY = (a.clientY + b.clientY) / 2;
+                  applyPinchZoom(midX, midY, pinchRef.current.scale * factor, pinchRef.current.scale);
+                } else if (e.touches.length === 1 && panStartRef.current) {
+                  e.preventDefault();
+                  const t = e.touches[0];
+                  const dx = t.clientX - panStartRef.current.x;
+                  const dy = t.clientY - panStartRef.current.y;
+                  panStartRef.current = { x: t.clientX, y: t.clientY };
+                  const d = scatterDataRef.current;
+                  if (d) {
+                    const cw = d.w - 2 * d.pad;
+                    const ch = d.h - 2 * d.pad;
+                    const dataPerPxX = cw > 0 ? (d.xMax - d.xMin) / cw : 0;
+                    const dataPerPxY = ch > 0 ? (d.yMax - d.yMin) / ch : 0;
+                    setScatterView((v) => ({
+                      ...v,
+                      panX: v.panX + (dx * dataPerPxX) / v.scale,
+                      panY: v.panY - (dy * dataPerPxY) / v.scale,
+                    }));
+                  }
+                }
+              }}
+              onTouchEnd={() => {
+                if (pinchRef.current) pinchRef.current = null;
+                panStartRef.current = null;
+                setIsPanning(false);
+              }}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                setScatterView({ scale: 1, panX: 0, panY: 0 });
+              }}
               onClick={(e) => {
                 if (chartInteractionMode === "pan" && scatterTooltip && activeChart) {
                   addPinnedTooltip({ chartId: activeChart.id, x: scatterTooltip.clientX, y: scatterTooltip.clientY, rowIndex: scatterTooltip.rowIndex, row: scatterTooltip.row, columns: scatterTooltip.columns });
@@ -1572,6 +2334,7 @@ export function ChartView() {
               {a.text}
             </div>
           ))}
+          </div>
         </div>
         {(scatterTooltip || chartTooltip) && (
           <div
@@ -1634,7 +2397,11 @@ export function ChartView() {
 
 export interface ChartRenderOpts {
   colors: string[];
+  /** Full continuous stops for heatmap / choropleth interpolation. */
+  continuousStops?: string[];
   opacity: number;
+  /** True when Visual → opacity was set explicitly (skip auto density opacity). */
+  opacityUserSet?: boolean;
   pointSize: number;
   // Typography
   fontFamily?: string;
@@ -1670,6 +2437,16 @@ export interface ChartRenderOpts {
   blendMode?: string;
   glowEnabled?: boolean;
   glowIntensity?: number;
+  // Look spectrum
+  chartDetail?: string;
+  markMotif?: string;
+  axisStyle?: string;
+  emphasisStyle?: string;
+  ghostEnabled?: boolean;
+  ghostWeight?: string;
+  ghostPlace?: string;
+  titleLayout?: string;
+  chartFrame?: string;
   // Theme-derived (so chart bg/title/axes follow app theme)
   themeBg?: string;
   themeText?: string;
@@ -1806,45 +2583,9 @@ function jitter(idx: number, amount: number): number {
   return jitterSeed.get(idx)! * amount;
 }
 
-// --- Background presets (themeBg from app theme when provided) ---
+// --- Background presets — see chartLooks.drawChartBackground ---
 function drawBackground(ctx: CanvasRenderingContext2D, w: number, h: number, style?: string, themeBg?: string) {
-  const bg = themeBg ?? "#0a0a0c";
-  switch (style) {
-    case "gradient": {
-      const grad = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.max(w, h) * 0.7);
-      grad.addColorStop(0, bg);
-      grad.addColorStop(1, blendTowardBlack(bg, 0.6));
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, w, h);
-      break;
-    }
-    case "paper": {
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, w, h);
-      ctx.globalAlpha = 0.03;
-      for (let i = 0; i < 2000; i++) {
-        const x = Math.random() * w, y = Math.random() * h;
-        ctx.fillStyle = Math.random() > 0.5 ? "#ffffff" : "#000000";
-        ctx.fillRect(x, y, 1, 1);
-      }
-      ctx.globalAlpha = 1;
-      break;
-    }
-    case "transparent":
-      ctx.clearRect(0, 0, w, h);
-      break;
-    default:
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, w, h);
-  }
-}
-function blendTowardBlack(hex: string, amount: number): string {
-  const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (!m) return hex;
-  const r = Math.round(parseInt(m[1], 16) * (1 - amount));
-  const g = Math.round(parseInt(m[2], 16) * (1 - amount));
-  const b = Math.round(parseInt(m[3], 16) * (1 - amount));
-  return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+  drawChartBackground(ctx, w, h, style, themeBg);
 }
 
 // --- Legend renderer (theme colors optional) ---
@@ -1856,17 +2597,23 @@ function drawLegend(ctx: CanvasRenderingContext2D, catMap: Map<string, number>, 
   const legendW = 120;
   const legendH = entries.length * lineH + 12;
 
+  // Float inside the plot so chrome never clips at the canvas edge
   let lx: number, ly: number;
   switch (position) {
     case "bottom":
-      lx = pad; ly = h - pad + 24;
+      lx = Math.round((w - legendW) / 2);
+      ly = h - pad - legendH - 6;
       break;
     case "right":
-      lx = w - legendW - 8; ly = pad + 20;
+      lx = w - pad - legendW - 6;
+      ly = Math.round(pad + (h - 2 * pad - legendH) / 2);
       break;
     default: // top-right
-      lx = w - legendW - 8; ly = pad;
+      lx = w - pad - legendW - 6;
+      ly = pad + 6;
   }
+  lx = Math.max(4, Math.min(w - legendW - 4, lx));
+  ly = Math.max(4, Math.min(h - legendH - 4, ly));
 
   ctx.globalAlpha = 0.85;
   ctx.fillStyle = themeBg;
@@ -2086,8 +2833,6 @@ function renderFullScatter(
 ) {
   if (yi < 0) return;
   const cols = opts?.colors ?? DEFAULT_COLORS;
-  const baseAlpha = opts?.opacity ?? 0.7;
-  const baseRadius = Math.max(1.5, (opts?.pointSize ?? 12) / 4);
   const [dataXMin, dataXMax] = numRange(rows, xi);
   const [dataYMin, dataYMax] = numRange(rows, yi);
   const xMin = viewBounds?.xMin ?? dataXMin;
@@ -2107,6 +2852,27 @@ function renderFullScatter(
   const getOpacityNorm = opacityIdx >= 0 ? encodingNorm(rows, opacityIdx) : null;
   const glowIntensity = opts?.glowIntensity ?? 8;
 
+  const plotW = Math.max(1, w - 2 * pad);
+  const plotH = Math.max(1, h - 2 * pad);
+  let nValid = 0;
+  for (const r of rows) {
+    const x = Number(r[xi]), y = Number(r[yi]);
+    if (!isNaN(x) && !isNaN(y)) nValid++;
+  }
+  const marks = densityAwarePointMarks({
+    n: nValid,
+    plotW,
+    plotH,
+    hasSizeEncoding: sizeIdx >= 0,
+    sizeScale: opts?.sizeScale ?? 1,
+    pointSize: opts?.pointSize ?? 12,
+    opacity: opts?.opacity ?? 0.7,
+    opacityUserSet: opts?.opacityUserSet,
+  });
+  const baseAlpha = marks.opacity;
+  const baseRadius = marks.minR;
+  const maxSizeRadius = marks.maxR;
+
   drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
 
   const shape = opts?.markShape ?? "circle";
@@ -2123,15 +2889,14 @@ function renderFullScatter(
       cat = catMap.get(k)!;
     }
     let radius = baseRadius;
-    const scale = opts?.sizeScale ?? 1;
     if (sizeIdx >= 0) {
       const s = Number(r[sizeIdx]);
       if (!isNaN(s)) {
         const t = (s - sizeMin) / sizeRange;
-        radius = Math.max(1, baseRadius * (0.4 + 1.2 * t) * scale);
+        radius = baseRadius + Math.sqrt(Math.max(0, Math.min(1, t))) * (maxSizeRadius - baseRadius);
       }
     } else {
-      radius = baseRadius * scale;
+      radius = (baseRadius + maxSizeRadius) / 2;
     }
     let sx = pad + ((x - xMin) / (xMax - xMin)) * (w - 2 * pad);
     let sy = h - pad - ((y - yMin) / (yMax - yMin)) * (h - 2 * pad);
@@ -2351,11 +3116,10 @@ function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown[][], x
 }
 
 function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
-  if (yi < 0) return;
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.8;
   const lineW = opts?.lineWidth ?? 1.5;
-  const agg = opts?.yAggregate ?? "mean";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "mean");
   const sorted = [...rows].sort((a, b) => String(a[xi]).localeCompare(String(b[xi])));
 
   const aggregateByX = (gRows: unknown[][]): { xKey: string; yVal: number }[] => {
@@ -2363,11 +3127,18 @@ function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
     for (const r of gRows) {
       const xKey = String(r[xi]);
       if (!byX.has(xKey)) byX.set(xKey, []);
-      const v = Number(r[yi]);
-      if (!isNaN(v)) byX.get(xKey)!.push(v);
+      if (yi < 0) {
+        byX.get(xKey)!.push(1);
+      } else {
+        const v = Number(r[yi]);
+        if (!isNaN(v)) byX.get(xKey)!.push(v);
+      }
     }
     const xKeys = [...byX.keys()].sort((a, b) => String(a).localeCompare(String(b)));
-    return xKeys.map((xKey) => ({ xKey, yVal: aggregateValues(byX.get(xKey) ?? [], agg) }));
+    return xKeys.map((xKey) => ({
+      xKey,
+      yVal: yi < 0 ? (byX.get(xKey)?.length ?? 0) : aggregateValues(byX.get(xKey) ?? [], agg),
+    }));
   };
 
   const series = aggregateByX(sorted);
@@ -2426,23 +3197,76 @@ function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
   drawAxisTicks(ctx, 0, 1, yMin, yMax, w, h, pad, opts);
 }
 
-function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, _opts?: ChartRenderOpts) {
+function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const plotW = Math.max(1, w - 2 * pad);
+  const plotH = Math.max(1, h - 2 * pad - 20);
+  const stops = opts?.continuousStops?.length
+    ? opts.continuousStops
+    : (opts?.colors ?? DEFAULT_COLORS);
+
+  // Prefer quantitative density bins when both axes look numeric
+  let numericHits = 0;
+  const probe = Math.min(rows.length, 40);
+  for (let i = 0; i < probe; i++) {
+    const x = Number(rows[i]![xi]);
+    const y = Number(rows[i]![yi]);
+    if (!isNaN(x) && !isNaN(y)) numericHits++;
+  }
+  if (probe > 0 && numericHits / probe >= 0.7) {
+    const [xMin, xMax] = numRange(rows, xi);
+    const [yMin, yMax] = numRange(rows, yi);
+    const xRange = xMax - xMin || 1;
+    const yRange = yMax - yMin || 1;
+    const binsX = Math.min(36, Math.max(12, Math.floor(plotW / 18)));
+    const binsY = Math.min(28, Math.max(10, Math.floor(plotH / 18)));
+    const grid = new Float32Array(binsX * binsY);
+    for (const r of rows) {
+      const x = Number(r[xi]);
+      const y = Number(r[yi]);
+      if (isNaN(x) || isNaN(y)) continue;
+      const bx = Math.min(binsX - 1, Math.max(0, Math.floor(((x - xMin) / xRange) * binsX)));
+      const by = Math.min(binsY - 1, Math.max(0, Math.floor(((y - yMin) / yRange) * binsY)));
+      grid[by * binsX + bx]! += 1;
+    }
+    let maxC = 1;
+    for (let i = 0; i < grid.length; i++) maxC = Math.max(maxC, grid[i]!);
+    const cellW = plotW / binsX;
+    const cellH = plotH / binsY;
+    for (let by = 0; by < binsY; by++) {
+      for (let bx = 0; bx < binsX; bx++) {
+        const c = grid[by * binsX + bx]!;
+        if (c <= 0) continue;
+        const t = Math.sqrt(c / maxC);
+        ctx.globalAlpha = 0.2 + t * 0.8;
+        ctx.fillStyle = sampleContinuous(stops, t);
+        const py = pad + 20 + (binsY - 1 - by) * cellH;
+        ctx.fillRect(pad + bx * cellW, py, Math.max(1, cellW - 0.5), Math.max(1, cellH - 0.5));
+      }
+    }
+    ctx.globalAlpha = 1;
+    drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
+    return;
+  }
+
   const xLabels = [...new Set(rows.map(r => String(r[xi])))].slice(0, 20);
   const yLabels = [...new Set(rows.map(r => String(r[yi])))].slice(0, 20);
   const counts = new Map<string, number>();
   for (const r of rows) { const k = `${r[xi]}|${r[yi]}`; counts.set(k, (counts.get(k) ?? 0) + 1); }
   const maxC = Math.max(...counts.values(), 1);
-  const cellW = (w - 2 * pad) / xLabels.length;
-  const cellH = (h - 2 * pad) / yLabels.length;
+  const cellW = plotW / Math.max(1, xLabels.length);
+  const cellH = plotH / Math.max(1, yLabels.length);
 
   xLabels.forEach((xL, xi2) => {
     yLabels.forEach((yL, yi2) => {
       const c = counts.get(`${xL}|${yL}`) ?? 0;
+      if (c <= 0) return;
       const t = c / maxC;
-      ctx.fillStyle = `rgba(108, 92, 231, ${0.08 + t * 0.88})`;
+      ctx.globalAlpha = 0.15 + t * 0.85;
+      ctx.fillStyle = sampleContinuous(stops, t);
       ctx.fillRect(pad + xi2 * cellW, pad + 20 + yi2 * cellH, cellW - 1, cellH - 1);
     });
   });
+  ctx.globalAlpha = 1;
 }
 
 function renderFullStrip(
@@ -2575,29 +3399,37 @@ function renderFullBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
 function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.75;
-  const agg = opts?.yAggregate ?? "sum";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
   const sorted = [...rows].sort((a, b) => String(a[xi]).localeCompare(String(b[xi])));
   const plotH = h - 2 * pad - 20;
   const plotW = w - 2 * pad;
   let maxStack = 0;
+
+  const pushVal = (bucket: number[], r: unknown[]) => {
+    if (yi < 0) {
+      bucket.push(1);
+      return;
+    }
+    const v = Number(r[yi]);
+    if (!isNaN(v)) bucket.push(v);
+  };
+  const reduceBucket = (vals: number[]) => (yi < 0 ? vals.length : aggregateValues(vals, agg));
 
   if (ci >= 0) {
     const xToGroupVals = new Map<string, Map<string, number[]>>();
     for (const r of sorted) {
       const xKey = String(r[xi]);
       const g = String(r[ci]);
-      const v = Number(r[yi]);
-      if (isNaN(v)) continue;
       if (!xToGroupVals.has(xKey)) xToGroupVals.set(xKey, new Map());
       const gm = xToGroupVals.get(xKey)!;
       if (!gm.has(g)) gm.set(g, []);
-      gm.get(g)!.push(v);
+      pushVal(gm.get(g)!, r);
     }
     const xToGroupSums = new Map<string, Map<string, number>>();
     for (const [xKey, groupMap] of xToGroupVals) {
       xToGroupSums.set(xKey, new Map());
       for (const [g, vals] of groupMap) {
-        xToGroupSums.get(xKey)!.set(g, aggregateValues(vals, agg));
+        xToGroupSums.get(xKey)!.set(g, reduceBucket(vals));
       }
     }
     const xKeys = [...xToGroupSums.keys()].sort((a, b) => String(a).localeCompare(String(b)));
@@ -2640,11 +3472,10 @@ function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
     for (const r of sorted) {
       const xKey = String(r[xi]);
       if (!byX.has(xKey)) byX.set(xKey, []);
-      const v = Number(r[yi]);
-      if (!isNaN(v)) byX.get(xKey)!.push(v);
+      pushVal(byX.get(xKey)!, r);
     }
     const xKeys = [...byX.keys()].sort((a, b) => String(a).localeCompare(String(b)));
-    const series = xKeys.map((xKey) => aggregateValues(byX.get(xKey) ?? [], agg));
+    const series = xKeys.map((xKey) => reduceBucket(byX.get(xKey) ?? []));
     if (series.length === 0) return;
     const yMin = Math.min(...series);
     const yMax = Math.max(...series);
@@ -2689,48 +3520,68 @@ function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
   const total = entries.reduce((s, [, v]) => s + v, 0);
   if (total === 0) return;
 
-  const cx = w / 2, cy = (h - pad - 20) / 2;
-  const radius = Math.min(w, h - pad - 30) / 2 - 20;
+  const plotW = w - 2 * pad;
+  const plotH = h - 2 * pad;
+  const legendW = Math.min(120, plotW * 0.28);
+  const cx = pad + (plotW - legendW) / 2;
+  const cy = pad + plotH / 2;
+  const radius = Math.max(28, Math.min(plotW - legendW, plotH) / 2 - 6);
+  const innerR = radius * 0.42;
 
   let start = -Math.PI / 2;
-  entries.forEach(([label, val], i) => {
+  entries.forEach(([, val], i) => {
     const sweep = (val / total) * Math.PI * 2;
     ctx.fillStyle = cols[i % cols.length];
     ctx.globalAlpha = alpha;
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, radius, start, start + sweep);
+    ctx.arc(cx, cy, innerR, start + sweep, start, true);
     ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = opts?.themeBorder ?? "#1a1a1f";
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = opts?.themeBg ?? "#1a1a1f";
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 1;
     ctx.stroke();
     start += sweep;
   });
+
   if (opts?.showDataLabels) {
     ctx.font = `9px '${opts.fontFamily ?? "Inter"}', sans-serif`;
-    ctx.fillStyle = opts.axisLabelColor ?? "#6b6b78";
     ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
     let startLbl = -Math.PI / 2;
-    entries.forEach(([label, val], i) => {
+    entries.forEach(([, val], i) => {
       const sweep = (val / total) * Math.PI * 2;
+      if (sweep < 0.18) {
+        startLbl += sweep;
+        return;
+      }
       const midAngle = startLbl + sweep / 2;
-      const r2 = radius * 0.6;
-      const tx = cx + Math.cos(midAngle) * r2;
-      const ty = cy + Math.sin(midAngle) * r2;
+      const r2 = (radius + innerR) / 2;
+      const fill = cols[i % cols.length];
+      ctx.fillStyle = contrastingInk(fill);
       const pct = ((val / total) * 100).toFixed(0);
-      ctx.fillText(`${label.length > 8 ? label.slice(0, 7) + "…" : label} (${pct}%)`, tx, ty + 4);
+      ctx.fillText(`${pct}%`, cx + Math.cos(midAngle) * r2, cy + Math.sin(midAngle) * r2);
       startLbl += sweep;
     });
   }
 
-  ctx.globalAlpha = 1;
-  ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+  // Side legend — stays clear of the donut
+  const lx = w - pad - legendW + 4;
+  let ly = pad + 4;
   ctx.font = `9px '${opts?.fontFamily ?? "Inter"}', sans-serif`;
-  ctx.textAlign = "center";
-  entries.slice(0, 6).forEach(([label], i) => {
-    ctx.fillText(label.length > 10 ? label.slice(0, 9) + "\u2026" : label, cx, h - pad - 8 - (6 - i) * 12);
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  entries.slice(0, 8).forEach(([label], i) => {
+    ctx.fillStyle = cols[i % cols.length];
+    ctx.globalAlpha = 1;
+    ctx.fillRect(lx, ly, 8, 8);
+    ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+    const text = label.length > 12 ? label.slice(0, 11) + "\u2026" : label;
+    ctx.fillText(text, lx + 12, ly + 4);
+    ly += 14;
   });
+  ctx.globalAlpha = 1;
 }
 
 // --- Bubble (scatter with size) ---
@@ -2750,16 +3601,33 @@ function renderFullBubble(
 ) {
   if (yi < 0) return;
   const palette = opts?.colors ?? DEFAULT_COLORS;
-  const alpha = opts?.opacity ?? 0.5;
   const fontFamily = opts?.fontFamily ?? "Inter";
   const [xMin, xMax] = numRange(rows, xi);
   const [yMin, yMax] = numRange(rows, yi);
   const [sizeMin, sizeMax] = sizeIdx >= 0 ? numRange(rows, sizeIdx) : [0, 1];
   const sizeRange = sizeMax - sizeMin || 1;
-  const minR = 3;
-  const maxR = Math.min(w, h) * 0.055;
   const xRange = xMax - xMin || 1;
   const yRange = yMax - yMin || 1;
+  const plotW = Math.max(1, w - 2 * pad);
+  const plotH = Math.max(1, h - 2 * pad);
+
+  // Count valid points cheaply for density (same filter as draw loop)
+  let nValid = 0;
+  for (const r of rows) {
+    const x = Number(r[xi]), y = Number(r[yi]);
+    if (!isNaN(x) && !isNaN(y)) nValid++;
+  }
+  const marks = densityAwarePointMarks({
+    n: nValid,
+    plotW,
+    plotH,
+    hasSizeEncoding: sizeIdx >= 0,
+    sizeScale: opts?.sizeScale ?? 1,
+    pointSize: opts?.pointSize ?? 12,
+    opacity: opts?.opacity,
+    opacityUserSet: opts?.opacityUserSet,
+  });
+  const { minR, maxR, opacity: alpha, drawStroke } = marks;
 
   drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
 
@@ -2782,11 +3650,11 @@ function renderFullBubble(
       const s = Number(r[sizeIdx]);
       if (!isNaN(s)) {
         const t = (s - sizeMin) / sizeRange;
-        radius = minR + Math.sqrt(t) * (maxR - minR);
+        radius = minR + Math.sqrt(Math.max(0, Math.min(1, t))) * (maxR - minR);
       }
     }
-    const sx = pad + ((x - xMin) / xRange) * (w - 2 * pad);
-    const sy = h - pad - ((y - yMin) / yRange) * (h - 2 * pad);
+    const sx = pad + ((x - xMin) / xRange) * plotW;
+    const sy = h - pad - ((y - yMin) / yRange) * plotH;
     bubbles.push({ sx, sy, r: radius, cat });
   }
 
@@ -2798,10 +3666,12 @@ function renderFullBubble(
     ctx.beginPath();
     ctx.arc(b.sx, b.sy, b.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.globalAlpha = Math.min(alpha + 0.3, 0.9);
-    ctx.strokeStyle = palette[b.cat % palette.length];
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    if (drawStroke) {
+      ctx.globalAlpha = Math.min(alpha + 0.25, 0.85);
+      ctx.strokeStyle = palette[b.cat % palette.length];
+      ctx.lineWidth = 0.75;
+      ctx.stroke();
+    }
   }
   ctx.globalAlpha = 1;
 
@@ -2860,17 +3730,19 @@ function renderFullBubble(
 
 // --- Violin ---
 
-function renderFullViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+function renderFullViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   if (yi < 0) return;
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.65;
   const groups = new Map<string, number[]>();
+  const groupColor = new Map<string, string>();
   for (const r of rows) {
     const k = String(r[xi]);
     const v = Number(r[yi]);
     if (isNaN(v)) continue;
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k)!.push(v);
+    if (ci >= 0 && !groupColor.has(k)) groupColor.set(k, String(r[ci]));
   }
   const entries = [...groups.entries()].slice(0, 12);
   if (entries.length === 0) return;
@@ -2880,10 +3752,11 @@ function renderFullViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: 
   const range = gMax - gMin || 1;
   const bandW = (w - 2 * pad) / entries.length;
   const bins = 20;
+  const colorKeys = ci >= 0 ? [...new Set([...groupColor.values()])] : [];
 
   drawGridLines(ctx, gMin, gMax, gMin, gMax, w, h, pad, opts);
 
-  entries.forEach(([, vals], gi) => {
+  entries.forEach(([label, vals], gi) => {
     const sorted = [...vals].sort((a, b) => a - b);
     const counts = new Array(bins).fill(0);
     for (const v of sorted) {
@@ -2893,8 +3766,12 @@ function renderFullViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: 
     const maxC = Math.max(...counts, 1);
     const cx = pad + (gi + 0.5) * bandW;
     const halfW = bandW * 0.4;
+    const colorIdx =
+      ci >= 0 && groupColor.has(label)
+        ? Math.max(0, colorKeys.indexOf(groupColor.get(label)!))
+        : gi;
 
-    ctx.fillStyle = cols[gi % cols.length];
+    ctx.fillStyle = cols[colorIdx % cols.length];
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     for (let b = 0; b < bins; b++) {
@@ -2980,10 +3857,10 @@ function renderFullRadar(
   }
   const groupEntries = [...groups.entries()].slice(0, 6);
 
-  const radarPad = pad + 40;
+  const radarPad = 8;
   const cx = w / 2;
-  const cy = h / 2;
-  const radius = Math.min(w - 2 * radarPad, h - 2 * radarPad) / 2;
+  const cy = pad + (h - 2 * pad) / 2;
+  const radius = Math.max(20, Math.min(w - 2 * pad, h - 2 * pad) / 2 - radarPad);
   if (radius < 20) return;
 
   const rings = 4;
@@ -3020,7 +3897,7 @@ function renderFullRadar(
   ctx.globalAlpha = 1;
   for (let i = 0; i < n; i++) {
     const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
-    const labelR = radius + 14;
+    const labelR = radius + Math.min(14, pad * 0.35);
     const lx = cx + Math.cos(angle) * labelR;
     const ly = cy + Math.sin(angle) * labelR;
     const name = axes[i].name;
@@ -3331,22 +4208,23 @@ function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi:
     }
   };
 
-  treemapLayout(entries, pad, pad + 10, w - 2 * pad, h - 2 * pad - 10);
+  treemapLayout(entries, pad, pad, w - 2 * pad, h - 2 * pad);
 
   for (const rect of rects) {
     const colorIdx = ci >= 0 ? (catMap.get(rect.cat) ?? 0) : (rects.indexOf(rect) % palette.length);
-    ctx.fillStyle = palette[colorIdx % palette.length];
+    const fill = palette[colorIdx % palette.length];
+    ctx.fillStyle = fill;
     ctx.globalAlpha = alpha;
-    ctx.fillRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+    ctx.fillRect(rect.x + 1, rect.y + 1, Math.max(0, rect.w - 2), Math.max(0, rect.h - 2));
     ctx.strokeStyle = opts?.themeBg ?? "#0e0e12";
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
     ctx.globalAlpha = 1;
-    ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+    ctx.strokeRect(rect.x + 1, rect.y + 1, Math.max(0, rect.w - 2), Math.max(0, rect.h - 2));
 
-    if (rect.w > 30 && rect.h > 16) {
-      ctx.fillStyle = "#fff";
-      ctx.globalAlpha = 0.9;
-      const fontSize = Math.max(8, Math.min(12, rect.w / 8));
+    if (rect.w > 36 && rect.h > 18) {
+      ctx.fillStyle = contrastingInk(fill);
+      ctx.globalAlpha = 0.92;
+      const fontSize = Math.max(8, Math.min(12, Math.min(rect.w / 7, rect.h / 2.2)));
       ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
@@ -3389,11 +4267,11 @@ function renderFullSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi
 
   const grandTotal = outerEntries.reduce((s, e) => s + e.total, 0);
   const cx = w / 2;
-  const cy = h / 2;
-  const outerR = Math.min(w - 2 * pad, h - 2 * pad) / 2 - 10;
-  const innerR = outerR * 0.45;
+  const cy = pad + (h - 2 * pad) / 2;
+  const outerR = Math.max(24, Math.min(w - 2 * pad, h - 2 * pad) / 2 - 4);
+  const innerR = outerR * 0.42;
   const hasInner = ci >= 0 && outerEntries.some(e => e.children.length > 1);
-  const midR = hasInner ? outerR * 0.7 : outerR;
+  const midR = hasInner ? outerR * 0.72 : outerR;
 
   let angle = -Math.PI / 2;
   outerEntries.forEach((entry, ei) => {
@@ -3413,8 +4291,8 @@ function renderFullSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi
     if (sweep > 0.2 && midR - innerR > 20) {
       const midAngle = angle + sweep / 2;
       const labelR = (innerR + midR) / 2;
-      ctx.fillStyle = "#fff";
-      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = contrastingInk(palette[ei % palette.length]);
+      ctx.globalAlpha = 0.92;
       ctx.font = `${Math.max(8, Math.min(11, sweep * 30))}px '${fontFamily}', sans-serif`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -3515,7 +4393,7 @@ function renderFullChoropleth(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   const legendW = Math.min(120, w - 2 * pad);
   const legendH = 8;
   const lx = w - pad - legendW;
-  const ly = h - pad + 4;
+  const ly = h - pad - legendH - 2;
   const grad = ctx.createLinearGradient(lx, 0, lx + legendW, 0);
   grad.addColorStop(0, "hsl(220, 50%, 15%)");
   grad.addColorStop(0.5, "hsl(130, 65%, 35%)");
@@ -3525,9 +4403,9 @@ function renderFullChoropleth(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   ctx.font = `8px '${fontFamily}', sans-serif`;
   ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
   ctx.textAlign = "left";
-  ctx.fillText(minVal >= 1000 ? `${(minVal/1000).toFixed(1)}k` : String(Math.round(minVal)), lx, ly + legendH + 10);
+  ctx.fillText(minVal >= 1000 ? `${(minVal/1000).toFixed(1)}k` : String(Math.round(minVal)), lx, ly - 2);
   ctx.textAlign = "right";
-  ctx.fillText(maxVal >= 1000 ? `${(maxVal/1000).toFixed(1)}k` : String(Math.round(maxVal)), lx + legendW, ly + legendH + 10);
+  ctx.fillText(maxVal >= 1000 ? `${(maxVal/1000).toFixed(1)}k` : String(Math.round(maxVal)), lx + legendW, ly - 2);
 }
 
 // --- Force Bubble (packed circles) ---
@@ -3568,14 +4446,16 @@ function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][],
   }
 
   const maxVal = Math.max(...entries.map(e => e.value));
+  const plotCx = w / 2;
+  const plotCy = pad + (h - 2 * pad) / 2;
   const areaScale = Math.min(w - 2 * pad, h - 2 * pad) / 2;
   const totalArea = entries.reduce((s, e) => s + Math.sqrt(e.value / maxVal), 0);
   const scaleFactor = (areaScale * 0.85) / Math.max(totalArea * 0.18, 1);
 
   type Circle = { x: number; y: number; r: number; label: string; cat: string; value: number };
   const circles: Circle[] = entries.map(e => ({
-    x: w / 2 + (Math.random() - 0.5) * 20,
-    y: h / 2 + (Math.random() - 0.5) * 20,
+    x: plotCx + (Math.random() - 0.5) * 20,
+    y: plotCy + (Math.random() - 0.5) * 20,
     r: Math.max(8, Math.sqrt(e.value / maxVal) * scaleFactor),
     label: e.label,
     cat: e.cat,
@@ -3585,8 +4465,8 @@ function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][],
   for (let iter = 0; iter < 120; iter++) {
     for (let i = 0; i < circles.length; i++) {
       const a = circles[i];
-      a.x += (w / 2 - a.x) * 0.02;
-      a.y += (h / 2 - a.y) * 0.02;
+      a.x += (plotCx - a.x) * 0.02;
+      a.y += (plotCy - a.y) * 0.02;
       for (let j = i + 1; j < circles.length; j++) {
         const b = circles[j];
         const dx = b.x - a.x;
@@ -3603,25 +4483,29 @@ function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][],
           b.y += ny * overlap;
         }
       }
+      // Soft clamp inside plot
+      a.x = Math.min(w - pad - a.r, Math.max(pad + a.r, a.x));
+      a.y = Math.min(h - pad - a.r, Math.max(pad + a.r, a.y));
     }
   }
 
   circles.sort((a, b) => b.r - a.r);
   for (const c of circles) {
     const colorIdx = ci >= 0 ? (catMap.get(c.cat) ?? 0) : (circles.indexOf(c) % palette.length);
-    ctx.fillStyle = palette[colorIdx % palette.length];
+    const fill = palette[colorIdx % palette.length];
+    ctx.fillStyle = fill;
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = palette[colorIdx % palette.length];
+    ctx.strokeStyle = fill;
     ctx.globalAlpha = Math.min(alpha + 0.2, 1);
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
     if (c.r > 18) {
-      ctx.fillStyle = "#fff";
-      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = contrastingInk(fill);
+      ctx.globalAlpha = 0.92;
       const fs = Math.max(7, Math.min(11, c.r * 0.45));
       ctx.font = `${fs}px '${fontFamily}', sans-serif`;
       ctx.textAlign = "center";
@@ -3694,13 +4578,14 @@ function renderFullSankey(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: 
 
   const grandTotal = [...sourceTotals.values()].reduce((s, v) => s + v, 0) || 1;
   const nodeW = 14;
-  const leftX = pad + 50;
-  const rightX = w - pad - 50;
-  const plotH = h - 2 * pad - 20;
+  const labelGutter = Math.min(56, Math.max(36, pad * 0.85));
+  const leftX = pad + labelGutter;
+  const rightX = w - pad - labelGutter - nodeW;
+  const plotH = Math.max(40, h - 2 * pad - 8);
   const nodeGap = 3;
 
   const sourceY = new Map<string, { y: number; h: number }>();
-  let srcCursor = pad + 10;
+  let srcCursor = pad + 4;
   const totalSrcGap = nodeGap * (sortedSources.length - 1);
   const srcScale = (plotH - totalSrcGap) / grandTotal;
   for (const s of sortedSources) {
@@ -3711,7 +4596,7 @@ function renderFullSankey(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: 
 
   const grandTargetTotal = [...targetTotals.values()].reduce((s, v) => s + v, 0) || 1;
   const targetYMap = new Map<string, { y: number; h: number }>();
-  let tgtCursor = pad + 10;
+  let tgtCursor = pad + 4;
   const totalTgtGap = nodeGap * (sortedTargets.length - 1);
   const tgtScale = (plotH - totalTgtGap) / grandTargetTotal;
   for (const t of sortedTargets) {
@@ -3782,70 +4667,11 @@ function renderFullSankey(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: 
 // --- Helpers ---
 
 function drawGridLines(ctx: CanvasRenderingContext2D, _xMin: number, _xMax: number, _yMin: number, _yMax: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
-  if (opts?.showGrid === false) return;
-  const style = opts?.gridStyle ?? "solid";
-  if (style === "none") return;
-  const n = Math.max(2, opts?.tickCount ?? 5);
-  const alpha = opts?.gridOpacity ?? 0.5;
-  ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.strokeStyle = opts?.themeBorder ?? "#1a1a1f";
-  ctx.lineWidth = 0.5;
-  if (style === "dashed") ctx.setLineDash([6, 4]);
-  else if (style === "dotted") ctx.setLineDash([2, 3]);
-  for (let i = 0; i <= n; i++) {
-    const y = pad + (i / n) * (h - 2 * pad);
-    ctx.beginPath();
-    ctx.moveTo(pad, y);
-    ctx.lineTo(w - pad, y);
-    ctx.stroke();
-  }
-  for (let i = 0; i <= n; i++) {
-    const x = pad + (i / n) * (w - 2 * pad);
-    ctx.beginPath();
-    ctx.moveTo(x, pad);
-    ctx.lineTo(x, h - pad);
-    ctx.stroke();
-  }
-  ctx.setLineDash([]);
-  ctx.restore();
+  drawChartGrid(ctx, w, h, pad, opts);
 }
 
 function drawAxisTicks(ctx: CanvasRenderingContext2D, xMin: number, xMax: number, yMin: number, yMax: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
-  const n = Math.max(2, opts?.tickCount ?? 5);
-  const fontFamily = opts?.fontFamily ?? "Inter";
-  const axisLabelColor = opts?.axisLabelColor ?? "#6b6b78";
-  const rotDeg = opts?.tickRotation ?? 0;
-  const rotRad = (rotDeg * Math.PI) / 180;
-  ctx.fillStyle = axisLabelColor;
-  ctx.font = `9px '${fontFamily}', sans-serif`;
-  ctx.textAlign = rotDeg === 90 ? "center" : "center";
-  for (let i = 0; i <= n; i++) {
-    const v = xMin + (i / n) * (xMax - xMin);
-    const x = pad + (i / n) * (w - 2 * pad);
-    const y = h - pad + 14;
-    if (rotDeg !== 0) {
-      ctx.save();
-      ctx.translate(x, y);
-      ctx.rotate(-rotRad);
-      ctx.fillText(formatTick(v), 0, 0);
-      ctx.restore();
-    } else {
-      ctx.fillText(formatTick(v), x, y);
-    }
-  }
-  ctx.textAlign = "right";
-  for (let i = 0; i <= n; i++) {
-    const v = yMin + (i / n) * (yMax - yMin);
-    const y = h - pad - (i / n) * (h - 2 * pad);
-    ctx.fillText(formatTick(v), pad - 6, y + 3);
-  }
-}
-
-function formatTick(v: number): string {
-  if (Math.abs(v) >= 1000000) return (v / 1000000).toFixed(1) + "M";
-  if (Math.abs(v) >= 1000) return (v / 1000).toFixed(1) + "K";
-  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+  drawChartTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
 }
 
 function roundedRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {

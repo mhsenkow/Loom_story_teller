@@ -39,8 +39,8 @@ const config: Config = {
         "lg": "var(--radius-lg)",
       },
       boxShadow: {
-        "loom": "0 1px 3px rgba(0,0,0,0.4), 0 1px 2px rgba(0,0,0,0.3)",
-        "loom-lg": "0 4px 14px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.3)",
+        "loom": "var(--shadow-1)",
+        "loom-lg": "var(--shadow-2)",
       },
       animation: {
         "pulse-subtle": "pulse-subtle 2s ease-in-out infinite",

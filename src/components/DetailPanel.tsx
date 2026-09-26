@@ -2,22 +2,49 @@
 // DetailPanel — Stats / Chart (Vega & visual)
 // =================================================================
 // Right panel: Stats and Chart tabs. Schema lives in the footer.
-// Chart tab: encoding drop zones + dropdowns; drag from footer Schema
-// or pick columns from dropdowns.
+// Chart tab: encoding slots (select + drop), Visual presets, Vega JSON.
 // =================================================================
 
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, type ReactNode, type DragEvent } from "react";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
-import { COLOR_PALETTES } from "@/lib/chartPalettes";
+import {
+  COLOR_PALETTES,
+  palettesGrouped,
+  resolveChartColors,
+  type PaletteKind,
+} from "@/lib/chartPalettes";
+import {
+  THEMES,
+  THEME_LABEL,
+  UI_CHROMES,
+  UI_CHROME_LABEL,
+  APP_FONTS,
+  APP_FONT_LABEL,
+  FACES_SOURCES,
+  VISUAL_PRESETS,
+  VISUAL_PRESET_BLURB,
+  shuffleVisualOverrides,
+  VISUAL_SHUFFLE_SECTIONS,
+  type VisualPresetId,
+  type VisualShuffleLocks,
+  type VisualShuffleSection,
+  normalizeTheme,
+  type LookTheme,
+  type UiChrome,
+  type AppFont,
+  type FacesSource,
+} from "@/lib/lookSystem";
+import { requestDiscoverScan } from "@/lib/discoverStories";
 import {
   createChartRec,
   CHART_KIND_OPTIONS,
   Y_AGGREGATE_OPTIONS,
   getRecommendationReason,
   getRandomEncoding,
+  applyEncodingLocks,
   chartKindDataSupport,
   tryBuildRandomChartRec,
   recommend,
@@ -25,8 +52,9 @@ import {
   recommendStreamStory,
   type ChartKind,
   type YAggregateOption,
+  type EncodingShuffleLocks,
 } from "@/lib/recommendations";
-import { computeDataQualityHints, formatChartAggregationSummary } from "@/lib/chartSupport";
+import { computeDataQualityHints, formatChartAggregationSummary, chartCapabilities, encodingChannelLabels } from "@/lib/chartSupport";
 import {
   runAnomaly,
   runForecast,
@@ -51,24 +79,78 @@ const TABS: { key: PanelTab; label: string }[] = [
 ];
 
 export function DetailPanel() {
-  const { panelOpen, panelTab, setPanelTab, selectedFile } = useLoomStore();
+  const { panelOpen, panelTab, setPanelTab, selectedFile, togglePanel } = useLoomStore();
 
   if (!panelOpen) return null;
 
   return (
-    <aside className="flex flex-col h-full w-[var(--panel-width)] border-l border-loom-border bg-loom-surface flex-shrink-0">
+    <>
+      {/* Mobile backdrop */}
+      <button
+        type="button"
+        className="md:hidden fixed inset-0 z-[35] bg-black/40"
+        aria-label="Close detail panel"
+        onClick={togglePanel}
+      />
+      <aside
+        className={`
+          flex flex-col bg-loom-surface flex-shrink-0
+          md:relative md:h-full md:w-[var(--panel-width)] md:border-l md:border-loom-border md:z-auto
+          fixed inset-x-0 bottom-0 z-40 w-full
+          border-t border-loom-border rounded-t-xl shadow-loom-lg
+          md:max-h-none md:rounded-none md:shadow-none md:inset-auto
+          ${panelTab === "chart" ? "max-h-[min(90dvh,44rem)]" : "max-h-[min(82dvh,36rem)]"}
+        `}
+        style={{ paddingBottom: "var(--safe-bottom)" }}
+      >
+        {/* Mobile sheet chrome */}
+        <div className="md:hidden relative flex items-center justify-between px-3 pt-3 pb-1 shrink-0">
+          <div className="pointer-events-none absolute left-1/2 top-1.5 h-1 w-10 -translate-x-1/2 rounded-full bg-loom-border" />
+          <span className="text-xs font-medium text-loom-text">
+            {TABS.find((t) => t.key === panelTab)?.label ?? "Details"}
+          </span>
+          <button type="button" onClick={togglePanel} className="loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted text-lg leading-none" aria-label="Close">
+            ×
+          </button>
+        </div>
       {/* Tab Bar */}
-      <div role="tablist" aria-label="Panel sections" className="flex items-center gap-0.5 px-2 h-[var(--topbar-height)] border-b border-loom-border flex-wrap">
+      <div role="tablist" aria-label="Panel sections" className="flex items-center gap-0.5 px-2 min-h-[var(--topbar-height)] border-b border-loom-border flex-nowrap overflow-x-auto scrollbar-none">
         {TABS.map((tab) => (
           <button
             key={tab.key}
             type="button"
             role="tab"
+            id={`panel-tab-${tab.key}`}
+            aria-controls="panel-content"
             aria-selected={panelTab === tab.key}
+            tabIndex={panelTab === tab.key ? 0 : -1}
             aria-label={tab.label}
             onClick={() => setPanelTab(tab.key)}
+            onKeyDown={(e) => {
+              const i = TABS.findIndex((t) => t.key === panelTab);
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                e.preventDefault();
+                const next = TABS[(i + 1) % TABS.length];
+                setPanelTab(next.key);
+                queueMicrotask(() => document.getElementById(`panel-tab-${next.key}`)?.focus());
+              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const prev = TABS[(i - 1 + TABS.length) % TABS.length];
+                setPanelTab(prev.key);
+                queueMicrotask(() => document.getElementById(`panel-tab-${prev.key}`)?.focus());
+              } else if (e.key === "Home") {
+                e.preventDefault();
+                setPanelTab(TABS[0].key);
+                queueMicrotask(() => document.getElementById(`panel-tab-${TABS[0].key}`)?.focus());
+              } else if (e.key === "End") {
+                e.preventDefault();
+                const last = TABS[TABS.length - 1];
+                setPanelTab(last.key);
+                queueMicrotask(() => document.getElementById(`panel-tab-${last.key}`)?.focus());
+              }
+            }}
             className={`
-              px-3 py-1 text-xs font-medium rounded transition-all duration-100
+              px-3 py-2 md:py-1 text-xs font-medium rounded transition-all duration-100 whitespace-nowrap shrink-0
               ${panelTab === tab.key
                 ? "bg-loom-elevated text-loom-text"
                 : "text-loom-muted hover:text-loom-text"
@@ -81,7 +163,7 @@ export function DetailPanel() {
       </div>
 
       {/* Content */}
-      <div role="tabpanel" id="panel-content" aria-label={TABS.find((t) => t.key === panelTab)?.label ?? "Panel"} className="flex-1 overflow-y-auto">
+      <div role="tabpanel" id="panel-content" aria-labelledby={`panel-tab-${panelTab}`} className="flex-1 overflow-y-auto">
         {panelTab === "settings" ? (
           <SettingsView />
         ) : panelTab === "dashboards" ? (
@@ -101,6 +183,7 @@ export function DetailPanel() {
         )}
       </div>
     </aside>
+    </>
   );
 }
 
@@ -174,9 +257,8 @@ function DashboardsView() {
     const dashboard = useLoomStore.getState().dashboards.find((d) => d.id === id);
     const chartIds = dashboard?.slots.filter((s) => s.viewType === "chart").map((s) => s.viewId) ?? [];
     if (chartIds.length > 0) {
-      setToast("Capturing chart previews…");
+      setToast(`Building "${story.title}" — capturing ${chartIds.length} previews…`);
       await captureStoryDashboardPreviews(id);
-      setToast(`Created "${story.title}" with ${story.charts.length} charts`);
     } else {
       setDashboardsExpanded(true);
       setToast(`Created "${story.title}" with ${story.charts.length} charts`);
@@ -208,11 +290,12 @@ function DashboardsView() {
       const dashboard = useLoomStore.getState().dashboards.find((d) => d.id === id);
       const chartIds = dashboard?.slots.filter((s) => s.viewType === "chart").map((s) => s.viewId) ?? [];
       if (chartIds.length > 0) {
-        setToast("Capturing chart previews…");
+        setToast(`Building "${story.title}" — capturing ${chartIds.length} previews…`);
         await captureStoryDashboardPreviews(id);
+      } else {
+        setDashboardsExpanded(true);
+        setToast(`Created "${story.title}" with ${story.charts.length} charts`);
       }
-      setDashboardsExpanded(true);
-      setToast(`Created "${story.title}" with ${story.charts.length} charts`);
     } catch (e) {
       setToast(`Stream dashboard failed: ${e instanceof Error ? e.message : e}`);
     }
@@ -646,60 +729,127 @@ function AddViewDropdown({
 
 // --- Settings tab: app-wide theme, typography, accessibility ---
 function SettingsView() {
-  const { appSettings, setAppSettings } = useLoomStore();
-  const themes: { value: AppTheme; label: string; desc: string }[] = [
-    { value: "dark", label: "Dark", desc: "Default dark theme" },
-    { value: "light", label: "Light", desc: "Light backgrounds" },
-    { value: "high-contrast", label: "High contrast", desc: "Maximum contrast for accessibility" },
-    { value: "colorblind", label: "Colorblind friendly", desc: "Palette safe for deuteranopia/protanopia" },
-  ];
+  const { appSettings, setAppSettings, setToast } = useLoomStore();
   const fontScales: { value: FontScale; label: string }[] = [
     { value: 0.9, label: "90%" },
     { value: 1, label: "100%" },
     { value: 1.1, label: "110%" },
     { value: 1.15, label: "115%" },
   ];
+  const currentTheme = (appSettings.theme === "high-contrast" ? "contrast" : appSettings.theme === "colorblind" ? "dark" : appSettings.theme) as LookTheme;
 
   return (
     <div className="p-4 space-y-6">
       <div>
+        <h3 className="text-sm font-semibold text-loom-text mb-1">Discover</h3>
+        <p className="text-2xs text-loom-muted mb-2">
+          Intro scan of live feeds for chart-ready stories (shown once until you skip it).
+        </p>
+        <button
+          type="button"
+          className="loom-btn-primary text-xs py-1.5 px-3"
+          onClick={() => {
+            requestDiscoverScan();
+            setToast("Scanning feeds for something interesting…");
+          }}
+        >
+          What’s interesting right now
+        </button>
+      </div>
+      <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">Theme</h3>
-        <p className="text-2xs text-loom-muted mb-2">App and chart palette</p>
-        <div className="space-y-1.5">
-          {themes.map((t) => (
-            <label
-              key={t.value}
-              className={`flex items-center gap-2 p-2 rounded-md border cursor-pointer transition-colors ${appSettings.theme === t.value ? "border-loom-accent bg-loom-accent/10" : "border-loom-border hover:border-loom-muted"
-                }`}
+        <p className="text-2xs text-loom-muted mb-2">
+          Shared ibm.io look spectrum · double-click to cycle
+        </p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {THEMES.map((t) => (
+            <button
+              key={t}
+              type="button"
+              onClick={() => setAppSettings((prev) => ({ ...prev, theme: t as AppTheme }))}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                setAppSettings((prev) => {
+                  const cur = normalizeTheme(prev.theme);
+                  const idx = THEMES.indexOf(cur);
+                  const next = THEMES[(idx + 1) % THEMES.length]!;
+                  return { ...prev, theme: next as AppTheme };
+                });
+              }}
+              className={`px-2 py-1.5 text-2xs rounded-md border text-left transition-colors ${
+                currentTheme === t
+                  ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                  : "border-loom-border text-loom-muted hover:text-loom-text"
+              }`}
             >
-              <input
-                type="radio"
-                name="theme"
-                value={t.value}
-                checked={appSettings.theme === t.value}
-                onChange={() => setAppSettings((prev) => ({ ...prev, theme: t.value }))}
-                className="accent-loom-accent"
-              />
-              <div>
-                <span className="text-xs font-medium text-loom-text">{t.label}</span>
-                <span className="text-2xs text-loom-muted ml-1">— {t.desc}</span>
-              </div>
-            </label>
+              {THEME_LABEL[t]}
+            </button>
           ))}
         </div>
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-loom-text mb-1">Typography</h3>
-        <p className="text-2xs text-loom-muted mb-2">UI font size scale</p>
+        <h3 className="text-sm font-semibold text-loom-text mb-1">Chrome</h3>
+        <p className="text-2xs text-loom-muted mb-2">Shell face (type + borders)</p>
+        <div className="grid grid-cols-2 gap-1.5">
+          {UI_CHROMES.map((u) => (
+            <button
+              key={u}
+              type="button"
+              onClick={() => setAppSettings((prev) => ({ ...prev, uiChrome: u as UiChrome }))}
+              className={`px-2 py-1.5 text-2xs rounded-md border text-left transition-colors ${
+                appSettings.uiChrome === u
+                  ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                  : "border-loom-border text-loom-muted hover:text-loom-text"
+              }`}
+            >
+              {UI_CHROME_LABEL[u]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-loom-text mb-1">Typeface</h3>
+        <select
+          value={appSettings.font}
+          onChange={(e) => setAppSettings((prev) => ({ ...prev, font: e.target.value as AppFont }))}
+          className="loom-input w-full text-xs py-1.5"
+        >
+          {APP_FONTS.map((f) => (
+            <option key={f} value={f}>{APP_FONT_LABEL[f]}</option>
+          ))}
+        </select>
+        <div className="flex gap-1.5 mt-2">
+          {FACES_SOURCES.map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setAppSettings((prev) => ({ ...prev, faces: f as FacesSource }))}
+              className={`px-2 py-1 text-2xs rounded border ${
+                appSettings.faces === f ? "border-loom-accent text-loom-text" : "border-loom-border text-loom-muted"
+              }`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+        <p className="text-2xs text-loom-muted mt-1">Faces: web fonts vs local system stacks</p>
+      </div>
+
+      <div>
+        <h3 className="text-sm font-semibold text-loom-text mb-1">UI scale</h3>
         <div className="flex flex-wrap gap-2">
           {fontScales.map((s) => (
             <button
               key={s.value}
               type="button"
               onClick={() => setAppSettings((prev) => ({ ...prev, fontScale: s.value }))}
-              className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${appSettings.fontScale === s.value ? "border-loom-accent bg-loom-accent/20 text-loom-text" : "border-loom-border text-loom-muted hover:text-loom-text"
-                }`}
+              className={`px-3 py-1.5 text-xs rounded-md border transition-colors ${
+                appSettings.fontScale === s.value
+                  ? "border-loom-accent bg-loom-accent/20 text-loom-text"
+                  : "border-loom-border text-loom-muted hover:text-loom-text"
+              }`}
             >
               {s.label}
             </button>
@@ -709,8 +859,7 @@ function SettingsView() {
 
       <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">Accessibility</h3>
-        <p className="text-2xs text-loom-muted mb-2">Motion and animation</p>
-        <label className="flex items-center gap-2 cursor-pointer">
+        <label className="flex items-center gap-2 cursor-pointer mb-2">
           <input
             type="checkbox"
             checked={appSettings.reducedMotion}
@@ -719,12 +868,22 @@ function SettingsView() {
           />
           <span className="text-xs text-loom-text">Reduce motion</span>
         </label>
-        <p className="text-2xs text-loom-muted mt-1 ml-6">Minimizes animations and transitions</p>
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={!!appSettings.colorblindCharts}
+            onChange={(e) => setAppSettings((prev) => ({ ...prev, colorblindCharts: e.target.checked }))}
+            className="rounded border-loom-border accent-loom-accent"
+          />
+          <span className="text-xs text-loom-text">Colorblind chart palette</span>
+        </label>
+        <p className="text-2xs text-loom-muted mt-1 ml-6">Paul Tol–safe series; shell theme unchanged</p>
       </div>
 
       <div className="pt-2 border-t border-loom-border">
         <p className="text-2xs text-loom-muted">
-          Settings apply immediately. In Chart → Visual, the &quot;Theme (app)&quot; color palette uses the same colors as the theme above; other palettes override.
+          Chart → Visual uses Theme palette colors from the active theme. Looks sync to{" "}
+          <span className="font-mono">ibm.tools.shared</span> when available.
         </p>
       </div>
     </div>
@@ -733,56 +892,444 @@ function SettingsView() {
 
 const DRAG_TYPE_COLUMN = "application/x-loom-column";
 
-function DropZone({
+type EncodingOption = { value: string; label: string; type?: string; disabled?: boolean };
+
+/** Single channel control: label + select (+ optional type), doubles as column drop target. */
+function EncodingSlot({
   label,
   value,
-  isActive,
+  options,
+  typeHint,
+  allowEmpty,
+  emptyLabel = "None",
+  isDropActive,
   onDragEnter,
   onDragOver,
   onDragLeave,
   onDrop,
+  onChange,
+  trailing,
 }: {
   label: string;
   value: string;
-  isActive: boolean;
-  onDragEnter: (e: React.DragEvent) => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDragLeave: () => void;
-  onDrop: (e: React.DragEvent) => void;
+  options: EncodingOption[];
+  typeHint?: string;
+  allowEmpty?: boolean;
+  emptyLabel?: string;
+  isDropActive?: boolean;
+  onDragEnter?: (e: DragEvent) => void;
+  onDragOver?: (e: DragEvent) => void;
+  onDragLeave?: () => void;
+  onDrop?: (e: DragEvent) => void;
+  onChange: (value: string) => void;
+  trailing?: ReactNode;
 }) {
+  const droppable = Boolean(onDrop);
   return (
-    <div
-      onDragEnter={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onDragEnter(e);
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        e.dataTransfer.dropEffect = "copy";
-        onDragOver(e);
-      }}
-      onDragLeave={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onDragLeave();
-      }}
-      onDrop={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        onDrop(e);
-      }}
-      className={`
-        min-h-[36px] rounded border-2 border-dashed px-2 py-2 text-xs font-mono transition-colors flex items-center
-        ${isActive ? "border-loom-accent bg-loom-accent/10" : "border-loom-border bg-loom-elevated/50"}
-      `}
-    >
-      <span className="text-loom-muted mr-2">{label}:</span>
-      <span className="text-loom-text truncate">{value}</span>
+    <div className="space-y-1">
+      <div
+        onDragEnter={
+          droppable
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDragEnter?.(e);
+              }
+            : undefined
+        }
+        onDragOver={
+          droppable
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = "copy";
+                onDragOver?.(e);
+              }
+            : undefined
+        }
+        onDragLeave={
+          droppable
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDragLeave?.();
+              }
+            : undefined
+        }
+        onDrop={
+          droppable
+            ? (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDrop?.(e);
+              }
+            : undefined
+        }
+        className={`
+          flex items-stretch gap-0 rounded-md border overflow-hidden transition-colors
+          ${isDropActive ? "border-loom-accent bg-loom-accent/10 ring-1 ring-loom-accent/40" : "border-loom-border bg-loom-elevated/40"}
+          ${droppable && !isDropActive ? "border-dashed" : ""}
+        `}
+      >
+        <span
+          className="shrink-0 w-[4.5rem] px-1.5 flex items-center text-2xs font-semibold uppercase tracking-wide text-loom-muted bg-loom-bg/60 border-r border-loom-border/80 leading-tight"
+          title={droppable ? `${label} — pick a column or drop from Schema` : label}
+        >
+          {label}
+        </span>
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className="loom-input flex-1 min-w-0 border-0 rounded-none bg-transparent text-xs py-2 px-2 font-mono focus:ring-0"
+          aria-label={`${label} field`}
+        >
+          {allowEmpty && <option value="">{emptyLabel}</option>}
+          {options.map((o) => (
+            <option key={o.value} value={o.value} disabled={o.disabled} title={o.type}>
+              {o.type ? `${o.label}` : o.label}
+            </option>
+          ))}
+        </select>
+        {typeHint ? (
+          <span className="hidden sm:flex shrink-0 max-w-[5.5rem] items-center px-1.5 text-2xs font-mono text-loom-muted truncate border-l border-loom-border/80" title={typeHint}>
+            {typeHint.replace(/^(VARCHAR|DOUBLE|INTEGER|BIGINT|BOOLEAN|TIMESTAMP|FLOAT|DECIMAL|REAL)/i, (m) => m.slice(0, 3).toUpperCase())}
+          </span>
+        ) : null}
+      </div>
+      {trailing}
     </div>
   );
 }
+
+function EncodingSectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wider pt-1">{children}</p>
+  );
+}
+
+type IconToggleOption<T extends string | number> = {
+  value: T;
+  label: string;
+  icon: ReactNode;
+};
+
+/** Compact icon button group for small discrete option sets (≤6). */
+function IconToggleGroup<T extends string | number>({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: T;
+  options: IconToggleOption<T>[];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div>
+      <p className="text-2xs text-loom-muted mb-1">{label}</p>
+      <div className="flex flex-wrap gap-1" role="group" aria-label={label}>
+        {options.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <button
+              key={String(opt.value)}
+              type="button"
+              title={opt.label}
+              aria-label={opt.label}
+              aria-pressed={active}
+              onClick={() => onChange(opt.value)}
+              className={`
+                min-h-9 min-w-9 px-2 rounded-md border flex items-center justify-center transition-colors
+                ${active
+                  ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                  : "border-loom-border text-loom-muted hover:border-loom-accent/40 hover:text-loom-text hover:bg-loom-elevated"}
+              `}
+            >
+              {opt.icon}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ColorSwatchGroup({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string; color: string }[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div>
+      <p className="text-2xs text-loom-muted mb-1">{label}</p>
+      <div className="flex flex-wrap gap-1.5" role="group" aria-label={label}>
+        {options.map((opt) => {
+          const active = opt.value === value;
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              title={opt.label}
+              aria-label={opt.label}
+              aria-pressed={active}
+              onClick={() => onChange(opt.value)}
+              className={`
+                min-h-9 min-w-9 rounded-md border flex items-center justify-center transition-colors
+                ${active ? "border-loom-accent ring-1 ring-loom-accent/50" : "border-loom-border hover:border-loom-accent/40"}
+              `}
+            >
+              <span
+                className="w-4 h-4 rounded-sm border border-black/20"
+                style={{
+                  background:
+                    opt.color === "theme"
+                      ? "var(--loom-border)"
+                      : opt.color,
+                }}
+              />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const Ico = {
+  plain: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <rect x="2" y="3" width="12" height="10" rx="1" />
+    </svg>
+  ),
+  viz: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M2 12V8M6 12V5M10 12V7M14 12V3" strokeLinecap="round" />
+    </svg>
+  ),
+  deep: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M2 13V6M5 13V4M8 13V7M11 13V3M14 13V8" strokeLinecap="round" />
+      <path d="M2 3h12" opacity="0.4" />
+    </svg>
+  ),
+  dots: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <circle cx="4" cy="5" r="1.5" /><circle cx="9" cy="8" r="1.5" /><circle cx="12" cy="4" r="1.5" /><circle cx="6" cy="12" r="1.5" />
+    </svg>
+  ),
+  squares: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <rect x="2" y="3" width="4" height="4" rx="0.5" /><rect x="9" y="6" width="4" height="4" rx="0.5" /><rect x="5" y="11" width="3" height="3" rx="0.5" />
+    </svg>
+  ),
+  ticks: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden>
+      <path d="M3 4v3M7 6v5M11 3v4M14 8v3" strokeLinecap="round" />
+    </svg>
+  ),
+  bar: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <rect x="2" y="8" width="3" height="6" rx="0.5" /><rect x="6.5" y="4" width="3" height="10" rx="0.5" /><rect x="11" y="6" width="3" height="8" rx="0.5" />
+    </svg>
+  ),
+  ring: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <circle cx="8" cy="8" r="4.5" /><circle cx="8" cy="8" r="1.5" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  rule: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M3 13h10M3 13V3" strokeLinecap="round" />
+    </svg>
+  ),
+  ladder: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <path d="M3 13h10M3 13V3M3 6h4M3 9h6M3 11h3" strokeLinecap="round" />
+    </svg>
+  ),
+  mercury: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M8 2v9" strokeLinecap="round" /><circle cx="8" cy="13" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  spine: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M8 2v12M3 13h10" strokeLinecap="round" />
+    </svg>
+  ),
+  index: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <path d="M3 13h10M3 13V3M2 5h3M2 8h3M2 11h3" strokeLinecap="round" />
+    </svg>
+  ),
+  tape: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <path d="M2 12h12M4 12V8M7 12V5M10 12V9M13 12V6" strokeLinecap="round" opacity="0.85" />
+      <path d="M2 4h12" strokeDasharray="2 2" />
+    </svg>
+  ),
+  tint: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <rect x="2" y="3" width="12" height="10" rx="1" opacity="0.35" /><rect x="5" y="6" width="6" height="4" rx="0.5" />
+    </svg>
+  ),
+  wash: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <rect x="2" y="3" width="12" height="10" rx="1" opacity="0.2" /><path d="M2 8h12" stroke="currentColor" strokeWidth="3" opacity="0.45" />
+    </svg>
+  ),
+  dot: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <circle cx="8" cy="8" r="5" opacity="0.35" /><circle cx="8" cy="8" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  alarm: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M8 3l6 10H2L8 3z" strokeLinejoin="round" /><circle cx="8" cy="11" r="0.8" fill="currentColor" stroke="none" /><path d="M8 7v2.5" strokeLinecap="round" />
+    </svg>
+  ),
+  tag: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <path d="M2 8l6-6h5v5L7 13 2 8z" strokeLinejoin="round" /><circle cx="11" cy="5" r="1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  pair: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M2 4h8M2 7h5" strokeLinecap="round" /><rect x="2" y="10" width="12" height="4" rx="0.5" opacity="0.4" />
+    </svg>
+  ),
+  stack: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M3 3h10M3 6h7M3 9h10M3 12h6" strokeLinecap="round" />
+    </svg>
+  ),
+  titleSpine: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M3 3v10M6 4h7M6 7h5" strokeLinecap="round" />
+    </svg>
+  ),
+  caption: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <rect x="2" y="2" width="12" height="8" rx="1" opacity="0.45" /><path d="M3 13h10M3 15h6" strokeLinecap="round" />
+    </svg>
+  ),
+  ticket: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <rect x="2" y="4" width="12" height="8" rx="1" /><path d="M5 4v8" strokeDasharray="1.5 1.5" /><path d="M7 7h5M7 9h3" strokeLinecap="round" />
+    </svg>
+  ),
+  slab: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <rect x="2" y="3" width="12" height="4" rx="0.5" /><rect x="2" y="9" width="12" height="4" rx="0.5" opacity="0.35" />
+    </svg>
+  ),
+  hero: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <rect x="1.5" y="2" width="13" height="12" rx="1" /><path d="M4 6h8M4 9h5" strokeLinecap="round" />
+    </svg>
+  ),
+  compact: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <rect x="4" y="4" width="8" height="8" rx="1" /><path d="M6 7h4M6 9h2" strokeLinecap="round" />
+    </svg>
+  ),
+  focus: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <path d="M3 6V3h3M10 3h3v3M13 10v3h-3M6 13H3v-3" strokeLinecap="round" strokeLinejoin="round" /><circle cx="8" cy="8" r="2" />
+    </svg>
+  ),
+  whisper: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <circle cx="8" cy="8" r="5" opacity="0.2" />
+    </svg>
+  ),
+  soft: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <circle cx="8" cy="8" r="5" opacity="0.45" />
+    </svg>
+  ),
+  firm: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <circle cx="8" cy="8" r="5" opacity="0.8" />
+    </svg>
+  ),
+  se: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <rect x="2" y="2" width="12" height="12" rx="1" opacity="0.4" /><circle cx="11" cy="11" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  sw: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <rect x="2" y="2" width="12" height="12" rx="1" opacity="0.4" /><circle cx="5" cy="11" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  ne: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <rect x="2" y="2" width="12" height="12" rx="1" opacity="0.4" /><circle cx="11" cy="5" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  nw: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <rect x="2" y="2" width="12" height="12" rx="1" opacity="0.4" /><circle cx="5" cy="5" r="2" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  weightLight: <span className="text-2xs font-light leading-none">Ag</span>,
+  weightRegular: <span className="text-2xs font-normal leading-none">Ag</span>,
+  weightSemi: <span className="text-2xs font-semibold leading-none">Ag</span>,
+  weightBold: <span className="text-2xs font-bold leading-none">Ag</span>,
+  rot0: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <path d="M3 12h10" /><text x="4" y="9" fontSize="6" fill="currentColor" stroke="none">abc</text>
+    </svg>
+  ),
+  rot30: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <path d="M3 12h10" /><path d="M5 11l3-5" strokeLinecap="round" /><path d="M9 11l3-5" strokeLinecap="round" />
+    </svg>
+  ),
+  rot45: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <path d="M3 12h10" /><path d="M5 11l4-4" strokeLinecap="round" /><path d="M9 11l4-4" strokeLinecap="round" />
+    </svg>
+  ),
+  rot60: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <path d="M3 12h10" /><path d="M6 11l2-6" strokeLinecap="round" /><path d="M10 11l2-6" strokeLinecap="round" />
+    </svg>
+  ),
+  rot90: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden>
+      <path d="M3 12h10" /><path d="M6 11V4" strokeLinecap="round" /><path d="M10 11V4" strokeLinecap="round" />
+    </svg>
+  ),
+  solid: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M2 8h12" strokeLinecap="round" />
+    </svg>
+  ),
+  dashed: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M2 8h12" strokeLinecap="round" strokeDasharray="3 2" />
+    </svg>
+  ),
+  dotted: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+      <path d="M2 8h12" strokeLinecap="round" strokeDasharray="1 2.5" />
+    </svg>
+  ),
+  none: (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden>
+      <circle cx="8" cy="8" r="5" /><path d="M4.5 4.5l7 7" strokeLinecap="round" />
+    </svg>
+  ),
+} as const;
 
 function StatsView() {
   const { columnStats, sampleRows } = useLoomStore();
@@ -1495,6 +2042,8 @@ function ChartPanelView() {
     showMarginals, setShowMarginals,
     customRefLines, addCustomRefLine, removeCustomRefLine,
     setPromptDialog,
+    setToast,
+    appSettings,
   } = useLoomStore();
   const [specExpanded, setSpecExpanded] = useState(true);
   const [specCopyOk, setSpecCopyOk] = useState(false);
@@ -1503,6 +2052,26 @@ function ChartPanelView() {
   const [activeChartOpen, setActiveChartOpen] = useState(true);
   const [visualOpen, setVisualOpen] = useState(true);
   const [vegaOpen, setVegaOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const [moreChannelsOpen, setMoreChannelsOpen] = useState(() =>
+    Boolean(
+      activeChart?.sizeField ||
+        activeChart?.rowField ||
+        activeChart?.glowField ||
+        activeChart?.outlineField ||
+        activeChart?.opacityField,
+    ),
+  );
+  const [encodingLocks, setEncodingLocks] = useState<EncodingShuffleLocks>({});
+  const [visualLocks, setVisualLocks] = useState<VisualShuffleLocks>({});
+
+  const toggleEncodingLock = useCallback((key: keyof EncodingShuffleLocks) => {
+    setEncodingLocks((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
+
+  const toggleVisualLock = useCallback((key: VisualShuffleSection) => {
+    setVisualLocks((prev) => ({ ...prev, [key]: !prev[key] }));
+  }, []);
 
   const tableName = selectedFile?.name?.replace(/\.\w+$/, "") ?? "";
 
@@ -1532,7 +2101,7 @@ function ChartPanelView() {
   );
 
   const handleDrop = useCallback(
-    (slot: "x" | "y" | "color") => (e: React.DragEvent) => {
+    (slot: "x" | "y" | "color") => (e: DragEvent) => {
       e.preventDefault();
       setDragOverSlot(null);
       const colName = e.dataTransfer.getData(DRAG_TYPE_COLUMN) || e.dataTransfer.getData("text/plain");
@@ -1547,7 +2116,7 @@ function ChartPanelView() {
   );
 
   const handleDragEnter = useCallback((slot: "x" | "y" | "color") => () => setDragOverSlot(slot), []);
-  const handleDragOver = useCallback((slot: "x" | "y" | "color") => (e: React.DragEvent) => {
+  const handleDragOver = useCallback((slot: "x" | "y" | "color") => (e: DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     setDragOverSlot(slot);
@@ -1616,7 +2185,7 @@ function ChartPanelView() {
   const applyChartType = useCallback(
     (kind: ChartKind) => {
       if (!activeChart || columnStats.length === 0) return;
-      const rec = createChartRec(
+      let rec = createChartRec(
         kind,
         columnStats,
         activeChart.xField,
@@ -1625,9 +2194,20 @@ function ChartPanelView() {
         tableName,
         extraFromChart(),
       );
+      if (!rec) {
+        for (let i = 0; i < 24; i++) {
+          const enc = getRandomEncoding(columnStats, kind);
+          if (!enc) break;
+          const extra: Parameters<typeof createChartRec>[6] = { ...extraFromChart() };
+          if (enc.sizeField) extra.sizeField = enc.sizeField;
+          rec = createChartRec(kind, columnStats, enc.xField, enc.yField, enc.colorField, tableName, extra);
+          if (rec) break;
+        }
+      }
       if (rec) setActiveChart(rec);
+      else setToast(`Can’t build a ${kind} chart from these columns`);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart, setToast],
   );
 
   const applyYAggregate = useCallback(
@@ -1683,19 +2263,49 @@ function ChartPanelView() {
 
   const handleRandomize = useCallback(() => {
     if (columnStats.length === 0) return;
-    const rec = tryBuildRandomChartRec(columnStats, tableName);
-    if (rec) setActiveChart(rec);
-  }, [columnStats, tableName, setActiveChart]);
+    const keep = activeChart
+      ? {
+          kind: activeChart.kind,
+          xField: activeChart.xField,
+          yField: activeChart.yField,
+          colorField: activeChart.colorField,
+          sizeField: activeChart.sizeField ?? null,
+        }
+      : undefined;
+    const rec = tryBuildRandomChartRec(columnStats, tableName, { locks: encodingLocks, keep });
+    if (rec) {
+      setActiveChart(rec);
+      const locked = Object.entries(encodingLocks).filter(([, v]) => v).map(([k]) => k);
+      setToast(
+        locked.length
+          ? `Random · ${rec.kind} (locked ${locked.join(", ")})`
+          : `Random · ${rec.kind}`,
+      );
+    } else {
+      setToast("Couldn’t find a random chart for these columns");
+    }
+  }, [columnStats, tableName, setActiveChart, setToast, encodingLocks, activeChart]);
 
   const handleRandomizeEncoding = useCallback(() => {
     if (columnStats.length === 0 || !activeChart) return;
+    if (!chartKindDataSupport(columnStats, activeChart.kind).ok) {
+      setToast(`This table can’t support ${activeChart.kind} — pick another type`);
+      return;
+    }
+    const keep = {
+      xField: activeChart.xField,
+      yField: activeChart.yField,
+      colorField: activeChart.colorField,
+      sizeField: activeChart.sizeField ?? null,
+    };
     for (let i = 0; i < 48; i++) {
-      const enc = getRandomEncoding(columnStats, activeChart.kind);
-      if (!enc) continue;
-      const extra: Parameters<typeof createChartRec>[6] = {};
-      if (enc.sizeField) extra.sizeField = enc.sizeField;
-      if (activeChart.tooltipFields?.length) extra.tooltipFields = activeChart.tooltipFields;
-      if (activeChart.tooltipKeyField) extra.tooltipKeyField = activeChart.tooltipKeyField;
+      const drawn = getRandomEncoding(columnStats, activeChart.kind);
+      if (!drawn) continue;
+      const enc = applyEncodingLocks(drawn, encodingLocks, keep);
+      const extra: Parameters<typeof createChartRec>[6] = {
+        ...extraFromChart(),
+        sizeField: enc.sizeField ?? null,
+      };
       const rec = createChartRec(
         activeChart.kind,
         columnStats,
@@ -1707,10 +2317,17 @@ function ChartPanelView() {
       );
       if (rec) {
         setActiveChart(rec);
+        const bits = [
+          rec.xField,
+          rec.yField,
+          encodingLocks.color ? null : rec.colorField,
+        ].filter(Boolean);
+        setToast(`Shuffled · ${bits.join(" × ")}`);
         return;
       }
     }
-  }, [columnStats, tableName, setActiveChart, activeChart]);
+    setToast("Couldn’t shuffle fields for this chart type");
+  }, [columnStats, tableName, setActiveChart, activeChart, extraFromChart, setToast, encodingLocks]);
 
   if (!activeChart) {
     return (
@@ -1725,15 +2342,20 @@ function ChartPanelView() {
   const rowCount = sampleRows?.rows.length ?? 0;
   const totalRows = sampleRows?.total_rows ?? rowCount;
   const aggSummary = formatChartAggregationSummary(activeChart);
-  const showY = activeChart.kind !== "histogram";
-  const showColor = !["histogram", "pie"].includes(activeChart.kind);
-  const showSize = activeChart.kind === "scatter" || activeChart.kind === "strip" || activeChart.kind === "bubble";
-  const showAggregate = ["bar", "line", "area", "pie"].includes(activeChart.kind);
+  const caps = chartCapabilities(activeChart.kind);
+  const channelLabels = encodingChannelLabels(activeChart.kind);
+  const showX = caps.xChannel;
+  const showY = caps.yChannel;
+  const showColor = caps.colorChannel;
+  const showSize = caps.sizeChannel;
+  const showAggregate = caps.aggregate;
   const effectiveAggregate: YAggregateOption = !activeChart.yField
     ? "count"
     : (activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum"));
-  const showRow = ["bar", "line", "area"].includes(activeChart.kind);
-  const showVisualEncoding = activeChart.kind === "scatter" || activeChart.kind === "strip";
+  const showRow = caps.facetRow;
+  const showMarkPoints = caps.markPoints;
+  const showOpacityEnc = caps.opacityChannel;
+  const showGlowOutline = caps.glowOutline;
   const numericCols = columnStats.filter(
     (c) => ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL"].some((t) => (c.data_type ?? "").toUpperCase().includes(t)),
   );
@@ -1742,382 +2364,416 @@ function ChartPanelView() {
   );
 
   const colType = (name: string) => columnStats.find((c) => c.name === name)?.data_type ?? "";
+  const allColOptions: EncodingOption[] = columnStats.map((c) => ({
+    value: c.name,
+    label: c.name,
+    type: c.data_type,
+  }));
+  const numericOptions: EncodingOption[] = numericCols.map((c) => ({
+    value: c.name,
+    label: c.name,
+    type: c.data_type,
+  }));
+  const rowOptions: EncodingOption[] = nominalForRow.map((c) => ({
+    value: c.name,
+    label: c.name,
+    type: c.data_type,
+  }));
+  const tooltipSelectedCount = activeChart.tooltipFields?.length ?? 0;
+  const extraChannelCount = [
+    showMarkPoints && activeChart.sizeField,
+    showRow && activeChart.rowField,
+    showGlowOutline && activeChart.glowField,
+    showGlowOutline && activeChart.outlineField,
+    showOpacityEnc && activeChart.opacityField,
+  ].filter(Boolean).length;
 
   return (
     <div className="flex flex-col gap-3 p-3">
-      {/* Save chart view — always visible at top */}
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-2xs text-loom-muted">Save this chart for dashboards</span>
-        <SaveChartViewButton />
-      </div>
       {/* Encoding — collapsible */}
       <div className="loom-card overflow-hidden">
         <button
           type="button"
           onClick={() => setEncodingOpen((o) => !o)}
-          className="w-full flex items-center justify-between px-2 py-1.5 text-left hover:bg-loom-elevated/50 rounded transition-colors"
+          className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-loom-elevated/50 transition-colors"
         >
           <span className="text-xs font-semibold text-loom-text">Encoding</span>
           <span className="text-loom-muted text-xs">{encodingOpen ? "▼" : "▶"}</span>
         </button>
         {encodingOpen && (
-          <div className="space-y-2 px-2 pb-2">
+          <div className="space-y-2.5 px-2.5 pb-3">
             {(() => {
               const curSupport = chartKindDataSupport(columnStats, activeChart.kind);
               if (!curSupport.ok) {
                 return (
-                  <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1.5 text-2xs text-amber-200/90">
-                    <span className="font-medium">Current chart doesn’t fit this table:</span> {curSupport.reason}
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-2xs text-amber-200/90">
+                    <span className="font-medium">Doesn’t fit this table:</span> {curSupport.reason}
                   </div>
                 );
               }
               return null;
             })()}
-            <div>
-              <label className="block text-2xs text-loom-muted mb-1">Chart type</label>
-              <select
-                value={activeChart.kind}
-                onChange={(e) => {
-                  const v = e.target.value as ChartKind;
-                  if (!chartKindDataSupport(columnStats, v).ok) return;
-                  applyChartType(v);
-                }}
-                className="loom-input w-full text-xs py-1.5 font-mono"
-                title="Types that don’t match your columns are disabled"
-              >
-                {CHART_KIND_OPTIONS.map((opt) => {
-                  const { ok, reason } = chartKindDataSupport(columnStats, opt.value);
-                  return (
-                    <option key={opt.value} value={opt.value} disabled={!ok} title={!ok ? reason : undefined}>
-                      {!ok ? `${opt.label} — ${reason}` : opt.label}
-                    </option>
-                  );
-                })}
-              </select>
-              <p className="text-2xs text-loom-muted mt-0.5">Grayed options need different column types or cardinality.</p>
-            </div>
-            <div className="flex rounded border border-loom-border overflow-hidden">
+
+            <div className="flex gap-1.5 items-stretch">
+              <div className="flex-1 min-w-0">
+                <label className="sr-only" htmlFor="loom-chart-kind">Chart type</label>
+                <select
+                  id="loom-chart-kind"
+                  value={activeChart.kind}
+                  onChange={(e) => {
+                    const v = e.target.value as ChartKind;
+                    if (!chartKindDataSupport(columnStats, v).ok) return;
+                    applyChartType(v);
+                  }}
+                  className="loom-input w-full text-xs py-2 min-h-9"
+                  title="Unavailable types need different columns"
+                >
+                  {CHART_KIND_OPTIONS.map((opt) => {
+                    const { ok, reason } = chartKindDataSupport(columnStats, opt.value);
+                    return (
+                      <option key={opt.value} value={opt.value} disabled={!ok} title={!ok ? reason : undefined}>
+                        {ok ? opt.label : `${opt.label} (n/a)`}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
               <button
                 type="button"
                 onClick={handleRandomizeEncoding}
-                className="flex-1 text-2xs py-1.5 px-2 text-loom-muted hover:bg-loom-elevated hover:text-loom-text transition-colors text-left"
-                title="Keep chart type, shuffle columns"
+                className="shrink-0 min-h-9 min-w-9 px-2 rounded-md border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors"
+                title="Shuffle unlocked fields (keeps chart type; respects locks)"
+                aria-label="Shuffle fields"
               >
-                ⟳ Shuffle fields
+                ⟳
               </button>
-              <span className="w-px bg-loom-border" />
               <button
                 type="button"
                 onClick={handleRandomize}
-                className="text-2xs py-1.5 px-2.5 text-loom-muted hover:bg-loom-elevated hover:text-loom-accent transition-colors"
-                title="Randomize chart type and columns"
+                className="shrink-0 min-h-9 min-w-9 px-2 rounded-md border border-loom-border text-loom-muted hover:text-loom-accent hover:bg-loom-elevated transition-colors"
+                title="Random chart — respects locks (type / x / y / color / size)"
+                aria-label="Randomize chart"
               >
-                🎲
+                ✦
               </button>
             </div>
-            <p className="text-2xs text-loom-muted">Drag columns from footer Schema tab, or choose below.</p>
+
+            <div className="flex flex-wrap items-center gap-1">
+              <span className="text-2xs text-loom-muted mr-0.5">Lock</span>
+              {(
+                [
+                  ["kind", "Type"],
+                  ["x", "X"],
+                  ["y", "Y"],
+                  ["color", "Color"],
+                  ["size", "Size"],
+                ] as const
+              ).map(([key, label]) => {
+                const on = !!encodingLocks[key];
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => toggleEncodingLock(key)}
+                    title={on ? `Unlock ${label} for random` : `Lock ${label} while randomizing`}
+                    className={`px-1.5 py-0.5 text-2xs rounded border ${
+                      on
+                        ? "border-loom-accent/60 text-loom-accent bg-loom-accent/10"
+                        : "border-loom-border text-loom-muted hover:border-loom-accent/40"
+                    }`}
+                  >
+                    {label}{on ? " · locked" : ""}
+                  </button>
+                );
+              })}
+            </div>
+
+            <EncodingSectionLabel>Channels</EncodingSectionLabel>
             <div className="space-y-2">
-              <div className="flex flex-col gap-1">
-                <DropZone
-                  label="X"
-                  value={activeChart.xField}
-                  isActive={dragOverSlot === "x"}
-                  onDragEnter={handleDragEnter("x")}
-                  onDragOver={handleDragOver("x")}
-                  onDragLeave={handleDragLeave}
-                  onDrop={handleDrop("x")}
-                />
-                <select
-                  value={activeChart.xField}
-                  onChange={(e) => applyEncoding("x", e.target.value)}
-                  className="loom-input w-full text-xs py-1.5 font-mono"
-                >
-                  {columnStats.map((c) => (
-                    <option key={c.name} value={c.name}>{c.name}</option>
-                  ))}
-                </select>
-                {colType(activeChart.xField) && (
-                  <p className="text-2xs text-loom-muted mt-0.5 font-mono">{colType(activeChart.xField)}</p>
-                )}
-              </div>
-              {showY && (
-                <div className="flex flex-col gap-1">
-                  <DropZone
-                    label="Y"
-                    value={activeChart.yField ?? "—"}
-                    isActive={dragOverSlot === "y"}
-                    onDragEnter={handleDragEnter("y")}
-                    onDragOver={handleDragOver("y")}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop("y")}
-                  />
-                  <select
-                    value={activeChart.yField ?? ""}
-                    onChange={(e) => applyEncoding("y", e.target.value)}
-                    className="loom-input w-full text-xs py-1.5 font-mono"
-                  >
-                    <option value="">—</option>
-                    {columnStats.map((c) => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                  {activeChart.yField && colType(activeChart.yField) && (
-                    <p className="text-2xs text-loom-muted mt-0.5 font-mono">{colType(activeChart.yField)}</p>
-                  )}
-                  {showAggregate && (
-                    <>
-                      <label className="text-2xs text-loom-muted mt-1">Aggregate (Y)</label>
-                      <select
-                        value={effectiveAggregate}
-                        onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)}
-                        className="loom-input w-full text-xs py-1.5 font-mono"
-                        title="Sum, average, count, min, or max for the Y column"
-                      >
-                        {Y_AGGREGATE_OPTIONS.map((opt) => (
-                          <option key={opt.value} value={opt.value} disabled={!activeChart.yField && opt.value !== "count"}>
-                            {opt.label}
-                          </option>
-                        ))}
-                      </select>
-                    </>
-                  )}
-                </div>
+              {showX && (
+              <EncodingSlot
+                label={channelLabels.x}
+                value={activeChart.xField}
+                options={allColOptions}
+                typeHint={colType(activeChart.xField)}
+                isDropActive={dragOverSlot === "x"}
+                onDragEnter={handleDragEnter("x")}
+                onDragOver={handleDragOver("x")}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop("x")}
+                onChange={(v) => applyEncoding("x", v)}
+              />
               )}
-              {showColor && (
-                <div className="flex flex-col gap-1">
-                  <DropZone
-                    label="Color"
-                    value={activeChart.colorField ?? "None"}
-                    isActive={dragOverSlot === "color"}
-                    onDragEnter={handleDragEnter("color")}
-                    onDragOver={handleDragOver("color")}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop("color")}
-                  />
-                  <select
-                    value={activeChart.colorField ?? "__none__"}
-                    onChange={(e) => applyEncoding("color", e.target.value)}
-                    className="loom-input w-full text-xs py-1.5 font-mono"
-                  >
-                    <option value="__none__">None</option>
-                    {columnStats.map((c) => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                  {activeChart.colorField && colType(activeChart.colorField) && (
-                    <p className="text-2xs text-loom-muted mt-0.5 font-mono">{colType(activeChart.colorField)}</p>
-                  )}
-                  {activeChart.kind === "bar" && activeChart.colorField && (
-                    <p className="text-2xs text-loom-muted mt-0.5">
-                      Use as subcategory: dodged / stacked / percent bars (see Active chart).
-                    </p>
-                  )}
-                </div>
-              )}
-              {showSize && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-2xs text-loom-muted">Size</label>
-                  <select
-                    value={activeChart.sizeField ?? "__none__"}
-                    onChange={(e) => applyEncodingExtra("size", e.target.value)}
-                    className="loom-input w-full text-xs py-1.5 font-mono"
-                  >
-                    <option value="__none__">None</option>
-                    {numericCols.map((c) => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {showRow && (
-                <div className="flex flex-col gap-1">
-                  <label className="text-2xs text-loom-muted">Row (facet)</label>
-                  <select
-                    value={activeChart.rowField ?? "__none__"}
-                    onChange={(e) => applyEncodingExtra("row", e.target.value)}
-                    className="loom-input w-full text-xs py-1.5 font-mono"
-                  >
-                    <option value="__none__">None</option>
-                    {nominalForRow.map((c) => (
-                      <option key={c.name} value={c.name}>{c.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-              {showVisualEncoding && (
-                <>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-2xs text-loom-muted">Glow by</label>
-                    <select
-                      value={activeChart.glowField ?? "__none__"}
-                      onChange={(e) => applyEncodingExtra("glow", e.target.value)}
-                      className="loom-input w-full text-xs py-1.5 font-mono"
-                    >
-                      <option value="__none__">None</option>
-                      {columnStats.map((c) => (
-                        <option key={c.name} value={c.name}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-2xs text-loom-muted">Outline by</label>
-                    <select
-                      value={activeChart.outlineField ?? "__none__"}
-                      onChange={(e) => applyEncodingExtra("outline", e.target.value)}
-                      className="loom-input w-full text-xs py-1.5 font-mono"
-                    >
-                      <option value="__none__">None</option>
-                      {columnStats.map((c) => (
-                        <option key={c.name} value={c.name}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-2xs text-loom-muted">Opacity by</label>
-                    <select
-                      value={activeChart.opacityField ?? "__none__"}
-                      onChange={(e) => applyEncodingExtra("opacity", e.target.value)}
-                      className="loom-input w-full text-xs py-1.5 font-mono"
-                    >
-                      <option value="__none__">None</option>
-                      {columnStats.map((c) => (
-                        <option key={c.name} value={c.name}>{c.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </>
-              )}
-              <div className="pt-2 mt-2 border-t border-loom-border space-y-2">
-                <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Tooltip</p>
-                <p className="text-2xs text-loom-muted">
-                  Hover shows values. Leave all unchecked to mirror encoding fields. Press L on the chart to lock or clear a row filter by link key.
+
+              {!showX && activeChart.kind === "radar" && (
+                <p className="text-2xs text-loom-muted px-0.5">
+                  Radar uses all numeric columns as axes. Set Series (color) to compare groups.
                 </p>
-                <div className="max-h-32 overflow-y-auto space-y-1 border border-loom-border rounded p-1.5">
-                  {columnStats.map((c) => (
-                    <label key={c.name} className="flex items-center gap-2 text-2xs text-loom-text cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={activeChart.tooltipFields?.includes(c.name) ?? false}
-                        onChange={(e) => {
-                          const cur = new Set(activeChart.tooltipFields ?? []);
-                          if (e.target.checked) cur.add(c.name);
-                          else cur.delete(c.name);
-                          applyTooltipFields([...cur]);
-                        }}
-                        className="rounded border-loom-border accent-loom-accent"
-                      />
-                      {c.name}
-                    </label>
-                  ))}
-                </div>
+              )}
+
+              {showY && (
+                <EncodingSlot
+                  label={channelLabels.y}
+                  value={activeChart.yField ?? ""}
+                  options={allColOptions}
+                  allowEmpty
+                  emptyLabel="—"
+                  typeHint={activeChart.yField ? colType(activeChart.yField) : undefined}
+                  isDropActive={dragOverSlot === "y"}
+                  onDragEnter={handleDragEnter("y")}
+                  onDragOver={handleDragOver("y")}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop("y")}
+                  onChange={(v) => applyEncoding("y", v)}
+                  trailing={
+                    showAggregate ? (
+                      <div className="flex items-center gap-2 pl-0.5">
+                        <label className="text-2xs text-loom-muted shrink-0" htmlFor="loom-y-agg">
+                          Aggregate
+                        </label>
+                        <select
+                          id="loom-y-agg"
+                          value={effectiveAggregate}
+                          onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)}
+                          className="loom-input flex-1 text-xs py-1.5 min-h-8"
+                          title="How values are summarized"
+                        >
+                          {Y_AGGREGATE_OPTIONS.map((opt) => (
+                            <option
+                              key={opt.value}
+                              value={opt.value}
+                              disabled={!activeChart.yField && opt.value !== "count"}
+                            >
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : undefined
+                  }
+                />
+              )}
+
+              {showColor && (
+                <EncodingSlot
+                  label={channelLabels.color}
+                  value={activeChart.colorField ?? ""}
+                  options={allColOptions}
+                  allowEmpty
+                  emptyLabel="None"
+                  typeHint={activeChart.colorField ? colType(activeChart.colorField) : undefined}
+                  isDropActive={dragOverSlot === "color"}
+                  onDragEnter={handleDragEnter("color")}
+                  onDragOver={handleDragOver("color")}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop("color")}
+                  onChange={(v) => applyEncoding("color", v === "" ? "__none__" : v)}
+                  trailing={
+                    activeChart.kind === "bar" && activeChart.colorField ? (
+                      <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
+                        <span className="text-2xs text-loom-muted shrink-0">Layout</span>
+                        <div className="flex gap-1 flex-wrap">
+                          {(["grouped", "stacked", "percent"] as const).map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => {
+                                setBarStackMode(m);
+                                if (columnStats.length === 0) return;
+                                const rec = createChartRec(
+                                  activeChart.kind,
+                                  columnStats,
+                                  activeChart.xField,
+                                  activeChart.yField,
+                                  activeChart.colorField,
+                                  tableName,
+                                  { ...extraFromChart(), barStackMode: m },
+                                );
+                                if (rec) setActiveChart(rec);
+                              }}
+                              className={`min-h-8 px-2.5 text-2xs rounded-md capitalize ${
+                                barStackMode === m
+                                  ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                                  : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
+                              }`}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : undefined
+                  }
+                />
+              )}
+            </div>
+
+            {(showSize || showRow || showGlowOutline || showOpacityEnc) && (
+              <div className="space-y-2">
                 <button
                   type="button"
-                  onClick={() => applyTooltipFields([])}
-                  className="text-2xs text-loom-muted hover:text-loom-text"
+                  onClick={() => setMoreChannelsOpen((o) => !o)}
+                  className="flex w-full items-center justify-between text-2xs text-loom-muted hover:text-loom-text py-1"
                 >
-                  Reset tooltip columns (encoding default)
+                  <span>
+                    More channels
+                    {extraChannelCount > 0 ? ` · ${extraChannelCount} set` : ""}
+                  </span>
+                  <span>{moreChannelsOpen ? "▼" : "▶"}</span>
                 </button>
-                <div>
-                  <label className="block text-2xs text-loom-muted mb-1">Link key for L</label>
-                  <select
-                    value={activeChart.tooltipKeyField ?? "__default__"}
-                    onChange={(e) =>
-                      applyTooltipKeyField(e.target.value === "__default__" ? null : e.target.value)
-                    }
-                    className="loom-input w-full text-xs py-1.5 font-mono"
-                  >
-                    <option value="__default__">Same as X field</option>
-                    {columnStats.map((c) => (
-                      <option key={c.name} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {moreChannelsOpen && (
+                  <div className="space-y-2">
+                    {showSize && (
+                      <EncodingSlot
+                        label="Size"
+                        value={activeChart.sizeField ?? ""}
+                        options={numericOptions}
+                        allowEmpty
+                        typeHint={activeChart.sizeField ? colType(activeChart.sizeField) : undefined}
+                        onChange={(v) => applyEncodingExtra("size", v === "" ? "__none__" : v)}
+                      />
+                    )}
+                    {showRow && (
+                      <EncodingSlot
+                        label="Facet"
+                        value={activeChart.rowField ?? ""}
+                        options={rowOptions}
+                        allowEmpty
+                        typeHint={activeChart.rowField ? colType(activeChart.rowField) : undefined}
+                        onChange={(v) => applyEncodingExtra("row", v === "" ? "__none__" : v)}
+                      />
+                    )}
+                    {showGlowOutline && (
+                      <>
+                        <EncodingSlot
+                          label="Glow"
+                          value={activeChart.glowField ?? ""}
+                          options={allColOptions}
+                          allowEmpty
+                          onChange={(v) => applyEncodingExtra("glow", v === "" ? "__none__" : v)}
+                        />
+                        <EncodingSlot
+                          label="Outline"
+                          value={activeChart.outlineField ?? ""}
+                          options={allColOptions}
+                          allowEmpty
+                          onChange={(v) => applyEncodingExtra("outline", v === "" ? "__none__" : v)}
+                        />
+                      </>
+                    )}
+                    {showOpacityEnc && (
+                      <EncodingSlot
+                        label="Opacity"
+                        value={activeChart.opacityField ?? ""}
+                        options={allColOptions}
+                        allowEmpty
+                        onChange={(v) => applyEncodingExtra("opacity", v === "" ? "__none__" : v)}
+                      />
+                    )}
+                  </div>
+                )}
               </div>
+            )}
+
+            <div className="border-t border-loom-border/70 pt-2 space-y-2">
+              <button
+                type="button"
+                onClick={() => setTooltipOpen((o) => !o)}
+                className="flex w-full items-center justify-between text-2xs text-loom-muted hover:text-loom-text py-1"
+              >
+                <span>
+                  Tooltip
+                  {tooltipSelectedCount > 0
+                    ? ` · ${tooltipSelectedCount} fields`
+                    : " · encoding defaults"}
+                </span>
+                <span>{tooltipOpen ? "▼" : "▶"}</span>
+              </button>
+              {tooltipOpen && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-1.5">
+                    {columnStats.map((c) => {
+                      const on = activeChart.tooltipFields?.includes(c.name) ?? false;
+                      return (
+                        <button
+                          key={c.name}
+                          type="button"
+                          onClick={() => {
+                            const cur = new Set(activeChart.tooltipFields ?? []);
+                            if (on) cur.delete(c.name);
+                            else cur.add(c.name);
+                            applyTooltipFields([...cur]);
+                          }}
+                          className={`min-h-8 px-2 rounded-md text-2xs border transition-colors ${
+                            on
+                              ? "border-loom-accent/50 bg-loom-accent/15 text-loom-text"
+                              : "border-loom-border text-loom-muted hover:border-loom-accent/30 hover:text-loom-text"
+                          }`}
+                          title={c.data_type}
+                        >
+                          {c.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => applyTooltipFields([])}
+                      className="text-2xs text-loom-muted hover:text-loom-text"
+                    >
+                      Use encoding defaults
+                    </button>
+                  </div>
+                  <EncodingSlot
+                    label="Link"
+                    value={activeChart.tooltipKeyField ?? ""}
+                    options={allColOptions}
+                    allowEmpty
+                    emptyLabel="Same as X"
+                    onChange={(v) => applyTooltipKeyField(v === "" ? null : v)}
+                  />
+                  <p className="text-2xs text-loom-muted leading-snug">
+                    Link key is used when you press L on the chart to filter by a value.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <p className="text-2xs text-loom-muted tabular-nums truncate">
+                {rowCount.toLocaleString()}
+                {totalRows > rowCount ? ` / ${totalRows.toLocaleString()}` : ""} rows · {aggSummary}
+              </p>
+              <SaveChartViewButton />
             </div>
           </div>
         )}
       </div>
 
-      {/* Active chart — collapsible */}
+      {/* Active chart — toggles & annotations */}
       <div className="loom-card overflow-hidden">
         <button
           type="button"
           onClick={() => setActiveChartOpen((o) => !o)}
-          className="w-full flex items-center justify-between px-2 py-1.5 text-left hover:bg-loom-elevated/50 rounded transition-colors"
+          className="w-full flex items-center justify-between px-2.5 py-2 text-left hover:bg-loom-elevated/50 transition-colors"
         >
           <span className="text-xs font-semibold text-loom-text">Active chart</span>
           <span className="text-loom-muted text-xs">{activeChartOpen ? "▼" : "▶"}</span>
         </button>
         {activeChartOpen && (
-          <div className="space-y-1.5 px-2 pb-2">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <span className="loom-badge">{activeChart.kind}</span>
-              <SaveChartViewButton />
+          <div className="space-y-2 px-2.5 pb-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="loom-badge capitalize">{activeChart.kind}</span>
+              <button
+                type="button"
+                className="text-2xs text-loom-muted hover:text-loom-text border-b border-dotted border-loom-muted/40"
+                title={aiSuggestionReason ?? getRecommendationReason(activeChart)}
+              >
+                Why this chart?
+              </button>
             </div>
-            <p className="text-2xs text-loom-muted">
-              <span className="cursor-help border-b border-dotted border-loom-muted/50" title={aiSuggestionReason ?? getRecommendationReason(activeChart)}>
-                Why?
-              </span>
-            </p>
-            <div className="text-2xs font-mono text-loom-muted space-y-0.5">
-              <p>X: {activeChart.xField}</p>
-              {activeChart.yField && <p>Y: {activeChart.yField}</p>}
-              {activeChart.colorField && <p>Color: {activeChart.colorField}</p>}
-              {activeChart.sizeField && <p>Size: {activeChart.sizeField}</p>}
-              {activeChart.rowField && <p>Row: {activeChart.rowField}</p>}
-              {activeChart.glowField && <p>Glow: {activeChart.glowField}</p>}
-              {activeChart.outlineField && <p>Outline: {activeChart.outlineField}</p>}
-              {activeChart.opacityField && <p>Opacity: {activeChart.opacityField}</p>}
-              <p className="text-loom-text">
-                Showing {rowCount.toLocaleString()}
-                {totalRows > rowCount ? ` of ${totalRows.toLocaleString()}` : ""} rows in chart
-              </p>
-              <p className="text-loom-muted">{aggSummary}</p>
-            </div>
-            {/* Chart-specific toggles */}
-            {activeChart.kind === "bar" && activeChart.colorField && (
-              <div className="mt-2">
-                <label className="block text-2xs text-loom-muted mb-1">Bar layout (Color = subcategory)</label>
-                <div className="flex gap-1 flex-wrap">
-                  {(["grouped", "stacked", "percent"] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => {
-                        setBarStackMode(m);
-                        if (columnStats.length === 0) return;
-                        const rec = createChartRec(
-                          activeChart.kind,
-                          columnStats,
-                          activeChart.xField,
-                          activeChart.yField,
-                          activeChart.colorField,
-                          tableName,
-                          {
-                            sizeField: activeChart.sizeField ?? null,
-                            rowField: activeChart.rowField ?? null,
-                            glowField: activeChart.glowField ?? null,
-                            outlineField: activeChart.outlineField ?? null,
-                            opacityField: activeChart.opacityField ?? null,
-                            yAggregate: activeChart.yAggregate ?? null,
-                            tooltipFields: activeChart.tooltipFields,
-                            tooltipKeyField: activeChart.tooltipKeyField ?? null,
-                            barStackMode: m,
-                          },
-                        );
-                        if (rec) setActiveChart(rec);
-                      }}
-                      className={`px-1.5 py-0.5 text-2xs rounded ${barStackMode === m ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {activeChart.kind === "scatter" && (
+            {caps.scatterExtras && (
               <div className="mt-2 space-y-1">
                 <label className="flex items-center gap-1.5 text-2xs text-loom-muted cursor-pointer">
                   <input type="checkbox" checked={connectScatterTrail} onChange={(e) => setConnectScatterTrail(e.target.checked)} className="rounded border-loom-border accent-loom-accent" />
@@ -2130,6 +2786,7 @@ function ChartPanelView() {
               </div>
             )}
             {/* Custom reference lines */}
+            {caps.referenceLines && (
             <div className="mt-2">
               <button type="button" onClick={() => {
                 setPromptDialog({
@@ -2156,6 +2813,7 @@ function ChartPanelView() {
                 </div>
               ))}
             </div>
+            )}
           </div>
         )}
       </div>
@@ -2172,28 +2830,315 @@ function ChartPanelView() {
         </button>
         {visualOpen && (
           <div className="space-y-4 px-2 pb-2">
-            {/* Presets */}
+            {/* Presets — full replace */}
             <div className="space-y-1.5">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Preset</p>
+              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Design system</p>
+              <p className="text-2xs text-loom-muted leading-snug">
+                Full looks — Tufte / Bauhaus / Newspaper / Military change ink, axes, and atmosphere on every chart kind.
+              </p>
               <div className="flex flex-wrap gap-1.5">
-                {[
-                  { name: "Minimal", overrides: { chartPadding: 30, showGrid: false, titleFontWeight: 400, axisFontSize: 9, legendPosition: "none" as const } },
-                  { name: "Editorial", overrides: { fontFamily: "Instrument Serif", chartPadding: 60, titleFontWeight: 700, showGrid: true, gridStyle: "dashed" as const, barCornerRadius: 0 } },
-                  { name: "High contrast", overrides: { axisLineWidth: 2, gridOpacity: 0.8, titleFontWeight: 700, axisFontSize: 11, showDataLabels: true } },
-                ].map(({ name, overrides }) => (
+                {(Object.keys(VISUAL_PRESETS) as VisualPresetId[]).map((id) => (
                   <button
-                    key={name}
+                    key={id}
                     type="button"
-                    onClick={() => setChartVisualOverrides((prev) => ({ ...prev, ...overrides }))}
-                    className="px-2 py-1 text-2xs rounded border border-loom-border text-loom-text hover:border-loom-accent hover:bg-loom-accent/10"
+                    title={VISUAL_PRESET_BLURB[id]}
+                    onClick={() => setChartVisualOverrides({ ...VISUAL_PRESETS[id].overrides })}
+                    className={`px-2.5 py-1.5 min-h-9 text-2xs rounded border ${
+                      id === "tufte" || id === "bauhaus" || id === "newspaper" || id === "military"
+                        ? "border-loom-accent/50 text-loom-text bg-loom-accent/5 hover:bg-loom-accent/12"
+                        : id === "clarity"
+                          ? "border-loom-accent/60 text-loom-accent bg-loom-accent/10 hover:bg-loom-accent/15"
+                          : "border-loom-border text-loom-text hover:border-loom-accent hover:bg-loom-accent/10"
+                    }`}
                   >
-                    {name}
+                    {VISUAL_PRESETS[id].name}
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = shuffleVisualOverrides(chartVisualOverrides, visualLocks);
+                    setChartVisualOverrides(next);
+                    const locked = VISUAL_SHUFFLE_SECTIONS.filter((s) => visualLocks[s.id]).map((s) => s.label);
+                    setToast(
+                      locked.length
+                        ? `Shuffled look · kept ${locked.join(", ")}`
+                        : "Shuffled look · color + design",
+                    );
+                  }}
+                  className="px-2.5 py-1.5 min-h-9 text-2xs rounded border border-loom-accent/50 text-loom-accent hover:bg-loom-accent/10"
+                  title="Randomize unlocked Visual sections (Color included when unlocked)"
+                >
+                  Shuffle look
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-1 pt-0.5">
+                <span className="text-2xs text-loom-muted mr-0.5">Lock</span>
+                {VISUAL_SHUFFLE_SECTIONS.map((s) => {
+                  const on = !!visualLocks[s.id];
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => toggleVisualLock(s.id)}
+                      title={on ? `Unlock ${s.label}` : `Lock ${s.label} while shuffling`}
+                      className={`px-1.5 py-0.5 text-2xs rounded border ${
+                        on
+                          ? "border-loom-accent/60 text-loom-accent bg-loom-accent/10"
+                          : "border-loom-border text-loom-muted hover:border-loom-accent/40"
+                      }`}
+                    >
+                      {s.label}{on ? " · locked" : ""}
+                    </button>
+                  );
+                })}
               </div>
             </div>
-            {/* Typography */}
+
+            {/* Color palettes */}
             <div className="space-y-2">
+              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Color</p>
+              <p className="text-2xs text-loom-muted leading-snug">
+                Data-viz scales — Auto picks categorical, sequential, or semantic from the chart.
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {(
+                  [
+                    ["auto", "Auto"],
+                    ["categorical", "Cat"],
+                    ["sequential", "Seq"],
+                    ["diverging", "Div"],
+                    ["spectrum", "Spec"],
+                    ["semantic", "Sem"],
+                  ] as const
+                ).map(([id, label]) => {
+                  const cur = chartVisualOverrides.colorScaleKind ?? "auto";
+                  const active = cur === id;
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => {
+                        updateOverride("colorScaleKind", id);
+                        if (id === "auto") updateOverride("colorPalette", "auto");
+                        else {
+                          const first = COLOR_PALETTES.find(
+                            (p) => p.kind === id && p.source === "system" && p.id !== "auto",
+                          );
+                          if (first) updateOverride("colorPalette", first.id);
+                        }
+                      }}
+                      className={`px-2 py-1 text-2xs rounded border ${
+                        active
+                          ? "border-loom-accent text-loom-accent bg-loom-accent/10"
+                          : "border-loom-border text-loom-muted hover:border-loom-accent/50"
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!chartVisualOverrides.colorPaletteReverse}
+                  onChange={(e) => updateOverride("colorPaletteReverse", e.target.checked)}
+                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                />
+                Reverse scale
+              </label>
+              {(() => {
+                const applied = resolveChartColors({
+                  paletteId: chartVisualOverrides.colorPalette ?? "auto",
+                  theme: appSettings.theme,
+                  colorblind: !!appSettings.colorblindCharts,
+                  chartKind: activeChart?.kind ?? null,
+                  reverse: !!chartVisualOverrides.colorPaletteReverse,
+                  scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
+                });
+                const kindFilter = chartVisualOverrides.colorScaleKind ?? "auto";
+                const grouped = palettesGrouped();
+                const filterList = (list: typeof grouped.system) =>
+                  kindFilter === "auto"
+                    ? list
+                    : list.filter((p) => p.kind === (kindFilter as PaletteKind));
+                const sections: { title: string; items: typeof grouped.system }[] = [
+                  { title: "System", items: filterList(grouped.system) },
+                  { title: "Theme", items: filterList(grouped.theme) },
+                  { title: "Research", items: filterList(grouped.research) },
+                ].filter((s) => s.items.length > 0);
+                const selectedId = chartVisualOverrides.colorPalette ?? "auto";
+                return (
+                  <div className="space-y-2.5">
+                    <div className="rounded border border-loom-border/60 bg-loom-elevated/40 px-2 py-1.5">
+                      <p className="text-2xs text-loom-muted mb-1">
+                        Applied · {applied.paletteId}
+                        {applied.continuous ? " · continuous" : ""}
+                      </p>
+                      <div className="flex h-3 rounded overflow-hidden">
+                        {applied.colors.map((c, i) => (
+                          <span key={`${c}-${i}`} className="flex-1" style={{ background: c }} title={c} />
+                        ))}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        updateOverride("colorPalette", "auto");
+                        updateOverride("colorScaleKind", "auto");
+                      }}
+                      className={`w-full text-left rounded border px-2 py-1.5 ${
+                        selectedId === "auto"
+                          ? "border-loom-accent bg-loom-accent/10"
+                          : "border-loom-border hover:border-loom-accent/40"
+                      }`}
+                    >
+                      <span className="text-2xs text-loom-text font-medium">Auto</span>
+                      <span className="block text-2xs text-loom-muted">Match scale to chart kind</span>
+                    </button>
+                    {sections.map((sec) => (
+                      <div key={sec.title} className="space-y-1">
+                        <p className="text-2xs text-loom-muted uppercase tracking-wide">{sec.title}</p>
+                        <div className="space-y-1 max-h-48 overflow-y-auto pr-0.5">
+                          {sec.items.map((p) => {
+                            const active = selectedId === p.id;
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  updateOverride("colorPalette", p.id);
+                                  updateOverride("colorScaleKind", p.kind);
+                                }}
+                                className={`w-full text-left rounded border px-2 py-1.5 ${
+                                  active
+                                    ? "border-loom-accent bg-loom-accent/10"
+                                    : "border-loom-border hover:border-loom-accent/40"
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <span className="text-2xs text-loom-text font-medium truncate">{p.name}</span>
+                                  <span className="text-2xs text-loom-muted shrink-0">{p.kind}</span>
+                                </div>
+                                <div className="flex h-2.5 rounded overflow-hidden">
+                                  {p.colors.map((c, i) => (
+                                    <span key={`${p.id}-${i}`} className="flex-1" style={{ background: c }} />
+                                  ))}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Look spectrum — only controls that affect this chart kind */}
+            <div className="space-y-2.5">
+              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Look</p>
+              <IconToggleGroup
+                label="Detail"
+                value={chartVisualOverrides.chartDetail ?? "viz"}
+                onChange={(v) => updateOverride("chartDetail", v)}
+                options={[
+                  { value: "plain", label: "Plain", icon: Ico.plain },
+                  { value: "viz", label: "Viz", icon: Ico.viz },
+                  { value: "deep", label: "Deep", icon: Ico.deep },
+                ]}
+              />
+              {caps.markMotif && (
+                <IconToggleGroup
+                  label="Mark motif"
+                  value={chartVisualOverrides.markMotif ?? "dots"}
+                  onChange={(v) => updateOverride("markMotif", v)}
+                  options={[
+                    { value: "dots", label: "Dots", icon: Ico.dots },
+                    { value: "squares", label: "Squares", icon: Ico.squares },
+                    { value: "ticks", label: "Ticks", icon: Ico.ticks },
+                    { value: "bar", label: "Bar", icon: Ico.bar },
+                    { value: "ring", label: "Ring", icon: Ico.ring },
+                  ]}
+                />
+              )}
+              {caps.cartesian && (
+                <IconToggleGroup
+                  label="Axis style"
+                  value={chartVisualOverrides.axisStyle ?? "rule"}
+                  onChange={(v) => updateOverride("axisStyle", v)}
+                  options={[
+                    { value: "rule", label: "Rule", icon: Ico.rule },
+                    { value: "ladder", label: "Ladder", icon: Ico.ladder },
+                    { value: "mercury", label: "Mercury", icon: Ico.mercury },
+                    { value: "spine", label: "Spine", icon: Ico.spine },
+                    { value: "index", label: "Index", icon: Ico.index },
+                    { value: "tape", label: "Tape", icon: Ico.tape },
+                  ]}
+                />
+              )}
+              <IconToggleGroup
+                label="Title layout"
+                value={chartVisualOverrides.titleLayout ?? "pair"}
+                onChange={(v) => updateOverride("titleLayout", v)}
+                options={[
+                  { value: "pair", label: "Pair", icon: Ico.pair },
+                  { value: "stack", label: "Stack", icon: Ico.stack },
+                  { value: "spine", label: "Spine", icon: Ico.titleSpine },
+                  { value: "caption", label: "Caption", icon: Ico.caption },
+                  { value: "ticket", label: "Ticket", icon: Ico.ticket },
+                  { value: "slab", label: "Slab", icon: Ico.slab },
+                ]}
+              />
+              <IconToggleGroup
+                label="Frame"
+                value={chartVisualOverrides.chartFrame ?? "focus"}
+                onChange={(v) => updateOverride("chartFrame", v)}
+                options={[
+                  { value: "hero", label: "Hero", icon: Ico.hero },
+                  { value: "compact", label: "Compact", icon: Ico.compact },
+                  { value: "focus", label: "Focus", icon: Ico.focus },
+                ]}
+              />
+              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
+                <input
+                  type="checkbox"
+                  checked={chartVisualOverrides.ghostEnabled ?? false}
+                  onChange={(e) => updateOverride("ghostEnabled", e.target.checked)}
+                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                />
+                Ghost overlay
+              </label>
+              {chartVisualOverrides.ghostEnabled && (
+                <div className="space-y-2.5 pl-0.5">
+                  <IconToggleGroup
+                    label="Ghost weight"
+                    value={chartVisualOverrides.ghostWeight ?? "soft"}
+                    onChange={(v) => updateOverride("ghostWeight", v)}
+                    options={[
+                      { value: "whisper", label: "Whisper", icon: Ico.whisper },
+                      { value: "soft", label: "Soft", icon: Ico.soft },
+                      { value: "firm", label: "Firm", icon: Ico.firm },
+                    ]}
+                  />
+                  <IconToggleGroup
+                    label="Ghost place"
+                    value={chartVisualOverrides.ghostPlace ?? "se"}
+                    onChange={(v) => updateOverride("ghostPlace", v)}
+                    options={[
+                      { value: "nw", label: "Top left", icon: Ico.nw },
+                      { value: "ne", label: "Top right", icon: Ico.ne },
+                      { value: "sw", label: "Bottom left", icon: Ico.sw },
+                      { value: "se", label: "Bottom right", icon: Ico.se },
+                    ]}
+                  />
+                </div>
+              )}
+            </div>
+            {/* Typography */}
+            <div className="space-y-2.5">
               <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Typography</p>
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Font family</label>
@@ -2202,24 +3147,23 @@ function ChartPanelView() {
                   onChange={(e) => updateOverride("fontFamily", e.target.value)}
                   className="loom-input w-full text-xs py-1.5"
                 >
-                  {["Inter", "JetBrains Mono", "Space Grotesk", "DM Sans", "Instrument Serif"].map((f) => (
+                  {["Inter", "JetBrains Mono", "IBM Plex Sans", "Libre Baskerville", "Lora", "Fira Code", "Geist"].map((f) => (
                     <option key={f} value={f}>{f}</option>
                   ))}
                 </select>
               </div>
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Title weight</label>
-                <select
-                  value={chartVisualOverrides.titleFontWeight ?? 600}
-                  onChange={(e) => updateOverride("titleFontWeight", Number(e.target.value))}
-                  className="loom-input w-full text-xs py-1.5"
-                >
-                  {[300, 400, 600, 700].map((w) => (
-                    <option key={w} value={w}>{w === 300 ? "Light" : w === 400 ? "Regular" : w === 600 ? "Semibold" : "Bold"}</option>
-                  ))}
-                </select>
-              </div>
-              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
+              <IconToggleGroup
+                label="Title weight"
+                value={chartVisualOverrides.titleFontWeight ?? 600}
+                onChange={(v) => updateOverride("titleFontWeight", v)}
+                options={[
+                  { value: 300, label: "Light", icon: Ico.weightLight },
+                  { value: 400, label: "Regular", icon: Ico.weightRegular },
+                  { value: 600, label: "Semibold", icon: Ico.weightSemi },
+                  { value: 700, label: "Bold", icon: Ico.weightBold },
+                ]}
+              />
+              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
                 <input
                   type="checkbox"
                   checked={chartVisualOverrides.titleItalic ?? false}
@@ -2228,24 +3172,27 @@ function ChartPanelView() {
                 />
                 Title italic
               </label>
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Tick label rotation</label>
-                <select
+              {caps.cartesian && (
+                <IconToggleGroup
+                  label="Tick label rotation"
                   value={chartVisualOverrides.tickRotation ?? 0}
-                  onChange={(e) => updateOverride("tickRotation", Number(e.target.value))}
-                  className="loom-input w-full text-xs py-1.5"
-                >
-                  {[0, 30, 45, 60, 90].map((deg) => (
-                    <option key={deg} value={deg}>{deg}°</option>
-                  ))}
-                </select>
-              </div>
+                  onChange={(v) => updateOverride("tickRotation", v)}
+                  options={[
+                    { value: 0, label: "0°", icon: Ico.rot0 },
+                    { value: 30, label: "30°", icon: Ico.rot30 },
+                    { value: 45, label: "45°", icon: Ico.rot45 },
+                    { value: 60, label: "60°", icon: Ico.rot60 },
+                    { value: 90, label: "90°", icon: Ico.rot90 },
+                  ]}
+                />
+              )}
             </div>
 
-            {/* Marks */}
+            {/* Marks — only for kinds that draw marks this way */}
+            {(caps.markPoints || caps.barMarks || caps.lineMarks) && (
             <div className="space-y-2">
               <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Marks</p>
-              {(activeChart.kind === "scatter" || activeChart.kind === "strip") && (
+              {caps.markPoints && (
                 <>
                   <div>
                     <label className="block text-2xs text-loom-muted mb-1">Point size</label>
@@ -2333,7 +3280,7 @@ function ChartPanelView() {
                   </div>
                 </>
               )}
-              {activeChart.kind === "bar" && (
+              {caps.barMarks && (
                 <div>
                   <label className="block text-2xs text-loom-muted mb-1">Bar corner radius (px)</label>
                   <input
@@ -2347,21 +3294,19 @@ function ChartPanelView() {
                   <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.barCornerRadius ?? 3}</span>
                 </div>
               )}
-              {["line", "area"].includes(activeChart.kind) && (
+              {caps.lineMarks && (
                 <>
-                  <div>
-                    <label className="block text-2xs text-loom-muted mb-1">Line style</label>
-                    <select
-                      value={chartVisualOverrides.lineStrokeStyle ?? "solid"}
-                      onChange={(e) => updateOverride("lineStrokeStyle", e.target.value)}
-                      className="loom-input w-full text-xs py-1.5"
-                    >
-                      {["solid", "dashed", "dotted"].map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
+                  <IconToggleGroup
+                    label="Line style"
+                    value={chartVisualOverrides.lineStrokeStyle ?? "solid"}
+                    onChange={(v) => updateOverride("lineStrokeStyle", v)}
+                    options={[
+                      { value: "solid", label: "Solid", icon: Ico.solid },
+                      { value: "dashed", label: "Dashed", icon: Ico.dashed },
+                      { value: "dotted", label: "Dotted", icon: Ico.dotted },
+                    ]}
+                  />
+                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
                     <input
                       type="checkbox"
                       checked={chartVisualOverrides.lineCurveSmooth ?? false}
@@ -2373,22 +3318,25 @@ function ChartPanelView() {
                 </>
               )}
             </div>
+            )}
 
-            {/* Axes & Grid */}
-            <div className="space-y-2">
+            {/* Axes & Grid — cartesian charts only */}
+            {caps.cartesian && (
+            <div className="space-y-2.5">
               <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Axes & Grid</p>
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Axis line color</label>
-                <select
-                  value={chartVisualOverrides.axisLineColor ?? "#2a2a30"}
-                  onChange={(e) => updateOverride("axisLineColor", e.target.value)}
-                  className="loom-input w-full text-xs py-1.5"
-                >
-                  {["#2a2a30", "#3a3a42", "#1a1a1f", "#4a4a52", "#e8e8ec"].map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
+              <ColorSwatchGroup
+                label="Axis line color"
+                value={chartVisualOverrides.axisLineColor ?? "theme"}
+                onChange={(v) => updateOverride("axisLineColor", v === "theme" ? undefined : v)}
+                options={[
+                  { value: "theme", label: "Theme border", color: "theme" },
+                  { value: "#2a2a30", label: "Graphite", color: "#2a2a30" },
+                  { value: "#6b6b78", label: "Muted", color: "#6b6b78" },
+                  { value: "#000000", label: "Black", color: "#000000" },
+                  { value: "#ffffff", label: "White", color: "#ffffff" },
+                  { value: "#c8c8c4", label: "Light gray", color: "#c8c8c4" },
+                ]}
+              />
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Axis line width</label>
                 <input
@@ -2402,18 +3350,17 @@ function ChartPanelView() {
                 />
                 <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.axisLineWidth ?? 1}</span>
               </div>
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Grid style</label>
-                <select
-                  value={chartVisualOverrides.gridStyle ?? "solid"}
-                  onChange={(e) => updateOverride("gridStyle", e.target.value)}
-                  className="loom-input w-full text-xs py-1.5"
-                >
-                  {["solid", "dashed", "dotted", "none"].map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              </div>
+              <IconToggleGroup
+                label="Grid style"
+                value={chartVisualOverrides.gridStyle ?? "solid"}
+                onChange={(v) => updateOverride("gridStyle", v)}
+                options={[
+                  { value: "solid", label: "Solid", icon: Ico.solid },
+                  { value: "dashed", label: "Dashed", icon: Ico.dashed },
+                  { value: "dotted", label: "Dotted", icon: Ico.dotted },
+                  { value: "none", label: "None", icon: Ico.none },
+                ]}
+              />
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Grid opacity</label>
                 <input
@@ -2439,18 +3386,19 @@ function ChartPanelView() {
                 />
                 <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.tickCount ?? 5}</span>
               </div>
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Axis label color</label>
-                <select
-                  value={chartVisualOverrides.axisLabelColor ?? "#6b6b78"}
-                  onChange={(e) => updateOverride("axisLabelColor", e.target.value)}
-                  className="loom-input w-full text-xs py-1.5"
-                >
-                  {["#6b6b78", "#8a8a94", "#4a4a52", "#5b7c99", "#b8860b"].map((c) => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
+              <ColorSwatchGroup
+                label="Axis label color"
+                value={chartVisualOverrides.axisLabelColor ?? "theme"}
+                onChange={(v) => updateOverride("axisLabelColor", v === "theme" ? undefined : v)}
+                options={[
+                  { value: "theme", label: "Theme muted", color: "theme" },
+                  { value: "#6b6b78", label: "Muted gray", color: "#6b6b78" },
+                  { value: "#000000", label: "Black", color: "#000000" },
+                  { value: "#ffffff", label: "White", color: "#ffffff" },
+                  { value: "#e8e8ec", label: "Near white", color: "#e8e8ec" },
+                  { value: "#1a1a1f", label: "Near black", color: "#1a1a1f" },
+                ]}
+              />
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Axis font size</label>
                 <input
@@ -2472,6 +3420,7 @@ function ChartPanelView() {
                 Show grid
               </label>
             </div>
+            )}
 
             {/* Layout */}
             <div className="space-y-2">
@@ -2482,11 +3431,11 @@ function ChartPanelView() {
                   type="range"
                   min={20}
                   max={80}
-                  value={chartVisualOverrides.chartPadding ?? 50}
+                  value={chartVisualOverrides.chartPadding ?? 56}
                   onChange={(e) => updateOverride("chartPadding", Number(e.target.value))}
                   className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                 />
-                <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.chartPadding ?? 50}</span>
+                <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.chartPadding ?? 56}</span>
               </div>
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Legend position</label>
@@ -2494,13 +3443,17 @@ function ChartPanelView() {
                   value={chartVisualOverrides.legendPosition ?? "none"}
                   onChange={(e) => updateOverride("legendPosition", e.target.value)}
                   className="loom-input w-full text-xs py-1.5"
+                  disabled={!caps.legend}
                 >
                   {["none", "top-right", "bottom", "right"].map((p) => (
                     <option key={p} value={p}>{p === "none" ? "None" : p === "top-right" ? "Top right" : p}</option>
                   ))}
                 </select>
+                {!caps.legend && (
+                  <p className="text-2xs text-loom-muted mt-0.5">Legend isn’t used for this chart type.</p>
+                )}
               </div>
-              {["bar", "pie"].includes(activeChart.kind) && (
+              {caps.dataLabels && (
                 <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
                   <input
                     type="checkbox"
@@ -2511,19 +3464,6 @@ function ChartPanelView() {
                   Data labels
                 </label>
               )}
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Facet by (small multiples)</label>
-                <select
-                  value={chartVisualOverrides.facetField ?? ""}
-                  onChange={(e) => updateOverride("facetField", e.target.value || undefined)}
-                  className="loom-input w-full text-xs py-1.5"
-                >
-                  <option value="">None</option>
-                  {(columnStats ?? []).map((c) => (
-                    <option key={c.name} value={c.name}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
             </div>
 
             {/* Atmosphere */}
@@ -2536,8 +3476,19 @@ function ChartPanelView() {
                   onChange={(e) => updateOverride("backgroundStyle", e.target.value)}
                   className="loom-input w-full text-xs py-1.5"
                 >
-                  {["default", "gradient", "paper", "transparent"].map((b) => (
-                    <option key={b} value={b}>{b === "default" ? "Default" : b === "gradient" ? "Gradient vignette" : b === "paper" ? "Paper" : "Transparent"}</option>
+                  {["default", "tufte", "newsprint", "bauhaus", "carbon", "blueprint", "ruled", "gradient", "paper", "transparent"].map((b) => (
+                    <option key={b} value={b}>
+                      {b === "default" ? "Default"
+                        : b === "tufte" ? "Tufte clean"
+                        : b === "newsprint" ? "Newsprint"
+                        : b === "bauhaus" ? "Bauhaus blocks"
+                        : b === "carbon" ? "Carbon hatch"
+                        : b === "blueprint" ? "Blueprint"
+                        : b === "ruled" ? "Ruled notebook"
+                        : b === "gradient" ? "Gradient vignette"
+                        : b === "paper" ? "Paper grain"
+                        : "Transparent"}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -2553,28 +3504,32 @@ function ChartPanelView() {
                   ))}
                 </select>
               </div>
-              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={chartVisualOverrides.glowEnabled ?? false}
-                  onChange={(e) => updateOverride("glowEnabled", e.target.checked)}
-                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                />
-                Glow on marks
-              </label>
-              {chartVisualOverrides.glowEnabled && (
-                <div>
-                  <label className="block text-2xs text-loom-muted mb-1">Glow intensity</label>
-                  <input
-                    type="range"
-                    min={1}
-                    max={20}
-                    value={chartVisualOverrides.glowIntensity ?? 8}
-                    onChange={(e) => updateOverride("glowIntensity", Number(e.target.value))}
-                    className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
-                  />
-                  <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.glowIntensity ?? 8}</span>
-                </div>
+              {caps.markPoints && (
+                <>
+                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={chartVisualOverrides.glowEnabled ?? false}
+                      onChange={(e) => updateOverride("glowEnabled", e.target.checked)}
+                      className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                    />
+                    Glow on marks
+                  </label>
+                  {chartVisualOverrides.glowEnabled && (
+                    <div>
+                      <label className="block text-2xs text-loom-muted mb-1">Glow intensity</label>
+                      <input
+                        type="range"
+                        min={1}
+                        max={20}
+                        value={chartVisualOverrides.glowIntensity ?? 8}
+                        onChange={(e) => updateOverride("glowIntensity", Number(e.target.value))}
+                        className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
+                      />
+                      <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.glowIntensity ?? 8}</span>
+                    </div>
+                  )}
+                </>
               )}
               <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
                 <input
@@ -2629,18 +3584,6 @@ function ChartPanelView() {
                   className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                 />
                 <span className="text-2xs font-mono text-loom-muted ml-2">{((chartVisualOverrides.opacity ?? 0.7) * 100).toFixed(0)}%</span>
-              </div>
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Color palette</label>
-                <select
-                  value={chartVisualOverrides.colorPalette ?? "theme"}
-                  onChange={(e) => updateOverride("colorPalette", e.target.value)}
-                  className="loom-input w-full text-xs py-1.5"
-                >
-                  {COLOR_PALETTES.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
-                  ))}
-                </select>
               </div>
             </div>
           </div>

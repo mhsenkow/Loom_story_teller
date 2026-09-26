@@ -33,6 +33,13 @@ import {
   setTablePrefs as persistTablePrefs,
 } from "@/lib/persist";
 import type { ChartViewItem, QueryViewItem, DashboardItem } from "@/lib/store";
+import {
+  readIbmToolsShared,
+  normalizeTheme,
+  normalizeUi,
+  normalizeFont,
+  normalizeFaces,
+} from "@/lib/lookSystem";
 
 export function HydrateStore() {
   const hydrated = useRef(false);
@@ -81,10 +88,43 @@ export function HydrateStore() {
     if (saved) {
       setAppSettings((prev) => ({
         ...prev,
-        ...(saved.theme && { theme: saved.theme as "dark" | "light" | "high-contrast" | "colorblind" }),
-        ...(typeof saved.fontScale === "number" && { fontScale: saved.fontScale as 0.9 | 1 | 1.1 | 1.15 }),
-        ...(typeof saved.reducedMotion === "boolean" && { reducedMotion: saved.reducedMotion }),
+        ...(saved.theme && {
+          theme: (saved.theme === "high-contrast"
+            ? "contrast"
+            : saved.theme === "colorblind"
+              ? "dark"
+              : saved.theme) as typeof prev.theme,
+          ...(saved.theme === "colorblind" ? { colorblindCharts: true } : {}),
+        }),
+        ...(saved.uiChrome && { uiChrome: saved.uiChrome as typeof prev.uiChrome }),
+        ...(saved.font && { font: saved.font as typeof prev.font }),
+        ...(saved.faces && { faces: saved.faces as typeof prev.faces }),
+        ...(typeof saved.fontScale === "number" && { fontScale: saved.fontScale as typeof prev.fontScale }),
+        ...(typeof saved.reducedMotion === "boolean"
+          ? { reducedMotion: saved.reducedMotion }
+          : typeof window !== "undefined" &&
+              window.matchMedia("(prefers-reduced-motion: reduce)").matches
+            ? { reducedMotion: true }
+            : {}),
+        ...(typeof saved.colorblindCharts === "boolean" && { colorblindCharts: saved.colorblindCharts }),
+        ...(saved.chartAspect && { chartAspect: saved.chartAspect as typeof prev.chartAspect }),
+        ...(saved.chartDevice && { chartDevice: saved.chartDevice as typeof prev.chartDevice }),
       }));
+    } else {
+      const shared = readIbmToolsShared();
+      const preferReduce =
+        typeof window !== "undefined" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      if (shared || preferReduce) {
+        setAppSettings((prev) => ({
+          ...prev,
+          ...(shared?.theme && { theme: normalizeTheme(shared.theme) as typeof prev.theme }),
+          ...(shared?.ui && { uiChrome: normalizeUi(shared.ui) as typeof prev.uiChrome }),
+          ...(shared?.font && { font: normalizeFont(shared.font) as typeof prev.font }),
+          ...(shared?.faces && { faces: normalizeFaces(shared.faces) as typeof prev.faces }),
+          ...(preferReduce ? { reducedMotion: true } : {}),
+        }));
+      }
     }
 
     const recent = getRecentFiles();
@@ -149,7 +189,16 @@ export function HydrateStore() {
       skipFirstPersist.current.recentFiles = false;
       return;
     }
-    setPersistedRecentFiles(recentFiles);
+    setPersistedRecentFiles(
+      recentFiles.map((f) => ({
+        path: f.path,
+        name: f.name,
+        extension: f.extension,
+        row_count: f.row_count,
+        size_bytes: f.size_bytes,
+        ...(f.sourceUrl ? { sourceUrl: f.sourceUrl } : {}),
+      })),
+    );
   }, [recentFiles]);
 
   useEffect(() => {

@@ -39,8 +39,14 @@ function safeSetItem(key: string, value: string): void {
 
 export interface PersistedAppSettings {
   theme?: string;
+  uiChrome?: string;
+  font?: string;
+  faces?: string;
   fontScale?: number;
   reducedMotion?: boolean;
+  colorblindCharts?: boolean;
+  chartAspect?: string;
+  chartDevice?: string;
 }
 
 export function getPersistedAppSettings(): PersistedAppSettings | null {
@@ -63,6 +69,8 @@ export interface RecentFileEntry {
   extension: string;
   row_count: number;
   size_bytes: number;
+  /** Remote CSV URL for web re-open (not the row data). */
+  sourceUrl?: string;
 }
 
 export function getRecentFiles(): RecentFileEntry[] {

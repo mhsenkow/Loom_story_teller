@@ -1,9 +1,14 @@
 # Dependencies
 node_modules/
+mcp/node_modules/
 
 # Next.js
 .next/
 out/
+
+# Wrangler local / deploy temp
+.wrangler/
+mcp/.wrangler/
 
 # Tauri / Rust
 src-tauri/target/

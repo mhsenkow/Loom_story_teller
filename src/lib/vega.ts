@@ -9,11 +9,9 @@
 // =================================================================
 
 import type { ColumnInfo } from "./store";
+import { VIZ_CATEGORICAL } from "./chartPalettes";
 
-const CHART_COLORS = [
-  "#6c5ce7", "#00d68f", "#ff6b6b", "#ffd93d",
-  "#00b4d8", "#e77c5c", "#a29bfe", "#74b9ff",
-];
+const CHART_COLORS = VIZ_CATEGORICAL;
 
 interface VegaEncoding {
   field: string;

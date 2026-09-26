@@ -25,8 +25,14 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toast } from "@/components/Toast";
 import { PromptDialog } from "@/components/PromptDialog";
 import { Onboarding } from "@/components/Onboarding";
+import { FeedbackNotes } from "@/components/FeedbackNotes";
+import { WebSessionResume } from "@/components/WebSessionResume";
 import { useEffect, useCallback } from "react";
 import { createGitHubIssue, getGitHubNewIssueUrl, isTauri, openExternalUrl } from "@/lib/tauri";
+import {
+  captureChartViewPreview,
+  captureStoryDashboardPreviews,
+} from "@/lib/captureStoryPreviews";
 
 /** Open a URL: in Tauri use backend (default browser), in web use new tab. */
 async function openUrl(url: string): Promise<void> {
@@ -53,9 +59,14 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     setViewMode,
     setPanelTab,
     setDashboardRefresh,
+    previewCapture,
+    setToast,
   } = useLoomStore();
   const active = dashboards.find((d) => d.id === activeDashboardId);
   const [focusedSlot, setFocusedSlot] = useState<DashboardSlot | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
+  const capturingThis =
+    !!previewCapture && !!active && previewCapture.dashboardId === active.id;
 
   const getSlotLabel = (viewType: "table" | "chart" | "query" | "snapshot", viewId: string) => {
     if (viewType === "table") return tableViews.find((x) => x.id === viewId)?.name ?? viewId;
@@ -76,8 +87,22 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     else if (viewType === "chart") applyChartView(viewId);
     else if (viewType === "query") applyQueryView(viewId);
     else applyQuerySnapshot(viewId);
+    // apply* already collapses the dashboard canvas; land in the live editor view
     setViewMode(viewType === "table" || viewType === "snapshot" ? "explorer" : viewType === "chart" ? "chart" : "query");
     setPanelTab(viewType === "table" || viewType === "snapshot" ? "stats" : viewType === "chart" ? "chart" : "stats");
+    onCollapse();
+  };
+
+  const openLiveView = (slot: DashboardSlot) => {
+    handleApply(slot.viewType, slot.viewId);
+    setFocusedSlot(null);
+    setToast(
+      slot.viewType === "chart"
+        ? "Opened live chart"
+        : slot.viewType === "query"
+          ? "Opened query"
+          : "Opened in Explorer",
+    );
   };
 
   const handleBackFromFocus = useCallback(() => setFocusedSlot(null), [setFocusedSlot]);
@@ -140,7 +165,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border bg-loom-surface/50 flex-shrink-0 flex-wrap">
         <h2 className="text-sm font-semibold text-loom-text">{active.name}</h2>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-2xs text-loom-muted">Refresh:</span>
           <select
             value={active.refreshInterval ?? "manual"}
@@ -158,6 +183,18 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
             title="Mark as refreshed now"
           >
             Refresh
+          </button>
+          <button
+            type="button"
+            disabled={!!previewCapture}
+            onClick={async () => {
+              setToast("Recapturing all chart previews…");
+              await captureStoryDashboardPreviews(active.id);
+            }}
+            className="text-2xs px-2 py-0.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated disabled:opacity-50"
+            title="Re-render PNG thumbnails for every chart in this story"
+          >
+            Recapture previews
           </button>
           {lastRefreshed && (
             <span className="text-2xs text-loom-muted" title={lastRefreshed.toLocaleString()}>
@@ -191,29 +228,77 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
               const snapshotUrl = chartView?.snapshotImageDataUrl ?? null;
               const is1p2First = layout === "1+2" && idx === 0;
               const isStreamHero = layout === "stream" && idx === 0;
+              const isChart = slot.viewType === "chart";
+              const waitingPreview = isChart && !snapshotUrl;
+              const busy = retryingId === slot.viewId || (capturingThis && waitingPreview);
               return (
-                <button
+                <div
                   key={slot.id}
-                  type="button"
-                  onClick={() => setFocusedSlot(slot)}
-                  className={`loom-card p-3 text-left hover:border-loom-accent hover:bg-loom-elevated/50 transition-colors border border-loom-border rounded-lg flex flex-col min-h-[140px] aspect-[4/3]`}
+                  className={`loom-card p-3 text-left border border-loom-border rounded-lg flex flex-col min-h-[140px] aspect-[4/3] hover:border-loom-accent/50 transition-colors`}
                   style={is1p2First ? { gridRow: "span 2" } : isStreamHero ? { gridColumn: "span 2", gridRow: "span 1" } : undefined}
                 >
                   <span className="text-2xs font-medium text-loom-muted uppercase tracking-wider shrink-0">{slot.viewType}</span>
-                  {snapshotUrl ? (
-                    <div className="mt-1 flex-1 min-h-0 w-full rounded overflow-hidden bg-loom-bg/50 flex items-center justify-center">
-                      <img src={snapshotUrl} alt="" className="w-full h-full object-contain" />
-                    </div>
-                  ) : (
-                    <div className="mt-1 flex-1 min-h-0 rounded bg-loom-bg/30 flex items-center justify-center">
-                      <span className="text-2xs text-loom-muted">{label}</span>
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={() => openLiveView(slot)}
+                    title="Open live view"
+                    className="mt-1 flex-1 min-h-0 w-full rounded overflow-hidden bg-loom-bg/50 flex items-center justify-center hover:ring-1 hover:ring-loom-accent/40 transition-shadow"
+                  >
+                    {snapshotUrl ? (
+                      <img src={snapshotUrl} alt="" className="w-full h-full object-contain pointer-events-none" />
+                    ) : busy ? (
+                      <div className="flex flex-col items-center gap-2 px-3">
+                        <span className="inline-block w-5 h-5 rounded-full border-2 border-loom-border border-t-loom-accent animate-spin" aria-hidden />
+                        <span className="text-2xs text-loom-muted">Loading preview…</span>
+                      </div>
+                    ) : (
+                      <span className="text-2xs text-loom-muted px-2 text-center">Open to view</span>
+                    )}
+                  </button>
                   <p className="text-xs font-medium text-loom-text truncate shrink-0 mt-1.5" title={label}>
                     {label}
                   </p>
-                  <p className="text-2xs text-loom-muted shrink-0 mt-0.5">Click to focus</p>
-                </button>
+                  <div className="flex items-center justify-between gap-1.5 mt-0.5 shrink-0 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => openLiveView(slot)}
+                      className="text-2xs text-loom-accent hover:underline font-medium"
+                    >
+                      {isChart ? "Open chart" : slot.viewType === "query" ? "Open query" : "Open"}
+                    </button>
+                    <div className="flex items-center gap-2">
+                      {snapshotUrl && (
+                        <button
+                          type="button"
+                          className="text-2xs text-loom-muted hover:text-loom-text hover:underline"
+                          onClick={() => setFocusedSlot(slot)}
+                          title="Fullscreen snapshot preview"
+                        >
+                          Preview
+                        </button>
+                      )}
+                      {isChart && !busy && (
+                        <button
+                          type="button"
+                          className="text-2xs text-loom-muted hover:text-loom-accent hover:underline disabled:opacity-50"
+                          disabled={!!previewCapture || retryingId !== null}
+                          onClick={async () => {
+                            setRetryingId(slot.viewId);
+                            try {
+                              const ok = await captureChartViewPreview(slot.viewId);
+                              useLoomStore.getState().setDashboardsExpanded(true);
+                              setToast(ok ? "Preview updated" : "Preview failed — open chart and try again");
+                            } finally {
+                              setRetryingId(null);
+                            }
+                          }}
+                        >
+                          {snapshotUrl ? "Recapture" : "Retry"}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
               );
             })}
           </div>
@@ -238,13 +323,13 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
               <p className="text-sm font-medium text-loom-text truncate flex-1 text-center">
                 {getSlotLabel(focusedSlot.viewType, focusedSlot.viewId)}
               </p>
-              <div className="w-32 text-right min-w-0">
-                {getSlotSource(focusedSlot.viewType, focusedSlot.viewId) && (
-                  <span className="text-2xs text-loom-muted truncate block max-w-full" title={getSlotSource(focusedSlot.viewType, focusedSlot.viewId) ?? undefined}>
-                    {getSlotSource(focusedSlot.viewType, focusedSlot.viewId)}
-                  </span>
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={() => openLiveView(focusedSlot)}
+                className="text-xs px-3 py-1.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium shrink-0"
+              >
+                Open live
+              </button>
             </div>
             <div className="flex-1 min-h-0 overflow-auto flex items-center justify-center p-4">
               {focusedSlot.viewType === "chart" && (() => {
@@ -258,10 +343,10 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
                     <p className="text-sm text-loom-muted">No preview for this chart.</p>
                     <button
                       type="button"
-                      onClick={() => { handleApply(focusedSlot.viewType, focusedSlot.viewId); handleBackFromFocus(); }}
+                      onClick={() => openLiveView(focusedSlot)}
                       className="text-xs px-3 py-1.5 rounded border border-loom-accent text-loom-accent hover:bg-loom-accent/10"
                     >
-                      Open in editor
+                      Open live chart
                     </button>
                   </div>
                 );
@@ -269,12 +354,15 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
               {focusedSlot.viewType !== "chart" && (
                 <div className="flex flex-col items-center gap-3">
                   <p className="text-sm text-loom-muted">{getSlotLabel(focusedSlot.viewType, focusedSlot.viewId)}</p>
+                  {getSlotSource(focusedSlot.viewType, focusedSlot.viewId) && (
+                    <p className="text-2xs text-loom-muted">{getSlotSource(focusedSlot.viewType, focusedSlot.viewId)}</p>
+                  )}
                   <button
                     type="button"
-                    onClick={() => { handleApply(focusedSlot.viewType, focusedSlot.viewId); handleBackFromFocus(); }}
+                    onClick={() => openLiveView(focusedSlot)}
                     className="text-xs px-3 py-1.5 rounded border border-loom-accent text-loom-accent hover:bg-loom-accent/10"
                   >
-                    Open in editor
+                    Open live
                   </button>
                 </div>
               )}
@@ -287,16 +375,24 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
 }
 
 export default function Home() {
-  const { viewMode, setViewMode, dataSourcesExpanded, dashboardsExpanded } = useLoomStore();
+  const { viewMode, setViewMode, dataSourcesExpanded, dashboardsExpanded, previewCapture } = useLoomStore();
   return (
     <>
       <ThemeApplicator />
       <HydrateStore />
+      <WebSessionResume />
       <Onboarding />
       <ErrorBoundary>
-        <HomeContent viewMode={viewMode} setViewMode={setViewMode} dataSourcesExpanded={dataSourcesExpanded} dashboardsExpanded={dashboardsExpanded} />
+        <HomeContent
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          dataSourcesExpanded={dataSourcesExpanded}
+          dashboardsExpanded={dashboardsExpanded}
+          previewCapture={previewCapture}
+        />
       </ErrorBoundary>
       <PromptDialog />
+      <FeedbackNotes />
       <Toast />
     </>
   );
@@ -359,11 +455,18 @@ function HomeContent({
   setViewMode,
   dataSourcesExpanded,
   dashboardsExpanded,
+  previewCapture,
 }: {
   viewMode: "explorer" | "chart" | "query";
   setViewMode: (m: "explorer" | "chart" | "query") => void;
   dataSourcesExpanded: boolean;
   dashboardsExpanded: boolean;
+  previewCapture: {
+    dashboardId: string;
+    current: number;
+    total: number;
+    label: string;
+  } | null;
 }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [helpTab, setHelpTab] = useState<"shortcuts" | "feedback">("shortcuts");
@@ -375,9 +478,30 @@ function HomeContent({
   const setPanelTab = useLoomStore((s) => s.setPanelTab);
   const setToast = useLoomStore((s) => s.setToast);
 
+  // Mobile: start with drawers closed so the chart canvas owns the screen
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    const apply = () => {
+      if (mq.matches) {
+        useLoomStore.setState({ sidebarOpen: false, panelOpen: false });
+      }
+    };
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      const t = e.target as HTMLElement | null;
+      const typing =
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.tagName === "SELECT" ||
+          t.isContentEditable);
+
+      if (e.key === "?" && !e.metaKey && !e.ctrlKey && !e.altKey && !typing) {
         setShortcutsOpen((o) => !o);
         e.preventDefault();
         return;
@@ -386,7 +510,7 @@ function HomeContent({
         setShortcutsOpen(false);
         return;
       }
-      if ((e.metaKey || e.ctrlKey) && e.key >= "1" && e.key <= "5") {
+      if ((e.metaKey || e.ctrlKey) && e.key >= "1" && e.key <= "6") {
         const i = parseInt(e.key, 10) - 1;
         if (i >= 0 && i < PANEL_TABS.length) {
           setPanelTab(PANEL_TABS[i]);
@@ -395,8 +519,7 @@ function HomeContent({
         return;
       }
       if (e.metaKey || e.ctrlKey) return;
-      if (document.activeElement?.tagName === "TEXTAREA") return;
-      if (document.activeElement?.tagName === "INPUT") return;
+      if (typing) return;
 
       switch (e.key) {
         case "1":
@@ -407,6 +530,14 @@ function HomeContent({
           break;
         case "3":
           setViewMode("query");
+          break;
+        case "[":
+          useLoomStore.getState().toggleSidebar();
+          e.preventDefault();
+          break;
+        case "]":
+          useLoomStore.getState().togglePanel();
+          e.preventDefault();
           break;
       }
     }
@@ -464,9 +595,25 @@ function HomeContent({
           );
         }
       } else {
-        const url = getGitHubNewIssueUrl(title, body);
-        await openUrl(url);
-        setToast(feedbackImage ? "Open the issue and paste your screenshot (Ctrl+V)" : "Opening GitHub to submit feedback");
+        try {
+          const url = await createGitHubIssue(title, body, imageBase64);
+          setToast("Issue created!");
+          await openUrl(url);
+          setFeedbackTitle("");
+          setFeedbackBody("");
+          setFeedbackImage(null);
+          if (feedbackFileRef.current) feedbackFileRef.current.value = "";
+          setShortcutsOpen(false);
+        } catch (e) {
+          console.error("createGitHubIssue (web):", e);
+          const url = getGitHubNewIssueUrl(title, body);
+          await openUrl(url);
+          setToast(
+            feedbackImage
+              ? "Opened GitHub — paste your screenshot there (API may need a token)."
+              : "Opening GitHub to submit feedback",
+          );
+        }
       }
     } finally {
       setFeedbackSubmitting(false);
@@ -474,7 +621,7 @@ function HomeContent({
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-loom-bg transition-theme">
+    <div className="flex flex-col h-dvh max-h-dvh w-screen bg-loom-bg transition-theme overflow-hidden">
       {shortcutsOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
@@ -516,12 +663,16 @@ function HomeContent({
 
             {helpTab === "shortcuts" && (
               <ul className="text-xs text-loom-text space-y-2">
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">1</kbd> Explorer</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">2</kbd> Chart</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">3</kbd> Query</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘1</kbd>–<kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘5</kbd> Panel: Stats, Chart, Export, Smart, Settings</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘</kbd><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono ml-1">Enter</kbd> Run query (in Query view)</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">?</kbd> This help</li>
+                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">1</kbd> Explorer · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">2</kbd> Chart · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">3</kbd> Query</li>
+                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘1</kbd>–<kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘6</kbd> Panel tabs (Stats → Settings)</li>
+                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">[</kbd> Sidebar · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">]</kbd> Right panel</li>
+                <li className="pt-1 text-loom-muted font-medium">Scatter</li>
+                <li>Two-finger scroll pans · pinch / mouse wheel zooms toward cursor · double-click resets</li>
+                <li className="md:hidden">On phone: chart fills the screen · swipe the Charts strip · Edit opens Encoding</li>
+                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">+</kbd>/<kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">−</kbd> Zoom · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">0</kbd> Reset · arrows pan (Shift = faster)</li>
+                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">V</kbd> Pan · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">C</kbd> Crosshair · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">G</kbd> Lasso</li>
+                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">Shift</kbd>+drag brush select · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">L</kbd> Link tooltip · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">Esc</kbd> Clear</li>
+                <li className="pt-1"><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘</kbd><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono ml-1">Enter</kbd> Run query · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">?</kbd> This help</li>
               </ul>
             )}
 
@@ -593,7 +744,7 @@ function HomeContent({
           <Sidebar />
 
           {/* Canvas Area — hidden when Data & sources is expanded; shows dashboard when dashboards expanded */}
-          <main className={`bg-loom-bg overflow-hidden transition-[flex] duration-200 flex flex-col ${dataSourcesExpanded ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}>
+          <main className={`relative bg-loom-bg overflow-hidden transition-[flex] duration-200 flex flex-col ${dataSourcesExpanded ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}>
             {dashboardsExpanded ? (
               <DashboardCanvas onCollapse={() => useLoomStore.getState().setDashboardsExpanded(false)} />
             ) : (
@@ -602,6 +753,30 @@ function HomeContent({
                 {!dataSourcesExpanded && viewMode === "chart" && <ChartView />}
                 {!dataSourcesExpanded && viewMode === "query" && <QueryView />}
               </>
+            )}
+            {previewCapture && (
+              <div
+                className="absolute inset-0 z-40 flex items-center justify-center bg-loom-bg/75 backdrop-blur-[2px]"
+                role="status"
+                aria-live="polite"
+                aria-busy="true"
+              >
+                <div className="loom-card px-5 py-4 flex flex-col items-center gap-3 max-w-sm mx-4 shadow-lg border border-loom-border">
+                  <span className="inline-block w-7 h-7 rounded-full border-2 border-loom-border border-t-loom-accent animate-spin" aria-hidden />
+                  <p className="text-sm font-medium text-loom-text text-center">Building story previews</p>
+                  <p className="text-2xs text-loom-muted text-center leading-relaxed">{previewCapture.label}</p>
+                  {previewCapture.total > 0 && (
+                    <div className="w-full h-1.5 rounded-full bg-loom-elevated overflow-hidden">
+                      <div
+                        className="h-full bg-loom-accent transition-[width] duration-300 ease-out"
+                        style={{
+                          width: `${Math.min(100, (previewCapture.current / previewCapture.total) * 100)}%`,
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </main>
 

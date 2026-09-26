@@ -11,6 +11,18 @@
 
 import type { FileEntry, ColumnInfo, QueryResult } from "./store";
 import { mockFiles, mockInspect, mockQuery } from "./mock-data";
+import {
+  fetchCsvTextWeb,
+  fetchUkCatalogWeb,
+  fetchUsCatalogWeb,
+  type DataGovDataset,
+  type DataGovResource,
+  type DataGovSortKey,
+  type FetchDataGovOptions,
+} from "./openDataCatalog";
+
+export type { DataGovDataset, DataGovResource, DataGovSortKey, FetchDataGovOptions };
+export { fetchCsvTextWeb };
 
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -89,23 +101,6 @@ export interface InspectResult {
   sample: QueryResult;
 }
 
-export interface DataGovResource {
-  id: string;
-  name: string;
-  format: string;
-  url: string;
-}
-
-export interface DataGovDataset {
-  id: string;
-  name: string;
-  title: string;
-  organization?: string;
-  notes?: string;
-  resources: DataGovResource[];
-  portal_id: string;
-}
-
 export async function inspectFile(
   filePath: string,
   limit?: number
@@ -129,32 +124,28 @@ export async function saveCsvToFolder(
   });
 }
 
-/** CKAN sort keys passed through to the desktop command (allowlisted server-side). */
-export type DataGovSortKey = "newest" | "updated" | "relevance" | "title_az" | "title_za";
-
-export interface FetchDataGovOptions {
-  rows?: number;
-  /** Full-text search on the portal (CKAN `q`). */
-  query?: string;
-  sort?: DataGovSortKey;
-}
-
-/** Fetch Data.gov (US) datasets with CSV resources — Catalog `/search` API (Tauri only). */
+/** Fetch Data.gov datasets — Tauri IPC, or browser via Cloudflare `/api/catalog/us`. */
 export async function fetchDataGovRecentCsv(opts?: FetchDataGovOptions): Promise<DataGovDataset[]> {
-  return invoke<DataGovDataset[]>("fetch_data_gov_recent_csv", {
-    rows: opts?.rows ?? 40,
-    query: opts?.query?.trim() || null,
-    sort: opts?.sort ?? null,
-  });
+  if (isTauri()) {
+    return invoke<DataGovDataset[]>("fetch_data_gov_recent_csv", {
+      rows: opts?.rows ?? 40,
+      query: opts?.query?.trim() || null,
+      sort: opts?.sort ?? null,
+    });
+  }
+  return fetchUsCatalogWeb(opts);
 }
 
-/** Fetch data.gov.uk datasets with CSV resources (Tauri only). */
+/** Fetch data.gov.uk datasets — Tauri IPC, or browser (CKAN CORS / Worker fallback). */
 export async function fetchUkDataRecentCsv(opts?: FetchDataGovOptions): Promise<DataGovDataset[]> {
-  return invoke<DataGovDataset[]>("fetch_uk_data_recent_csv", {
-    rows: opts?.rows ?? 40,
-    query: opts?.query?.trim() || null,
-    sort: opts?.sort ?? null,
-  });
+  if (isTauri()) {
+    return invoke<DataGovDataset[]>("fetch_uk_data_recent_csv", {
+      rows: opts?.rows ?? 40,
+      query: opts?.query?.trim() || null,
+      sort: opts?.sort ?? null,
+    });
+  }
+  return fetchUkCatalogWeb(opts);
 }
 
 /** Base URL and label for a portal (for preview modal "Open on …"). */
@@ -178,26 +169,49 @@ export interface StreamStatus {
 }
 
 export async function streamStart(): Promise<void> {
+  if (!isTauri()) {
+    const { webStreamStart } = await import("./webStreams");
+    return webStreamStart();
+  }
   return invoke<void>("stream_start", {});
 }
 
 export async function streamStop(): Promise<void> {
+  if (!isTauri()) {
+    const { webStreamStop } = await import("./webStreams");
+    return webStreamStop();
+  }
   return invoke<void>("stream_stop", {});
 }
 
 export async function streamStatus(): Promise<StreamStatus> {
+  if (!isTauri()) {
+    const { webStreamStatus } = await import("./webStreams");
+    return webStreamStatus();
+  }
   return invoke<StreamStatus>("stream_status", {});
 }
 
 export async function streamQuery(sql: string, limit?: number): Promise<QueryResult> {
+  if (!isTauri()) {
+    throw new Error("SQL on live streams needs the desktop app (DuckDB). Use Explore snapshot on web.");
+  }
   return invoke<QueryResult>("stream_query", { sql, limit });
 }
 
 export async function streamSnapshot(limit?: number): Promise<InspectResult> {
+  if (!isTauri()) {
+    const { webStreamSnapshot } = await import("./webStreams");
+    return webStreamSnapshot(limit);
+  }
   return invoke<InspectResult>("stream_snapshot", { limit });
 }
 
 export async function streamClear(): Promise<void> {
+  if (!isTauri()) {
+    const { webStreamClear } = await import("./webStreams");
+    return webStreamClear();
+  }
   return invoke<void>("stream_clear", {});
 }
 
@@ -205,7 +219,14 @@ export async function streamClear(): Promise<void> {
 // Poll-Based Data Sources (USGS, Open-Meteo, NWS, World Bank)
 // =================================================================
 
-export type SourceKind = "usgs" | "meteo" | "nws" | "world_bank";
+export type SourceKind =
+  | "usgs"
+  | "meteo"
+  | "nws"
+  | "world_bank"
+  | "iss"
+  | "hn"
+  | "crypto";
 
 export interface SourceStatus {
   running: boolean;
@@ -217,37 +238,64 @@ export interface SourceStatus {
 }
 
 export async function sourceStart(kind: SourceKind): Promise<void> {
+  if (!isTauri()) {
+    const { webSourceStart } = await import("./webStreams");
+    return webSourceStart(kind);
+  }
   return invoke<void>("source_start", { kind });
 }
 
 export async function sourceStop(kind: SourceKind): Promise<void> {
+  if (!isTauri()) {
+    const { webSourceStop } = await import("./webStreams");
+    return webSourceStop(kind);
+  }
   return invoke<void>("source_stop", { kind });
 }
 
 export async function sourceStatus(kind: SourceKind): Promise<SourceStatus> {
+  if (!isTauri()) {
+    const { webSourceStatus } = await import("./webStreams");
+    return webSourceStatus(kind);
+  }
   return invoke<SourceStatus>("source_status", { kind });
 }
 
 export async function sourceQuery(kind: SourceKind, sql: string, limit?: number): Promise<QueryResult> {
+  if (!isTauri()) {
+    throw new Error("SQL on live sources needs the desktop app (DuckDB). Use Explore snapshot on web.");
+  }
   return invoke<QueryResult>("source_query", { kind, sql, limit });
 }
 
 export async function sourceSnapshot(kind: SourceKind, limit?: number): Promise<InspectResult> {
+  if (!isTauri()) {
+    const { webSourceSnapshot } = await import("./webStreams");
+    return webSourceSnapshot(kind, limit);
+  }
   return invoke<InspectResult>("source_snapshot", { kind, limit });
 }
 
 export async function sourceClear(kind: SourceKind): Promise<void> {
+  if (!isTauri()) {
+    const { webSourceClear } = await import("./webStreams");
+    return webSourceClear(kind);
+  }
   return invoke<void>("source_clear", { kind });
 }
 
 const GITHUB_REPO = "mhsenkow/Loom_story_teller";
 
-/** Create a GitHub issue (Tauri only, requires GITHUB_TOKEN). Returns issue URL or throws. */
+/** Create a GitHub issue (feedback). Tauri uses GITHUB_TOKEN env; web uses Worker secret. */
 export async function createGitHubIssue(
   title: string,
   body: string,
   imageBase64?: string | null
 ): Promise<string> {
+  if (!isTauri()) {
+    const { webCreateGitHubIssue } = await import("./webStreams");
+    return webCreateGitHubIssue(title, body, imageBase64);
+  }
   return invoke<string>("create_github_issue", {
     title,
     body,

@@ -11,11 +11,13 @@
 
 import { useRef, useState, useEffect, useMemo } from "react";
 import { useLoomStore, type FileEntry } from "@/lib/store";
-import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, OPEN_DATA_PORTALS, type DataGovDataset, type DataGovSortKey, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, sourceStart, sourceStop, sourceStatus, sourceSnapshot, sourceClear, type SourceKind } from "@/lib/tauri";
+import { pickFolder, scanFolder, inspectFile, isTauri, saveCsvToFolder, fetchDataGovRecentCsv, fetchUkDataRecentCsv, fetchCsvTextWeb, OPEN_DATA_PORTALS, type DataGovDataset, type DataGovSortKey, streamStart, streamStop, streamStatus, streamSnapshot, streamClear, sourceStart, sourceStop, sourceStatus, sourceSnapshot, sourceClear, type SourceKind } from "@/lib/tauri";
+import { getRecentFiles as getPersistedRecentFiles } from "@/lib/persist";
 import { recommend, recommendStreamStory, recommendSourceStory } from "@/lib/recommendations";
 import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
-
+import { firstCsvResource } from "@/lib/openDataCatalog";
+import { useIsMobile } from "@/lib/useMediaQuery";
 const SIDEBAR_WIDTH = 260;
 const DATA_REGION_WIDTH = 340;
 
@@ -34,6 +36,19 @@ function dataGovResourceSaveable(res: { format: string; url: string }): boolean 
   return res.format === "CSV" || /\.csv(\?|$)/i.test(res.url);
 }
 
+/** Leave Data & sources full-screen and show the chart canvas (esp. mobile). */
+function leaveSourcesShowChart() {
+  const s = useLoomStore.getState();
+  s.setDataSourcesExpanded(false);
+  s.setDataRegionOpen(false);
+  s.setViewMode("chart");
+  s.setPanelTab("chart");
+  if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
+    if (s.sidebarOpen) s.toggleSidebar();
+    if (s.panelOpen) s.togglePanel();
+  }
+}
+
 export function Sidebar() {
   const {
     mountedFolder, files, isScanning, selectedFile, inspectingFilePath, sidebarOpen, dataRegionOpen, dataSourcesExpanded,
@@ -41,12 +56,14 @@ export function Sidebar() {
     setColumnStats, setSampleRows, setVegaSpec, setChartRecs, setActiveChart,
     setDataRegionOpen, setDataSourcesExpanded, webFileCache, setWebFileCache,
     addRecentFile, setLastSession, viewMode, recentFiles, lastSession, setViewMode,
-    setToast,
+    setToast, toggleSidebar,
   } = useLoomStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
+  const [openingRecentPath, setOpeningRecentPath] = useState<string | null>(null);
   // Only show web vs Tauri UI after mount so server and first client render match (avoids hydration mismatch).
   const [mounted, setMounted] = useState(false);
+  const isMobile = useIsMobile();
 
   const filteredFiles = useMemo(() => {
     if (!fileSearchQuery.trim()) return files;
@@ -111,18 +128,108 @@ export function Sidebar() {
   }
 
   async function handleOpenRecentFile(file: FileEntry) {
-    if (file.path.startsWith("web://") || file.path.startsWith("mock://")) {
-      if (mountedFolder && files.some((f) => f.path === file.path)) {
-        await handleSelectFile(file);
+    setOpeningRecentPath(file.path);
+    setToast(`Opening ${file.name}…`);
+    try {
+    // Live stream / poll source — reconnect and snapshot into Chart.
+    if (file.path.startsWith("stream://")) {
+      const kind = file.path.replace(/^stream:\/\//, "") as SourceKind | "wiki";
+      try {
+        if (kind === "wiki") {
+          await streamStart();
+          const snap = await streamSnapshot(500);
+          if (!snap.sample.rows.length) {
+            setToast("Wikipedia stream is warm — tap Explore in Live Streams when events appear");
+            setDataRegionOpen(true);
+            setDataSourcesExpanded(true);
+            return;
+          }
+          setSelectedFile({ ...file, row_count: snap.sample.total_rows });
+          setColumnStats(snap.stats);
+          setSampleRows(snap.sample);
+          const story = recommendStreamStory(snap.stats, snap.sample);
+          setChartRecs(story.charts);
+          setActiveChart(story.charts[0] ?? null);
+          leaveSourcesShowChart();
+          setToast(`Reopened ${file.name}`);
+          return;
+        }
+        await sourceStart(kind);
+        const snap = await sourceSnapshot(kind, 500);
+        if (!snap.sample.rows.length) {
+          setToast(`${file.name} is connecting — tap Explore when rows appear`);
+          setDataRegionOpen(true);
+          setDataSourcesExpanded(true);
+          return;
+        }
+        setSelectedFile({ ...file, row_count: snap.sample.total_rows });
+        setColumnStats(snap.stats);
+        setSampleRows(snap.sample);
+        const story = recommendSourceStory(kind, snap.stats, snap.sample);
+        setChartRecs(story.charts);
+        setActiveChart(story.charts[0] ?? null);
+        leaveSourcesShowChart();
+        setToast(`Reopened ${file.name}`);
+      } catch (e) {
+        setToast(`Couldn’t reopen: ${ipcErrorMessage(e)}`);
       }
       return;
     }
+
+    // Web / mock: prefer in-memory inspect cache, else re-fetch remote URL.
+    if (file.path.startsWith("web://") || file.path.startsWith("mock://")) {
+      const state = useLoomStore.getState();
+      const cached = state.webFileCache[file.path];
+      // Store may have dropped sourceUrl on older entries — recover from disk.
+      let sourceUrl = file.sourceUrl;
+      if (!sourceUrl) {
+        sourceUrl = getPersistedRecentFiles().find((f) => f.path === file.path)?.sourceUrl;
+      }
+      if (cached) {
+        const inList = state.files.some((f) => f.path === file.path);
+        if (!inList) {
+          setMountedFolder(file.path.startsWith("mock://") ? "mock://demo-folder" : "web://");
+          setFiles([
+            ...state.files.filter((f) => f.path !== file.path),
+            { ...file, sourceUrl: sourceUrl ?? file.sourceUrl },
+          ]);
+        }
+        setSelectedFile({ ...file, sourceUrl: sourceUrl ?? file.sourceUrl });
+        setColumnStats(cached.stats);
+        setSampleRows(cached.sample);
+        const recs = recommend(cached.stats, cached.sample, file.name);
+        setChartRecs(recs);
+        setActiveChart(recs.length > 0 ? recs[0] : null);
+        setViewMode("chart");
+        leaveSourcesShowChart();
+        setToast(`Opened ${file.name}`);
+        return;
+      }
+      if (sourceUrl) {
+        await handleLoadRemoteCsv(sourceUrl, file.name);
+        return;
+      }
+      if (file.path.startsWith("mock://")) {
+        handleUseDemoData();
+        leaveSourcesShowChart();
+        return;
+      }
+      // Dead recent (local upload or pre-sourceUrl catalog) — prune so it stops teasing.
+      const pruned = state.recentFiles.filter((f) => f.path !== file.path);
+      useLoomStore.getState().setRecentFiles(pruned);
+      setToast("That recent file can’t be reopened here — Explore it again from Data & sources.");
+      return;
+    }
+
     const parent = file.path.includes("/") ? file.path.replace(/\/[^/]+$/, "") : "";
     if (mountedFolder === parent && files.some((f) => f.path === file.path)) {
       await handleSelectFile(file);
       return;
     }
-    if (!parent) return;
+    if (!parent) {
+      setToast("Can’t reopen that path — mount the folder again.");
+      return;
+    }
     setMountedFolder(parent);
     setIsScanning(true);
     try {
@@ -130,10 +237,15 @@ export function Sidebar() {
       setFiles(result);
       const found = result.find((f) => f.path === file.path);
       if (found) await handleSelectFile(found);
+      else setToast("File not found in that folder.");
     } catch (e) {
       console.error("Open recent failed:", e);
+      setToast("Couldn’t reopen that file. Mount the folder again.");
     } finally {
       setIsScanning(false);
+    }
+    } finally {
+      setOpeningRecentPath(null);
     }
   }
 
@@ -143,6 +255,7 @@ export function Sidebar() {
     setColumnStats([]);
     setSampleRows(null);
     addRecentFile(file);
+    if (isMobile && sidebarOpen) toggleSidebar();
     setLastSession({
       folderPath: mountedFolder,
       filePath: file.path,
@@ -211,7 +324,7 @@ export function Sidebar() {
         const firstEntry = entries[0];
         setSelectedFile(firstEntry);
         addRecentFile(firstEntry);
-        setLastSession({ folderPath: "web://", filePath: firstEntry.path, viewMode });
+        setLastSession({ folderPath: "web://", filePath: firstEntry.path, viewMode: "chart" });
         const first = cache[firstEntry.path];
         if (first) {
           setColumnStats(first.stats);
@@ -220,6 +333,10 @@ export function Sidebar() {
           setChartRecs(recs);
           setActiveChart(recs.length > 0 ? recs[0] : null);
         }
+        setViewMode("chart");
+        setDataRegionOpen(false);
+        setDataSourcesExpanded(false);
+        setToast(`Exploring ${firstEntry.name}`);
       }
     } catch (err) {
       console.error("Load files failed:", err);
@@ -229,20 +346,93 @@ export function Sidebar() {
     }
   }
 
+  /** Web-only: pull a remote CSV through the Worker proxy into the in-browser file cache. */
+  async function handleLoadRemoteCsv(url: string, filename: string) {
+    const safeName = (filename || "dataset.csv").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+    const name = safeName.toLowerCase().endsWith(".csv") ? safeName : `${safeName}.csv`;
+    setIsScanning(true);
+    try {
+      const { text, truncated } = await fetchCsvTextWeb(url);
+      const path = `web://${name}`;
+      const inspect = parseCsvToInspectResult(name, text);
+      const rowCount = inspect.sample.total_rows ?? inspect.sample.rows.length;
+      const entry: FileEntry = {
+        path,
+        name,
+        extension: "csv",
+        row_count: rowCount,
+        size_bytes: text.length,
+        sourceUrl: url,
+      };
+      const prev = useLoomStore.getState();
+      const cache = { ...prev.webFileCache, [path]: inspect };
+      setWebFileCache(cache);
+      setMountedFolder("web://");
+      const nextFiles = [
+        ...prev.files.filter((f) => f.path.startsWith("web://") && f.path !== path),
+        entry,
+      ];
+      setFiles(nextFiles);
+      setSelectedFile(entry);
+      addRecentFile(entry);
+      setLastSession({ folderPath: "web://", filePath: path, viewMode: "chart" });
+      setColumnStats(inspect.stats);
+      setSampleRows(inspect.sample);
+      const recs = recommend(inspect.stats, inspect.sample, name);
+      setChartRecs(recs);
+      setActiveChart(recs.length > 0 ? recs[0] : null);
+      setViewMode("chart");
+      leaveSourcesShowChart();
+      setToast(
+        truncated
+          ? `Exploring ${name} (first rows — file was large)`
+          : `Exploring ${name} — ${rowCount.toLocaleString()} rows`,
+      );
+    } catch (e) {
+      setToast(ipcErrorMessage(e) || "Failed to load CSV in browser");
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
   if (!sidebarOpen) return null;
 
   const width = dataSourcesExpanded ? undefined : (dataRegionOpen ? DATA_REGION_WIDTH : SIDEBAR_WIDTH);
   const folderName = mountedFolder?.split("/").pop() ?? null;
 
   return (
-    <aside
-      className={`flex flex-col h-full border-r border-loom-border bg-loom-surface overflow-hidden transition-[width] duration-200 ease-out ${dataSourcesExpanded ? "flex-1 min-w-0" : "flex-shrink-0"}`}
-      style={width !== undefined ? { width: `${width}px` } : undefined}
-    >
+    <>
+      {isMobile && (
+        <button
+          type="button"
+          className="fixed inset-0 z-[35] bg-black/40 md:hidden"
+          aria-label="Close sidebar"
+          onClick={toggleSidebar}
+        />
+      )}
+      <aside
+        className={`flex flex-col h-full border-r border-loom-border bg-loom-surface overflow-hidden transition-[width] duration-200 ease-out
+          ${dataSourcesExpanded ? "flex-1 min-w-0 max-md:fixed max-md:inset-0 max-md:z-40 max-md:w-full" : "flex-shrink-0"}
+          ${!dataSourcesExpanded ? "max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-40 max-md:w-[min(100vw-2.5rem,20rem)] max-md:shadow-loom-lg" : ""}
+          md:relative md:shadow-none`}
+        style={{
+          ...(width !== undefined && !(isMobile && !dataSourcesExpanded) ? { width: `${width}px` } : {}),
+          paddingBottom: "var(--safe-bottom)",
+          paddingLeft: isMobile ? "var(--safe-left)" : undefined,
+        }}
+      >
       {/* Header */}
       <div className="flex items-center gap-2 px-4 h-[var(--topbar-height)] border-b border-loom-border flex-shrink-0">
         <div className="w-2 h-2 rounded-full bg-loom-accent animate-pulse-subtle" />
-        <span className="text-sm font-semibold text-loom-text tracking-tight">Loom</span>
+        <span className="text-sm font-semibold text-loom-text tracking-tight flex-1">Loom</span>
+        <button
+          type="button"
+          className="md:hidden loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted"
+          onClick={toggleSidebar}
+          aria-label="Close sidebar"
+        >
+          ×
+        </button>
       </div>
 
       {dataRegionOpen ? (
@@ -257,6 +447,11 @@ export function Sidebar() {
           isScanning={isScanning}
           onPickFolder={handlePickFolder}
           onRescanFolder={handleRescanFolder}
+          isWeb={isWebEnv}
+          onLoadRemoteCsv={handleLoadRemoteCsv}
+          onLoadFiles={handleLoadFiles}
+          onUseDemoData={handleUseDemoData}
+          fileInputRef={fileInputRef}
         />
       ) : (
         <FilesView
@@ -279,11 +474,13 @@ export function Sidebar() {
           lastSession={lastSession}
           onReopenSession={handleReopenSession}
           onOpenRecentFile={handleOpenRecentFile}
+          openingRecentPath={openingRecentPath}
           fileSearchQuery={fileSearchQuery}
           onFileSearchChange={setFileSearchQuery}
         />
       )}
     </aside>
+    </>
   );
 }
 
@@ -386,11 +583,9 @@ function WikiStreamSection() {
     streamWikisSeen, streamUptimeSecs,
     setStreamStatus, setStreamActive, setSelectedFile, setColumnStats,
     setSampleRows, setChartRecs, setActiveChart, setVegaSpec, setToast,
-    setViewMode, setPanelTab,
   } = useLoomStore();
   const [connecting, setConnecting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isTauriEnv = isTauri();
 
   useEffect(() => {
     return () => {
@@ -416,10 +611,6 @@ function WikiStreamSection() {
   };
 
   const handleConnect = async () => {
-    if (!isTauriEnv) {
-      setToast("Wikipedia stream requires the desktop app (Tauri)");
-      return;
-    }
     setConnecting(true);
     try {
       await streamStart();
@@ -444,6 +635,10 @@ function WikiStreamSection() {
   const handleLoadSnapshot = async () => {
     try {
       const snap = await streamSnapshot(500);
+      if (!snap.sample.rows.length) {
+        setToast("No Wikipedia events yet — wait a second and try Explore again");
+        return;
+      }
       const streamFile = { path: "stream://wiki", name: "Wikipedia Live", extension: "stream", row_count: snap.sample.total_rows, size_bytes: 0 };
       setSelectedFile(streamFile);
       setColumnStats(snap.stats);
@@ -459,8 +654,7 @@ function WikiStreamSection() {
         setActiveChart(null);
         setVegaSpec(null);
       }
-      setViewMode("chart");
-      setPanelTab("chart");
+      leaveSourcesShowChart();
       setToast(`Loaded ${snap.sample.rows.length} stream events`);
     } catch (e) {
       setToast(`Failed to load snapshot: ${e instanceof Error ? e.message : e}`);
@@ -482,23 +676,19 @@ function WikiStreamSection() {
   };
 
   return (
-    <section>
-      <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
-        Live Streams
-      </h3>
-      <div className="loom-card border border-loom-border rounded-lg p-3 space-y-3">
+    <div className="border border-loom-border rounded-md p-3 space-y-2.5 bg-loom-surface/40">
         <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1.5">
-            <span className={`w-2 h-2 rounded-full ${streamRunning ? "bg-loom-success animate-pulse" : "bg-loom-muted"}`} />
-            <span className="text-xs font-medium text-loom-text">Wikipedia</span>
+          <span className={`w-2 h-2 rounded-full shrink-0 ${streamRunning ? "bg-loom-success animate-pulse" : "bg-loom-muted"}`} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-loom-text leading-tight">Wikipedia</p>
+            <p className="text-2xs text-loom-muted">Recent changes · real-time</p>
           </div>
-          <span className="text-2xs text-loom-muted flex-1">Real-time edits</span>
           {!streamRunning ? (
             <button
               type="button"
               onClick={handleConnect}
               disabled={connecting}
-              className="text-2xs py-1 px-2.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50"
+              className="text-2xs py-1 px-2.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50 shrink-0"
             >
               {connecting ? "Connecting…" : "Connect"}
             </button>
@@ -506,7 +696,7 @@ function WikiStreamSection() {
             <button
               type="button"
               onClick={handleDisconnect}
-              className="text-2xs py-1 px-2.5 rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium"
+              className="text-2xs py-1 px-2.5 rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium shrink-0"
             >
               Stop
             </button>
@@ -514,39 +704,31 @@ function WikiStreamSection() {
         </div>
 
         {streamRunning && (
-          <div className="grid grid-cols-3 gap-2">
-            <div className="text-center">
-              <p className="text-sm font-semibold text-loom-text font-mono">{streamEventsPerSec.toFixed(1)}</p>
+          <div className="grid grid-cols-3 gap-2 pt-1 border-t border-loom-border/60">
+            <div>
+              <p className="text-sm font-semibold text-loom-text font-mono tabular-nums">{streamEventsPerSec.toFixed(1)}</p>
               <p className="text-2xs text-loom-muted">events/s</p>
             </div>
-            <div className="text-center">
-              <p className="text-sm font-semibold text-loom-text font-mono">{streamBufferRows.toLocaleString()}</p>
+            <div>
+              <p className="text-sm font-semibold text-loom-text font-mono tabular-nums">{streamBufferRows.toLocaleString()}</p>
               <p className="text-2xs text-loom-muted">buffered</p>
             </div>
-            <div className="text-center">
-              <p className="text-sm font-semibold text-loom-text font-mono">{streamWikisSeen}</p>
+            <div>
+              <p className="text-sm font-semibold text-loom-text font-mono tabular-nums">{streamWikisSeen}</p>
               <p className="text-2xs text-loom-muted">wikis</p>
             </div>
           </div>
         )}
 
         {streamRunning && (
-          <div className="flex items-center justify-between">
-            <span className="text-2xs text-loom-muted">{formatUptime(streamUptimeSecs)} uptime · {streamTotalEvents.toLocaleString()} total</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-2xs text-loom-muted">{formatUptime(streamUptimeSecs)} · {streamTotalEvents.toLocaleString()} total</span>
             <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={handleClear}
-                className="text-2xs py-0.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
-              >
+              <button type="button" onClick={handleClear} className="text-2xs py-0.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">
                 Clear
               </button>
-              <button
-                type="button"
-                onClick={handleLoadSnapshot}
-                disabled={streamBufferRows === 0}
-                className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50"
-              >
+              <button type="button" onClick={handleLoadSnapshot} disabled={streamBufferRows === 0}
+                className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
                 Explore
               </button>
             </div>
@@ -555,22 +737,14 @@ function WikiStreamSection() {
 
         {!streamRunning && streamBufferRows > 0 && (
           <div className="flex items-center justify-between">
-            <span className="text-2xs text-loom-muted">{streamBufferRows.toLocaleString()} rows in buffer</span>
-            <button
-              type="button"
-              onClick={handleLoadSnapshot}
-              className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium"
-            >
+            <span className="text-2xs text-loom-muted">{streamBufferRows.toLocaleString()} rows ready</span>
+            <button type="button" onClick={handleLoadSnapshot}
+              className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium">
               Explore
             </button>
           </div>
         )}
-
-        <p className="text-2xs text-loom-muted leading-relaxed">
-          Wikimedia recent-changes stream. Events buffer locally in DuckDB — explore with charts, queries, and dashboards. {!isTauriEnv && <span className="text-loom-warning">Desktop app required.</span>}
-        </p>
       </div>
-    </section>
   );
 }
 
@@ -592,51 +766,96 @@ const SOURCE_DEFS: SourceCardDef[] = [
   {
     kind: "usgs",
     label: "USGS Earthquakes",
-    description: "Global seismic events from the USGS Earthquake Hazards Program. Polls hourly feed every 60s.",
-    attribution: "Data: USGS (public domain, no key required)",
+    description: "Global quakes from the past hour. Refreshes every minute.",
+    attribution: "USGS · public domain",
     streamPath: "stream://usgs",
     fileName: "USGS Quakes",
     color: "loom-warning",
   },
   {
+    kind: "iss",
+    label: "ISS Tracker",
+    description: "Where the International Space Station is right now — builds a lat/lon trail.",
+    attribution: "Where The ISS At · free",
+    streamPath: "stream://iss",
+    fileName: "ISS Track",
+    color: "loom-accent",
+  },
+  {
+    kind: "hn",
+    label: "Hacker News",
+    description: "Front-page stories with points and comment counts. Refreshes every 2 min.",
+    attribution: "HN Search (Algolia) · free",
+    streamPath: "stream://hn",
+    fileName: "HN Front Page",
+    color: "loom-warning",
+  },
+  {
+    kind: "crypto",
+    label: "Crypto markets",
+    description: "Top 50 coins by market cap — price, volume, 24h change.",
+    attribution: "CoinGecko · free tier",
+    streamPath: "stream://crypto",
+    fileName: "Crypto Markets",
+    color: "loom-success",
+  },
+  {
     kind: "meteo",
-    label: "Open-Meteo Weather",
-    description: "Hourly weather for 5 world cities (NYC, London, Tokyo, Sydney, São Paulo). Refreshes every 5 min.",
-    attribution: "Data: Open-Meteo.com — free for non-commercial use, no API key",
+    label: "World weather",
+    description: "Hourly temps for NYC, London, Tokyo, Sydney, São Paulo.",
+    attribution: "Open-Meteo · free",
     streamPath: "stream://meteo",
     fileName: "World Weather",
     color: "loom-accent",
   },
   {
     kind: "nws",
-    label: "NWS Alerts (US)",
-    description: "Active US weather alerts from the National Weather Service. Polls every 2 min.",
-    attribution: "Data: api.weather.gov — public, requires User-Agent (included)",
+    label: "NWS Alerts",
+    description: "Active US weather warnings and watches.",
+    attribution: "api.weather.gov · public",
     streamPath: "stream://nws",
     fileName: "NWS Alerts",
     color: "loom-error",
   },
   {
     kind: "world_bank",
-    label: "World Bank Indicators",
-    description: "GDP, population, life expectancy, and CO₂ emissions for all countries (2015–2023). Loads once.",
-    attribution: "Data: World Bank Open Data API — free, no key required",
+    label: "World Bank",
+    description: "GDP, population, life expectancy, CO₂ (2015–2023). Loads once.",
+    attribution: "World Bank Open Data · free",
     streamPath: "stream://world_bank",
     fileName: "World Bank",
     color: "loom-success",
   },
 ];
 
+function SectionHeading({
+  title,
+  lede,
+  meta,
+}: {
+  title: string;
+  lede?: string;
+  meta?: string;
+}) {
+  return (
+    <div className="px-1 mb-2.5">
+      <div className="flex items-baseline justify-between gap-2">
+        <h3 className="text-sm font-semibold text-loom-text tracking-tight">{title}</h3>
+        {meta && <span className="text-2xs text-loom-muted tabular-nums shrink-0">{meta}</span>}
+      </div>
+      {lede && <p className="text-2xs text-loom-muted mt-0.5 leading-snug max-w-[36ch]">{lede}</p>}
+    </div>
+  );
+}
 function SourceCard({ def }: { def: SourceCardDef }) {
   const {
     sourceStatuses, setSourceStatus,
     setSelectedFile, setColumnStats, setSampleRows,
     setChartRecs, setActiveChart, setVegaSpec,
-    setViewMode, setPanelTab, setToast, setStreamActive,
+    setToast, setStreamActive, addRecentFile, setLastSession,
   } = useLoomStore();
   const [connecting, setConnecting] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const isTauriEnv = isTauri();
   const status = sourceStatuses[def.kind];
   const running = status?.running ?? false;
   const bufferRows = status?.buffer_rows ?? 0;
@@ -655,13 +874,53 @@ function SourceCard({ def }: { def: SourceCardDef }) {
     }, 3000);
   };
 
+  const handleExplore = async (opts?: { quiet?: boolean }) => {
+    try {
+      const snap = await sourceSnapshot(def.kind, 500);
+      if (!snap.sample.rows.length) {
+        if (!opts?.quiet) setToast(`${def.label} has no rows yet — wait a moment`);
+        return false;
+      }
+      const file = {
+        path: def.streamPath,
+        name: def.fileName,
+        extension: "stream",
+        row_count: snap.sample.total_rows,
+        size_bytes: 0,
+      };
+      setSelectedFile(file);
+      addRecentFile(file);
+      setLastSession({ folderPath: "web://", filePath: def.streamPath, viewMode: "chart" });
+      setColumnStats(snap.stats);
+      setSampleRows(snap.sample);
+      setStreamActive(true);
+      const story = recommendSourceStory(def.kind, snap.stats, snap.sample);
+      const recs = story.charts;
+      setChartRecs(recs);
+      setActiveChart(recs.length > 0 ? recs[0] : null);
+      if (recs.length === 0) setVegaSpec(null);
+      leaveSourcesShowChart();
+      setToast(`Loaded ${snap.sample.rows.length} ${def.label} rows`);
+      return true;
+    } catch (e) {
+      if (!opts?.quiet) setToast(`Failed: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+  };
+
   const handleConnect = async () => {
-    if (!isTauriEnv) { setToast("Requires the desktop app (Tauri)"); return; }
     setConnecting(true);
     try {
       await sourceStart(def.kind);
+      const s = await sourceStatus(def.kind);
+      setSourceStatus(def.kind, s);
       startPolling();
-      setToast(`Connected to ${def.label}`);
+      // Snapshot feeds (HN, crypto, …) fill on first poll — jump straight to chart.
+      if (s.buffer_rows > 0) {
+        const opened = await handleExplore({ quiet: true });
+        if (opened) return;
+      }
+      setToast(`Connected to ${def.label} — tap Explore when rows appear`);
     } catch (e) {
       setToast(`${def.label} failed: ${e instanceof Error ? e.message : e}`);
     } finally { setConnecting(false); }
@@ -676,27 +935,6 @@ function SourceCard({ def }: { def: SourceCardDef }) {
     } catch { /* ignore */ }
   };
 
-  const handleExplore = async () => {
-    try {
-      const snap = await sourceSnapshot(def.kind, 500);
-      const file = { path: def.streamPath, name: def.fileName, extension: "stream", row_count: snap.sample.total_rows, size_bytes: 0 };
-      setSelectedFile(file);
-      setColumnStats(snap.stats);
-      setSampleRows(snap.sample);
-      setStreamActive(true);
-      const story = recommendSourceStory(def.kind, snap.stats, snap.sample);
-      const recs = story.charts;
-      setChartRecs(recs);
-      setActiveChart(recs.length > 0 ? recs[0] : null);
-      if (recs.length === 0) setVegaSpec(null);
-      setViewMode("chart");
-      setPanelTab("chart");
-      setToast(`Loaded ${snap.sample.rows.length} ${def.label} rows`);
-    } catch (e) {
-      setToast(`Failed: ${e instanceof Error ? e.message : e}`);
-    }
-  };
-
   const handleClear = async () => {
     try {
       await sourceClear(def.kind);
@@ -706,29 +944,31 @@ function SourceCard({ def }: { def: SourceCardDef }) {
   };
 
   return (
-    <div className="loom-card border border-loom-border rounded-lg p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <span className={`w-2 h-2 rounded-full ${running ? `bg-${def.color} animate-pulse` : "bg-loom-muted"}`} />
-        <span className="text-xs font-medium text-loom-text">{def.label}</span>
-        <span className="flex-1" />
+    <div className="border border-loom-border rounded-md p-3 space-y-2 bg-loom-surface/40">
+      <div className="flex items-start gap-2">
+        <span className={`w-2 h-2 mt-1.5 rounded-full shrink-0 ${running ? "bg-loom-accent animate-pulse" : "bg-loom-muted"}`} />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-medium text-loom-text leading-tight">{def.label}</p>
+          <p className="text-2xs text-loom-muted mt-0.5 leading-snug">{def.description}</p>
+        </div>
         {!running ? (
           <button type="button" onClick={handleConnect} disabled={connecting}
-            className="text-2xs py-1 px-2.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
+            className="text-2xs py-1 px-2.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50 shrink-0">
             {connecting ? "Loading…" : "Connect"}
           </button>
         ) : (
           <button type="button" onClick={handleDisconnect}
-            className="text-2xs py-1 px-2.5 rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium">
+            className="text-2xs py-1 px-2.5 rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium shrink-0">
             Stop
           </button>
         )}
       </div>
       {running && (
-        <div className="flex items-center justify-between">
-          <span className="text-2xs text-loom-muted">{(status?.total_events ?? 0).toLocaleString()} rows loaded</span>
+        <div className="flex items-center justify-between pl-4">
+          <span className="text-2xs text-loom-muted tabular-nums">{(status?.total_events ?? 0).toLocaleString()} rows</span>
           <div className="flex gap-1.5">
             <button type="button" onClick={handleClear} className="text-2xs py-0.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">Clear</button>
-            <button type="button" onClick={handleExplore} disabled={bufferRows === 0}
+            <button type="button" onClick={() => void handleExplore()} disabled={bufferRows === 0}
               className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
               Explore
             </button>
@@ -736,16 +976,17 @@ function SourceCard({ def }: { def: SourceCardDef }) {
         </div>
       )}
       {!running && bufferRows > 0 && (
-        <div className="flex items-center justify-between">
-          <span className="text-2xs text-loom-muted">{bufferRows.toLocaleString()} rows</span>
-          <button type="button" onClick={handleExplore}
+        <div className="flex items-center justify-between pl-4">
+          <span className="text-2xs text-loom-muted tabular-nums">{bufferRows.toLocaleString()} rows ready</span>
+          <button type="button" onClick={() => void handleExplore()}
             className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium">
             Explore
           </button>
         </div>
       )}
-      <p className="text-2xs text-loom-muted leading-relaxed">{def.description}</p>
-      {def.attribution && <p className="text-2xs text-loom-muted/70 italic">{def.attribution}</p>}
+      {def.attribution && (
+        <p className="text-2xs text-loom-muted/60 pl-4">{def.attribution}</p>
+      )}
     </div>
   );
 }
@@ -767,6 +1008,112 @@ function filterDatasetsLocal(datasets: DataGovDataset[], text: string): DataGovD
     const hay = `${d.title} ${d.organization ?? ""} ${d.name}`.toLowerCase();
     return hay.includes(q);
   });
+}
+
+function exploreFilename(ds: DataGovDataset, res: { name: string }): string {
+  const base = res.name !== "CSV" ? res.name : ds.title;
+  return base.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) + ".csv";
+}
+
+/** Discovery card — web puts Explore first so grab→chart feels like desktop open. */
+function DiscoverDatasetCard({
+  dataset: ds,
+  expanded,
+  isWeb,
+  canSaveToFolder,
+  isScanning,
+  loadingId,
+  savingId,
+  onPreview,
+  onExplore,
+  onSave,
+}: {
+  dataset: DataGovDataset;
+  expanded: boolean;
+  isWeb: boolean;
+  canSaveToFolder: boolean;
+  isScanning: boolean;
+  loadingId: string | null;
+  savingId: string | null;
+  onPreview: () => void;
+  onExplore: (url: string, filename: string, resourceId: string) => void;
+  onSave: (url: string, filename: string, resourceId: string) => void;
+}) {
+  const csv = firstCsvResource(ds);
+  const exploreBusy = csv != null && (loadingId === csv.id || isScanning);
+
+  return (
+    <div className={`border border-loom-border rounded-md p-3 space-y-2.5 bg-loom-surface/40 ${expanded ? "flex flex-col min-w-0" : ""}`}>
+      <div className="min-w-0 flex-1">
+        {ds.organization && (
+          <p className="text-2xs text-loom-muted truncate mb-0.5">{ds.organization}</p>
+        )}
+        <p className="text-sm font-medium text-loom-text leading-snug line-clamp-2">{ds.title}</p>
+      </div>
+
+      {isWeb && csv ? (
+        <div className="flex items-center gap-2 flex-wrap mt-auto pt-0.5">
+          <button
+            type="button"
+            disabled={exploreBusy}
+            onClick={() => onExplore(csv.url, exploreFilename(ds, csv), csv.id)}
+            className="loom-btn-primary text-2xs py-1.5 px-3 disabled:opacity-50"
+          >
+            {exploreBusy ? "Loading…" : "Explore"}
+          </button>
+          <button type="button" onClick={onPreview} className="text-2xs text-loom-muted hover:text-loom-text">
+            Details
+          </button>
+          <a
+            href={csv.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-2xs text-loom-muted hover:text-loom-text"
+          >
+            Source
+          </a>
+        </div>
+      ) : (
+        <>
+          <div className="flex items-start justify-between gap-2">
+            <button type="button" onClick={onPreview} className="text-2xs text-loom-accent hover:underline">
+              View
+            </button>
+          </div>
+          <div className="space-y-1">
+            {ds.resources.slice(0, expanded ? 2 : 3).map((res) => {
+              const saveable = dataGovResourceSaveable(res);
+              const label = `${res.format}: ${res.name}`;
+              const filename = exploreFilename(ds, res);
+              return (
+                <div key={res.id} className="flex items-center gap-2 flex-wrap text-2xs">
+                  <span className={`text-loom-muted truncate ${expanded ? "max-w-full" : "max-w-[180px]"}`} title={res.url}>
+                    {label}
+                  </span>
+                  <a href={res.url} target="_blank" rel="noopener noreferrer" className="text-loom-accent hover:underline shrink-0">
+                    Open
+                  </a>
+                  {canSaveToFolder && saveable && (
+                    <button
+                      type="button"
+                      disabled={savingId === res.id}
+                      onClick={() => onSave(res.url, filename, res.id)}
+                      className="text-loom-accent hover:underline disabled:opacity-50 shrink-0"
+                    >
+                      {savingId === res.id ? "Saving…" : "Save to folder"}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            {ds.resources.length > (expanded ? 2 : 3) && (
+              <p className="text-2xs text-loom-muted">+{ds.resources.length - (expanded ? 2 : 3)} more</p>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
 }
 
 function CkanDiscoverToolbar({
@@ -874,6 +1221,11 @@ function DataRegionView({
   isScanning,
   onPickFolder,
   onRescanFolder,
+  isWeb,
+  onLoadRemoteCsv,
+  onLoadFiles,
+  onUseDemoData,
+  fileInputRef,
 }: {
   onBack: () => void;
   expanded: boolean;
@@ -885,16 +1237,21 @@ function DataRegionView({
   isScanning: boolean;
   onPickFolder: () => void;
   onRescanFolder: () => void;
+  isWeb: boolean;
+  onLoadRemoteCsv: (url: string, filename: string) => Promise<void>;
+  onLoadFiles?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onUseDemoData?: () => void;
+  fileInputRef?: React.RefObject<HTMLInputElement | null>;
 }) {
   const [dataGovDatasets, setDataGovDatasets] = useState<DataGovDataset[]>([]);
   const [dataGovLoading, setDataGovLoading] = useState(false);
   const [dataGovError, setDataGovError] = useState<string | null>(null);
   const [dataGovRequest, setDataGovRequest] = useState<{ q: string; sort: DataGovSortKey; rows: (typeof DATA_GOV_ROW_OPTIONS)[number] }>({
-    q: "",
-    sort: "newest",
+    q: isWeb ? "csv" : "",
+    sort: isWeb ? "relevance" : "newest",
     rows: 80,
   });
-  const [dataGovQueryDraft, setDataGovQueryDraft] = useState("");
+  const [dataGovQueryDraft, setDataGovQueryDraft] = useState(isWeb ? "csv" : "");
   const [dataGovLocalFilter, setDataGovLocalFilter] = useState("");
 
   const [ukDatasets, setUkDatasets] = useState<DataGovDataset[]>([]);
@@ -909,6 +1266,7 @@ function DataRegionView({
   const [ukLocalFilter, setUkLocalFilter] = useState("");
 
   const [savingId, setSavingId] = useState<string | null>(null);
+  const [loadingId, setLoadingId] = useState<string | null>(null);
   const [previewDataset, setPreviewDataset] = useState<DataGovDataset | null>(null);
   const isTauriEnv = isTauri();
 
@@ -922,12 +1280,6 @@ function DataRegionView({
     let cancelled = false;
     setDataGovLoading(true);
     setDataGovError(null);
-    if (!isTauriEnv) {
-      setDataGovError("Data.gov discovery is available in the desktop app (Tauri mode).");
-      setDataGovDatasets([]);
-      setDataGovLoading(false);
-      return () => { cancelled = true; };
-    }
     fetchDataGovRecentCsv({
       rows: dataGovRequest.rows,
       query: dataGovRequest.q || undefined,
@@ -946,16 +1298,10 @@ function DataRegionView({
         if (!cancelled) setDataGovLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isTauriEnv, dataGovRequest]);
+  }, [dataGovRequest]);
 
   useEffect(() => {
     let cancelled = false;
-    if (!isTauriEnv) {
-      setUkError("UK data is available in the desktop app (Tauri mode).");
-      setUkDatasets([]);
-      setUkLoading(false);
-      return () => { cancelled = true; };
-    }
     setUkLoading(true);
     setUkError(null);
     fetchUkDataRecentCsv({
@@ -976,7 +1322,7 @@ function DataRegionView({
         if (!cancelled) setUkLoading(false);
       });
     return () => { cancelled = true; };
-  }, [isTauriEnv, ukRequest]);
+  }, [ukRequest]);
 
   async function handleSaveToFolder(url: string, filename: string, resourceId: string) {
     if (!mountedFolder || mountedFolder.startsWith("mock://") || mountedFolder.startsWith("web://")) return;
@@ -991,7 +1337,17 @@ function DataRegionView({
     }
   }
 
+  async function handleLoadCsv(url: string, filename: string, resourceId: string) {
+    setLoadingId(resourceId);
+    try {
+      await onLoadRemoteCsv(url, filename);
+    } finally {
+      setLoadingId(null);
+    }
+  }
+
   const canSaveToFolder = isTauriEnv && mountedFolder && !mountedFolder.startsWith("mock://") && !mountedFolder.startsWith("web://");
+  const canLoadInBrowser = isWeb;
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden animate-fade-in">
@@ -1002,12 +1358,13 @@ function DataRegionView({
             onClick={onBack}
             className="loom-btn-ghost p-1.5 rounded-md shrink-0"
             title="Back to files"
+            aria-label="Back to files"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
           </button>
-          <span className="text-xs font-semibold text-loom-text uppercase tracking-wider truncate">Data & sources</span>
+          <span className="text-sm font-semibold text-loom-text tracking-tight truncate">Data & sources</span>
         </div>
         <button
           type="button"
@@ -1029,59 +1386,81 @@ function DataRegionView({
         </button>
       </div>
 
-      <div className={`flex-1 overflow-y-auto py-3 px-3 ${expanded ? "min-h-0" : ""} ${expanded ? "space-y-4" : "space-y-6"}`}>
-        {/* Local: choose folder first */}
+      <div className={`flex-1 overflow-y-auto py-4 px-3 ${expanded ? "min-h-0" : ""} space-y-7`}>
+        {/* Get data in — web: upload / explore; desktop: folder */}
         <section>
-          <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
-            Local folder
-          </h3>
+          <SectionHeading
+            title={isWeb ? "Open files" : "Local folder"}
+            lede={isWeb ? "Drop CSVs here, or Explore a catalog dataset below." : "Mount a folder of CSV / Parquet files."}
+          />
           <div className="space-y-2">
-            <button
-              onClick={onPickFolder}
-              disabled={isScanning}
-              className="loom-btn-primary w-full text-xs"
-            >
-              {isScanning ? "Scanning…" : mountedFolder ? "Change folder" : "Choose folder"}
-            </button>
-            {mountedFolder ? (
-              <div className="loom-card flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-loom-text truncate">{folderName ?? "Folder"}</p>
-                  <p className="text-2xs text-loom-muted font-mono truncate" title={mountedFolder}>
-                    {mountedFolder}
-                  </p>
-                </div>
-                <span className="loom-badge flex-shrink-0">{filesCount} files</span>
-              </div>
+            {isWeb ? (
+              <>
+                <input
+                  ref={fileInputRef}
+                  id="loom-web-csv-files-data-region"
+                  type="file"
+                  accept=".csv"
+                  multiple
+                  className="sr-only"
+                  onChange={onLoadFiles}
+                />
+                <label
+                  htmlFor="loom-web-csv-files-data-region"
+                  className={`loom-btn-primary w-full text-xs flex items-center justify-center cursor-pointer ${isScanning ? "pointer-events-none opacity-60" : ""}`}
+                >
+                  {isScanning ? "Loading…" : "Open CSVs from this device"}
+                </label>
+                {onUseDemoData && (
+                  <button type="button" onClick={onUseDemoData} className="loom-btn-ghost w-full text-xs">
+                    Try demo data
+                  </button>
+                )}
+                {filesCount > 0 && (
+                  <div className="flex items-center justify-between gap-2 px-1 pt-1">
+                    <p className="text-2xs text-loom-muted">Loaded in this browser</p>
+                    <span className="loom-badge flex-shrink-0">{filesCount}</span>
+                  </div>
+                )}
+              </>
             ) : (
-              <p className="text-2xs text-loom-muted px-1">
-                Pick a folder to save discovered data and load local CSVs.
-              </p>
+              <>
+                <button
+                  onClick={onPickFolder}
+                  disabled={isScanning}
+                  className="loom-btn-primary w-full text-xs"
+                >
+                  {isScanning ? "Scanning…" : mountedFolder ? "Change folder" : "Choose folder"}
+                </button>
+                {mountedFolder ? (
+                  <div className="border border-loom-border rounded-md p-2.5 flex items-center justify-between gap-2 bg-loom-surface/40">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-loom-text truncate">{folderName ?? "Folder"}</p>
+                      <p className="text-2xs text-loom-muted font-mono truncate" title={mountedFolder}>
+                        {mountedFolder}
+                      </p>
+                    </div>
+                    <span className="loom-badge flex-shrink-0">{filesCount}</span>
+                  </div>
+                ) : null}
+              </>
             )}
           </div>
         </section>
 
         {/* Data.gov: discover recent CSVs — list or grid when expanded */}
         <section className={expanded ? "flex-1 min-h-0 flex flex-col" : ""}>
-          <div className="flex items-center justify-between gap-2 mb-1 px-1">
-            <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">
-              Discover — Data.gov
-            </h3>
-            {!dataGovLoading && dataGovDatasets.length > 0 && (
-              <span className="text-2xs text-loom-muted shrink-0 text-right">
-                {dataGovLocalFilter.trim()
-                  ? `${dataGovFiltered.length} / ${dataGovDatasets.length}`
-                  : dataGovDatasets.length}{" "}
-                shown
-              </span>
-            )}
-          </div>
-          {!expanded && (
-            <p className="text-2xs text-loom-muted px-1 mb-2">
-              Search lists CSV, ZIP, JSON, and other downloads (Data.gov retired the old CKAN-only CSV filter). Use{" "}
-              <span className="font-mono text-loom-text/90">Save to folder</span> for CSV links only.
-            </p>
-          )}
+          <SectionHeading
+            title="Data.gov"
+            lede={isWeb ? "US open data — Explore loads CSV and opens Chart." : "Search and save CSVs into your folder."}
+            meta={
+              !dataGovLoading && dataGovDatasets.length > 0
+                ? dataGovLocalFilter.trim()
+                  ? `${dataGovFiltered.length}/${dataGovDatasets.length}`
+                  : `${dataGovDatasets.length}`
+                : undefined
+            }
+          />
           <CkanDiscoverToolbar
             queryDraft={dataGovQueryDraft}
             onQueryDraftChange={setDataGovQueryDraft}
@@ -1105,66 +1484,19 @@ function DataRegionView({
           )}
           <div className={expanded ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 flex-1 content-start overflow-y-auto min-h-0" : "space-y-3"}>
             {dataGovFiltered.map((ds) => (
-              <div key={ds.id} className={`loom-card p-2.5 space-y-1.5 ${expanded ? "flex flex-col min-w-0" : ""}`}>
-                <div className="flex items-start justify-between gap-2 min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <p className={`text-xs font-medium text-loom-text ${expanded ? "line-clamp-2" : "line-clamp-2"}`}>{ds.title}</p>
-                    {ds.organization && (
-                      <p className="text-2xs text-loom-muted mt-0.5 truncate">{ds.organization}</p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewDataset(ds)}
-                    className="text-2xs text-loom-accent hover:underline shrink-0 text-left"
-                  >
-                    View
-                  </button>
-                </div>
-                <div className="space-y-1">
-                  {ds.resources.slice(0, expanded ? 2 : 3).map((res) => {
-                    const saveable = dataGovResourceSaveable(res);
-                    const label = `${res.format}: ${res.name}`;
-                    const filename =
-                      (saveable ? (res.name !== "CSV" ? res.name : ds.title) : "")
-                        .replace(/[^a-zA-Z0-9._-]/g, "_")
-                        .slice(0, 80) + ".csv";
-                    return (
-                      <div key={res.id} className="flex items-center gap-2 flex-wrap text-2xs">
-                        <span className={`text-loom-muted truncate ${expanded ? "max-w-full" : "max-w-[180px]"}`} title={res.url}>
-                          {label}
-                        </span>
-                        <a
-                          href={res.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-loom-accent hover:underline shrink-0"
-                        >
-                          Open
-                        </a>
-                        {canSaveToFolder && saveable && (
-                          <span className="shrink-0 flex flex-col items-start">
-                            <button
-                              type="button"
-                              disabled={savingId === res.id}
-                              onClick={() => handleSaveToFolder(res.url, filename, res.id)}
-                              className="text-loom-accent hover:underline disabled:opacity-50"
-                            >
-                              {savingId === res.id ? "Saving…" : "Save to folder"}
-                            </button>
-                            {savingId === res.id && (
-                              <span className="text-2xs text-loom-muted mt-0.5">Large files may take a moment</span>
-                            )}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {ds.resources.length > (expanded ? 2 : 3) && (
-                    <p className="text-2xs text-loom-muted">+{ds.resources.length - (expanded ? 2 : 3)} more</p>
-                  )}
-                </div>
-              </div>
+              <DiscoverDatasetCard
+                key={ds.id}
+                dataset={ds}
+                expanded={expanded}
+                isWeb={canLoadInBrowser}
+                canSaveToFolder={!!canSaveToFolder}
+                isScanning={isScanning}
+                loadingId={loadingId}
+                savingId={savingId}
+                onPreview={() => setPreviewDataset(ds)}
+                onExplore={(url, filename, id) => handleLoadCsv(url, filename, id)}
+                onSave={handleSaveToFolder}
+              />
             ))}
           </div>
           <a
@@ -1182,22 +1514,17 @@ function DataRegionView({
 
         {/* data.gov.uk — same card UI + preview modal */}
         <section>
-          <div className="flex items-center justify-between gap-2 mb-1 px-1">
-            <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">
-              Discover — data.gov.uk
-            </h3>
-            {!ukLoading && ukDatasets.length > 0 && (
-              <span className="text-2xs text-loom-muted shrink-0 text-right">
-                {ukLocalFilter.trim() ? `${ukFiltered.length} / ${ukDatasets.length}` : ukDatasets.length}{" "}
-                shown
-              </span>
-            )}
-          </div>
-          {!expanded && (
-            <p className="text-2xs text-loom-muted px-1 mb-2">
-              Same controls as Data.gov: search, sort, more results, and quick page filter.
-            </p>
-          )}
+          <SectionHeading
+            title="data.gov.uk"
+            lede={isWeb ? "UK open data — same Explore flow as Data.gov." : "Same search and save controls as Data.gov."}
+            meta={
+              !ukLoading && ukDatasets.length > 0
+                ? ukLocalFilter.trim()
+                  ? `${ukFiltered.length}/${ukDatasets.length}`
+                  : `${ukDatasets.length}`
+                : undefined
+            }
+          />
           <CkanDiscoverToolbar
             queryDraft={ukQueryDraft}
             onQueryDraftChange={setUkQueryDraft}
@@ -1217,57 +1544,19 @@ function DataRegionView({
           )}
           <div className={expanded ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 content-start" : "space-y-3"}>
             {ukFiltered.map((ds) => (
-              <div key={ds.id} className={`loom-card p-2.5 space-y-1.5 ${expanded ? "flex flex-col min-w-0" : ""}`}>
-                <div className="flex items-start justify-between gap-2 min-w-0">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-medium text-loom-text line-clamp-2">{ds.title}</p>
-                    {ds.organization && (
-                      <p className="text-2xs text-loom-muted mt-0.5 truncate">{ds.organization}</p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setPreviewDataset(ds)}
-                    className="text-2xs text-loom-accent hover:underline shrink-0 text-left"
-                  >
-                    View
-                  </button>
-                </div>
-                <div className="space-y-1">
-                  {ds.resources.slice(0, expanded ? 2 : 3).map((res) => {
-                    const label = res.name !== "CSV" ? res.name : `${ds.title.slice(0, 30)}.csv`;
-                    const filename = (res.name !== "CSV" ? res.name : ds.title).replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80) + ".csv";
-                    return (
-                      <div key={res.id} className="flex items-center gap-2 flex-wrap text-2xs">
-                        <span className={`text-loom-muted truncate ${expanded ? "max-w-full" : "max-w-[180px]"}`} title={res.url}>
-                          {label}
-                        </span>
-                        <a href={res.url} target="_blank" rel="noopener noreferrer" className="text-loom-accent hover:underline shrink-0">
-                          Download
-                        </a>
-                        {canSaveToFolder && (
-                          <span className="shrink-0 flex flex-col items-start">
-                            <button
-                              type="button"
-                              disabled={savingId === res.id}
-                              onClick={() => handleSaveToFolder(res.url, filename, res.id)}
-                              className="text-loom-accent hover:underline disabled:opacity-50"
-                            >
-                              {savingId === res.id ? "Saving…" : "Save to folder"}
-                            </button>
-                            {savingId === res.id && (
-                              <span className="text-2xs text-loom-muted mt-0.5">Large files may take a moment</span>
-                            )}
-                          </span>
-                        )}
-                      </div>
-                    );
-                  })}
-                  {ds.resources.length > (expanded ? 2 : 3) && (
-                    <p className="text-2xs text-loom-muted">+{ds.resources.length - (expanded ? 2 : 3)} more</p>
-                  )}
-                </div>
-              </div>
+              <DiscoverDatasetCard
+                key={ds.id}
+                dataset={ds}
+                expanded={expanded}
+                isWeb={canLoadInBrowser}
+                canSaveToFolder={!!canSaveToFolder}
+                isScanning={isScanning}
+                loadingId={loadingId}
+                savingId={savingId}
+                onPreview={() => setPreviewDataset(ds)}
+                onExplore={(url, filename, id) => handleLoadCsv(url, filename, id)}
+                onSave={handleSaveToFolder}
+              />
             ))}
           </div>
           <a
@@ -1283,44 +1572,39 @@ function DataRegionView({
           </a>
         </section>
 
-        {/* Live Streams & Sources */}
-        <WikiStreamSection />
-        {SOURCE_DEFS.map((def) => (
-          <SourceCard key={def.kind} def={def} />
-        ))}
+        {/* Live feeds */}
+        <section className="space-y-2.5">
+          <SectionHeading
+            title="Live feeds"
+            lede="Connect a feed, let it fill, then Explore into Chart."
+          />
+          <WikiStreamSection />
+          {SOURCE_DEFS.map((def) => (
+            <SourceCard key={def.kind} def={def} />
+          ))}
+        </section>
 
-        {/* More data sources — links to other open data portals */}
+        {/* More portals */}
         <section>
-          <h3 className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-2 px-1">
-            More sources
-          </h3>
-          <p className="text-2xs text-loom-muted px-1 mb-2">
-            Open data portals with CSV downloads. Open in browser, then download and add to your folder.
-          </p>
-          <ul className="space-y-1.5">
+          <SectionHeading title="More portals" lede="Open in a tab, download CSV, then bring it back here." />
+          <ul className="space-y-2.5 px-1">
             <li>
-              <a href="https://data.europa.eu" target="_blank" rel="noopener noreferrer" className="text-2xs text-loom-accent hover:underline">
+              <a href="https://data.europa.eu" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
                 data.europa.eu
               </a>
-              <span className="text-2xs text-loom-muted"> — EU open data (1M+ datasets)</span>
+              <p className="text-2xs text-loom-muted">EU open data</p>
             </li>
             <li>
-              <a href="https://data.gov.uk" target="_blank" rel="noopener noreferrer" className="text-2xs text-loom-accent hover:underline">
-                data.gov.uk
-              </a>
-              <span className="text-2xs text-loom-muted"> — UK government data</span>
-            </li>
-            <li>
-              <a href="https://ourworldindata.org" target="_blank" rel="noopener noreferrer" className="text-2xs text-loom-accent hover:underline">
+              <a href="https://ourworldindata.org" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
                 Our World in Data
               </a>
-              <span className="text-2xs text-loom-muted"> — Global development, health, environment</span>
+              <p className="text-2xs text-loom-muted">Global development & health</p>
             </li>
             <li>
-              <a href="https://data.nasa.gov" target="_blank" rel="noopener noreferrer" className="text-2xs text-loom-accent hover:underline">
+              <a href="https://data.nasa.gov" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
                 data.nasa.gov
               </a>
-              <span className="text-2xs text-loom-muted"> — NASA open data</span>
+              <p className="text-2xs text-loom-muted">NASA open science</p>
             </li>
           </ul>
         </section>
@@ -1358,6 +1642,7 @@ function FilesView({
   lastSession,
   onReopenSession,
   onOpenRecentFile,
+  openingRecentPath,
   fileSearchQuery,
   onFileSearchChange,
 }: {
@@ -1380,6 +1665,7 @@ function FilesView({
   lastSession?: { folderPath: string | null; filePath: string | null; viewMode: string } | null;
   onReopenSession?: () => void;
   onOpenRecentFile?: (f: FileEntry) => void;
+  openingRecentPath?: string | null;
   fileSearchQuery?: string;
   onFileSearchChange?: (q: string) => void;
 }) {
@@ -1484,19 +1770,35 @@ function FilesView({
       {recentFiles && recentFiles.length > 0 && onOpenRecentFile && (
         <div className="px-3 py-2 border-b border-loom-border flex-shrink-0">
           <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wider mb-1">Recent</p>
-          <ul className="space-y-0.5 max-h-28 overflow-y-auto">
-            {recentFiles.slice(0, 8).map((f) => (
-              <li key={f.path}>
-                <button
-                  type="button"
-                  onClick={() => onOpenRecentFile(f)}
-                  className="w-full text-left text-xs text-loom-muted hover:text-loom-text truncate px-1.5 py-0.5 rounded hover:bg-loom-elevated"
-                  title={f.path}
-                >
-                  {f.name}
-                </button>
-              </li>
-            ))}
+          <ul className="space-y-0.5 max-h-36 overflow-y-auto">
+            {recentFiles.slice(0, 8).map((f) => {
+              const canReopen =
+                Boolean(f.sourceUrl) ||
+                f.path.startsWith("stream://") ||
+                f.path.startsWith("mock://") ||
+                (!f.path.startsWith("web://") && f.path.includes("/"));
+              const busy = openingRecentPath === f.path || (isScanning && selectedFile?.path === f.path);
+              return (
+                <li key={f.path}>
+                  <button
+                    type="button"
+                    disabled={Boolean(openingRecentPath) || isScanning}
+                    onClick={() => void onOpenRecentFile(f)}
+                    className={`w-full text-left text-xs truncate px-2 py-2 min-h-9 rounded border border-transparent
+                      ${canReopen ? "text-loom-text hover:bg-loom-elevated hover:border-loom-border" : "text-loom-muted hover:bg-loom-elevated"}
+                      disabled:opacity-60`}
+                    title={
+                      canReopen
+                        ? f.sourceUrl || f.path
+                        : "May need to Explore again from Data & sources (no saved URL)"
+                    }
+                  >
+                    {busy ? "Opening… " : ""}
+                    {f.name}
+                  </button>
+                </li>
+              );
+            })}
           </ul>
         </div>
       )}

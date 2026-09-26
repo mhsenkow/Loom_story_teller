@@ -16,11 +16,9 @@
 // =================================================================
 
 import type { ColumnInfo, QueryResult } from "./store";
+import { VIZ_CATEGORICAL } from "./chartPalettes";
 
-const COLORS = [
-  "#6c5ce7", "#00d68f", "#ff6b6b", "#ffd93d",
-  "#00b4d8", "#e77c5c", "#a29bfe", "#74b9ff",
-];
+const COLORS = VIZ_CATEGORICAL;
 
 const DARK_AXIS = {
   labelColor: "#6b6b78",
@@ -142,7 +140,7 @@ export function createScatterRec(
     encoding.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
   }
   if (sizeField) {
-    encoding.size = { field: sizeField, type: "quantitative", scale: { range: [20, 200] } };
+    encoding.size = { field: sizeField, type: "quantitative", scale: { range: [12, 96] } };
   }
   const colorCol = colorField ? columns.find(c => c.name === colorField) : null;
   const mark: { type: "circle"; opacity: number; size?: number } = { type: "circle", opacity: 0.65 };
@@ -333,7 +331,7 @@ export function createChartRec(
         ?? null;
       enc.x = { field: xField, type: "quantitative" };
       enc.y = { field: yField, type: "quantitative" };
-      if (sizeField) enc.size = { field: sizeField, type: "quantitative", scale: { range: [20, 800] } };
+      if (sizeField) enc.size = { field: sizeField, type: "quantitative", scale: { range: [16, 120] } };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = sizeField ? `${xField} vs ${yField} sized by ${sizeField}` : `${xField} vs ${yField}`;
       subtitle = colorField ? `colored by ${colorField}` : (sizeField ? "three-variable relationship" : "bubble chart");
@@ -423,12 +421,22 @@ export function createChartRec(
       break;
     }
     case "sankey": {
-      if (!yField && !colorField) return null;
-      const target = colorField ?? yField!;
+      // Color = flow target (required). Y = optional numeric weight; else row count.
+      const target =
+        colorField && nomCols.some((c) => c.name === colorField)
+          ? colorField
+          : yField && nomCols.some((c) => c.name === yField)
+            ? yField
+            : null;
+      if (!target || target === xField) return null;
+      const weightOk = Boolean(yField && numCols.some((c) => c.name === yField));
       enc.x = { field: xField, type: "nominal" };
-      enc.y = { field: target, type: "nominal" };
+      enc.color = { field: target, type: "nominal", scale: { range: COLORS } };
+      enc.y = weightOk
+        ? { field: yField!, type: "quantitative", aggregate: "sum" }
+        : { aggregate: "count", type: "quantitative" };
       title = `${xField} → ${target}`;
-      subtitle = "flow between categories";
+      subtitle = weightOk ? `weighted by ${yField}` : "flow between categories";
       break;
     }
     default:
@@ -495,10 +503,32 @@ export function recommend(
 ): ChartRecommendation[] {
   const recs: ChartRecommendation[] = [];
   const name = fileName.replace(/\.\w+$/, "");
+  const nRows = data?.rows?.length ?? 0;
+  const dense = nRows >= 2500;
+  const veryDense = nRows >= 6000;
 
   const numCols = columns.filter(c => inferType(c.data_type, c.name) === "quantitative");
   const nomCols = columns.filter(c => inferType(c.data_type, c.name) === "nominal");
   const timeCols = columns.filter(c => inferType(c.data_type, c.name) === "temporal");
+
+  // Dense bivariate → density heatmap beats a bubble soup
+  if (dense && numCols.length >= 2) {
+    const a = numCols[0]!;
+    const b = numCols[1]!;
+    recs.push({
+      id: `heatmap-density-${a.name}-${b.name}`,
+      kind: "heatmap",
+      title: `${a.name} × ${b.name} density`,
+      subtitle: veryDense
+        ? `${nRows.toLocaleString()} rows · binned (clearer than bubbles)`
+        : "binned density · less overplotting",
+      score: veryDense ? 94 : 86,
+      spec: {},
+      xField: a.name,
+      yField: b.name,
+      colorField: null,
+    });
+  }
 
   // --- SCATTER: every pair of numeric columns ---
   for (let i = 0; i < numCols.length && i < 4; i++) {
@@ -518,6 +548,7 @@ export function recommend(
       let score = 70;
       if (x.distinct_count > 50 && y.distinct_count > 50) score += 15;
       if (colorCol && colorCol.distinct_count >= 2 && colorCol.distinct_count <= 10) score += 10;
+      if (dense) score += 6; // scatter + density-aware marks beats bubbles when crowded
 
       recs.push({
         id: `scatter-${x.name}-${y.name}`,
@@ -913,8 +944,10 @@ export function recommend(
           id: `bubble-${numCols[i].name}-${numCols[j].name}-${numCols[k].name}`,
           kind: "bubble",
           title: `${numCols[i].name} vs ${numCols[j].name} sized by ${numCols[k].name}`,
-          subtitle: colorCol ? `colored by ${colorCol.name}` : "three-variable view",
-          score: 73,
+          subtitle: colorCol
+            ? `colored by ${colorCol.name}`
+            : (dense ? "three-variable · prefer Clarity or density heatmap when crowded" : "three-variable view"),
+          score: veryDense ? 42 : dense ? 55 : 73,
           spec: {},
           xField: numCols[i].name,
           yField: numCols[j].name,
@@ -1190,11 +1223,42 @@ export function getBestSuggestion(recs: ChartRecommendation[]): ChartRecommendat
   return recs.reduce((best, r) => (r.score > best.score ? r : best), recs[0]);
 }
 
-/** Pick a random valid encoding for the given chart kind. Returns null if no valid combo. */
+export type EncodingShuffleLocks = {
+  kind?: boolean;
+  x?: boolean;
+  y?: boolean;
+  color?: boolean;
+  size?: boolean;
+};
+
+export type RandomEncoding = {
+  xField: string;
+  yField: string | null;
+  colorField: string | null;
+  sizeField?: string | null;
+};
+
+/** Apply channel locks: keep pinned fields, fill the rest from a fresh random draw. */
+export function applyEncodingLocks(
+  drawn: RandomEncoding,
+  locks: EncodingShuffleLocks | undefined,
+  keep: Partial<RandomEncoding> | undefined,
+): RandomEncoding {
+  if (!locks || !keep) return drawn;
+  return {
+    xField: locks.x && keep.xField != null ? keep.xField : drawn.xField,
+    yField: locks.y ? (keep.yField ?? null) : drawn.yField,
+    colorField: locks.color ? (keep.colorField ?? null) : drawn.colorField,
+    sizeField: locks.size ? (keep.sizeField ?? null) : drawn.sizeField,
+  };
+}
+
+/** Pick a random valid encoding for the given chart kind. Returns null if no valid combo.
+ *  Often includes a colorField when nominal columns exist (scatter/bar/line/bubble/…). */
 export function getRandomEncoding(
   columns: ColumnInfo[],
   kind: ChartKind,
-): { xField: string; yField: string | null; colorField: string | null; sizeField?: string | null } | null {
+): RandomEncoding | null {
   const numCols = columns.filter(c => inferType(c.data_type, c.name) === "quantitative");
   const nomCols = columns.filter(c => inferType(c.data_type, c.name) === "nominal");
   const timeCols = columns.filter(c => inferType(c.data_type, c.name) === "temporal");
@@ -1226,11 +1290,17 @@ export function getRandomEncoding(
     case "area": {
       const xTime = pick(timeCols.length > 0 ? timeCols : nomCols);
       if (!xTime) return null;
+      // Prefer a numeric Y; count-only series still render when yField is null.
       const yVal = numCols.length > 0 ? pick(numCols)! : null;
-      const colorLine = nomCols.length > 0 && nomCols.some(c => c.distinct_count <= 15) ? pick(nomCols.filter(c => c.distinct_count <= 15)) ?? null : null;
+      const colorLine = nomCols.length > 0 && nomCols.some(c => c.distinct_count <= 15) ? pick(nomCols.filter(c => c.distinct_count <= 15 && c.name !== xTime.name)) ?? null : null;
       return { xField: xTime.name, yField: yVal?.name ?? null, colorField: colorLine?.name ?? null };
     }
     case "heatmap": {
+      if (numCols.length >= 2 && Math.random() > 0.4) {
+        const a = pick(numCols)!;
+        const b = pick(numCols.filter((c) => c.name !== a.name)) ?? numCols.find((c) => c.name !== a.name);
+        if (a && b) return { xField: a.name, yField: b.name, colorField: null };
+      }
       const a = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20));
       const b = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20 && c.name !== a?.name));
       if (!a || !b) return null;
@@ -1256,10 +1326,15 @@ export function getRandomEncoding(
       return { xField: xPie.name, yField: yPie?.name ?? null, colorField: null };
     }
     case "bubble": {
-      if (numCols.length < 3) return null;
+      if (numCols.length < 2) return null;
       const shuffled = [...numCols].sort(() => Math.random() - 0.5);
       const color = nomCols.length > 0 && nomCols.some(c => c.distinct_count <= 15) ? pick(nomCols.filter(c => c.distinct_count <= 15)) ?? null : null;
-      return { xField: shuffled[0].name, yField: shuffled[1].name, colorField: color?.name ?? null, sizeField: shuffled[2].name };
+      return {
+        xField: shuffled[0]!.name,
+        yField: shuffled[1]!.name,
+        colorField: color?.name ?? null,
+        sizeField: shuffled[2]?.name ?? null,
+      };
     }
     case "violin": {
       const xViolin = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 12));
@@ -1277,9 +1352,9 @@ export function getRandomEncoding(
     }
     case "waterfall": {
       const xWf = pick(nomCols.filter(c => c.distinct_count >= 3 && c.distinct_count <= 20));
-      const yWf = pick(numCols);
-      if (!xWf || !yWf) return null;
-      return { xField: xWf.name, yField: yWf.name, colorField: null };
+      if (!xWf) return null;
+      const yWf = numCols.length > 0 ? pick(numCols)! : null;
+      return { xField: xWf.name, yField: yWf?.name ?? null, colorField: null };
     }
     case "lollipop": {
       const xLol = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 30));
@@ -1319,8 +1394,10 @@ export function getRandomEncoding(
     }
     case "sankey": {
       if (nomCols.length < 2) return null;
-      const a = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20))!;
-      const b = pick(nomCols.filter(c => c.name !== a.name && c.distinct_count >= 2 && c.distinct_count <= 20));
+      const sankeyNom = nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20);
+      const a = pick(sankeyNom);
+      if (!a) return null;
+      const b = pick(sankeyNom.filter(c => c.name !== a.name));
       if (!b) return null;
       const yVal = numCols.length > 0 && Math.random() > 0.3 ? pick(numCols)! : null;
       return { xField: a.name, yField: yVal?.name ?? null, colorField: b.name };
@@ -1344,7 +1421,7 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
     case "scatter":
       return numCols.length >= 2 ? { ok: true, reason: "" } : { ok: false, reason: "Need ≥2 numeric columns" };
     case "bubble":
-      return numCols.length >= 3 ? { ok: true, reason: "" } : { ok: false, reason: "Need ≥3 numeric columns" };
+      return numCols.length >= 2 ? { ok: true, reason: "" } : { ok: false, reason: "Need ≥2 numeric columns" };
     case "histogram":
       return numCols.length >= 1 ? { ok: true, reason: "" } : { ok: false, reason: "Need a numeric column" };
     case "bar":
@@ -1360,7 +1437,9 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
     case "pie":
       return nom(2, 15).length >= 1 ? { ok: true, reason: "" } : { ok: false, reason: "Need a category (2–15 distinct)" };
     case "heatmap":
-      return nom(2, 20).length >= 2 ? { ok: true, reason: "" } : { ok: false, reason: "Need two categories (2–20 distinct each)" };
+      return numCols.length >= 2 || nom(2, 20).length >= 2
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need two numeric columns (density) or two categories (2–20 distinct)" };
     case "strip":
       return numCols.length >= 1 && nomCols.length >= 1
         ? { ok: true, reason: "" }
@@ -1376,21 +1455,21 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
     case "radar":
       return numCols.length >= 3 ? { ok: true, reason: "" } : { ok: false, reason: "Need ≥3 numeric columns" };
     case "waterfall":
-      return nom(3, 20).length >= 1 && numCols.length >= 1
+      return nom(3, 20).length >= 1
         ? { ok: true, reason: "" }
-        : { ok: false, reason: "Need category (3–20 values) + numeric" };
+        : { ok: false, reason: "Need a category (3–20 distinct values)" };
     case "treemap":
-      return nom(3, 30).length >= 1 && numCols.length >= 1
+      return nom(3, 30).length >= 1
         ? { ok: true, reason: "" }
-        : { ok: false, reason: "Need category (3–30 values) + numeric" };
+        : { ok: false, reason: "Need a category (3–30 distinct values)" };
     case "sunburst":
-      return nom(3, 20).length >= 1 && numCols.length >= 1
+      return nom(3, 20).length >= 1
         ? { ok: true, reason: "" }
-        : { ok: false, reason: "Need category (3–20 values) + numeric" };
+        : { ok: false, reason: "Need a category (3–20 distinct values)" };
     case "forceBubble":
-      return nom(3, 40).length >= 1 && numCols.length >= 1
+      return nom(3, 40).length >= 1
         ? { ok: true, reason: "" }
-        : { ok: false, reason: "Need category (3–40 values) + numeric" };
+        : { ok: false, reason: "Need a category (3–40 distinct values)" };
     case "choropleth": {
       const geo = nomCols.filter(c => geoP.test(c.name) && c.distinct_count >= 3);
       const any = nomCols.filter(c => c.distinct_count >= 3);
@@ -1408,17 +1487,32 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
 }
 
 /**
- * Random chart that passes createChartRec (encoding + schema). Retries random encodings;
- * falls back to top recommend() result.
+ * Random chart that passes createChartRec + schema support. Retries encodings;
+ * falls back to top recommend() result. Optional locks keep kind / channels.
  */
-export function tryBuildRandomChartRec(columns: ColumnInfo[], tableName: string): ChartRecommendation | null {
+export function tryBuildRandomChartRec(
+  columns: ColumnInfo[],
+  tableName: string,
+  opts?: {
+    locks?: EncodingShuffleLocks;
+    keep?: Partial<RandomEncoding> & { kind?: ChartKind };
+  },
+): ChartRecommendation | null {
   if (columns.length === 0) return null;
+  const locks = opts?.locks ?? {};
+  const keep = opts?.keep;
+  const supported = ALL_CHART_KINDS.filter((k) => chartKindDataSupport(columns, k).ok);
+  let pool = supported.length > 0 ? supported : ALL_CHART_KINDS;
+  if (locks.kind && keep?.kind && pool.includes(keep.kind)) {
+    pool = [keep.kind];
+  }
   for (let round = 0; round < 4; round++) {
-    const shuffled = [...ALL_CHART_KINDS].sort(() => Math.random() - 0.5);
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
     for (const kind of shuffled) {
       for (let att = 0; att < 14; att++) {
-        const enc = getRandomEncoding(columns, kind);
-        if (!enc) break;
+        const drawn = getRandomEncoding(columns, kind);
+        if (!drawn) break;
+        const enc = applyEncodingLocks(drawn, locks, keep);
         const extra: Parameters<typeof createChartRec>[6] = {};
         if (enc.sizeField) extra.sizeField = enc.sizeField;
         const rec = createChartRec(kind, columns, enc.xField, enc.yField, enc.colorField, tableName, extra);
@@ -1641,6 +1735,42 @@ export function recommendSourceStory(
         mk("bar", "Top 10 by population", "Most populous nations", 85, "country_name", "value", null, "max"),
         mk("scatter", "Year vs indicator value", "How values evolve over time (per country)", 82, "yr", "value", "country_code"),
         mk("histogram", "Value distribution", "Spread of indicator values", 78, "value", null, null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "iss") {
+    return {
+      title: "ISS orbital track",
+      charts: [
+        mk("scatter", "Orbital path", "Latitude vs longitude trail", 95, "longitude", "latitude", null),
+        mk("line", "Altitude over time", "How high is the station?", 90, "ts", "altitude_km", null),
+        mk("line", "Velocity over time", "Orbital speed", 85, "ts", "velocity_kmh", null),
+        mk("scatter", "Altitude vs velocity", "Do they move together?", 80, "altitude_km", "velocity_kmh", null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "hn") {
+    return {
+      title: "Hacker News front page",
+      charts: [
+        mk("bar", "Top stories by points", "What's hottest right now?", 95, "title", "points", null, "max"),
+        mk("scatter", "Points vs comments", "Discussion intensity", 90, "points", "num_comments", "author"),
+        mk("histogram", "Score distribution", "How viral is the front page?", 85, "points", null, null),
+        mk("bar", "Active authors", "Who is posting?", 78, "author", null, null, "count"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "crypto") {
+    return {
+      title: "Crypto markets",
+      charts: [
+        mk("bar", "Market cap leaders", "Top coins by size", 95, "symbol", "market_cap", null, "max"),
+        mk("scatter", "Price vs 24h change", "Winners and losers today", 92, "price_usd", "change_24h_pct", "symbol"),
+        mk("bar", "24h volume", "Where is the trading activity?", 88, "symbol", "volume_24h", null, "max"),
+        mk("histogram", "Daily change %", "How wild is the market?", 82, "change_24h_pct", null, null),
       ].slice(0, 5),
     };
   }

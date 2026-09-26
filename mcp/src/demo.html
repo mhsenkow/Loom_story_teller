@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loom MCP — live demo</title>
+<style>
+  :root {
+    --bg: #0a0a0c; --face: #121218; --ink: #e8e8ec; --mute: #6b6b78;
+    --hair: #2a2a30; --accent: #6c5ce7;
+    font-family: Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); min-height: 100dvh; padding: 28px 20px; line-height: 1.5; }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.15rem; font-weight: 600; margin-bottom: 6px; }
+  .lead { font-size: 0.9rem; color: var(--mute); margin-bottom: 18px; }
+  textarea {
+    width: 100%; min-height: 140px; padding: 12px 14px;
+    border: 1px solid var(--hair); background: var(--face); color: var(--ink);
+    font: 12px/1.45 ui-monospace, Menlo, monospace; border-radius: 8px; resize: vertical;
+  }
+  .row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  button {
+    appearance: none; border: 1px solid var(--hair); background: var(--accent);
+    color: #fff; font: 600 12px/1 Inter, sans-serif; padding: 10px 14px; border-radius: 8px; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--ink); }
+  pre {
+    margin-top: 16px; padding: 14px; background: var(--face); border: 1px solid var(--hair);
+    border-radius: 8px; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word;
+    max-height: 420px; overflow: auto;
+  }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Loom MCP demo</h1>
+  <p class="lead">Paste CSV → <code>recommend_charts</code> against this Worker. Endpoint: <span id="ep"></span></p>
+  <textarea id="csv">category,value,region,date
+Alpha,12,West,2024-01-01
+Beta,18,East,2024-01-02
+Alpha,9,West,2024-01-03
+Gamma,22,North,2024-01-04
+Beta,15,East,2024-01-05
+Delta,7,South,2024-01-06</textarea>
+  <div class="row">
+    <button type="button" id="go">Recommend charts</button>
+    <button type="button" class="ghost" id="kinds">List supported kinds</button>
+    <a href="/demo/chat">Chat-style demo →</a>
+  </div>
+  <pre id="out">Ready.</pre>
+</div>
+<script>
+(function () {
+  var origin = location.origin;
+  document.getElementById("ep").textContent = origin + "/mcp";
+  async function mcpCall(name, args) {
+    var res = await fetch(origin + "/mcp", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/event-stream"
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: name, arguments: args }
+      })
+    });
+    var text = await res.text();
+    document.getElementById("out").textContent = text;
+  }
+  document.getElementById("go").onclick = function () {
+    document.getElementById("out").textContent = "Calling…";
+    mcpCall("recommend_charts", { csv: document.getElementById("csv").value, limit: 6 });
+  };
+  document.getElementById("kinds").onclick = function () {
+    document.getElementById("out").textContent = "Calling…";
+    mcpCall("list_chart_kinds", { csv: document.getElementById("csv").value });
+  };
+})();
+</script>
+</body>
+</html>

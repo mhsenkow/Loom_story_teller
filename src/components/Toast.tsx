@@ -23,9 +23,9 @@ export function Toast() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-4 right-4 z-[100] max-w-sm px-3 py-2 text-xs text-loom-text bg-loom-surface border border-loom-border rounded shadow-lg flex items-center justify-between gap-2"
+      className="fixed bottom-[max(1rem,var(--safe-bottom))] right-[max(1rem,var(--safe-right))] z-[100] max-w-[min(24rem,calc(100vw-2rem))] px-3 py-2 text-xs text-loom-text bg-loom-surface border border-loom-border rounded shadow-lg flex items-center justify-between gap-2"
     >
-      <span className="min-w-0 truncate">{toastMessage}</span>
+      <span className="min-w-0 break-words">{toastMessage}</span>
       <button
         type="button"
         onClick={() => setToast(null)}

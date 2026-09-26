@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Loom chart suggestions</title>
+<style>
+  :root {
+    --bg: #0a0a0c;
+    --face: #121218;
+    --ink: #e8e8ec;
+    --mute: #6b6b78;
+    --hair: #2a2a30;
+    --accent: #6c5ce7;
+    font-family: Inter, system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--ink); padding: 14px 16px 18px; min-height: 100%; }
+  .hdr { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .brand { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--mute); }
+  .brand strong { color: var(--ink); font-weight: 600; }
+  .meta { font-size: 11px; color: var(--mute); }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .card {
+    background: var(--face);
+    border: 1px solid var(--hair);
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+  .kind {
+    display: inline-block;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    margin-bottom: 4px;
+  }
+  .title { font-size: 13px; font-weight: 600; line-height: 1.3; }
+  .sub { font-size: 11px; color: var(--mute); margin-top: 3px; line-height: 1.35; }
+  .score { float: right; font-size: 10px; color: var(--mute); font-variant-numeric: tabular-nums; }
+  a.open {
+    display: inline-block;
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  a.open:hover { text-decoration: underline; }
+  .empty { color: var(--mute); font-size: 12px; padding: 8px 0; }
+</style>
+</head>
+<body>
+  <div class="hdr">
+    <div class="brand"><strong>Loom</strong> · chart suggestions</div>
+    <div class="meta" id="meta"></div>
+  </div>
+  <div class="list" id="list"></div>
+  <a class="open" id="open" href="https://loom.ibm.io/" target="_blank" rel="noopener">Open Loom →</a>
+<script>
+(function () {
+  function seed() {
+    try {
+      var o = window.openai || {};
+      return o.toolOutput || o.toolInput || {};
+    } catch (e) {
+      return {};
+    }
+  }
+  var data = seed();
+  var recs = Array.isArray(data.recommendations) ? data.recommendations : [];
+  var meta = document.getElementById("meta");
+  var list = document.getElementById("list");
+  var open = document.getElementById("open");
+  if (data.fileName) meta.textContent = data.fileName;
+  else if (data.rowCount != null) meta.textContent = data.rowCount + " rows";
+  if (data.loomUrl) open.href = data.loomUrl;
+
+  if (!recs.length) {
+    list.innerHTML = '<p class="empty">No chart suggestions yet. Pass CSV or column schema to recommend_charts.</p>';
+    return;
+  }
+  list.innerHTML = recs.slice(0, 8).map(function (r) {
+    var kind = (r.kind || "chart").replace(/([A-Z])/g, " $1").trim();
+    return (
+      '<article class="card">' +
+        '<span class="score">' + (r.score != null ? r.score : "") + '</span>' +
+        '<div class="kind">' + kind + '</div>' +
+        '<div class="title">' + (r.title || "") + '</div>' +
+        '<div class="sub">' + (r.subtitle || r.reason || "") + '</div>' +
+      '</article>'
+    );
+  }).join("");
+})();
+</script>
+</body>
+</html>

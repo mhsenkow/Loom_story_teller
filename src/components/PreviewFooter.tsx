@@ -9,17 +9,21 @@
 
 import { useState } from "react";
 import { useLoomStore } from "@/lib/store";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 const DRAG_TYPE_COLUMN = "application/x-loom-column";
 
 type FooterTab = "preview" | "schema";
 
 export function PreviewFooter() {
-  const { sampleRows, selectedFile, columnStats, activeChart, chartTitleOverrides } = useLoomStore();
+  const { sampleRows, selectedFile, columnStats, activeChart, chartTitleOverrides, viewMode } = useLoomStore();
   const [expanded, setExpanded] = useState(false);
   const [footerTab, setFooterTab] = useState<FooterTab>("preview");
+  const isMobile = useIsMobile();
 
   if (!selectedFile) return null;
+  // Chart view on phones: keep canvas tall; schema/preview stay one tap away from Explorer.
+  if (isMobile && viewMode === "chart" && !expanded) return null;
 
   const rowCount = sampleRows?.rows.length ?? 0;
   const total = sampleRows?.total_rows ?? rowCount;
@@ -32,7 +36,10 @@ export function PreviewFooter() {
   }
 
   return (
-    <div className="flex flex-col border-t border-loom-border bg-loom-surface">
+    <div
+      className="flex flex-col border-t border-loom-border bg-loom-surface max-md:pb-[var(--safe-bottom)]"
+      style={{ paddingBottom: expanded ? undefined : undefined }}
+    >
       {/* Tab bar + expand toggle */}
       <div className="flex items-center justify-between h-[var(--statusbar-height)] min-h-[28px]">
         <div className="flex items-center gap-0.5 px-2">

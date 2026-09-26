@@ -113,6 +113,9 @@ pub struct SourcesState {
     pub meteo: SourceInstance,
     pub nws: SourceInstance,
     pub world_bank: SourceInstance,
+    pub iss: SourceInstance,
+    pub hn: SourceInstance,
+    pub crypto: SourceInstance,
 }
 
 impl SourcesState {
@@ -122,6 +125,9 @@ impl SourcesState {
             meteo: SourceInstance::new(),
             nws: SourceInstance::new(),
             world_bank: SourceInstance::new(),
+            iss: SourceInstance::new(),
+            hn: SourceInstance::new(),
+            crypto: SourceInstance::new(),
         }
     }
 
@@ -131,6 +137,9 @@ impl SourcesState {
             "meteo" => Some(&self.meteo),
             "nws" => Some(&self.nws),
             "world_bank" => Some(&self.world_bank),
+            "iss" => Some(&self.iss),
+            "hn" => Some(&self.hn),
+            "crypto" => Some(&self.crypto),
             _ => None,
         }
     }
@@ -142,6 +151,9 @@ fn table_for_kind(kind: &str) -> &'static str {
         "meteo" => "meteo_weather",
         "nws" => "nws_alerts",
         "world_bank" => "world_bank",
+        "iss" => "iss_track",
+        "hn" => "hn_stories",
+        "crypto" => "crypto_markets",
         _ => "unknown",
     }
 }
@@ -200,6 +212,33 @@ pub fn ensure_tables(db: &LoomDb) -> Result<(), String> {
             indicator_name VARCHAR,
             yr INTEGER,
             value DOUBLE
+        );
+        CREATE TABLE IF NOT EXISTS iss_track (
+            ts TIMESTAMP,
+            latitude DOUBLE,
+            longitude DOUBLE,
+            altitude_km DOUBLE,
+            velocity_kmh DOUBLE,
+            visibility VARCHAR
+        );
+        CREATE TABLE IF NOT EXISTS hn_stories (
+            id VARCHAR,
+            title VARCHAR,
+            author VARCHAR,
+            points INTEGER,
+            num_comments INTEGER,
+            url VARCHAR,
+            created_at TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS crypto_markets (
+            id VARCHAR,
+            symbol VARCHAR,
+            name VARCHAR,
+            price_usd DOUBLE,
+            market_cap DOUBLE,
+            volume_24h DOUBLE,
+            change_24h_pct DOUBLE,
+            rank INTEGER
         );",
     )
     .map_err(|e| e.to_string())
@@ -693,9 +732,212 @@ pub async fn source_start(
                 inst_c.0.store(false, Ordering::Relaxed);
             });
         }
+        "iss" => {
+            const ISS_URL: &str = "https://api.wheretheiss.at/v1/satellites/25544";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(ISS_URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(n) = iss_insert(&db_c, &body) {
+                                inst_c.1.fetch_add(n as u64, Ordering::Relaxed);
+                                let _ = trim_table(&db_c, "iss_track");
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(15)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "hn" => {
+            const HN_URL: &str =
+                "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=50";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(HN_URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(c) = db_c.conn.lock() {
+                                let _ = c.execute_batch("DELETE FROM hn_stories");
+                            }
+                            if let Ok(n) = hn_insert(&db_c, &body) {
+                                inst_c.1.store(n as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(120)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "crypto" => {
+            const CG_URL: &str = "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(CG_URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(c) = db_c.conn.lock() {
+                                let _ = c.execute_batch("DELETE FROM crypto_markets");
+                            }
+                            if let Ok(n) = crypto_insert(&db_c, &body) {
+                                inst_c.1.store(n as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
         _ => return Err("Unknown source".to_string()),
     }
     Ok(())
+}
+
+fn iss_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let lat = body.get("latitude").and_then(|v| v.as_f64()).ok_or("no lat")?;
+    let lon = body.get("longitude").and_then(|v| v.as_f64()).ok_or("no lon")?;
+    let alt = body.get("altitude").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let vel = body.get("velocity").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let vis = body
+        .get("visibility")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let ts = body.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0);
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO iss_track VALUES (to_timestamp(?), ?, ?, ?, ?, ?)",
+        params![ts, lat, lon, alt, vel, vis],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(1)
+}
+
+fn hn_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let hits = body
+        .get("hits")
+        .and_then(|v| v.as_array())
+        .ok_or("no hits")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for hit in hits {
+        let id = hit
+            .get("objectID")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let title = hit
+            .get("title")
+            .or_else(|| hit.get("story_title"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let author = hit
+            .get("author")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let points = hit.get("points").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+        let comments = hit
+            .get("num_comments")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let url = hit
+            .get("url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let created = hit
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = conn.execute(
+            "INSERT INTO hn_stories VALUES (?, ?, ?, ?, ?, ?, ?)",
+            params![id, title, author, points, comments, url, created],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn crypto_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let list = body.as_array().ok_or("no coins")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for coin in list {
+        let id = coin
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let symbol = coin
+            .get("symbol")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_uppercase();
+        let name = coin
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let price = coin
+            .get("current_price")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let mcap = coin
+            .get("market_cap")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let vol = coin
+            .get("total_volume")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let chg = coin
+            .get("price_change_percentage_24h")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let rank = coin
+            .get("market_cap_rank")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let _ = conn.execute(
+            "INSERT INTO crypto_markets VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![id, symbol, name, price, mcap, vol, chg, rank],
+        );
+        n += 1;
+    }
+    Ok(n)
 }
 
 pub async fn source_stop(kind: &str, state: Arc<SourcesState>) -> Result<(), String> {

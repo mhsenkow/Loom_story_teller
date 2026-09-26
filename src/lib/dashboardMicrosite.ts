@@ -26,21 +26,36 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
-// Loom dark theme tokens (match globals.css) so microsite matches the app
-const LOOM = {
-  bg: "#0a0a0c",
-  surface: "#111114",
-  elevated: "#1a1a1f",
-  border: "#2a2a30",
-  text: "#e8e8ec",
-  muted: "#6b6b78",
-  accent: "#6c5ce7",
-};
+function snapshotThemeTokens(): Record<string, string> {
+  if (typeof document === "undefined") {
+    return {
+      bg: "#0a0a0c",
+      surface: "#111114",
+      elevated: "#1a1a1f",
+      border: "#2a2a30",
+      text: "#e8e8ec",
+      muted: "#6b6b78",
+      accent: "#6c5ce7",
+    };
+  }
+  const s = getComputedStyle(document.documentElement);
+  const get = (k: string, fb: string) => s.getPropertyValue(k).trim() || fb;
+  return {
+    bg: get("--loom-bg", "#0a0a0c"),
+    surface: get("--loom-surface", "#111114"),
+    elevated: get("--loom-elevated", "#1a1a1f"),
+    border: get("--loom-border", "#2a2a30"),
+    text: get("--loom-text", "#e8e8ec"),
+    muted: get("--loom-muted", "#6b6b78"),
+    accent: get("--loom-accent", "#6c5ce7"),
+  };
+}
 
 /** Build a self-contained HTML string for the dashboard (shareable microsite). */
 export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
   const { dashboardName, slots, lastUpdatedMs, layoutTemplate = "auto" } = input;
   const title = escapeHtml(dashboardName);
+  const LOOM = snapshotThemeTokens();
 
   // Grid: match app's gridClass and gridStyle for 1+2 / stream
   const is1p2 = layoutTemplate === "1+2";

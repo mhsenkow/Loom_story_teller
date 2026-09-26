@@ -48,6 +48,7 @@ src/                   Next.js frontend
     QueryView.tsx      SQL editor + results grid
   lib/                 Business logic (no React)
     store.ts           Zustand global state
+    lookSystem.ts      Themes, chrome, fonts, Visual presets
     tauri.ts           Typed IPC bridge to Rust
     vega.ts            Vega-Lite spec generators
     webgpu.ts          WebGPU pipeline (compute + render)
@@ -65,6 +66,7 @@ Root files:
   Makefile             🧵 Command Loom (run `make` for help)
   Dockerfile           Web UI container (static export + serve)
   docker-compose.yml   Docker Compose for web UI
+  wrangler.jsonc       Cloudflare Workers static assets (web UI)
 ```
 
 ## Command Loom (Makefile)
@@ -75,6 +77,7 @@ All dev commands use weaving metaphors:
 - `make weave` — production .app build
 - `make spool` — generate sample data
 - `make shuttle` — Docker web UI
+- `make loft` — deploy web UI to Cloudflare Workers
 - `make check` — all quality checks
 - `make unravel` — deep clean everything
 

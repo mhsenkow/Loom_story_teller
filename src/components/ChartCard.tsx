@@ -10,12 +10,13 @@
 import { useEffect, useRef, useCallback } from "react";
 import type { ChartRecommendation } from "@/lib/recommendations";
 import type { QueryResult } from "@/lib/store";
-import { getPaletteColors } from "@/lib/chartPalettes";
+import { discreteSeriesColors, resolveChartColors, sampleContinuous } from "@/lib/chartPalettes";
 import { buildBarFacetGrid } from "@/lib/chartTooltip";
 import type { YAggregateOption } from "@/lib/recommendations";
 import { useLoomStore } from "@/lib/store";
+import { densityAwarePointMarks } from "@/lib/chartLayout";
 
-const FALLBACK_COLORS = ["#6c5ce7", "#00d68f", "#ff6b6b", "#ffd93d", "#00b4d8", "#e77c5c", "#a29bfe", "#74b9ff"];
+const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
 
 const KIND_LABELS: Record<string, string> = {
   scatter: "Scatter",
@@ -44,15 +45,27 @@ export function ChartCard({
   data,
   isActive,
   onClick,
+  compact = false,
 }: {
   rec: ChartRecommendation;
   data: QueryResult | null;
   isActive: boolean;
   onClick: () => void;
+  /** Narrow fixed-width card for mobile horizontal rails */
+  compact?: boolean;
 }) {
   const theme = useLoomStore((s) => s.appSettings.theme);
-  const colors = getPaletteColors("theme");
-  const COLORS = colors.length >= 8 ? colors : FALLBACK_COLORS;
+  const colorblind = useLoomStore((s) => s.appSettings.colorblindCharts);
+  const resolved = resolveChartColors({
+    paletteId: "auto",
+    theme,
+    colorblind: !!colorblind,
+    chartKind: rec.kind,
+  });
+  const colors = resolved.continuous
+    ? resolved.colors
+    : discreteSeriesColors(resolved, 8);
+  const COLORS = colors.length >= 4 ? colors : FALLBACK_COLORS;
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -129,7 +142,7 @@ export function ChartCard({
     } else if (rec.kind === "sankey") {
       drawSankey(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
     }
-  }, [rec, data, theme]);
+  }, [rec, data, theme, colorblind]);
 
   useEffect(() => {
     draw();
@@ -147,20 +160,22 @@ export function ChartCard({
 
   return (
     <button
+      type="button"
       onClick={onClick}
       className={`
         group flex flex-col rounded-lg overflow-hidden transition-all duration-150
-        border bg-loom-elevated hover:border-loom-accent
+        border bg-loom-elevated hover:border-loom-accent text-left
         ${isActive ? "border-loom-accent ring-1 ring-loom-accent/40" : "border-loom-border"}
+        ${compact ? "w-[132px] shrink-0 snap-start" : "w-full"}
       `}
     >
-      <div ref={containerRef} className="relative w-full aspect-[4/3] min-h-[80px] bg-loom-bg">
+      <div ref={containerRef} className={`relative w-full bg-loom-bg ${compact ? "aspect-[5/3] min-h-[64px]" : "aspect-[4/3] min-h-[80px]"}`}>
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full"
         />
       </div>
-      <div className="flex flex-col gap-0.5 px-2.5 py-2 text-left">
+      <div className={`flex flex-col gap-0.5 text-left ${compact ? "px-1.5 py-1.5" : "px-2.5 py-2"}`}>
         <div className="flex items-center gap-1.5">
           <span className={`
             inline-block px-1.5 py-0.5 text-2xs font-mono font-semibold rounded
@@ -169,8 +184,8 @@ export function ChartCard({
             {KIND_LABELS[rec.kind] ?? rec.kind}
           </span>
         </div>
-        <p className="text-xs font-medium text-loom-text truncate leading-tight">{rec.title}</p>
-        <p className="text-2xs text-loom-muted truncate">{rec.subtitle}</p>
+        <p className={`font-medium text-loom-text truncate leading-tight ${compact ? "text-2xs" : "text-xs"}`}>{rec.title}</p>
+        {!compact && <p className="text-2xs text-loom-muted truncate">{rec.subtitle}</p>}
       </div>
     </button>
   );
@@ -357,11 +372,7 @@ function drawLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, 
 }
 
 function drawHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
-  const hex = colors[0] ?? "#6c5ce7";
-  const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  const r = m ? parseInt(m[1], 16) : 108;
-  const g = m ? parseInt(m[2], 16) : 92;
-  const b = m ? parseInt(m[3], 16) : 231;
+  const stops = colors.length ? colors : FALLBACK_COLORS;
   const xLabels = [...new Set(rows.map(r => String(r[xi])))].slice(0, 12);
   const yLabels = [...new Set(rows.map(r => String(r[yi])))].slice(0, 12);
   const counts = new Map<string, number>();
@@ -376,11 +387,14 @@ function drawHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numbe
   xLabels.forEach((xL, xi2) => {
     yLabels.forEach((yL, yi2) => {
       const c = counts.get(`${xL}|${yL}`) ?? 0;
+      if (c <= 0) return;
       const intensity = c / maxC;
-      ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.1 + intensity * 0.85})`;
+      ctx.globalAlpha = 0.15 + intensity * 0.85;
+      ctx.fillStyle = sampleContinuous(stops, intensity);
       ctx.fillRect(pad + xi2 * cellW, pad + yi2 * cellH, cellW - 1, cellH - 1);
     });
   });
+  ctx.globalAlpha = 1;
 }
 
 function drawStrip(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
@@ -545,8 +559,20 @@ function drawBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
   const sRange = sMax - sMin || 1;
   const xRange = xMax - xMin || 1;
   const yRange = yMax - yMin || 1;
-  const minR = 2;
-  const maxR = Math.min(w, h) * 0.08;
+  const plotW = Math.max(1, w - 2 * pad);
+  const plotH = Math.max(1, h - 2 * pad);
+  let nValid = 0;
+  for (const r of rows) {
+    if (!isNaN(Number(r[xi])) && !isNaN(Number(r[yi]))) nValid++;
+  }
+  const marks = densityAwarePointMarks({
+    n: nValid,
+    plotW,
+    plotH,
+    hasSizeEncoding: si >= 0,
+    pointSize: 10,
+  });
+  const { minR, maxR, opacity: alpha, drawStroke } = marks;
   const catMap = new Map<string, number>();
   let nextCat = 0;
 
@@ -566,21 +592,23 @@ function drawBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
       const s = Number(r[si]);
       if (!isNaN(s)) radius = minR + Math.sqrt((s - sMin) / sRange) * (maxR - minR);
     }
-    const sx = pad + ((x - xMin) / xRange) * (w - 2 * pad);
-    const sy = h - pad - ((y - yMin) / yRange) * (h - 2 * pad);
+    const sx = pad + ((x - xMin) / xRange) * plotW;
+    const sy = h - pad - ((y - yMin) / yRange) * plotH;
     bubbles.push({ sx, sy, r: radius, cat });
   }
   bubbles.sort((a, b) => b.r - a.r);
   for (const b of bubbles) {
     ctx.fillStyle = COL[b.cat % COL.length];
-    ctx.globalAlpha = 0.45;
+    ctx.globalAlpha = alpha;
     ctx.beginPath();
     ctx.arc(b.sx, b.sy, b.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.globalAlpha = 0.7;
-    ctx.strokeStyle = COL[b.cat % COL.length];
-    ctx.lineWidth = 0.7;
-    ctx.stroke();
+    if (drawStroke) {
+      ctx.globalAlpha = Math.min(alpha + 0.2, 0.8);
+      ctx.strokeStyle = COL[b.cat % COL.length];
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+    }
   }
   ctx.globalAlpha = 1;
 }

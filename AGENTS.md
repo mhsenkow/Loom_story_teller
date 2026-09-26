@@ -12,6 +12,7 @@ Use this file plus [DOCS.md](DOCS.md) (architecture) and [README.md](README.md) 
 | 2 | `src/lib/tauri.ts` | Every Tauri `invoke` wrapper; **single bridge** from UI to Rust |
 | 3 | `src/lib/store.ts` | All shared client state; subscribe to slices, do not duplicate |
 | 4 | `src-tauri/src/lib.rs` | Command registration (`generate_handler!`) and managed state (`LoomDb`, stream, sources) |
+| 5 | `mcp/` | Remote MCP / ChatGPT plugin Worker (chart recommend tools) — see `mcp/README.md` |
 
 ---
 
@@ -54,6 +55,7 @@ Rust implementation: `src-tauri/src/stream.rs`, `src-tauri/src/sources.rs`.
 make check      # tsc + eslint + cargo check (+ clippy if available)
 make test       # Vitest
 npm run build   # Next production build (static export)
+make loft       # Deploy static web UI to Cloudflare Workers (wrangler.jsonc)
 ```
 
 `eslint.config.mjs` uses flat config; some React Compiler ESLint rules are relaxed so the existing large components stay lint-clean without a full rewrite.

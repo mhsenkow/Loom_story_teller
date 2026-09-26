@@ -821,6 +821,9 @@ pub async fn source_status(
         "meteo" => "meteo_weather",
         "nws" => "nws_alerts",
         "world_bank" => "world_bank",
+        "iss" => "iss_track",
+        "hn" => "hn_stories",
+        "crypto" => "crypto_markets",
         _ => return Err("Unknown source kind".to_string()),
     };
     Ok(inst.status(table, &*db).await)
@@ -848,6 +851,9 @@ pub async fn source_snapshot(
         "meteo" => "meteo_weather",
         "nws" => "nws_alerts",
         "world_bank" => "world_bank",
+        "iss" => "iss_track",
+        "hn" => "hn_stories",
+        "crypto" => "crypto_markets",
         _ => return Err("Unknown source kind".to_string()),
     };
     let order = match kind.as_str() {
@@ -855,6 +861,9 @@ pub async fn source_snapshot(
         "meteo" => "ORDER BY ts DESC",
         "nws" => "ORDER BY effective DESC",
         "world_bank" => "ORDER BY yr DESC, country_code",
+        "iss" => "ORDER BY ts DESC",
+        "hn" => "ORDER BY points DESC",
+        "crypto" => "ORDER BY rank ASC",
         _ => "",
     };
     let sql = format!("SELECT * FROM {} {}", table, order);

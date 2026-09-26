@@ -111,6 +111,46 @@ Run `make` (or `make help`) to list all commands. Every target uses a weaving me
 | `make shuttle-down` | Stop containers |
 | `make shuttle-shell` | Shell into running container |
 
+### Cloud (Cloudflare)
+
+| Command | Description |
+|--------|-------------|
+| `make loft` | Build static export and deploy to Cloudflare Workers |
+| `make loft-mcp` | Deploy Loom MCP / ChatGPT plugin Worker |
+| `make loft-dry` | Same build, dry-run deploy (no upload) |
+| `make thread-mcp` | Local MCP Worker on :8787 |
+
+Hosted surface is the **browser web UI** — catalog discovery (Data.gov / UK) works via a Cloudflare Worker proxy; CSV **Load** is in-memory and size-capped. Full DuckDB folder workflows and live streams still need the desktop app.
+
+```bash
+npx wrangler login    # once
+make loft             # → https://loom.ibm.io/
+make loft-mcp         # → https://loom-mcp.mhsenkow.workers.dev/mcp
+```
+
+### MCP / ChatGPT plugin
+
+Remote MCP (same pattern as wordcount): chart profiling + recommendations for ChatGPT Developer Mode, Claude connectors, Cursor via `mcp-remote`.
+
+- Endpoint: `https://loom-mcp.mhsenkow.workers.dev/mcp`
+- Docs: [`mcp/README.md`](mcp/README.md) · submission checklist: [`mcp/SUBMISSION.md`](mcp/SUBMISSION.md)
+
+```bash
+make loft-mcp
+```
+
+Custom domain (e.g. `loom.ibm.io`): Cloudflare dashboard → **Workers & Pages** → **loom-storyteller** → **Domains** → add the hostname (or set `routes` in `wrangler.jsonc`).
+
+**Live streams (web):** Connect works in the browser — poll sources via `/api/source/*`, Wikipedia via EventSource. Buffers are in-memory (not DuckDB); use **Explore** after Connect.
+
+**Feedback notes:** Bottom-left note FAB → GitHub issue. One-time: create a fine-grained PAT with `Issues: Read and write` on `mhsenkow/Loom_story_teller`, then:
+
+```bash
+npx wrangler secret put GITHUB_TOKEN
+```
+
+Without the secret, notes still open the GitHub “new issue” form as a fallback.
+
 ### Quality
 
 | Command | Description |
@@ -231,6 +271,10 @@ Loom_story_teller/
 ├── Makefile                     # Command Loom (run `make` for help)
 ├── Dockerfile                   # Web UI container
 ├── docker-compose.yml
+├── mcp/                         # Remote MCP + ChatGPT plugin Worker
+│   ├── src/index.ts             # Tools: profile / recommend / build_chart
+│   └── SUBMISSION.md            # OpenAI plugin directory checklist
+├── wrangler.jsonc               # Cloudflare Workers static web UI
 ├── next.config.mjs              # Static export for Tauri
 ├── tailwind.config.ts          # Token-linked theme
 └── package.json
@@ -242,20 +286,28 @@ See [DOCS.md](DOCS.md) for a deeper codebase map and conventions.
 
 ## Design system
 
-Visual design is token-based in `src/styles/globals.css`:
+Token-based in `src/styles/globals.css`, catalog in `src/lib/lookSystem.ts` (aligned with ibm.io wordcount / portfolio).
 
-| Token | Dark default | Purpose |
-|-------|--------------|---------|
-| `--loom-bg` | `#0a0a0c` | Page background |
-| `--loom-surface` | `#111114` | Cards, panels |
-| `--loom-elevated` | `#1a1a1f` | Hover, inputs |
-| `--loom-border` | `#2a2a30` | Borders |
-| `--loom-text` | `#e8e8ec` | Primary text |
-| `--loom-muted` | `#6b6b78` | Secondary text |
-| `--loom-accent` | `#6c5ce7` | Accent (purple) |
-| `--chart-1` … `--chart-8` | (palette) | Chart colors |
+**Themes (`data-theme`):** light · dark · contrast · paper · glass · frost · brutal · loom · tank · nes  
 
-Component classes: `.loom-panel`, `.loom-card`, `.loom-btn-primary`, `.loom-btn-ghost`, `.loom-input`, `.loom-badge`. To reskin the app, change token values in `globals.css`.
+**Chrome (`data-ui`):** braun · monocle · bauhaus · noyes · ikea · military · terminal · nyt  
+
+**Type:** Libre Baskerville, Lora, IBM Plex, Inter, Geist, JetBrains Mono, Fira Code · faces auto/web/local  
+
+`--loom-*` aliases map to semantic colors so Tailwind (`bg-loom-surface`, …) keeps working. Chart → Visual presets replace look bundles (not merge). Colorblind chart series is a separate a11y toggle.
+
+| Token | Purpose |
+|-------|---------|
+| `--loom-bg` / `--color-bg` | Page background |
+| `--loom-surface` | Cards, panels |
+| `--loom-elevated` | Hover, inputs |
+| `--loom-border` | Borders |
+| `--loom-text` / `--loom-muted` | Text |
+| `--loom-accent` | Accent |
+| `--chart-1` … `--chart-8` | Series colors (per theme) |
+| `--shadow-1` / `--shadow-2` | Theme-aware shadows |
+
+Component classes: `.loom-panel`, `.loom-card`, `.loom-btn-primary`, `.loom-btn-ghost`, `.loom-input`, `.loom-badge`.
 
 ---
 

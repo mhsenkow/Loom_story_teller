@@ -9,6 +9,8 @@
 #    make thread    — frontend-only dev (no Rust)
 #    make spool     — generate sample data for testing
 #    make shuttle   — run inside Docker
+#    make loft      — deploy web UI to Cloudflare
+#    make loft-mcp — deploy Loom MCP / ChatGPT plugin Worker
 #    make unspool   — clean everything
 # =================================================================
 
@@ -44,6 +46,9 @@ help: ## 🧵 Show all Loom commands
 	@echo ""
 	@echo "  $(BOLD)DOCKER$(RESET)"
 	@grep -E '^[a-zA-Z_-]+:.*?## 🐳' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "    $(CYAN)%-16s$(RESET) %s\n", $$1, $$2}'
+	@echo ""
+	@echo "  $(BOLD)CLOUD$(RESET)"
+	@grep -E '^[a-zA-Z_-]+:.*?## ☁️' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "    $(CYAN)%-16s$(RESET) %s\n", $$1, $$2}'
 	@echo ""
 	@echo "  $(BOLD)QUALITY$(RESET)"
 	@grep -E '^[a-zA-Z_-]+:.*?## ✅' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "    $(CYAN)%-16s$(RESET) %s\n", $$1, $$2}'
@@ -164,6 +169,32 @@ shuttle-down: ## 🐳 Stop Docker containers
 .PHONY: shuttle-shell
 shuttle-shell: ## 🐳 Shell into running container
 	docker compose exec loom-web /bin/sh
+
+# =================================================================
+#  CLOUD — Cloudflare Workers (static web UI)
+# =================================================================
+
+.PHONY: loft
+loft: ## ☁️ Build + deploy web UI to Cloudflare Workers
+	@echo "$(PURPLE)🧵 Lofting the web UI to Cloudflare...$(RESET)"
+	npm run deploy
+	@echo "$(GREEN)✓ Deployed → https://loom.ibm.io/ (also workers.dev)$(RESET)"
+
+.PHONY: loft-mcp
+loft-mcp: ## ☁️ Deploy Loom MCP / ChatGPT plugin Worker
+	@echo "$(PURPLE)🧵 Lofting the Loom MCP server...$(RESET)"
+	cd mcp && npm install && npm run deploy
+	@echo "$(GREEN)✓ MCP → https://loom-mcp.mhsenkow.workers.dev/mcp$(RESET)"
+
+.PHONY: thread-mcp
+thread-mcp: ## 🔧 Dev-serve Loom MCP Worker locally
+	@echo "$(PURPLE)🧵 Threading MCP on :8787...$(RESET)"
+	cd mcp && npm install && npm run dev
+
+.PHONY: loft-dry
+loft-dry: ## ☁️ Dry-run Cloudflare deploy (no upload)
+	@echo "$(PURPLE)🧵 Dry-run loft...$(RESET)"
+	npm run deploy:dry
 
 # =================================================================
 #  QUALITY — Linting, type-checking, formatting

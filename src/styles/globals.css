@@ -6,25 +6,34 @@
  * ============================================================
  * LOOM DESIGN SYSTEM — Token Layer
  * ============================================================
- * All visual decisions flow from these CSS custom properties.
- * Components reference tokens via Tailwind (e.g. `bg-loom-surface`)
- * or directly via `var(--loom-*)`.
+ * Themes:  data-theme on <html>  (portfolio / wordcount aligned)
+ * Chrome:  data-ui on <html>
+ * Fonts:   data-font / data-faces on <html>
+ * A11y:    data-a11y="colorblind" overrides chart series
  *
- * To re-skin the entire product, change ONLY this file.
+ * --loom-* aliases keep Tailwind `bg-loom-*` working.
+ * To re-skin: change theme blocks below (or chrome/font attrs).
  * ============================================================
  */
 
 :root {
-  /* ---- Typography ---- */
-  --font-sans: "Inter", "SF Pro Display", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  /* ---- Typography (overridden by data-font / data-ui) ---- */
+  --font-sans: var(--font-inter, "Inter"), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, monospace;
+  --font-serif: var(--font-libre, "Libre Baskerville"), Georgia, serif;
   --app-font-scale: 1;
+  --track-ui: 0;
+  --leading-ui: 1.35;
 
   /* ---- Layout ---- */
   --sidebar-width: 260px;
   --panel-width: 320px;
   --topbar-height: 48px;
   --statusbar-height: 28px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 
   /* ---- Radii ---- */
   --radius-sm: 4px;
@@ -35,108 +44,357 @@
   --transition-fast: 120ms ease;
   --transition-base: 200ms ease;
   --transition-slow: 400ms ease;
+
+  /* ---- Semantic defaults (dark) before data-theme ---- */
+  --color-bg: #0a0a0c;
+  --color-bg-elev: #1a1a1f;
+  --color-surface: #111114;
+  --color-text: #e8e8ec;
+  --color-muted: #6b6b78;
+  --color-accent: #6c5ce7;
+  --color-accent-2: #a29bfe;
+  --color-border: #2a2a30;
+  --color-success: #00d68f;
+  --color-warning: #ffaa00;
+  --color-error: #ff4757;
+  --focus-ring: 2px solid var(--color-accent);
+  --selection-bg: rgba(108, 92, 231, 0.35);
+  --selection-text: #ffffff;
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --glass-1: rgba(17, 17, 20, 0.72);
+  --glass-2: rgba(17, 17, 20, 0.85);
+  --glass-blur: blur(0px);
+  --panel-border-w: 1px;
+  --btn-radius: var(--radius-md);
+
+  /* Default categorical (first 8) — keep in sync with chartPalettes THEME_CHART.dark */
+  --chart-1: #1877F2;
+  --chart-2: #F0701A;
+  --chart-3: #5A24C7;
+  --chart-4: #E42C87;
+  --chart-5: #00487C;
+  --chart-6: #3EA096;
+  --chart-7: #A87CFF;
+  --chart-8: #850550;
+
+  /* Loom aliases → semantic */
+  --loom-bg: var(--color-bg);
+  --loom-surface: var(--color-surface);
+  --loom-elevated: var(--color-bg-elev);
+  --loom-border: var(--color-border);
+  --loom-text: var(--color-text);
+  --loom-muted: var(--color-muted);
+  --loom-accent: var(--color-accent);
+  --loom-accent-dim: var(--color-accent-2);
+  --loom-success: var(--color-success);
+  --loom-warning: var(--color-warning);
+  --loom-error: var(--color-error);
 }
 
 /* ============================================================
- * DARK THEME (default — Loom is dark-first)
+ * THEMES — data-theme (portfolio / wordcount)
  * ============================================================ */
-:root,
-.dark {
-  --loom-bg:         #0a0a0c;
-  --loom-surface:    #111114;
-  --loom-elevated:   #1a1a1f;
-  --loom-border:     #2a2a30;
-  --loom-text:       #e8e8ec;
-  --loom-muted:      #6b6b78;
-  --loom-accent:     #6c5ce7;
-  --loom-accent-dim: #4a3cb8;
-  --loom-success:    #00d68f;
-  --loom-warning:    #ffaa00;
-  --loom-error:      #ff4757;
 
-  /* Data visualization palette — 8 marks, perceptually distinct */
-  --chart-1: #6c5ce7;
-  --chart-2: #00d68f;
-  --chart-3: #ff6b6b;
-  --chart-4: #ffd93d;
-  --chart-5: #00b4d8;
-  --chart-6: #e77c5c;
-  --chart-7: #a29bfe;
-  --chart-8: #74b9ff;
-}
-
-/* ============================================================
- * LIGHT THEME (opt-in via class)
- * ============================================================ */
-.light {
-  --loom-bg:         #f5f5f7;
-  --loom-surface:    #ffffff;
-  --loom-elevated:   #f0f0f3;
-  --loom-border:     #d4d4da;
-  --loom-text:       #1a1a1f;
-  --loom-muted:      #8e8e9a;
-  --loom-accent:     #6c5ce7;
-  --loom-accent-dim: #b8b0ff;
-  --loom-success:    #00b87c;
-  --loom-warning:    #e09600;
-  --loom-error:      #e0394a;
-
-  --chart-1: #6c5ce7;
+html[data-theme="light"],
+html.light {
+  color-scheme: light;
+  --color-bg: #f2f2f0;
+  --color-surface: #fafaf8;
+  --color-bg-elev: #ffffff;
+  --color-text: #111111;
+  --color-muted: #757575;
+  --color-accent: #c45c26;
+  --color-accent-2: #c62828;
+  --color-border: #c8c8c4;
+  --color-success: #00b87c;
+  --color-warning: #e09600;
+  --color-error: #e0394a;
+  --selection-bg: rgba(196, 92, 38, 0.22);
+  --selection-text: #111111;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --glass-1: rgba(250, 250, 248, 0.72);
+  --glass-2: rgba(250, 250, 248, 0.9);
+  --chart-1: #c45c26;
   --chart-2: #00b87c;
-  --chart-3: #e0394a;
+  --chart-3: #c62828;
   --chart-4: #d4a017;
   --chart-5: #0096b7;
-  --chart-6: #c46842;
-  --chart-7: #7c71d8;
-  --chart-8: #5a9fd4;
+  --chart-6: #7c71d8;
+  --chart-7: #5a9fd4;
+  --chart-8: #6e685c;
 }
 
-/* ============================================================
- * HIGH-CONTRAST THEME (accessibility)
- * ============================================================ */
-.high-contrast,
-.theme-high-contrast {
-  --loom-bg:         #000000;
-  --loom-surface:    #0d0d0d;
-  --loom-elevated:   #1a1a1a;
-  --loom-border:     #404040;
-  --loom-text:       #ffffff;
-  --loom-muted:      #b0b0b0;
-  --loom-accent:     #7c6cf7;
-  --loom-accent-dim: #5a4cdb;
-  --loom-success:    #00ff9d;
-  --loom-warning:    #ffcc00;
-  --loom-error:      #ff5555;
+html[data-theme="dark"],
+html.dark {
+  color-scheme: dark;
+  --color-bg: #0a0a0c;
+  --color-surface: #111114;
+  --color-bg-elev: #1a1a1f;
+  --color-text: #e8e8ec;
+  --color-muted: #6b6b78;
+  --color-accent: #6c5ce7;
+  --color-accent-2: #a29bfe;
+  --color-border: #2a2a30;
+  --color-success: #00d68f;
+  --color-warning: #ffaa00;
+  --color-error: #ff4757;
+  --selection-bg: rgba(108, 92, 231, 0.35);
+  --selection-text: #ffffff;
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --chart-1: #1877F2;
+  --chart-2: #F0701A;
+  --chart-3: #5A24C7;
+  --chart-4: #E42C87;
+  --chart-5: #00487C;
+  --chart-6: #3EA096;
+  --chart-7: #A87CFF;
+  --chart-8: #850550;
+}
 
-  --chart-1: #7c6cf7;
+html[data-theme="contrast"],
+html.high-contrast,
+html.theme-high-contrast {
+  color-scheme: dark;
+  --color-bg: #000000;
+  --color-surface: #000000;
+  --color-bg-elev: #0d0d0d;
+  --color-text: #ffffff;
+  --color-muted: #b0b0b0;
+  --color-accent: #ffff00;
+  --color-accent-2: #ffff00;
+  --color-border: #ffffff;
+  --color-success: #00ff9d;
+  --color-warning: #ffcc00;
+  --color-error: #ff5555;
+  --panel-border-w: 2px;
+  --focus-ring: 3px solid #ffffff;
+  --selection-bg: #ffffff;
+  --selection-text: #000000;
+  --shadow-1: none;
+  --shadow-2: none;
+  --chart-1: #ffff00;
   --chart-2: #00ff9d;
   --chart-3: #ff5555;
-  --chart-4: #ffcc00;
-  --chart-5: #00ccff;
-  --chart-6: #ff8844;
-  --chart-7: #bb99ff;
-  --chart-8: #66bbff;
+  --chart-4: #00ccff;
+  --chart-5: #ff8844;
+  --chart-6: #bb99ff;
+  --chart-7: #66bbff;
+  --chart-8: #ffffff;
 }
 
-/* ============================================================
- * COLORBLIND-FRIENDLY THEME (deuteranopia/protanopia safe)
- * Uses blue / orange / yellow / teal / pink / grey palette
- * ============================================================ */
-.colorblind,
-.theme-colorblind {
-  --loom-bg:         #0c0c0e;
-  --loom-surface:    #141418;
-  --loom-elevated:   #1e1e24;
-  --loom-border:     #36363d;
-  --loom-text:       #eaeaf0;
-  --loom-muted:      #7a7a88;
-  --loom-accent:     #3b82f6;
-  --loom-accent-dim: #2563eb;
-  --loom-success:    #10b981;
-  --loom-warning:    #f59e0b;
-  --loom-error:      #ef4444;
+html[data-theme="paper"] {
+  color-scheme: light;
+  --color-bg: #e8e2d6;
+  --color-surface: #f3efe6;
+  --color-bg-elev: #faf6ee;
+  --color-text: #1c1914;
+  --color-muted: #6e685c;
+  --color-accent: #8b4510;
+  --color-accent-2: #9b2c2c;
+  --color-border: #c4bbaa;
+  --color-success: #3d6b4f;
+  --color-warning: #a67c00;
+  --color-error: #9b2c2c;
+  --selection-bg: rgba(139, 69, 16, 0.2);
+  --selection-text: #1c1914;
+  --shadow-1: 2px 2px 6px rgba(28, 25, 20, 0.08);
+  --shadow-2: 4px 4px 12px rgba(28, 25, 20, 0.1);
+  --chart-1: #8b4510;
+  --chart-2: #3d6b4f;
+  --chart-3: #9b2c2c;
+  --chart-4: #a67c00;
+  --chart-5: #2c5f7c;
+  --chart-6: #6b4c7a;
+  --chart-7: #5c6e4a;
+  --chart-8: #6e685c;
+}
 
-  /* Paul Tol–style colorblind-safe sequence (no red–green only) */
+html[data-theme="glass"] {
+  color-scheme: light;
+  --color-bg: #e8eef8;
+  --color-surface: rgba(255, 255, 255, 0.55);
+  --color-bg-elev: rgba(255, 255, 255, 0.75);
+  --color-text: #0f172a;
+  --color-muted: #64748b;
+  --color-accent: #7c3aed;
+  --color-accent-2: #dc2626;
+  --color-border: rgba(148, 163, 184, 0.45);
+  --color-success: #059669;
+  --color-warning: #d97706;
+  --color-error: #dc2626;
+  --glass-blur: blur(12px) saturate(140%);
+  --selection-bg: rgba(124, 58, 237, 0.22);
+  --selection-text: #0f172a;
+  --shadow-1: 0 2px 10px rgba(147, 51, 234, 0.06);
+  --shadow-2: 0 8px 28px rgba(59, 130, 246, 0.1);
+  --chart-1: #7c3aed;
+  --chart-2: #059669;
+  --chart-3: #dc2626;
+  --chart-4: #d97706;
+  --chart-5: #2563eb;
+  --chart-6: #db2777;
+  --chart-7: #0891b2;
+  --chart-8: #64748b;
+}
+
+html[data-theme="frost"] {
+  color-scheme: dark;
+  --color-bg: #070b16;
+  --color-surface: rgba(15, 23, 42, 0.72);
+  --color-bg-elev: rgba(15, 23, 42, 0.88);
+  --color-text: #e2e8f0;
+  --color-muted: #94a3b8;
+  --color-accent: #a78bfa;
+  --color-accent-2: #f87171;
+  --color-border: rgba(148, 163, 184, 0.22);
+  --color-success: #34d399;
+  --color-warning: #fbbf24;
+  --color-error: #f87171;
+  --glass-blur: blur(14px) saturate(160%);
+  --selection-bg: rgba(167, 139, 250, 0.28);
+  --selection-text: #e2e8f0;
+  --shadow-1: 0 2px 12px rgba(139, 92, 246, 0.12);
+  --shadow-2: 0 8px 32px rgba(0, 0, 0, 0.45);
+  --chart-1: #a78bfa;
+  --chart-2: #34d399;
+  --chart-3: #f87171;
+  --chart-4: #fbbf24;
+  --chart-5: #38bdf8;
+  --chart-6: #fb7185;
+  --chart-7: #c4b5fd;
+  --chart-8: #94a3b8;
+}
+
+html[data-theme="brutal"] {
+  color-scheme: light;
+  --color-bg: #ffffff;
+  --color-surface: #ffffff;
+  --color-bg-elev: #ffffff;
+  --color-text: #000000;
+  --color-muted: #333333;
+  --color-accent: #ff0000;
+  --color-accent-2: #0000ff;
+  --color-border: #000000;
+  --color-success: #008000;
+  --color-warning: #ffaa00;
+  --color-error: #ff0000;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --panel-border-w: 3px;
+  --btn-radius: 0;
+  --selection-bg: #ff0000;
+  --selection-text: #ffffff;
+  --shadow-1: 3px 3px 0 #000;
+  --shadow-2: 5px 5px 0 #000;
+  --chart-1: #ff0000;
+  --chart-2: #0000ff;
+  --chart-3: #008000;
+  --chart-4: #ffaa00;
+  --chart-5: #000000;
+  --chart-6: #ff00ff;
+  --chart-7: #00ffff;
+  --chart-8: #808080;
+}
+
+html[data-theme="loom"] {
+  color-scheme: dark;
+  --color-bg: #0a0a0f;
+  --color-surface: #12121a;
+  --color-bg-elev: #1a1a25;
+  --color-text: #e8e6e3;
+  --color-muted: #a8a5a0;
+  --color-accent: #d4a84b;
+  --color-accent-2: #8b5cf6;
+  --color-border: #2a2a35;
+  --color-success: #6bcb77;
+  --color-warning: #d4a84b;
+  --color-error: #e57373;
+  --selection-bg: rgba(212, 168, 75, 0.28);
+  --selection-text: #e8e6e3;
+  --shadow-1: 0 0 12px rgba(212, 168, 75, 0.06);
+  --shadow-2: 0 0 24px rgba(212, 168, 75, 0.1);
+  --chart-1: #d4a84b;
+  --chart-2: #8b5cf6;
+  --chart-3: #e57373;
+  --chart-4: #6bcb77;
+  --chart-5: #64b5f6;
+  --chart-6: #ff8a65;
+  --chart-7: #ba68c8;
+  --chart-8: #a8a5a0;
+}
+
+html[data-theme="tank"] {
+  color-scheme: dark;
+  --color-bg: #0b1a22;
+  --color-surface: #163040;
+  --color-bg-elev: #1d3b4a;
+  --color-text: #c5e2e7;
+  --color-muted: #69a1b3;
+  --color-accent: #57a253;
+  --color-accent-2: #e6c92a;
+  --color-border: #23475a;
+  --color-success: #79c069;
+  --color-warning: #e6c92a;
+  --color-error: #e57373;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --panel-border-w: 2px;
+  --btn-radius: 0;
+  --selection-bg: rgba(87, 162, 83, 0.35);
+  --selection-text: #c5e2e7;
+  --shadow-1: 3px 3px 0 #1a120c;
+  --shadow-2: 4px 4px 0 #1a120c;
+  --chart-1: #57a253;
+  --chart-2: #e6c92a;
+  --chart-3: #e57373;
+  --chart-4: #64b5f6;
+  --chart-5: #79c069;
+  --chart-6: #ff8a65;
+  --chart-7: #4dd0e1;
+  --chart-8: #69a1b3;
+}
+
+html[data-theme="nes"] {
+  color-scheme: light;
+  --color-bg: #209cee;
+  --color-surface: #f8f8f8;
+  --color-bg-elev: #ffffff;
+  --color-text: #000000;
+  --color-muted: #1a1a1a;
+  --color-accent: #e4002b;
+  --color-accent-2: #fce100;
+  --color-border: #000000;
+  --color-success: #00a800;
+  --color-warning: #fce100;
+  --color-error: #e4002b;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --panel-border-w: 4px;
+  --btn-radius: 0;
+  --selection-bg: #e4002b;
+  --selection-text: #ffffff;
+  --shadow-1: 4px 4px 0 #000;
+  --shadow-2: 6px 6px 0 #000;
+  --chart-1: #e4002b;
+  --chart-2: #fce100;
+  --chart-3: #209cee;
+  --chart-4: #00a800;
+  --chart-5: #000000;
+  --chart-6: #fc9838;
+  --chart-7: #b8f8d8;
+  --chart-8: #881400;
+}
+
+/* Colorblind chart series overlay (keeps shell theme) */
+html[data-a11y="colorblind"],
+html.colorblind,
+html.theme-colorblind {
   --chart-1: #4477aa;
   --chart-2: #ee7733;
   --chart-3: #009988;
@@ -147,33 +405,180 @@
   --chart-8: #888888;
 }
 
-/* Apply font scale to root for app-wide scaling */
+/* ============================================================
+ * CHROME FACES — data-ui
+ * ============================================================ */
+
+html[data-ui="braun"] {
+  --font-sans: Helvetica, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", Menlo, Consolas, monospace;
+  --track-ui: 0.01em;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+}
+
+html[data-ui="monocle"] {
+  --font-sans: "Source Sans 3", "Avenir Next", system-ui, sans-serif;
+  --font-mono: "Source Code Pro", Menlo, monospace;
+  --track-ui: 0.01em;
+}
+
+html[data-ui="bauhaus"] {
+  --font-sans: "Josefin Sans", Futura, "Century Gothic", sans-serif;
+  --font-mono: "Space Mono", Menlo, monospace;
+  --track-ui: 0.05em;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --btn-radius: 0;
+}
+
+html[data-ui="noyes"] {
+  --font-sans: "IBM Plex Sans", Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", Menlo, monospace;
+}
+
+html[data-ui="ikea"] {
+  --font-sans: Verdana, Geneva, Tahoma, sans-serif;
+  --font-mono: Consolas, monospace;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+}
+
+html[data-ui="military"] {
+  --font-sans: Oswald, "Arial Narrow", sans-serif;
+  --font-mono: "Share Tech Mono", "Courier New", monospace;
+  --track-ui: 0.06em;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --btn-radius: 0;
+  --panel-border-w: 2px;
+}
+
+html[data-ui="terminal"] {
+  --font-sans: "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: "SF Mono", Menlo, Consolas, monospace;
+  --track-ui: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --btn-radius: 0;
+}
+
+html[data-ui="nyt"] {
+  --font-sans: Georgia, "Times New Roman", Times, serif;
+  --font-mono: "IBM Plex Mono", Menlo, monospace;
+  --track-ui: 0.01em;
+}
+
+/* App font overrides (data-font) — win over chrome for --font-sans/mono when set */
+html[data-font="libre-baskerville"] {
+  --font-sans: "Libre Baskerville", Georgia, serif;
+  --font-serif: "Libre Baskerville", Georgia, serif;
+}
+html[data-font="lora"] {
+  --font-sans: Lora, Georgia, serif;
+  --font-serif: Lora, Georgia, serif;
+}
+html[data-font="ibm-plex"] {
+  --font-sans: "IBM Plex Sans", Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", Menlo, monospace;
+}
+html[data-font="inter"] {
+  --font-sans: Inter, system-ui, sans-serif;
+}
+html[data-font="geist"] {
+  --font-sans: Geist, Inter, system-ui, sans-serif;
+}
+html[data-font="jetbrains-mono"] {
+  --font-sans: "JetBrains Mono", ui-monospace, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+html[data-font="fira-code"] {
+  --font-sans: "Fira Code", ui-monospace, monospace;
+  --font-mono: "Fira Code", ui-monospace, monospace;
+}
+
+html[data-faces="local"][data-font="libre-baskerville"],
+html[data-faces="local"][data-font="lora"] {
+  --font-sans: Georgia, "Times New Roman", serif;
+  --font-serif: Georgia, "Times New Roman", serif;
+}
+html[data-faces="local"][data-font="inter"],
+html[data-faces="local"][data-font="geist"],
+html[data-faces="local"][data-font="ibm-plex"] {
+  --font-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+}
+html[data-faces="local"][data-font="jetbrains-mono"],
+html[data-faces="local"][data-font="fira-code"] {
+  --font-sans: ui-monospace, Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, Menlo, Consolas, monospace;
+}
+
+/* Subtle theme atmosphere */
+html[data-theme="loom"] body::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  opacity: 0.04;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(212, 168, 75, 0.15) 2px,
+    rgba(212, 168, 75, 0.15) 3px
+  );
+}
+html[data-theme="tank"] body {
+  background-image: radial-gradient(ellipse at 30% 20%, rgba(87, 162, 83, 0.08), transparent 50%);
+}
+html[data-theme="glass"] .loom-panel,
+html[data-theme="frost"] .loom-panel,
+html[data-theme="glass"] .loom-card,
+html[data-theme="frost"] .loom-card {
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+}
+
 html {
   font-size: calc(100% * var(--app-font-scale));
 }
 
-/* ============================================================
- * BASE RESETS
- * ============================================================ */
 @layer base {
   html {
-    color-scheme: dark;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
 
   body {
     @apply bg-loom-bg text-loom-text font-sans;
+    letter-spacing: var(--track-ui);
+    line-height: var(--leading-ui);
     font-feature-settings: "ss01", "cv01";
-    overflow: hidden; /* Tauri manages scroll */
+    overflow: hidden;
+    /* Prefer dynamic viewport on mobile browsers */
+    min-height: 100%;
+    min-height: 100dvh;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
   }
 
-  /* High-density monospace for data values */
+  @media (max-width: 767px) {
+    :root {
+      --topbar-height: 44px;
+      --panel-width: 100%;
+    }
+  }
+
   [data-mono] {
     @apply font-mono text-xs tracking-tight;
   }
 
-  /* Scrollbar styling — thin, minimal */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -190,8 +595,8 @@ html {
   }
 
   ::selection {
-    background: var(--loom-accent);
-    color: white;
+    background: var(--selection-bg);
+    color: var(--selection-text);
   }
 
   .reduced-motion *,
@@ -203,16 +608,15 @@ html {
   }
 }
 
-/* ============================================================
- * COMPONENT UTILITIES
- * ============================================================ */
 @layer components {
   .loom-panel {
-    @apply bg-loom-surface border border-loom-border rounded-lg shadow-loom;
+    @apply bg-loom-surface rounded-lg shadow-loom;
+    border: var(--panel-border-w) solid var(--loom-border);
   }
 
   .loom-card {
-    @apply bg-loom-elevated border border-loom-border rounded-md p-3;
+    @apply bg-loom-elevated rounded-md p-3;
+    border: var(--panel-border-w) solid var(--loom-border);
     transition: border-color var(--transition-fast);
   }
   .loom-card:hover {
@@ -221,11 +625,35 @@ html {
 
   .loom-btn {
     @apply inline-flex items-center justify-center gap-2 px-3 py-1.5
-           text-sm font-medium rounded-md
+           text-sm font-medium
            transition-all duration-150;
+    border-radius: var(--btn-radius);
+  }
+  .loom-btn:focus-visible,
+  button:focus-visible,
+  [role="tab"]:focus-visible,
+  [role="button"]:focus-visible,
+  a:focus-visible,
+  [tabindex]:not([tabindex="-1"]):focus-visible,
+  select:focus-visible,
+  summary:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .loom-input:focus-visible {
+    outline: var(--focus-ring);
+    outline-offset: 1px;
   }
   .loom-btn-primary {
     @apply loom-btn bg-loom-accent text-white;
+  }
+  html[data-theme="contrast"] .loom-btn-primary,
+  html[data-theme="brutal"] .loom-btn-primary,
+  html[data-theme="nes"] .loom-btn-primary {
+    color: #000;
+  }
+  html[data-theme="contrast"] .loom-btn-primary {
+    color: #000;
   }
   .loom-btn-primary:hover {
     filter: brightness(1.15);
@@ -236,16 +664,23 @@ html {
 
   .loom-input {
     @apply w-full px-3 py-1.5 text-sm
-           bg-loom-elevated border border-loom-border rounded-md
+           bg-loom-elevated
            text-loom-text placeholder:text-loom-muted
-           focus:outline-none focus:ring-1 focus:ring-loom-accent focus:border-loom-accent;
+           focus:outline-none;
+    border: var(--panel-border-w) solid var(--loom-border);
+    border-radius: var(--btn-radius);
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  }
+  .loom-input:focus {
+    border-color: var(--loom-accent);
   }
 
   .loom-badge {
     @apply inline-flex items-center px-1.5 py-0.5
-           text-2xs font-mono font-medium rounded
-           bg-loom-elevated text-loom-muted border border-loom-border;
+           text-2xs font-mono font-medium
+           bg-loom-elevated text-loom-muted;
+    border: var(--panel-border-w) solid var(--loom-border);
+    border-radius: var(--radius-sm);
   }
 
   .loom-divider {
@@ -253,9 +688,6 @@ html {
   }
 }
 
-/* ============================================================
- * ANIMATION UTILITIES
- * ============================================================ */
 @layer utilities {
   .transition-theme {
     transition: background-color var(--transition-base),

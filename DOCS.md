@@ -34,7 +34,7 @@ For contributors and AI: where things live and how they connect. For a shorter a
 - **Folder / files**: `mountedFolder`, `files`, `isScanning`
 - **Selection**: `selectedFile`, `columnStats`, `sampleRows`, `selectedRowIndices`
 - **View**: `viewMode` (explorer | chart | query), `panelTab` (stats | chart | export | smart | settings), `suggestionsExpanded`
-- **App settings**: `appSettings` (theme, fontScale, reducedMotion). **Onboarding**: `onboardingDismissed`.
+- **App settings**: `appSettings` (theme, uiChrome, font, faces, fontScale, reducedMotion, colorblindCharts, `chartAspect`, `chartDevice`). **Onboarding**: `onboardingDismissed`. Chart framing: `src/lib/chartViewport.ts` (social aspects + mobile/tablet/desktop width); TopBar picks presets; ChartView fits a centered stage.
 - **Chart**: `vegaSpec`, `activeChart`, `chartVisualOverrides`, `chartTitleOverrides`, `aiSuggestionReason`, `chartAnnotations`. Encoding: `glowField`, `outlineField`, `opacityField`. **Interaction**: `chartInteractionMode` (pan | crosshair | lasso), `crosshairPos`, `rulerPins`, `lassoPoints`, `pinnedTooltips`, `customRefLines`. **Options**: `barStackMode` (grouped | stacked | percent), `connectScatterTrail`, `showMarginals`.
 - **Linked highlight**: `hoveredRowIndex` — table ↔ chart hover sync.
 - **Table**: `tableViewState` (column order, visibility, filters, sort), `tableViewHistory` for undo/redo, `tableViews` (saved named views). **Profiling**: `profilingCol` (column key or null).
@@ -79,13 +79,15 @@ Adding a new command:
 
 Chart look and feel is controlled by `chartVisualOverrides` in the store and applied in `ChartView.tsx` via `chartRenderOpts`. Grouped as:
 
+- **Color** — `src/lib/chartPalettes.ts` is the system of record (system + research palettes). Kinds: categorical, sequential, diverging, spectrum, semantic, reference. `colorPalette: "auto"` (default) picks scale from chart kind / color field (heatmap → sequential blue, waterfall → semantic, else categorical). `resolveChartColors` + `sampleContinuous` drive canvas/WebGPU; heatmaps interpolate sequential stops. Settings → colorblind charts forces Okabe–Ito / Cividis unless a palette is locked. Visual → Color shows swatch grid + reverse. Shuffle look respects per-section locks (Color / Design / Marks / …).
 - **Typography** — `fontFamily`, `titleFontWeight`, `titleItalic`, `tickRotation`; applied to title and axis labels.
 - **Marks** — `markShape` (circle, square, diamond, triangle, cross, star, …), `markStroke` / `markStrokeWidth`, `markJitter`, `sizeScale` (for size encoding), `barCornerRadius`, `lineStrokeStyle`, `lineCurveSmooth`.
 - **Axes & grid** — `axisLineColor`, `axisLineWidth`, `gridStyle`, `gridOpacity`, `tickCount`, `axisLabelColor`.
 - **Layout** — `chartPadding`, `legendPosition`, `showDataLabels`.
 - **Atmosphere** — `backgroundStyle`, `blendMode`, `glowEnabled`, `animateEntrance`.
+- **Look spectrum** (wordcount-inspired) — `chartDetail` (plain/viz/deep), `markMotif`, `axisStyle`, `emphasisStyle`, `ghostEnabled` / weight / place, `titleLayout`, `chartFrame`. Presets in `src/lib/lookSystem.ts` **replace** the override bundle (Tufte, Bauhaus, Newspaper, Military, Clarity, … + Shuffle).
 
-Encoding can also drive **glow**, **outline**, and **opacity** per point (scatter/strip) via `activeChart.glowField`, `outlineField`, `opacityField`; these require Canvas 2D. WebGPU scatter is used only when the chart is circle-only, has no stroke/jitter/glow or data-driven glow/outline/opacity, and has no Smart overlays (so anomaly rings, trend line, etc. can be drawn on the same canvas).
+Encoding can also drive **glow**, **outline**, and **opacity** per point (scatter/strip) via `activeChart.glowField`, `outlineField`, `opacityField`; these require Canvas 2D. WebGPU scatter is used only when the chart is circle-only, has no stroke/jitter/glow or data-driven glow/outline/opacity, and has no Smart overlays (so anomaly rings, trend line, etc. can be drawn on the same canvas). UI shows a **Canvas look** hint when Visual options force Canvas.
 
 ---
 
@@ -130,8 +132,10 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 
 ## Theming and tokens
 
-- **Tokens** — `src/styles/globals.css`: `--loom-*` and `--chart-*`. Tailwind is wired to these in `tailwind.config.ts` (e.g. `bg-loom-bg`, `text-loom-muted`).
-- **Components** — Use `.loom-panel`, `.loom-card`, `.loom-btn-primary`, `.loom-btn-ghost`, `.loom-input`, `.loom-badge` for consistency. New UI should use tokens and these classes.
+- **Catalog** — `src/lib/lookSystem.ts`: 10 themes, 8 chrome faces, app fonts, faces source; Visual presets.
+- **Tokens** — `src/styles/globals.css`: `data-theme` / `data-ui` / `data-font` / `data-faces` / `data-a11y` on `<html>`. Semantic `--color-*` with `--loom-*` aliases for Tailwind (`bg-loom-bg`, …). Per-theme `--chart-1`…`8`.
+- **Apply** — `ThemeApplicator` sets attributes + legacy class aliases; syncs `ibm.tools.shared` when same-origin.
+- **Components** — Use `.loom-panel`, `.loom-card`, `.loom-btn-primary`, `.loom-btn-ghost`, `.loom-input`, `.loom-badge`. Reskin by changing theme blocks in `globals.css` or Settings.
 
 ---
 
@@ -156,6 +160,7 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 | `src/lib/persist.ts` | Persist `tableViews` (and optional state) to storage. |
 | `src-tauri/src/stream.rs` | Wikimedia SSE → `wiki_stream` table; stream IPC helpers. |
 | `src-tauri/src/sources.rs` | USGS, Open-Meteo, NWS, World Bank → DuckDB tables; source IPC helpers. |
+| `src/lib/lookSystem.ts` | Theme / chrome / font catalog + Visual presets + ibm.tools.shared sync. |
 | `src/lib/dashboardMicrosite.ts` | Single-file HTML export for dashboard layouts. |
 | `src/lib/captureStoryPreviews.ts` | PNG thumbnails for story-dashboard chart slots. |
 
