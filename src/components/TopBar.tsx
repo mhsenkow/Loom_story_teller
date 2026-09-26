@@ -104,18 +104,18 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
 
   return (
     <header
-      className="flex items-center gap-1 sm:gap-2 flex-shrink-0 border-b border-loom-border bg-loom-surface px-1.5 sm:px-2"
+      className="flex items-center gap-1 sm:gap-2 flex-shrink-0 border-b border-loom-border bg-loom-surface/95 backdrop-blur-md px-1.5 sm:px-3"
       style={{
         height: "calc(var(--topbar-height) + var(--safe-top))",
         paddingTop: "var(--safe-top)",
-        paddingLeft: "max(0.375rem, var(--safe-left))",
-        paddingRight: "max(0.375rem, var(--safe-right))",
+        paddingLeft: "max(0.5rem, var(--safe-left))",
+        paddingRight: "max(0.5rem, var(--safe-right))",
       }}
     >
       <button
         type="button"
         onClick={toggleSidebar}
-        className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2"
+        className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2 rounded-md"
         title="Toggle Sidebar"
         aria-label="Toggle data sidebar"
       >
@@ -125,7 +125,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         </svg>
       </button>
 
-      <nav className="flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5 min-w-0" aria-label="View mode">
+      <nav className="loom-seg min-w-0" aria-label="View mode">
         {VIEW_MODES.map((mode) => (
           <button
             key={mode.key}
@@ -133,17 +133,11 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             onClick={() => setViewMode(mode.key)}
             aria-pressed={viewMode === mode.key}
             aria-current={viewMode === mode.key ? "page" : undefined}
-            className={`
-              min-h-9 sm:min-h-0 px-2.5 sm:px-3 py-1.5 sm:py-1 text-xs font-medium rounded transition-all duration-100
-              ${viewMode === mode.key
-                ? "bg-loom-accent text-white shadow-sm"
-                : "text-loom-muted hover:text-loom-text"
-              }
-            `}
+            className="loom-seg-item min-h-9 sm:min-h-0 px-2.5 sm:px-3"
           >
             <span className="sm:hidden">{mode.short}</span>
             <span className="hidden sm:inline">{mode.label}</span>
-            <span className="ml-1.5 text-2xs opacity-50 font-mono hidden md:inline">{mode.shortcut}</span>
+            <span className="ml-1 text-2xs opacity-50 font-mono hidden md:inline">{mode.shortcut}</span>
           </button>
         ))}
       </nav>
@@ -152,7 +146,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       {viewMode === "chart" && (
         <>
           <div
-            className="hidden md:flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5 max-w-[min(52vw,36rem)] overflow-x-auto scrollbar-none"
+            className="hidden md:flex loom-seg max-w-[min(52vw,36rem)] overflow-x-auto scrollbar-none"
             role="group"
             aria-label="Chart aspect ratio"
           >
@@ -163,11 +157,10 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
                 title={a.blurb}
                 onClick={() => setAspect(a.id)}
                 aria-pressed={aspect === a.id}
+                data-active={aspect === a.id ? "true" : undefined}
                 className={`
-                  shrink-0 px-2 py-1 text-2xs font-medium rounded transition-colors whitespace-nowrap
-                  ${aspect === a.id
-                    ? "bg-loom-surface text-loom-text shadow-sm border border-loom-border"
-                    : "text-loom-muted hover:text-loom-text border border-transparent"}
+                  loom-seg-item loom-seg-item-quiet shrink-0 px-2 py-1 text-2xs whitespace-nowrap border
+                  ${aspect === a.id ? "border-loom-border" : "border-transparent"}
                 `}
               >
                 {a.label}
@@ -176,7 +169,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           </div>
 
           <div
-            className="hidden md:flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5"
+            className="hidden md:flex loom-seg"
             role="group"
             aria-label="Chart width preview"
           >
@@ -197,12 +190,12 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
                   onClick={() => setDevice(d.id)}
                   aria-pressed={pressed}
                   className={`
-                    min-h-8 min-w-8 flex items-center justify-center rounded px-1.5 transition-colors
+                    loom-seg-item loom-seg-item-quiet min-h-8 min-w-8 px-1.5 border
                     ${pressed
-                      ? "bg-loom-surface text-loom-text shadow-sm border border-loom-border"
+                      ? "border-loom-border"
                       : soft
-                        ? "text-loom-accent border border-loom-accent/35"
-                        : "text-loom-muted hover:text-loom-text border border-transparent"}
+                        ? "text-loom-accent border-loom-accent/35"
+                        : "border-transparent"}
                   `}
                 >
                   <DeviceIcon kind={d.icon} />
@@ -217,7 +210,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       <div className="flex-1 min-w-0" />
 
       {selectedFile && (
-        <div className="hidden sm:flex items-center gap-1.5 mr-1 min-w-0 max-w-[28vw] sm:max-w-[160px]">
+        <div className="hidden sm:flex items-center gap-1.5 mr-1 min-w-0 max-w-[28vw] sm:max-w-[180px] px-2 py-1 rounded-md bg-loom-elevated/60 border border-loom-border/60">
           <span className="w-1.5 h-1.5 rounded-full bg-loom-success shrink-0" />
           <span className="text-xs text-loom-muted font-mono truncate">
             {selectedFile.name}
@@ -231,7 +224,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             type="button"
             onClick={() => startDeepScan()}
             disabled={!hasData}
-            className="md:hidden min-h-10 px-2.5 text-2xs font-semibold rounded-md bg-loom-accent text-white disabled:opacity-40 shadow-sm"
+            className="md:hidden min-h-10 px-3 text-2xs font-semibold rounded-md bg-loom-accent text-white disabled:opacity-40 shadow-sm"
             aria-label="Deep scan visualizations"
             title="Deep scan · swipe Keep / Skip"
           >
@@ -243,7 +236,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
               setPanelTab("chart");
               if (!panelOpen) togglePanel();
             }}
-            className="md:hidden loom-btn-ghost min-h-10 px-2.5 text-2xs font-medium text-loom-accent border border-loom-accent/40 rounded-md"
+            className="md:hidden loom-btn-ghost min-h-10 px-3 text-2xs font-medium text-loom-accent border border-loom-accent/35 rounded-md"
             aria-label="Edit chart encoding"
           >
             Edit
@@ -255,7 +248,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         <button
           type="button"
           onClick={onOpenShortcuts}
-          className="loom-btn-ghost hidden sm:flex min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono"
+          className="loom-btn-ghost hidden sm:flex min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md"
           title="Keyboard shortcuts (?)"
           aria-label="Keyboard shortcuts"
         >
@@ -265,7 +258,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       <button
         type="button"
         onClick={openSettings}
-        className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2"
+        className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2 rounded-md"
         title="Settings"
         aria-label="Settings"
       >
@@ -278,7 +271,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       <button
         type="button"
         onClick={openPanel}
-        className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2"
+        className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2 rounded-md"
         title={viewMode === "chart" ? "Chart encoding & visual" : "Toggle Detail Panel"}
         aria-label={viewMode === "chart" ? "Open chart panel" : "Toggle detail panel"}
         aria-pressed={panelOpen}

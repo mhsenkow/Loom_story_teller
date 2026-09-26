@@ -29,6 +29,15 @@ const STREAM_NAMES: Record<string, string> = {
   iss: "ISS Track",
   hn: "HN Front Page",
   crypto: "Crypto Markets",
+  aq: "Air Quality",
+  fx: "FX Rates",
+  fema: "FEMA Disasters",
+  opensky: "OpenSky Aircraft",
+  countries: "World Countries",
+  spacex: "SpaceX Launches",
+  nyc311: "NYC 311",
+  covid: "COVID Countries",
+  launches: "Space Launches",
 };
 
 export function WebSessionResume() {

@@ -20,6 +20,12 @@ import type {
   ClusterResult,
 } from "./smartAnalytics";
 import type { ChartAspectId, ChartDeviceId } from "./chartViewport";
+import type {
+  ExportBurnInOptions,
+  SocialExportTarget,
+  SocialPresetId,
+} from "./socialExport";
+import { DEFAULT_BURN_IN } from "./socialExport";
 import type { VizPreferenceModel } from "./vizPreferences";
 import {
   emptyVizPreferenceModel,
@@ -385,6 +391,20 @@ interface LoomState {
     label: string;
   } | null;
 
+  /**
+   * Social / platform export framing.
+   * When set, ChartView forces stage to these CSS pixels and Canvas 2D capture.
+   */
+  socialExportTarget: SocialExportTarget | null;
+  /** Distraction-free share-ready mode (hide chrome, show safe zones). */
+  socialExportReady: boolean;
+  /** Attribution burn-in for PNG exports. */
+  exportBurnIn: ExportBurnInOptions;
+  /** 1 = exact preset pixels; 2 = supersample then downscale in handler. */
+  exportSupersample: 1 | 2;
+  /** Selected platform preset id (Export tab). */
+  socialPresetId: SocialPresetId;
+
   /** Global prompt dialog state for replacing window.prompt. */
   promptDialog: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null;
 
@@ -535,6 +555,13 @@ interface LoomState {
       label: string;
     } | null,
   ) => void;
+  setSocialExportTarget: (v: SocialExportTarget | null) => void;
+  setSocialExportReady: (v: boolean) => void;
+  setExportBurnIn: (
+    v: ExportBurnInOptions | ((prev: ExportBurnInOptions) => ExportBurnInOptions),
+  ) => void;
+  setExportSupersample: (v: 1 | 2) => void;
+  setSocialPresetId: (v: SocialPresetId) => void;
   applyQuerySnapshot: (id: string) => void;
   setPromptDialog: (config: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null) => void;
   // Live stream actions
@@ -621,6 +648,11 @@ const initialState = {
   activeDashboardId: null as string | null,
   dashboardsExpanded: false,
   previewCapture: null,
+  socialExportTarget: null,
+  socialExportReady: false,
+  exportBurnIn: { ...DEFAULT_BURN_IN },
+  exportSupersample: 1 as 1 | 2,
+  socialPresetId: "ig-square" as SocialPresetId,
   promptDialog: null as { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null,
   streamRunning: false,
   streamTotalEvents: 0,
@@ -1089,6 +1121,14 @@ export const useLoomStore = create<LoomState>((set, get) => ({
   setActiveDashboardId: (id) => set({ activeDashboardId: id }),
   setDashboardsExpanded: (v) => set({ dashboardsExpanded: v }),
   setPreviewCapture: (v) => set({ previewCapture: v }),
+  setSocialExportTarget: (v) => set({ socialExportTarget: v }),
+  setSocialExportReady: (v) => set({ socialExportReady: v }),
+  setExportBurnIn: (v) =>
+    set((s) => ({
+      exportBurnIn: typeof v === "function" ? v(s.exportBurnIn) : v,
+    })),
+  setExportSupersample: (v) => set({ exportSupersample: v }),
+  setSocialPresetId: (id) => set({ socialPresetId: id }),
   applyQuerySnapshot: (id) =>
     set((s) => {
       const snap = s.querySnapshots.find((x) => x.id === id);

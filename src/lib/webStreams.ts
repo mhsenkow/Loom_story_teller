@@ -76,6 +76,42 @@ const sourceBufs: Record<SourceKind, BufferState> = {
     ["id", "symbol", "name", "price_usd", "market_cap", "volume_24h", "change_24h_pct", "rank"],
     ["VARCHAR", "VARCHAR", "VARCHAR", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "INTEGER"],
   ),
+  aq: emptyBuffer(
+    ["ts", "city", "latitude", "longitude", "pm2_5", "pm10", "ozone", "nitrogen_dioxide", "european_aqi"],
+    ["TIMESTAMP", "VARCHAR", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE"],
+  ),
+  fx: emptyBuffer(
+    ["as_of", "base", "quote", "rate", "change_pct"],
+    ["DATE", "VARCHAR", "VARCHAR", "DOUBLE", "DOUBLE"],
+  ),
+  fema: emptyBuffer(
+    ["id", "disaster_number", "state", "declaration_type", "declaration_title", "incident_type", "declaration_date", "incident_begin", "fy_declared"],
+    ["VARCHAR", "INTEGER", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "TIMESTAMP", "TIMESTAMP", "INTEGER"],
+  ),
+  opensky: emptyBuffer(
+    ["icao24", "callsign", "origin_country", "longitude", "latitude", "baro_altitude", "velocity", "true_track", "on_ground", "ts"],
+    ["VARCHAR", "VARCHAR", "VARCHAR", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "BOOLEAN", "TIMESTAMP"],
+  ),
+  countries: emptyBuffer(
+    ["name", "cca3", "region", "subregion", "population", "area", "density", "capital", "independent"],
+    ["VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "BIGINT", "DOUBLE", "DOUBLE", "VARCHAR", "BOOLEAN"],
+  ),
+  spacex: emptyBuffer(
+    ["id", "name", "date_utc", "success", "upcoming", "rocket", "flight_number", "details"],
+    ["VARCHAR", "VARCHAR", "TIMESTAMP", "BOOLEAN", "BOOLEAN", "VARCHAR", "INTEGER", "VARCHAR"],
+  ),
+  nyc311: emptyBuffer(
+    ["unique_key", "created_date", "complaint_type", "descriptor", "borough", "city", "latitude", "longitude", "status", "agency"],
+    ["VARCHAR", "TIMESTAMP", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "DOUBLE", "DOUBLE", "VARCHAR", "VARCHAR"],
+  ),
+  covid: emptyBuffer(
+    ["country", "cases", "today_cases", "deaths", "today_deaths", "recovered", "active", "cases_per_million", "deaths_per_million", "population", "continent"],
+    ["VARCHAR", "BIGINT", "BIGINT", "BIGINT", "BIGINT", "BIGINT", "BIGINT", "DOUBLE", "DOUBLE", "BIGINT", "VARCHAR"],
+  ),
+  launches: emptyBuffer(
+    ["id", "name", "net", "status", "pad", "location", "agency", "rocket", "orbital"],
+    ["VARCHAR", "VARCHAR", "TIMESTAMP", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "BOOLEAN"],
+  ),
 };
 
 const SOURCE_POLL_MS: Record<SourceKind, number> = {
@@ -86,6 +122,15 @@ const SOURCE_POLL_MS: Record<SourceKind, number> = {
   iss: 15_000,
   hn: 120_000,
   crypto: 60_000,
+  aq: 300_000,
+  fx: 3_600_000,
+  fema: 600_000,
+  opensky: 30_000,
+  countries: 0,
+  spacex: 3_600_000,
+  nyc311: 300_000,
+  covid: 1_800_000,
+  launches: 1_800_000,
 };
 
 function trim(buf: BufferState) {
@@ -332,23 +377,238 @@ function parseHn(body: unknown): Cell[][] {
 }
 
 function parseIss(body: unknown): Cell[][] {
-  const j = body as Record<string, unknown>;
-  if (j.latitude == null || j.longitude == null) return [];
-  return [[
-    j.timestamp != null
-      ? new Date(Number(j.timestamp) * 1000).toISOString()
-      : new Date().toISOString(),
-    Number(j.latitude),
-    Number(j.longitude),
-    Number(j.altitude ?? 0),
-    Number(j.velocity ?? 0),
-    String(j.visibility ?? ""),
-  ]];
+  const list = Array.isArray(body) ? body : [body];
+  const out: Cell[][] = [];
+  for (const item of list) {
+    const j = item as Record<string, unknown>;
+    if (j.latitude == null || j.longitude == null) continue;
+    out.push([
+      j.timestamp != null
+        ? new Date(Number(j.timestamp) * 1000).toISOString()
+        : new Date().toISOString(),
+      Number(j.latitude),
+      Number(j.longitude),
+      Number(j.altitude ?? 0),
+      Number(j.velocity ?? 0),
+      String(j.visibility ?? ""),
+    ]);
+  }
+  return out;
+}
+
+function parseAq(body: unknown): Cell[][] {
+  const cities = (body as { cities?: unknown[] })?.cities;
+  if (!Array.isArray(cities)) return [];
+  const out: Cell[][] = [];
+  for (const c of cities) {
+    const city = c as {
+      name?: string;
+      lat?: number;
+      lon?: number;
+      current?: Record<string, unknown>;
+    };
+    const cur = city.current ?? {};
+    out.push([
+      String(cur.time ?? new Date().toISOString()),
+      String(city.name ?? ""),
+      Number(city.lat ?? 0),
+      Number(city.lon ?? 0),
+      Number(cur.pm2_5 ?? 0),
+      Number(cur.pm10 ?? 0),
+      Number(cur.ozone ?? 0),
+      Number(cur.nitrogen_dioxide ?? 0),
+      Number(cur.european_aqi ?? 0),
+    ]);
+  }
+  return out;
+}
+
+function parseFx(body: unknown): Cell[][] {
+  const j = body as { base?: string; date?: string; rates?: Record<string, number> };
+  if (!j.rates) return [];
+  const base = String(j.base ?? "EUR");
+  const asOf = String(j.date ?? "");
+  return Object.entries(j.rates).map(([quote, rate]) => [
+    asOf,
+    base,
+    quote,
+    Number(rate),
+    0,
+  ]);
+}
+
+function parseFema(body: unknown): Cell[][] {
+  const list = (body as { DisasterDeclarationsSummaries?: unknown[] })
+    ?.DisasterDeclarationsSummaries;
+  if (!Array.isArray(list)) return [];
+  return list.slice(0, 200).map((r) => {
+    const row = r as Record<string, unknown>;
+    return [
+      String(row.id ?? row.disasterNumber ?? ""),
+      Number(row.disasterNumber ?? 0),
+      String(row.state ?? ""),
+      String(row.declarationType ?? ""),
+      String(row.declarationTitle ?? ""),
+      String(row.incidentType ?? ""),
+      row.declarationDate != null ? String(row.declarationDate) : null,
+      row.incidentBeginDate != null ? String(row.incidentBeginDate) : null,
+      Number(row.fyDeclared ?? 0),
+    ];
+  });
+}
+
+function parseOpensky(body: unknown): Cell[][] {
+  const states = (body as { states?: unknown[]; time?: number })?.states;
+  const time = Number((body as { time?: number })?.time ?? 0);
+  if (!Array.isArray(states)) return [];
+  const out: Cell[][] = [];
+  for (const st of states.slice(0, 800)) {
+    if (!Array.isArray(st) || st.length < 9) continue;
+    const lon = st[5] == null ? null : Number(st[5]);
+    const lat = st[6] == null ? null : Number(st[6]);
+    if (lon == null || lat == null || Number.isNaN(lon) || Number.isNaN(lat)) continue;
+    out.push([
+      String(st[0] ?? ""),
+      String(st[1] ?? "").trim(),
+      String(st[2] ?? ""),
+      lon,
+      lat,
+      Number(st[7] ?? 0),
+      Number(st[9] ?? 0),
+      Number(st[10] ?? 0),
+      Boolean(st[8]),
+      time ? new Date(time * 1000).toISOString() : new Date().toISOString(),
+    ]);
+  }
+  return out;
+}
+
+function parseCountries(body: unknown): Cell[][] {
+  if (!Array.isArray(body)) return [];
+  return body.map((r) => {
+    const row = r as {
+      name?: { common?: string };
+      cca3?: string;
+      region?: string;
+      subregion?: string;
+      population?: number;
+      area?: number;
+      capital?: string[];
+      independent?: boolean;
+    };
+    const pop = Number(row.population ?? 0);
+    const area = Number(row.area ?? 0);
+    return [
+      String(row.name?.common ?? ""),
+      String(row.cca3 ?? ""),
+      String(row.region ?? ""),
+      String(row.subregion ?? ""),
+      pop,
+      area,
+      area > 0 ? pop / area : 0,
+      String(row.capital?.[0] ?? ""),
+      Boolean(row.independent),
+    ];
+  });
+}
+
+function parseSpacex(body: unknown): Cell[][] {
+  if (!Array.isArray(body)) return [];
+  const start = Math.max(0, body.length - 120);
+  return body.slice(start).map((r) => {
+    const row = r as Record<string, unknown>;
+    return [
+      String(row.id ?? ""),
+      String(row.name ?? ""),
+      row.date_utc != null ? String(row.date_utc) : null,
+      Boolean(row.success),
+      Boolean(row.upcoming),
+      String(row.rocket ?? ""),
+      Number(row.flight_number ?? 0),
+      String(row.details ?? "").slice(0, 280),
+    ];
+  });
+}
+
+function parseNyc311(body: unknown): Cell[][] {
+  if (!Array.isArray(body)) return [];
+  return body.map((r) => {
+    const row = r as Record<string, unknown>;
+    return [
+      String(row.unique_key ?? ""),
+      row.created_date != null ? String(row.created_date) : null,
+      String(row.complaint_type ?? ""),
+      String(row.descriptor ?? ""),
+      String(row.borough ?? ""),
+      String(row.city ?? ""),
+      Number(row.latitude ?? 0),
+      Number(row.longitude ?? 0),
+      String(row.status ?? ""),
+      String(row.agency ?? ""),
+    ];
+  });
+}
+
+function parseCovid(body: unknown): Cell[][] {
+  if (!Array.isArray(body)) return [];
+  return body.map((r) => {
+    const row = r as Record<string, unknown>;
+    return [
+      String(row.country ?? ""),
+      Number(row.cases ?? 0),
+      Number(row.todayCases ?? 0),
+      Number(row.deaths ?? 0),
+      Number(row.todayDeaths ?? 0),
+      Number(row.recovered ?? 0),
+      Number(row.active ?? 0),
+      Number(row.casesPerOneMillion ?? 0),
+      Number(row.deathsPerOneMillion ?? 0),
+      Number(row.population ?? 0),
+      String(row.continent ?? ""),
+    ];
+  });
+}
+
+function parseLaunches(body: unknown): Cell[][] {
+  const list = (body as { results?: unknown[] })?.results;
+  if (!Array.isArray(list)) return [];
+  return list.map((r) => {
+    const row = r as Record<string, unknown>;
+    const status = row.status as { name?: string; abbrev?: string } | undefined;
+    const pad = row.pad as { name?: string; location?: { name?: string } } | undefined;
+    const agency = row.launch_service_provider as { name?: string } | undefined;
+    const rocket = row.rocket as { configuration?: { full_name?: string; name?: string } } | undefined;
+    const mission = row.mission as { type?: string } | undefined;
+    return [
+      String(row.id ?? ""),
+      String(row.name ?? ""),
+      row.net != null ? String(row.net) : null,
+      String(status?.name ?? status?.abbrev ?? ""),
+      String(pad?.name ?? ""),
+      String(pad?.location?.name ?? ""),
+      String(agency?.name ?? ""),
+      String(rocket?.configuration?.full_name ?? rocket?.configuration?.name ?? ""),
+      Boolean(mission?.type?.toLowerCase().includes("orbit")),
+    ];
+  });
 }
 
 async function pollSourceOnce(kind: SourceKind) {
   const buf = sourceBufs[kind];
-  const body = await fetchSourceJson(kind);
+  let body: unknown;
+  // Sparse ISS buffer → seed one orbit so ribbons aren't a single tip.
+  if (kind === "iss" && buf.rows.length < 3) {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 12_000);
+      const res = await fetch("/api/source/iss_trail", { signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok) body = await res.json();
+    } catch {
+      /* fall through to live tip */
+    }
+  }
+  if (body === undefined) body = await fetchSourceJson(kind);
   let rows: Cell[][] = [];
   if (kind === "usgs") rows = parseUsgs(body);
   else if (kind === "nws") rows = parseNws(body);
@@ -357,8 +617,9 @@ async function pollSourceOnce(kind: SourceKind) {
     buf.rows = [];
     buf.seenIds.clear();
     rows = parseWorldBank(body);
-  } else if (kind === "iss") rows = parseIss(body);
-  else if (kind === "hn") {
+  } else if (kind === "iss") {
+    rows = parseIss(body);
+  } else if (kind === "hn") {
     buf.rows = [];
     buf.seenIds.clear();
     rows = parseHn(body);
@@ -366,9 +627,68 @@ async function pollSourceOnce(kind: SourceKind) {
     buf.rows = [];
     buf.seenIds.clear();
     rows = parseCrypto(body);
+  } else if (kind === "aq") {
+    buf.rows = [];
+    buf.seenIds.clear();
+    rows = parseAq(body);
+  } else if (kind === "fx") {
+    buf.rows = [];
+    buf.seenIds.clear();
+    rows = parseFx(body);
+  } else if (kind === "fema") {
+    buf.rows = [];
+    buf.seenIds.clear();
+    rows = parseFema(body);
+  } else if (kind === "opensky") {
+    // Append snapshots so trailRibbon can stitch paths per icao24 over time.
+    rows = parseOpensky(body);
+  } else if (kind === "countries") {
+    buf.rows = [];
+    buf.seenIds.clear();
+    rows = parseCountries(body);
+  } else if (kind === "spacex") {
+    buf.rows = [];
+    buf.seenIds.clear();
+    rows = parseSpacex(body);
+  } else if (kind === "nyc311") {
+    buf.rows = [];
+    buf.seenIds.clear();
+    rows = parseNyc311(body);
+  } else if (kind === "covid") {
+    buf.rows = [];
+    buf.seenIds.clear();
+    rows = parseCovid(body);
+  } else if (kind === "launches") {
+    buf.rows = [];
+    buf.seenIds.clear();
+    rows = parseLaunches(body);
   }
+
+  if (kind === "opensky") {
+    for (const row of rows) {
+      const id = `${String(row[0] ?? "")}|${String(row[9] ?? "")}`;
+      if (id !== "|" && buf.seenIds.has(id)) continue;
+      if (id !== "|") buf.seenIds.add(id);
+      buf.rows.push(row);
+      buf.totalEvents += 1;
+    }
+    trim(buf);
+    return;
+  }
+
   const idIdx =
-    kind === "usgs" || kind === "nws" || kind === "hn" || kind === "crypto" ? 0 : undefined;
+    kind === "usgs" ||
+    kind === "nws" ||
+    kind === "hn" ||
+    kind === "crypto" ||
+    kind === "fema" ||
+    kind === "spacex" ||
+    kind === "nyc311" ||
+    kind === "launches"
+      ? 0
+      : kind === "iss"
+        ? 0 // timestamp — keep trail unique across seed + tip polls
+        : undefined;
   pushRows(buf, rows, idIdx);
 }
 

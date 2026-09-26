@@ -23,13 +23,13 @@ export function Toast() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed bottom-[max(1rem,var(--safe-bottom))] right-[max(1rem,var(--safe-right))] z-[100] max-w-[min(24rem,calc(100vw-2rem))] px-3 py-2 text-xs text-loom-text bg-loom-surface border border-loom-border rounded shadow-lg flex items-center justify-between gap-2"
+      className="fixed z-[100] left-1/2 -translate-x-1/2 bottom-[max(1.25rem,calc(var(--safe-bottom)+0.75rem))] sm:left-auto sm:right-[max(1rem,var(--safe-right))] sm:translate-x-0 sm:bottom-[max(1rem,var(--safe-bottom))] max-w-[min(24rem,calc(100vw-2rem))] px-3.5 py-2.5 text-xs text-loom-text bg-loom-surface/95 backdrop-blur-md border border-loom-border rounded-lg shadow-loom-lg flex items-center justify-between gap-3 animate-slide-up"
     >
-      <span className="min-w-0 break-words">{toastMessage}</span>
+      <span className="min-w-0 break-words leading-snug">{toastMessage}</span>
       <button
         type="button"
         onClick={() => setToast(null)}
-        className="flex-shrink-0 text-loom-muted hover:text-loom-text"
+        className="flex-shrink-0 grid place-items-center size-7 rounded-md text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors"
         aria-label="Dismiss"
       >
         ×

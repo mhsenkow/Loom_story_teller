@@ -3,27 +3,36 @@
 // =================================================================
 // Probes live feeds for “interesting right now” hooks, then hands
 // chart-ready recommendations back to the onboarding modal.
+// Progressive: callers can stream stories as each source finishes.
 // =================================================================
 
-import { recommendSourceStory } from "./recommendations";
+import { recommendSourceStory, recommendStreamStory } from "./recommendations";
 import type { ChartRecommendation } from "./recommendations";
 import type { ColumnInfo, QueryResult } from "./store";
 import {
+  ALL_SOURCE_KINDS,
   sourceSnapshot,
   sourceStart,
   sourceStatus,
+  streamSnapshot,
+  streamStart,
+  streamStatus,
   type SourceKind,
 } from "./tauri";
 
+export type DiscoverKind = SourceKind | "wiki";
+
 export interface DiscoverStory {
   id: string;
-  kind: SourceKind;
+  kind: DiscoverKind;
   streamPath: string;
   fileName: string;
   /** Short hook — what is interesting right now */
   hook: string;
   /** Why / what chart you’ll see */
   blurb: string;
+  /** Soft category chip for the modal */
+  category: string;
   chartKind: string;
   chart: ChartRecommendation;
   score: number;
@@ -45,7 +54,14 @@ export function requestDiscoverScan(): void {
   window.dispatchEvent(new Event("loom-discover"));
 }
 
-const SCAN_KINDS: SourceKind[] = ["usgs", "hn", "crypto", "iss", "nws", "meteo"];
+/** All poll sources (same set as Sidebar live cards). */
+const SCAN_KINDS: readonly SourceKind[] = ALL_SOURCE_KINDS;
+
+/** Cap on stories shown in the discover grid (primary + alts across every feed). */
+export const DISCOVER_STORY_LIMIT = 48;
+
+/** How many chart variants to keep per live source. */
+const VARIANTS_PER_SOURCE = 3;
 
 function colIndex(sample: QueryResult, name: string): number {
   return sample.columns.indexOf(name);
@@ -64,11 +80,23 @@ function strAt(sample: QueryResult, row: number, col: string): string {
   return String(sample.rows[row]?.[i] ?? "");
 }
 
+function pickPreferredChart(
+  charts: ChartRecommendation[],
+  preferKind?: string,
+): ChartRecommendation | null {
+  if (!charts.length) return null;
+  if (preferKind) {
+    const hit = charts.find((c) => c.kind === preferKind);
+    if (hit) return hit;
+  }
+  return charts[0]!;
+}
+
 function hookFor(
-  kind: SourceKind,
+  kind: DiscoverKind,
   sample: QueryResult,
   chart: ChartRecommendation,
-): { hook: string; blurb: string; score: number } {
+): { hook: string; blurb: string; score: number; preferKind?: string; category: string } {
   const n = sample.total_rows || sample.rows.length;
 
   if (kind === "usgs") {
@@ -86,12 +114,16 @@ function hookFor(
         hook: `M${maxMag.toFixed(1)} quake${place ? ` — ${place}` : ""}`,
         blurb: chart.subtitle || "Map it and see the cluster.",
         score: 98,
+        preferKind: "geoPoints",
+        category: "Earth",
       };
     }
     return {
       hook: `${n} earthquakes in the past hour`,
       blurb: chart.title,
       score: 80 + Math.min(15, n),
+      preferKind: "globe",
+      category: "Earth",
     };
   }
 
@@ -110,6 +142,8 @@ function hookFor(
       hook: short ? `${best} pts · ${short}` : `${n} stories on HN`,
       blurb: chart.subtitle || "Scores vs discussion.",
       score: 70 + Math.min(25, best / 20),
+      preferKind: "scatter",
+      category: "News",
     };
   }
 
@@ -130,6 +164,8 @@ function hookFor(
       hook: sym ? `${sym} ${sign}${chg.toFixed(1)}% today` : `${n} crypto markets`,
       blurb: chart.title,
       score: 75 + Math.min(20, bestAbs),
+      preferKind: "isoScatter",
+      category: "Markets",
     };
   }
 
@@ -139,11 +175,19 @@ function hookFor(
     if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
       return {
         hook: `ISS over ${lat.toFixed(1)}°, ${lon.toFixed(1)}°`,
-        blurb: "Start an orbital trail scatter.",
+        blurb: "Great-circle path on the globe.",
         score: 88,
+        preferKind: "globeTrail",
+        category: "Space",
       };
     }
-    return { hook: "Track the ISS live", blurb: chart.title, score: 85 };
+    return {
+      hook: "Track the ISS live",
+      blurb: chart.title,
+      score: 85,
+      preferKind: "geoPoints",
+      category: "Space",
+    };
   }
 
   if (kind === "nws") {
@@ -156,21 +200,300 @@ function hookFor(
       hook: severe > 0 ? `${severe} severe US weather alerts` : `${n} active NWS alerts`,
       blurb: chart.subtitle || chart.title,
       score: severe > 0 ? 92 : 70 + Math.min(15, n / 5),
+      preferKind: "bar",
+      category: "Weather",
     };
   }
 
   if (kind === "meteo") {
+    let hottest = -Infinity;
+    let city = "";
+    let wettest = -Infinity;
+    let wetCity = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const t = numAt(sample, r, "temperature");
+      const p = numAt(sample, r, "precipitation");
+      const c = strAt(sample, r, "city");
+      if (t > hottest) {
+        hottest = t;
+        city = c;
+      }
+      if (p > wettest) {
+        wettest = p;
+        wetCity = c;
+      }
+    }
+    if (Number.isFinite(hottest) && city) {
+      return {
+        hook: `${city} hottest at ${hottest.toFixed(1)}°C`,
+        blurb:
+          wettest > 0.2
+            ? `${wetCity} seeing rain · ${chart.subtitle || chart.title}`
+            : chart.subtitle || chart.title,
+        score: 78 + Math.min(12, Math.max(0, hottest) / 4),
+        preferKind: "geoBubbles",
+        category: "Weather",
+      };
+    }
     return {
       hook: "Five-city weather snapshot",
       blurb: chart.subtitle || chart.title,
       score: 72,
+      preferKind: "geoBubbles",
+      category: "Weather",
     };
   }
 
-  return { hook: chart.title, blurb: chart.subtitle, score: chart.score };
+  if (kind === "world_bank") {
+    let topVal = -Infinity;
+    let topCountry = "";
+    let indicator = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const ind = strAt(sample, r, "indicator_id");
+      if (ind !== "NY.GDP.MKTP.CD") continue;
+      const v = numAt(sample, r, "value");
+      if (v > topVal) {
+        topVal = v;
+        topCountry = strAt(sample, r, "country_name");
+        indicator = "GDP";
+      }
+    }
+    if (topCountry) {
+      const trillions = topVal / 1e12;
+      return {
+        hook: `${topCountry} leads ${indicator}${Number.isFinite(trillions) ? ` (~$${trillions.toFixed(1)}T)` : ""}`,
+        blurb: chart.subtitle || chart.title,
+        score: 84,
+        preferKind: "choropleth",
+        category: "Global",
+      };
+    }
+    return {
+      hook: "World Bank development indicators",
+      blurb: chart.title,
+      score: 76,
+      preferKind: "choropleth",
+      category: "Global",
+    };
+  }
+
+  if (kind === "aq") {
+    let worst = -Infinity;
+    let city = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const pm = numAt(sample, r, "pm2_5");
+      if (pm > worst) {
+        worst = pm;
+        city = strAt(sample, r, "city");
+      }
+    }
+    if (city && Number.isFinite(worst)) {
+      const level = worst >= 55 ? "unhealthy" : worst >= 35 ? "elevated" : "moderate";
+      return {
+        hook: `${city} PM2.5 ${worst.toFixed(0)} µg/m³ (${level})`,
+        blurb: chart.subtitle || "Compare cities on fine particulate pollution.",
+        score: 80 + Math.min(15, worst / 10),
+        preferKind: "geoBubbles",
+        category: "Air",
+      };
+    }
+    return {
+      hook: "City air quality snapshot",
+      blurb: chart.title,
+      score: 74,
+      preferKind: "geoBubbles",
+      category: "Air",
+    };
+  }
+
+  if (kind === "fx") {
+    let bestAbs = 0;
+    let pair = "";
+    let rate = 0;
+    for (let r = 0; r < sample.rows.length; r++) {
+      const chg = numAt(sample, r, "change_pct");
+      if (Math.abs(chg) > bestAbs) {
+        bestAbs = Math.abs(chg);
+        rate = numAt(sample, r, "rate");
+        pair = `${strAt(sample, r, "base")}/${strAt(sample, r, "quote")}`;
+      }
+    }
+    if (pair) {
+      const sign = (numAt(sample, 0, "change_pct") || 0) >= 0 || bestAbs === 0 ? "" : "";
+      void sign;
+      return {
+        hook: bestAbs > 0.05 ? `${pair} moving · ${rate.toFixed(4)}` : `${n} FX rates vs EUR`,
+        blurb: chart.subtitle || chart.title,
+        score: 73 + Math.min(18, bestAbs * 40),
+        preferKind: "bar",
+        category: "Markets",
+      };
+    }
+    return {
+      hook: "EUR foreign exchange rates",
+      blurb: chart.title,
+      score: 70,
+      preferKind: "bar",
+      category: "Markets",
+    };
+  }
+
+  if (kind === "fema") {
+    let newest = "";
+    let state = "";
+    let disaster = "";
+    for (let r = 0; r < Math.min(sample.rows.length, 40); r++) {
+      const d = strAt(sample, r, "declaration_date");
+      if (d > newest) {
+        newest = d;
+        state = strAt(sample, r, "state");
+        disaster = strAt(sample, r, "incident_type") || strAt(sample, r, "declaration_title");
+      }
+    }
+    return {
+      hook: disaster
+        ? `${disaster}${state ? ` · ${state}` : ""}`
+        : `${n} FEMA disaster declarations`,
+      blurb: chart.subtitle || "US declarations by type and state.",
+      score: 79,
+      preferKind: "choropleth",
+      category: "US",
+    };
+  }
+
+  if (kind === "opensky") {
+    return {
+      hook: `${n} aircraft over the US right now`,
+      blurb: chart.subtitle || "Flight paths wrapped on the globe.",
+      score: 86 + Math.min(10, n / 50),
+      preferKind: "globeTrail",
+      category: "Transit",
+    };
+  }
+
+  if (kind === "countries") {
+    let topPop = 0;
+    let topName = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const p = numAt(sample, r, "population");
+      if (p > topPop) {
+        topPop = p;
+        topName = strAt(sample, r, "name");
+      }
+    }
+    return {
+      hook: topName
+        ? `${topName} leads population (~${(topPop / 1e9).toFixed(2)}B)`
+        : `${n} countries loaded`,
+      blurb: chart.subtitle || "Countries filled by population.",
+      score: 83,
+      preferKind: "choropleth",
+      category: "Global",
+    };
+  }
+
+  if (kind === "spacex") {
+    let ok = 0;
+    let fail = 0;
+    for (let r = 0; r < sample.rows.length; r++) {
+      const s = sample.rows[r]?.[colIndex(sample, "success")];
+      if (s === true || s === "true") ok += 1;
+      else fail += 1;
+    }
+    const rate = ok + fail > 0 ? Math.round((100 * ok) / (ok + fail)) : 0;
+    return {
+      hook: `SpaceX · ${rate}% success across ${n} flights`,
+      blurb: chart.subtitle || chart.title,
+      score: 81,
+      preferKind: "bar",
+      category: "Space",
+    };
+  }
+
+  if (kind === "nyc311") {
+    const counts = new Map<string, number>();
+    for (let r = 0; r < sample.rows.length; r++) {
+      const t = strAt(sample, r, "complaint_type");
+      if (!t) continue;
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+    let top = "";
+    let topN = 0;
+    for (const [k, v] of counts) {
+      if (v > topN) {
+        topN = v;
+        top = k;
+      }
+    }
+    return {
+      hook: top ? `NYC 311 · ${top} leads (${topN})` : `${n} recent NYC 311 tickets`,
+      blurb: chart.subtitle || "Map complaints or break down by borough.",
+      score: 87,
+      preferKind: "geoPoints",
+      category: "Cities",
+    };
+  }
+
+  if (kind === "covid") {
+    let topCases = 0;
+    let topCountry = "";
+    let topToday = 0;
+    let todayCountry = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const c = numAt(sample, r, "cases");
+      const t = numAt(sample, r, "today_cases");
+      const name = strAt(sample, r, "country");
+      if (c > topCases) {
+        topCases = c;
+        topCountry = name;
+      }
+      if (t > topToday) {
+        topToday = t;
+        todayCountry = name;
+      }
+    }
+    return {
+      hook:
+        topToday > 0
+          ? `${todayCountry} +${Math.round(topToday).toLocaleString()} cases today`
+          : `${topCountry} leads cumulative cases`,
+      blurb: chart.subtitle || chart.title,
+      score: 84 + Math.min(10, topToday / 5000),
+      preferKind: "choropleth",
+      category: "Health",
+    };
+  }
+
+  if (kind === "launches") {
+    const next = strAt(sample, 0, "name") || strAt(sample, 0, "agency");
+    return {
+      hook: next ? `Next up · ${next}` : `${n} upcoming launches`,
+      blurb: chart.subtitle || "Agencies, pads, and rockets on the calendar.",
+      score: 85,
+      preferKind: "bar",
+      category: "Space",
+    };
+  }
+
+  if (kind === "wiki") {
+    return {
+      hook: `${n} recent Wikipedia edits`,
+      blurb: chart.subtitle || "Watch the live edit stream.",
+      score: 82,
+      preferKind: "bar",
+      category: "Culture",
+    };
+  }
+
+  return {
+    hook: chart.title,
+    blurb: chart.subtitle,
+    score: chart.score,
+    category: "Live",
+  };
 }
 
-const FILE_NAMES: Record<SourceKind, string> = {
+const FILE_NAMES: Record<DiscoverKind, string> = {
   usgs: "USGS Quakes",
   meteo: "World Weather",
   nws: "NWS Alerts",
@@ -178,33 +501,102 @@ const FILE_NAMES: Record<SourceKind, string> = {
   iss: "ISS Track",
   hn: "HN Front Page",
   crypto: "Crypto Markets",
+  aq: "Air Quality",
+  fx: "FX Rates",
+  fema: "FEMA Disasters",
+  opensky: "OpenSky Aircraft",
+  countries: "World Countries",
+  spacex: "SpaceX Launches",
+  nyc311: "NYC 311",
+  covid: "COVID Countries",
+  launches: "Space Launches",
+  wiki: "Wikipedia Live",
 };
 
-/** Warm a source and return a chart-ready discover story, or null if empty/failed. */
-async function probeKind(kind: SourceKind): Promise<DiscoverStory | null> {
+async function probeKind(kind: SourceKind): Promise<DiscoverStory[]> {
   try {
     const status = await sourceStatus(kind);
     if (!status.running) {
       await sourceStart(kind);
     }
-    // Brief settle for first poll inserts
-    await new Promise((r) => setTimeout(r, kind === "iss" ? 400 : 200));
-    const snap = await sourceSnapshot(kind, 300);
-    if (!snap.sample.rows.length) return null;
+    await new Promise((r) =>
+      setTimeout(r, kind === "iss" || kind === "opensky" || kind === "countries" ? 550 : 220),
+    );
+    const snap = await sourceSnapshot(kind, 400);
+    if (!snap.sample.rows.length) return [];
     const story = recommendSourceStory(kind, snap.stats, snap.sample);
-    const chart = story.charts[0];
-    if (!chart) return null;
-    const { hook, blurb, score } = hookFor(kind, snap.sample, chart);
-    return {
+    if (!story.charts.length) return [];
+
+    const out: DiscoverStory[] = [];
+    const primary = hookFor(kind, snap.sample, story.charts[0]!);
+    const chart0 = pickPreferredChart(story.charts, primary.preferKind) ?? story.charts[0]!;
+    const usedKinds = new Set<string>([chart0.kind]);
+    out.push({
       id: `discover-${kind}`,
       kind,
       streamPath: `stream://${kind}`,
       fileName: FILE_NAMES[kind] ?? kind,
-      hook,
-      blurb,
+      hook: primary.hook,
+      blurb: primary.blurb,
+      category: primary.category,
+      chartKind: chart0.kind,
+      chart: chart0,
+      score: primary.score,
+      stats: snap.stats,
+      sample: snap.sample,
+    });
+
+    let altIdx = 0;
+    for (const alt of story.charts) {
+      if (out.length >= VARIANTS_PER_SOURCE) break;
+      if (usedKinds.has(alt.kind)) continue;
+      usedKinds.add(alt.kind);
+      altIdx += 1;
+      out.push({
+        id: `discover-${kind}-alt${altIdx}`,
+        kind,
+        streamPath: `stream://${kind}`,
+        fileName: FILE_NAMES[kind] ?? kind,
+        hook: alt.title,
+        blurb: alt.subtitle || primary.blurb,
+        category: primary.category,
+        chartKind: alt.kind,
+        chart: alt,
+        score: Math.max(36, primary.score - 6 * altIdx),
+        stats: snap.stats,
+        sample: snap.sample,
+      });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+async function probeWiki(): Promise<DiscoverStory | null> {
+  try {
+    const status = await streamStatus();
+    if (!status.running) {
+      await streamStart();
+    }
+    await new Promise((r) => setTimeout(r, 800));
+    const snap = await streamSnapshot(300);
+    if (!snap.sample.rows.length) return null;
+    const story = recommendStreamStory(snap.stats, snap.sample);
+    const chart = story.charts[0];
+    if (!chart) return null;
+    const hooked = hookFor("wiki", snap.sample, chart);
+    return {
+      id: "discover-wiki",
+      kind: "wiki",
+      streamPath: "stream://wiki",
+      fileName: FILE_NAMES.wiki,
+      hook: hooked.hook,
+      blurb: hooked.blurb,
+      category: hooked.category,
       chartKind: chart.kind,
       chart,
-      score,
+      score: hooked.score,
       stats: snap.stats,
       sample: snap.sample,
     };
@@ -228,13 +620,44 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   });
 }
 
-/** Scan several live feeds in parallel; return top stories by score. */
-export async function scanDiscoverStories(limit = 5): Promise<DiscoverStory[]> {
-  const results = await Promise.all(
-    SCAN_KINDS.map((k) => withTimeout(probeKind(k), 7_000)),
-  );
-  return results
-    .filter((x): x is DiscoverStory => x != null)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
+export interface ScanDiscoverOptions {
+  limit?: number;
+  includeWiki?: boolean;
+  /** Called as each story arrives (progressive UI). */
+  onStory?: (story: DiscoverStory, soFar: DiscoverStory[]) => void;
+}
+
+/** Scan every live feed in parallel; return top stories by score. */
+export async function scanDiscoverStories(
+  limitOrOpts: number | ScanDiscoverOptions = DISCOVER_STORY_LIMIT,
+): Promise<DiscoverStory[]> {
+  const opts: ScanDiscoverOptions =
+    typeof limitOrOpts === "number" ? { limit: limitOrOpts } : limitOrOpts;
+  const limit = opts.limit ?? DISCOVER_STORY_LIMIT;
+  const includeWiki = opts.includeWiki !== false;
+  const collected: DiscoverStory[] = [];
+
+  const pushMany = (stories: DiscoverStory[]) => {
+    for (const story of stories) {
+      collected.push(story);
+      collected.sort((a, b) => b.score - a.score);
+      opts.onStory?.(story, [...collected].slice(0, limit));
+    }
+  };
+
+  const jobs: Promise<void>[] = SCAN_KINDS.map(async (k) => {
+    const s = await withTimeout(probeKind(k), 10_000);
+    pushMany(s ?? []);
+  });
+  if (includeWiki) {
+    jobs.push(
+      (async () => {
+        const s = await withTimeout(probeWiki(), 10_000);
+        if (s) pushMany([s]);
+      })(),
+    );
+  }
+  await Promise.all(jobs);
+
+  return collected.sort((a, b) => b.score - a.score).slice(0, limit);
 }

@@ -1,14 +1,9 @@
 // =================================================================
 // Loom — Poll-Based Data Sources
 // =================================================================
-// Four public data feeds, each polled on a background interval:
-//   1. USGS Earthquake Hazards   (GeoJSON, ~60s)
-//   2. Open-Meteo Weather        (JSON, on-demand + 5min refresh)
-//   3. NWS Alerts                (GeoJSON, ~120s)
-//   4. World Bank Indicators     (JSON, on-demand load)
-//
-// All share a common SourceInstance (running/cancel/event count)
-// and insert into per-source DuckDB tables.
+// Public data feeds polled on background intervals into DuckDB tables:
+//   USGS, Open-Meteo, NWS, World Bank, ISS, HN, Crypto,
+//   Air Quality (Open-Meteo), FX (Frankfurter), FEMA, OpenSky.
 // =================================================================
 
 use crate::db::{duckdb_value_to_json, ColumnInfo, LoomDb, QueryResult};
@@ -116,6 +111,15 @@ pub struct SourcesState {
     pub iss: SourceInstance,
     pub hn: SourceInstance,
     pub crypto: SourceInstance,
+    pub aq: SourceInstance,
+    pub fx: SourceInstance,
+    pub fema: SourceInstance,
+    pub opensky: SourceInstance,
+    pub countries: SourceInstance,
+    pub spacex: SourceInstance,
+    pub nyc311: SourceInstance,
+    pub covid: SourceInstance,
+    pub launches: SourceInstance,
 }
 
 impl SourcesState {
@@ -128,6 +132,15 @@ impl SourcesState {
             iss: SourceInstance::new(),
             hn: SourceInstance::new(),
             crypto: SourceInstance::new(),
+            aq: SourceInstance::new(),
+            fx: SourceInstance::new(),
+            fema: SourceInstance::new(),
+            opensky: SourceInstance::new(),
+            countries: SourceInstance::new(),
+            spacex: SourceInstance::new(),
+            nyc311: SourceInstance::new(),
+            covid: SourceInstance::new(),
+            launches: SourceInstance::new(),
         }
     }
 
@@ -140,6 +153,15 @@ impl SourcesState {
             "iss" => Some(&self.iss),
             "hn" => Some(&self.hn),
             "crypto" => Some(&self.crypto),
+            "aq" => Some(&self.aq),
+            "fx" => Some(&self.fx),
+            "fema" => Some(&self.fema),
+            "opensky" => Some(&self.opensky),
+            "countries" => Some(&self.countries),
+            "spacex" => Some(&self.spacex),
+            "nyc311" => Some(&self.nyc311),
+            "covid" => Some(&self.covid),
+            "launches" => Some(&self.launches),
             _ => None,
         }
     }
@@ -154,6 +176,15 @@ fn table_for_kind(kind: &str) -> &'static str {
         "iss" => "iss_track",
         "hn" => "hn_stories",
         "crypto" => "crypto_markets",
+        "aq" => "air_quality",
+        "fx" => "fx_rates",
+        "fema" => "fema_disasters",
+        "opensky" => "opensky_aircraft",
+        "countries" => "world_countries",
+        "spacex" => "spacex_launches",
+        "nyc311" => "nyc_311",
+        "covid" => "covid_countries",
+        "launches" => "space_launches",
         _ => "unknown",
     }
 }
@@ -239,6 +270,104 @@ pub fn ensure_tables(db: &LoomDb) -> Result<(), String> {
             volume_24h DOUBLE,
             change_24h_pct DOUBLE,
             rank INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS air_quality (
+            ts TIMESTAMP,
+            city VARCHAR,
+            latitude DOUBLE,
+            longitude DOUBLE,
+            pm2_5 DOUBLE,
+            pm10 DOUBLE,
+            ozone DOUBLE,
+            nitrogen_dioxide DOUBLE,
+            european_aqi DOUBLE
+        );
+        CREATE TABLE IF NOT EXISTS fx_rates (
+            as_of DATE,
+            base VARCHAR,
+            quote VARCHAR,
+            rate DOUBLE,
+            change_pct DOUBLE
+        );
+        CREATE TABLE IF NOT EXISTS fema_disasters (
+            id VARCHAR,
+            disaster_number INTEGER,
+            state VARCHAR,
+            declaration_type VARCHAR,
+            declaration_title VARCHAR,
+            incident_type VARCHAR,
+            declaration_date TIMESTAMP,
+            incident_begin TIMESTAMP,
+            fy_declared INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS opensky_aircraft (
+            icao24 VARCHAR,
+            callsign VARCHAR,
+            origin_country VARCHAR,
+            longitude DOUBLE,
+            latitude DOUBLE,
+            baro_altitude DOUBLE,
+            velocity DOUBLE,
+            true_track DOUBLE,
+            on_ground BOOLEAN,
+            ts TIMESTAMP
+        );
+        CREATE TABLE IF NOT EXISTS world_countries (
+            name VARCHAR,
+            cca3 VARCHAR,
+            region VARCHAR,
+            subregion VARCHAR,
+            population BIGINT,
+            area DOUBLE,
+            density DOUBLE,
+            capital VARCHAR,
+            independent BOOLEAN
+        );
+        CREATE TABLE IF NOT EXISTS spacex_launches (
+            id VARCHAR,
+            name VARCHAR,
+            date_utc TIMESTAMP,
+            success BOOLEAN,
+            upcoming BOOLEAN,
+            rocket VARCHAR,
+            flight_number INTEGER,
+            details VARCHAR
+        );
+        CREATE TABLE IF NOT EXISTS nyc_311 (
+            unique_key VARCHAR,
+            created_date TIMESTAMP,
+            complaint_type VARCHAR,
+            descriptor VARCHAR,
+            borough VARCHAR,
+            city VARCHAR,
+            latitude DOUBLE,
+            longitude DOUBLE,
+            status VARCHAR,
+            agency VARCHAR
+        );
+        CREATE TABLE IF NOT EXISTS covid_countries (
+            country VARCHAR,
+            cases BIGINT,
+            today_cases BIGINT,
+            deaths BIGINT,
+            today_deaths BIGINT,
+            recovered BIGINT,
+            active BIGINT,
+            cases_per_million DOUBLE,
+            deaths_per_million DOUBLE,
+            population BIGINT,
+            continent VARCHAR
+        );
+        CREATE TABLE IF NOT EXISTS space_launches (
+            id VARCHAR,
+            name VARCHAR,
+            net TIMESTAMP,
+            status VARCHAR,
+            pad VARCHAR,
+            location VARCHAR,
+            agency VARCHAR,
+            rocket VARCHAR,
+            orbital BOOLEAN
         );",
     )
     .map_err(|e| e.to_string())
@@ -742,6 +871,38 @@ pub async fn source_start(
                         return;
                     }
                 };
+                // Seed one orbit (~10 samples) so trail ribbons work immediately.
+                // wheretheiss.at allows ≤10 timestamps per request.
+                {
+                    let empty = true;
+                    if let Ok(c) = db_c.conn.lock() {
+                        empty = c
+                            .query_row("SELECT COUNT(*) FROM iss_track", [], |r| r.get::<_, i64>(0))
+                            .map(|n| n == 0)
+                            .unwrap_or(true);
+                    }
+                    if empty {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        let stamps: Vec<String> = (0..10)
+                            .rev()
+                            .map(|i| (now - i * 600).to_string())
+                            .collect();
+                        let url = format!(
+                            "https://api.wheretheiss.at/v1/satellites/25544/positions?timestamps={}",
+                            stamps.join(",")
+                        );
+                        if let Ok(res) = client.get(&url).send().await {
+                            if let Ok(body) = res.json::<serde_json::Value>().await {
+                                if let Ok(n) = iss_insert_many(&db_c, &body) {
+                                    inst_c.1.fetch_add(n as u64, Ordering::Relaxed);
+                                }
+                            }
+                        }
+                    }
+                }
                 loop {
                     if let Ok(res) = client.get(ISS_URL).send().await {
                         if let Ok(body) = res.json::<serde_json::Value>().await {
@@ -818,6 +979,275 @@ pub async fn source_start(
                 inst_c.0.store(false, Ordering::Relaxed);
             });
         }
+        "aq" => {
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(c) = db_c.conn.lock() {
+                        let _ = c.execute_batch("DELETE FROM air_quality");
+                    }
+                    let mut total = 0u32;
+                    for city in CITIES {
+                        let url = format!(
+                            "https://air-quality-api.open-meteo.com/v1/air-quality?latitude={}&longitude={}&current=pm2_5,pm10,ozone,nitrogen_dioxide,european_aqi",
+                            city.lat, city.lon
+                        );
+                        if let Ok(res) = client.get(&url).send().await {
+                            if let Ok(body) = res.json::<serde_json::Value>().await {
+                                if let Ok(n) = aq_insert_city(&db_c, city.name, city.lat, city.lon, &body) {
+                                    total += n;
+                                }
+                            }
+                        }
+                    }
+                    inst_c.1.store(total as u64, Ordering::Relaxed);
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "fx" => {
+            const FX_URL: &str = "https://api.frankfurter.app/latest";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(FX_URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(c) = db_c.conn.lock() {
+                                let _ = c.execute_batch("DELETE FROM fx_rates");
+                            }
+                            if let Ok(n) = fx_insert(&db_c, &body) {
+                                inst_c.1.store(n as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(3600)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "fema" => {
+            const FEMA_URL: &str = "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?$top=200&$orderby=declarationDate%20desc";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(FEMA_URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(c) = db_c.conn.lock() {
+                                let _ = c.execute_batch("DELETE FROM fema_disasters");
+                            }
+                            if let Ok(n) = fema_insert(&db_c, &body) {
+                                inst_c.1.store(n as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(600)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "opensky" => {
+            // Contiguous US bounding box — keeps payload manageable without auth.
+            const OS_URL: &str = "https://opensky-network.org/api/states/all?lamin=24.5&lomin=-125.0&lamax=49.5&lomax=-66.5";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(OS_URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            // Append snapshots (do not wipe) so trail ribbons can stitch paths.
+                            if let Ok(n) = opensky_insert(&db_c, &body) {
+                                inst_c.1.fetch_add(n as u64, Ordering::Relaxed);
+                                let _ = trim_table(&db_c, "opensky_aircraft");
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "countries" => {
+            const URL: &str = "https://restcountries.com/v3.1/all?fields=name,cca3,region,subregion,population,area,capital,independent";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                if let Ok(res) = client.get(URL).send().await {
+                    if let Ok(body) = res.json::<serde_json::Value>().await {
+                        if let Ok(c) = db_c.conn.lock() {
+                            let _ = c.execute_batch("DELETE FROM world_countries");
+                        }
+                        if let Ok(n) = countries_insert(&db_c, &body) {
+                            inst_c.1.store(n as u64, Ordering::Relaxed);
+                        }
+                    }
+                }
+                // One-shot snapshot (countries rarely need a poll loop)
+                loop {
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(86_400)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "spacex" => {
+            const URL: &str = "https://api.spacexdata.com/v5/launches/past";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(c) = db_c.conn.lock() {
+                                let _ = c.execute_batch("DELETE FROM spacex_launches");
+                            }
+                            if let Ok(n) = spacex_insert(&db_c, &body) {
+                                inst_c.1.store(n as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(3600)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "nyc311" => {
+            const URL: &str = "https://data.cityofnewyork.us/resource/erm2-nwe9.json?$limit=400&$order=created_date%20DESC";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(c) = db_c.conn.lock() {
+                                let _ = c.execute_batch("DELETE FROM nyc_311");
+                            }
+                            if let Ok(n) = nyc311_insert(&db_c, &body) {
+                                inst_c.1.store(n as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(300)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "covid" => {
+            const URL: &str = "https://disease.sh/v3/covid-19/countries";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(c) = db_c.conn.lock() {
+                                let _ = c.execute_batch("DELETE FROM covid_countries");
+                            }
+                            if let Ok(n) = covid_insert(&db_c, &body) {
+                                inst_c.1.store(n as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(1800)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
+        "launches" => {
+            const URL: &str = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40&mode=list";
+            tokio::spawn(async move {
+                let client = match build_client() {
+                    Ok(c) => c,
+                    Err(_) => {
+                        inst_c.0.store(false, Ordering::Relaxed);
+                        return;
+                    }
+                };
+                loop {
+                    if let Ok(res) = client.get(URL).send().await {
+                        if let Ok(body) = res.json::<serde_json::Value>().await {
+                            if let Ok(c) = db_c.conn.lock() {
+                                let _ = c.execute_batch("DELETE FROM space_launches");
+                            }
+                            if let Ok(n) = launches_insert(&db_c, &body) {
+                                inst_c.1.store(n as u64, Ordering::Relaxed);
+                            }
+                        }
+                    }
+                    tokio::select! {
+                        _ = &mut cancel_rx => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(1800)) => {}
+                    }
+                }
+                inst_c.0.store(false, Ordering::Relaxed);
+            });
+        }
         _ => return Err("Unknown source".to_string()),
     }
     Ok(())
@@ -841,6 +1271,19 @@ fn iss_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
     )
     .map_err(|e| e.to_string())?;
     Ok(1)
+}
+
+fn iss_insert_many(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let arr = body
+        .as_array()
+        .ok_or_else(|| "ISS trail: expected array".to_string())?;
+    let mut n = 0u32;
+    for item in arr {
+        if iss_insert(db, item).is_ok() {
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 fn hn_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
@@ -934,6 +1377,501 @@ fn crypto_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
         let _ = conn.execute(
             "INSERT INTO crypto_markets VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             params![id, symbol, name, price, mcap, vol, chg, rank],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn aq_insert_city(
+    db: &LoomDb,
+    city: &str,
+    lat: f64,
+    lon: f64,
+    body: &serde_json::Value,
+) -> Result<u32, String> {
+    let cur = body.get("current").ok_or("no current")?;
+    let pm25 = cur.get("pm2_5").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let pm10 = cur.get("pm10").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let o3 = cur.get("ozone").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let no2 = cur
+        .get("nitrogen_dioxide")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let aqi = cur
+        .get("european_aqi")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let ts = cur
+        .get("time")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    conn.execute(
+        "INSERT INTO air_quality VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        params![ts, city, lat, lon, pm25, pm10, o3, no2, aqi],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(1)
+}
+
+fn fx_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let base = body
+        .get("base")
+        .and_then(|v| v.as_str())
+        .unwrap_or("EUR")
+        .to_string();
+    let as_of = body
+        .get("date")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let rates = body
+        .get("rates")
+        .and_then(|v| v.as_object())
+        .ok_or("no rates")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for (quote, val) in rates {
+        let rate = val.as_f64().unwrap_or(0.0);
+        let _ = conn.execute(
+            "INSERT INTO fx_rates VALUES (?, ?, ?, ?, ?)",
+            params![as_of, base, quote, rate, 0.0_f64],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn fema_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let list = body
+        .get("DisasterDeclarationsSummaries")
+        .and_then(|v| v.as_array())
+        .ok_or("no fema rows")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for row in list.iter().take(200) {
+        let id = row
+            .get("id")
+            .or_else(|| row.get("disasterNumber"))
+            .map(|v| match v {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .unwrap_or_default();
+        let disaster_number = row
+            .get("disasterNumber")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let state = row
+            .get("state")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let declaration_type = row
+            .get("declarationType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let declaration_title = row
+            .get("declarationTitle")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let incident_type = row
+            .get("incidentType")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let declaration_date = row
+            .get("declarationDate")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let incident_begin = row
+            .get("incidentBeginDate")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let fy = row
+            .get("fyDeclared")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let _ = conn.execute(
+            "INSERT INTO fema_disasters VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                id,
+                disaster_number,
+                state,
+                declaration_type,
+                declaration_title,
+                incident_type,
+                declaration_date,
+                incident_begin,
+                fy
+            ],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn opensky_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let states = body
+        .get("states")
+        .and_then(|v| v.as_array())
+        .ok_or("no states")?;
+    let time = body.get("time").and_then(|v| v.as_i64()).unwrap_or(0);
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for st in states.iter().take(800) {
+        let arr = match st.as_array() {
+            Some(a) if a.len() >= 9 => a,
+            _ => continue,
+        };
+        let lon = arr.get(5).and_then(|v| v.as_f64());
+        let lat = arr.get(6).and_then(|v| v.as_f64());
+        let (Some(lon), Some(lat)) = (lon, lat) else {
+            continue;
+        };
+        let icao = arr
+            .get(0)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let callsign = arr
+            .get(1)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let country = arr
+            .get(2)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let alt = arr.get(7).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let vel = arr.get(9).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let track = arr.get(10).and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let on_ground = arr.get(8).and_then(|v| v.as_bool()).unwrap_or(false);
+        let _ = conn.execute(
+            "INSERT INTO opensky_aircraft VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, to_timestamp(?))",
+            params![icao, callsign, country, lon, lat, alt, vel, track, on_ground, time],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn countries_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let list = body.as_array().ok_or("no countries")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for row in list {
+        let name = row
+            .get("name")
+            .and_then(|v| v.get("common"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if name.is_empty() {
+            continue;
+        }
+        let cca3 = row
+            .get("cca3")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let region = row
+            .get("region")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let subregion = row
+            .get("subregion")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let population = row.get("population").and_then(|v| v.as_i64()).unwrap_or(0);
+        let area = row.get("area").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let density = if area > 0.0 {
+            population as f64 / area
+        } else {
+            0.0
+        };
+        let capital = row
+            .get("capital")
+            .and_then(|v| v.as_array())
+            .and_then(|a| a.first())
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let independent = row
+            .get("independent")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let _ = conn.execute(
+            "INSERT INTO world_countries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                name,
+                cca3,
+                region,
+                subregion,
+                population,
+                area,
+                density,
+                capital,
+                independent
+            ],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn spacex_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let list = body.as_array().ok_or("no launches")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    // Keep the most recent ~120 launches (API returns chronological; take last).
+    let start = list.len().saturating_sub(120);
+    for row in &list[start..] {
+        let id = row
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let name = row
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let date_utc = row
+            .get("date_utc")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let success = row.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+        let upcoming = row.get("upcoming").and_then(|v| v.as_bool()).unwrap_or(false);
+        let rocket = row
+            .get("rocket")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let flight_number = row
+            .get("flight_number")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0) as i32;
+        let details = row
+            .get("details")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .chars()
+            .take(280)
+            .collect::<String>();
+        let _ = conn.execute(
+            "INSERT INTO spacex_launches VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            params![id, name, date_utc, success, upcoming, rocket, flight_number, details],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn nyc311_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let list = body.as_array().ok_or("no 311")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for row in list {
+        let unique_key = row
+            .get("unique_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let created = row
+            .get("created_date")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let complaint = row
+            .get("complaint_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let descriptor = row
+            .get("descriptor")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let borough = row
+            .get("borough")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let city = row
+            .get("city")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let lat = row
+            .get("latitude")
+            .and_then(|v| v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_f64()))
+            .unwrap_or(0.0);
+        let lon = row
+            .get("longitude")
+            .and_then(|v| v.as_str().and_then(|s| s.parse().ok()).or_else(|| v.as_f64()))
+            .unwrap_or(0.0);
+        let status = row
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let agency = row
+            .get("agency")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = conn.execute(
+            "INSERT INTO nyc_311 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                unique_key,
+                created,
+                complaint,
+                descriptor,
+                borough,
+                city,
+                lat,
+                lon,
+                status,
+                agency
+            ],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn covid_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let list = body.as_array().ok_or("no covid")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for row in list {
+        let country = row
+            .get("country")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if country.is_empty() {
+            continue;
+        }
+        let cases = row.get("cases").and_then(|v| v.as_i64()).unwrap_or(0);
+        let today_cases = row.get("todayCases").and_then(|v| v.as_i64()).unwrap_or(0);
+        let deaths = row.get("deaths").and_then(|v| v.as_i64()).unwrap_or(0);
+        let today_deaths = row.get("todayDeaths").and_then(|v| v.as_i64()).unwrap_or(0);
+        let recovered = row.get("recovered").and_then(|v| v.as_i64()).unwrap_or(0);
+        let active = row.get("active").and_then(|v| v.as_i64()).unwrap_or(0);
+        let cpm = row
+            .get("casesPerOneMillion")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let dpm = row
+            .get("deathsPerOneMillion")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let population = row.get("population").and_then(|v| v.as_i64()).unwrap_or(0);
+        let continent = row
+            .get("continent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let _ = conn.execute(
+            "INSERT INTO covid_countries VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![
+                country,
+                cases,
+                today_cases,
+                deaths,
+                today_deaths,
+                recovered,
+                active,
+                cpm,
+                dpm,
+                population,
+                continent
+            ],
+        );
+        n += 1;
+    }
+    Ok(n)
+}
+
+fn launches_insert(db: &LoomDb, body: &serde_json::Value) -> Result<u32, String> {
+    let list = body
+        .get("results")
+        .and_then(|v| v.as_array())
+        .ok_or("no launches")?;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut n = 0u32;
+    for row in list {
+        let id = row
+            .get("id")
+            .map(|v| match v {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            })
+            .unwrap_or_default();
+        let name = row
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let net = row
+            .get("net")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let status = row
+            .get("status")
+            .and_then(|v| v.get("name").or_else(|| v.get("abbrev")))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let pad = row
+            .get("pad")
+            .and_then(|v| v.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let location = row
+            .get("pad")
+            .and_then(|v| v.get("location"))
+            .and_then(|v| v.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let agency = row
+            .get("launch_service_provider")
+            .and_then(|v| v.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let rocket = row
+            .get("rocket")
+            .and_then(|v| v.get("configuration"))
+            .and_then(|v| v.get("full_name").or_else(|| v.get("name")))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let orbital = row
+            .get("mission")
+            .and_then(|v| v.get("type"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_lowercase().contains("orbit"))
+            .unwrap_or(false);
+        let _ = conn.execute(
+            "INSERT INTO space_launches VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            params![id, name, net, status, pad, location, agency, rocket, orbital],
         );
         n += 1;
     }

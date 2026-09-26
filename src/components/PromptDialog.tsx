@@ -46,16 +46,16 @@ function PromptDialogForm({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 overflow-hidden"
+      className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 loom-overlay animate-fade-in overflow-hidden"
       onClick={handleCancel}
       role="dialog"
       aria-modal="true"
     >
       <div
-        className="loom-card max-w-sm w-full p-4 space-y-4 shadow-2xl border-loom-border bg-loom-surface rounded-lg"
+        className="loom-card max-w-sm w-full p-4 sm:p-5 space-y-4 shadow-loom-lg border-loom-border bg-loom-surface rounded-t-2xl sm:rounded-xl animate-slide-up mb-[var(--safe-bottom)] sm:mb-0"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 className="text-sm font-semibold text-loom-text">{dialog.title}</h3>
+        <h3 className="text-sm font-semibold text-loom-text tracking-tight">{dialog.title}</h3>
         <input
           ref={inputRef}
           type="text"

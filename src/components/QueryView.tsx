@@ -41,6 +41,15 @@ export function QueryView() {
     "stream://iss": "iss_track",
     "stream://hn": "hn_stories",
     "stream://crypto": "crypto_markets",
+    "stream://aq": "air_quality",
+    "stream://fx": "fx_rates",
+    "stream://fema": "fema_disasters",
+    "stream://opensky": "opensky_aircraft",
+    "stream://countries": "world_countries",
+    "stream://spacex": "spacex_launches",
+    "stream://nyc311": "nyc_311",
+    "stream://covid": "covid_countries",
+    "stream://launches": "space_launches",
   };
   const sourceTable = selectedFile?.path ? sourceTableMap[selectedFile.path] : undefined;
   const defaultSql = isStream
@@ -112,7 +121,7 @@ export function QueryView() {
     setQuerySql(localSql);
     try {
       const isStream = selectedFile.path === "stream://wiki";
-      const sourceKindMatch = selectedFile.path.match(/^stream:\/\/(usgs|meteo|nws|world_bank|iss|hn|crypto)$/);
+      const sourceKindMatch = selectedFile.path.match(/^stream:\/\/(usgs|meteo|nws|world_bank|iss|hn|crypto|aq|fx|fema|opensky|countries|spacex|nyc311|covid|launches)$/);
       const result = isStream
         ? await streamQuery(localSql, 10000)
         : sourceKindMatch
@@ -244,7 +253,7 @@ export function QueryView() {
             </select>
           )}
           {(() => {
-            const m = selectedFile?.path?.match(/^stream:\/\/(usgs|meteo|nws|world_bank|iss|hn|crypto)$/);
+            const m = selectedFile?.path?.match(/^stream:\/\/(usgs|meteo|nws|world_bank|iss|hn|crypto|aq|fx|fema|opensky|countries|spacex|nyc311|covid|launches)$/);
             const sk = m?.[1] as string | undefined;
             const snippets = sk ? SOURCE_SQL_SNIPPETS[sk] : undefined;
             if (!snippets?.length) return null;

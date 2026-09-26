@@ -36,6 +36,16 @@ import {
   type ChartRecommendation,
 } from "@/lib/recommendations";
 import { getChartRenderIssue, formatChartAggregationSummary, chartCapabilities } from "@/lib/chartSupport";
+import { isOddChartKind, renderOddChart } from "@/lib/oddCharts";
+import {
+  extractGpuScenePoints,
+  isGpuSceneKind,
+  isWebGpuDrawableScene,
+  renderGpuSceneCanvas,
+  type GpuSceneKind,
+} from "@/lib/gpuScenes";
+import { isGeoMapKind, renderGeoMapCanvas, isWebGpuGlobeKind } from "@/lib/geoMaps";
+import { LoomSceneRenderer } from "@/lib/webgpuScenes";
 import {
   resolveChartPad,
   contrastingInk,
@@ -110,17 +120,26 @@ export function ChartView() {
   // Framing uses the chart host width when Auto — window width would say
   // "desktop" while side panels leave a phone-sized stage.
   const [hostSize, setHostSize] = useState({ w: 800, h: 500 });
+  const socialExportTarget = useLoomStore((s) => s.socialExportTarget);
+  const socialExportReady = useLoomStore((s) => s.socialExportReady);
   // Phones (and panel-squeezed hosts) always fill — social aspect framing on a
   // already-narrow stage becomes a postage-stamp letterbox (e.g. 16:9 → 278×156).
-  const hostIsNarrow = hostSize.w > 0 && hostSize.w < 768;
+  // Platform export overrides this so we can still hit exact pixel targets.
+  const hostIsNarrow = hostSize.w > 0 && hostSize.w < 768 && !socialExportTarget;
   const chartAspect =
-    isMobile || hostIsNarrow ? "free" : (appSettings.chartAspect ?? "free");
-  const chartDevice = isMobile
-    ? "mobile"
-    : resolveDevice(
-      appSettings.chartDevice ?? "auto",
-      (appSettings.chartDevice ?? "auto") === "auto" ? hostSize.w || viewportW : viewportW,
-    );
+    socialExportTarget?.presetId && socialExportTarget.presetId !== "current"
+      ? (appSettings.chartAspect ?? "free")
+      : isMobile || hostIsNarrow
+        ? "free"
+        : (appSettings.chartAspect ?? "free");
+  const chartDevice = socialExportTarget
+    ? "desktop"
+    : isMobile
+      ? "mobile"
+      : resolveDevice(
+          appSettings.chartDevice ?? "auto",
+          (appSettings.chartDevice ?? "auto") === "auto" ? hostSize.w || viewportW : viewportW,
+        );
 
   const openChartEditor = useCallback(() => {
     setPanelTab("chart");
@@ -343,19 +362,28 @@ export function ChartView() {
   const axesOverlayRef = useRef<HTMLCanvasElement>(null);
   const stageHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartFrameSize = useMemo(
-    () =>
-      fitChartFrame({
-        hostW: hostSize.w,
-        hostH: hostSize.h,
-        aspectId: chartAspect,
-        device: chartDevice,
-        gutter: 10,
-      }),
-    [hostSize.w, hostSize.h, chartAspect, chartDevice],
-  );
+  const chartFrameSize = useMemo(() => {
+    if (socialExportTarget) {
+      return {
+        width: socialExportTarget.width,
+        height: socialExportTarget.height,
+        aspectLocked: true,
+      };
+    }
+    return fitChartFrame({
+      hostW: hostSize.w,
+      hostH: hostSize.h,
+      aspectId: chartAspect,
+      device: chartDevice,
+      gutter: 10,
+    });
+  }, [hostSize.w, hostSize.h, chartAspect, chartDevice, socialExportTarget]);
   const rendererRef = useRef<LoomRenderer | null>(null);
+  const sceneRendererRef = useRef<LoomSceneRenderer | null>(null);
   const [gpuReady, setGpuReady] = useState(false);
+  const [sceneOrbit, setSceneOrbit] = useState({ yaw: 0.55, pitch: 0.35, zoom: 1 });
+  const sceneOrbitDragRef = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
+  const [sceneTime, setSceneTime] = useState(0);
   const hasSmartOverlays =
     smartResults &&
     ((smartResults.anomaly?.rowIndices?.length ?? 0) > 0 ||
@@ -366,10 +394,11 @@ export function ChartView() {
   // Story/dashboard PNG capture must use Canvas 2D — WebGPU readback often
   // yields axes-only frames (grid, no points) when tiles are snapped quickly.
   const previewCaptureActive = useLoomStore((s) => !!s.previewCapture);
+  const forceCanvasCapture = previewCaptureActive || !!socialExportTarget || socialExportReady;
   const useWebGPUScatter =
     activeChart?.kind === "scatter" &&
     gpuReady &&
-    !previewCaptureActive &&
+    !forceCanvasCapture &&
     !hasSmartOverlays &&
     (chartVisualOverrides.markShape ?? "circle") === "circle" &&
     !chartVisualOverrides.markStroke &&
@@ -378,6 +407,24 @@ export function ChartView() {
     !activeChart?.glowField &&
     !activeChart?.outlineField &&
     !activeChart?.opacityField;
+  const useWebGpuScene =
+    !!activeChart &&
+    isWebGpuDrawableScene(activeChart.kind) &&
+    gpuReady &&
+    !forceCanvasCapture &&
+    !!sceneRendererRef.current;
+  const useWebGpuGlobe =
+    !!activeChart &&
+    isWebGpuGlobeKind(activeChart.kind) &&
+    gpuReady &&
+    !forceCanvasCapture &&
+    !!sceneRendererRef.current;
+  const orbitEnabled =
+    !!activeChart &&
+    (activeChart.kind === "scatter3d" ||
+      activeChart.kind === "firefly" ||
+      activeChart.kind === "globe" ||
+      activeChart.kind === "globeTrail");
   const [canvasSized, setCanvasSized] = useState(false);
   const exportStateRef = useRef({ activeChart, gpuReady, vegaSpec, sampleRows, chartVisualOverrides });
   exportStateRef.current = { activeChart, gpuReady, vegaSpec, sampleRows, chartVisualOverrides };
@@ -715,15 +762,58 @@ export function ChartView() {
     setCrosshairPos,
   ]);
 
-  // Initialize WebGPU on its own canvas (a canvas can only have one context: webgpu OR 2d)
+  // Initialize WebGPU — scatter renderer by default; scene renderer when a GPU scene is active.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const renderer = new LoomRenderer();
-    rendererRef.current = renderer;
-    renderer.init(canvas).then((ok) => { if (ok) setGpuReady(true); });
-    return () => { renderer.destroy(); rendererRef.current = null; setGpuReady(false); };
-  }, []);
+    let cancelled = false;
+    const kind = activeChart?.kind ?? "";
+    const wantScene = isWebGpuDrawableScene(kind);
+
+    rendererRef.current?.destroy();
+    sceneRendererRef.current?.destroy();
+    rendererRef.current = null;
+    sceneRendererRef.current = null;
+    setGpuReady(false);
+
+    void (async () => {
+      if (wantScene) {
+        const scene = new LoomSceneRenderer();
+        sceneRendererRef.current = scene;
+        const ok = await scene.init(canvas);
+        if (!cancelled && ok) setGpuReady(true);
+        else if (!cancelled) sceneRendererRef.current = null;
+      } else {
+        const renderer = new LoomRenderer();
+        rendererRef.current = renderer;
+        const ok = await renderer.init(canvas);
+        if (!cancelled && ok) setGpuReady(true);
+        else if (!cancelled) rendererRef.current = null;
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      rendererRef.current?.destroy();
+      sceneRendererRef.current?.destroy();
+      rendererRef.current = null;
+      sceneRendererRef.current = null;
+      setGpuReady(false);
+    };
+  }, [activeChart?.kind]);
+
+  // Firefly pulse clock
+  useEffect(() => {
+    if (activeChart?.kind !== "firefly" || !useWebGpuScene) return;
+    let raf = 0;
+    const start = performance.now();
+    const tick = (now: number) => {
+      setSceneTime((now - start) / 1000);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [activeChart?.kind, useWebGpuScene]);
 
   // Measure the stage host so we can fit social / device frames inside it.
   useEffect(() => {
@@ -753,7 +843,8 @@ export function ChartView() {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width === 0 || height === 0) continue;
-        const dpr = window.devicePixelRatio || 1;
+        const target = useLoomStore.getState().socialExportTarget;
+        const dpr = target?.pixelRatio ?? (window.devicePixelRatio || 1);
         const w = Math.round(width * dpr);
         const h = Math.round(height * dpr);
         [canvas, canvas2D, axesOverlay].forEach(c => {
@@ -768,7 +859,7 @@ export function ChartView() {
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [suggestionsExpanded, chartFrameSize.width, chartFrameSize.height]);
+  }, [suggestionsExpanded, chartFrameSize.width, chartFrameSize.height, socialExportTarget]);
 
   // Register PNG/SVG export handlers for the Export tab
   useEffect(() => {
@@ -778,7 +869,10 @@ export function ChartView() {
       const canvas2D = canvas2DRef.current;
       const axesOverlay = axesOverlayRef.current;
       if (!canvas || !canvas2D || !ac) return null;
-      const capturing = !!useLoomStore.getState().previewCapture;
+      const st = useLoomStore.getState();
+      const capturing =
+        !!st.previewCapture || !!st.socialExportTarget || st.socialExportReady;
+      // Always prefer Canvas 2D during any capture path (WebGPU readback is flaky).
       const useWebGPU =
         !capturing &&
         ac.kind === "scatter" &&
@@ -800,8 +894,8 @@ export function ChartView() {
         off.height = h;
         const ctx = off.getContext("2d");
         if (!ctx) return null;
-        const themeBg = getThemeUiColors(useLoomStore.getState().appSettings.theme).bg;
-        ctx.fillStyle = themeBg;
+        const themeUi = getThemeUiColors(st.appSettings.theme);
+        ctx.fillStyle = themeUi.bg;
         ctx.fillRect(0, 0, w, h);
         // 2D layer first (theme fill / full chart); WebGPU scatter on top; axes last
         try {
@@ -822,6 +916,18 @@ export function ChartView() {
           } catch {
             /* ignore */
           }
+        }
+        // Attribution burn-in for platform / social PNG exports
+        if (st.socialExportTarget) {
+          const { drawExportBurnIn } = await import("@/lib/socialExport");
+          const sourceLabel = st.selectedFile?.name ?? null;
+          drawExportBurnIn(ctx, w, h, {
+            burnIn: st.exportBurnIn,
+            sourceLabel,
+            themeText: themeUi.text,
+            themeMuted: themeUi.muted,
+            themeBg: themeUi.bg,
+          });
         }
         return new Promise<Blob | null>((resolve) => {
           off.toBlob((blob) => resolve(blob), "image/png");
@@ -1288,6 +1394,65 @@ export function ChartView() {
     if (!canvasSized || !activeChart || !sampleRows) return;
     if (activeChart.kind !== "scatter") scatterDataRef.current = null;
 
+    // WebGPU particle / 3D scenes (scatter3d, firefly) + live globe points
+    if (
+      (useWebGpuScene && isWebGpuDrawableScene(activeChart.kind) && sceneRendererRef.current) ||
+      (useWebGpuGlobe && isWebGpuGlobeKind(activeChart.kind) && sceneRendererRef.current)
+    ) {
+      const canvas2D = canvas2DRef.current;
+      if (canvas2D) {
+        const ctx = canvas2D.getContext("2d");
+        if (ctx) {
+          const dpr = window.devicePixelRatio || 1;
+          const w = canvas2D.width / dpr;
+          const h = canvas2D.height / dpr;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          ctx.clearRect(0, 0, w, h);
+          ctx.fillStyle = themeUi.bg;
+          ctx.fillRect(0, 0, w, h);
+          ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+      }
+      const packed = extractGpuScenePoints(
+        sampleRows.rows,
+        sampleRows.columns,
+        {
+          xField: activeChart.xField,
+          yField: activeChart.yField,
+          zField: activeChart.zField,
+          colorField: activeChart.colorField,
+          sizeField: activeChart.sizeField,
+          timeField: activeChart.timeField,
+          trailId: activeChart.trailId,
+        },
+      );
+      if (packed) {
+        const canvas = canvasRef.current;
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas ? canvas.width / dpr : 800;
+        const h = canvas ? canvas.height / dpr : 600;
+        const mode = isWebGpuGlobeKind(activeChart.kind)
+          ? "globe"
+          : (activeChart.kind as GpuSceneKind);
+        sceneRendererRef.current.uploadData(packed.points, packed, {
+          pointSize: pointSize * (activeChart.kind === "firefly" ? 1.4 : activeChart.kind === "globe" ? 1.6 : 1),
+          opacity,
+          sizeScale: chartVisualOverrides.sizeScale ?? 1,
+          palette: colors,
+          clearColor: hexToRgb01(themeUi.bg),
+          yaw: sceneOrbit.yaw,
+          pitch: sceneOrbit.pitch,
+          zoom: sceneOrbit.zoom,
+          mode,
+          time: sceneTime,
+        });
+        sceneRendererRef.current.setCamera(sceneOrbit.yaw, sceneOrbit.pitch, sceneOrbit.zoom);
+        sceneRendererRef.current.setTime(sceneTime);
+        sceneRendererRef.current.render(w, h);
+      }
+      return;
+    }
+
     const useWebGPU = useWebGPUScatter;
     if (useWebGPU) {
       canvas2DHitRef.current = null;
@@ -1381,7 +1546,8 @@ export function ChartView() {
     if (!Array.isArray(rowsAll) || !Array.isArray(cols)) return;
 
     const zoomScale = activeChart.kind === "scatter" ? scatterView.scale : 1;
-    const densityKinds = activeChart.kind === "scatter" || activeChart.kind === "bubble";
+    const densityKinds =
+      activeChart.kind === "scatter" || activeChart.kind === "bubble" || activeChart.kind === "hexbin" || activeChart.kind === "parallel";
     const sub = densityKinds
       ? subsampleRowsForDensity(rowsAll, 3500, zoomScale)
       : { rows: rowsAll, sampled: false, shown: rowsAll.length, total: rowsAll.length };
@@ -1505,11 +1671,138 @@ export function ChartView() {
           case "radar": renderFullRadar(ctx, rows, cols, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "waterfall": renderFullWaterfall(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
           case "lollipop": renderFullLollipop(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
+          case "dumbbell": renderFullDumbbell(ctx, rows, xIdx, yIdx, sizeIdx, cIdx, w, h, pad, opts); break;
+          case "ridgeline": renderFullRidgeline(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "hexbin": renderFullHexbin(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "funnel": renderFullFunnel(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
+          case "parallel": renderFullParallel(ctx, rows, cols, cIdx, w, h, pad, opts); break;
           case "treemap": renderFullTreemap(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "sunburst": renderFullSunburst(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
-          case "choropleth": renderFullChoropleth(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
+          case "choropleth":
+            renderGeoMapCanvas(
+              "choropleth",
+              ctx,
+              rows,
+              cols,
+              {
+                xField: activeChart.xField,
+                yField: activeChart.yField,
+                colorField: activeChart.colorField,
+                sizeField: activeChart.sizeField,
+              },
+              w,
+              h,
+              pad,
+              {
+                colors: opts.colors,
+                opacity: opts.opacity,
+                fontFamily: opts.fontFamily,
+                themeText: opts.themeText,
+                themeMuted: opts.themeMuted,
+                themeBorder: opts.themeBorder,
+                themeBg: opts.themeBg,
+                pointSize: opts.pointSize,
+                yAggregate: opts.yAggregate,
+                continuousStops: opts.continuousStops,
+                yaw: sceneOrbit.yaw,
+                pitch: sceneOrbit.pitch,
+                zoom: sceneOrbit.zoom,
+              },
+            );
+            break;
           case "forceBubble": renderFullForceBubble(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "sankey": renderFullSankey(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
+          default:
+            if (isGeoMapKind(activeChart.kind)) {
+              renderGeoMapCanvas(
+                activeChart.kind,
+                ctx,
+                rows,
+                cols,
+                {
+                  xField: activeChart.xField,
+                  yField: activeChart.yField,
+                  colorField: activeChart.colorField,
+                  sizeField: activeChart.sizeField,
+                },
+                w,
+                h,
+                pad,
+                {
+                  colors: opts.colors,
+                  opacity: opts.opacity,
+                  fontFamily: opts.fontFamily,
+                  themeText: opts.themeText,
+                  themeMuted: opts.themeMuted,
+                  themeBorder: opts.themeBorder,
+                  themeBg: opts.themeBg,
+                  pointSize: opts.pointSize,
+                  yAggregate: opts.yAggregate,
+                  continuousStops: opts.continuousStops,
+                  yaw: sceneOrbit.yaw,
+                  pitch: sceneOrbit.pitch,
+                  zoom: sceneOrbit.zoom,
+                },
+              );
+            } else if (isGpuSceneKind(activeChart.kind)) {
+              const packed = extractGpuScenePoints(
+                rows,
+                cols,
+                {
+                  xField: activeChart.xField,
+                  yField: activeChart.yField,
+                  zField: activeChart.zField,
+                  colorField: activeChart.colorField,
+                  sizeField: activeChart.sizeField,
+                  timeField: activeChart.timeField,
+                  trailId: activeChart.trailId,
+                },
+              );
+              if (packed) {
+                renderGpuSceneCanvas(activeChart.kind, ctx, packed, w, h, pad, {
+                  colors: opts.colors,
+                  opacity: opts.opacity,
+                  fontFamily: opts.fontFamily,
+                  themeText: opts.themeText,
+                  themeMuted: opts.themeMuted,
+                  themeBorder: opts.themeBorder,
+                  themeBg: opts.themeBg,
+                  pointSize: opts.pointSize,
+                  yaw: sceneOrbit.yaw,
+                  pitch: sceneOrbit.pitch,
+                  zoom: sceneOrbit.zoom,
+                });
+              }
+            } else if (isOddChartKind(activeChart.kind)) {
+              renderOddChart(
+                activeChart.kind,
+                ctx,
+                rows,
+                cols,
+                xIdx,
+                yIdx,
+                cIdx,
+                sizeIdx,
+                w,
+                h,
+                pad,
+                {
+                  colors: opts.colors,
+                  opacity: opts.opacity,
+                  fontFamily: opts.fontFamily,
+                  axisLabelColor: opts.axisLabelColor,
+                  themeText: opts.themeText,
+                  themeMuted: opts.themeMuted,
+                  themeBorder: opts.themeBorder,
+                  showDataLabels: opts.showDataLabels,
+                  pointSize: opts.pointSize,
+                  continuousStops: opts.continuousStops,
+                  yAggregate: opts.yAggregate,
+                },
+                false,
+              );
+            }
+            break;
         }
 
         const baseHit: Canvas2DHitContext = {
@@ -1595,7 +1888,7 @@ export function ChartView() {
     }
 
     drawOneFrame(1);
-  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h]);
+  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime]);
 
   // Axes overlay for WebGPU scatter; clear when not scatter so overlay doesn't sit on top of line/bar
   useEffect(() => {
@@ -1679,20 +1972,20 @@ export function ChartView() {
   // --- Empty states ---
   if (!selectedFile) {
     return (
-      <div className="relative flex flex-col items-center justify-center h-full gap-4 px-6">
-        <div className="w-16 h-16 rounded-xl bg-loom-elevated border border-loom-border flex items-center justify-center text-loom-muted">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <div className="relative flex flex-col items-center justify-center h-full gap-5 px-6 animate-fade-in">
+        <div className="w-16 h-16 rounded-2xl bg-loom-elevated border border-loom-border shadow-loom flex items-center justify-center text-loom-muted">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
             <path d="M3 3v18h18M7 16l4-8 4 4 4-8" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </div>
-        <div className="text-center max-w-sm">
-          <p className="text-sm font-medium text-loom-text">Nothing loaded yet</p>
-          <p className="text-xs text-loom-muted mt-1">
+        <div className="text-center max-w-sm space-y-1.5">
+          <p className="text-sm font-semibold text-loom-text tracking-tight">Nothing loaded yet</p>
+          <p className="text-xs text-loom-muted leading-relaxed">
             Open Data &amp; sources and tap Connect on a feed (Hacker News, quakes, crypto…) — it jumps straight into a chart.
           </p>
           <button
             type="button"
-            className="loom-btn-primary text-xs px-3 py-2 mt-4"
+            className="loom-btn-primary text-xs px-3 py-2 mt-3"
             onClick={() => {
               const s = useLoomStore.getState();
               if (!s.sidebarOpen) s.toggleSidebar();
@@ -1710,7 +2003,7 @@ export function ChartView() {
             requestDiscoverScan();
             setToast("Scanning live feeds…");
           }}
-          className="absolute bottom-3 right-3 text-2xs text-loom-muted/50 hover:text-loom-accent transition-colors px-1.5 py-1 rounded"
+          className="absolute bottom-[max(0.75rem,var(--safe-bottom))] right-3 text-2xs text-loom-muted/60 hover:text-loom-accent transition-colors px-2 py-1.5 rounded-md hover:bg-loom-elevated"
           title="Scan live feeds for something chartable"
           aria-label="What’s interesting right now"
         >
@@ -1876,6 +2169,7 @@ export function ChartView() {
   return (
     <div className={`flex h-full animate-fade-in ${suggestionsExpanded || isMobile ? "flex-col" : ""}`}>
       {/* Recommendation panel — desktop sidebar, mobile bottom rail, or full browse grid */}
+      {!socialExportReady && (
       <div
         className={`
           bg-loom-surface overflow-hidden transition-[width,height] duration-200 ease-out
@@ -1909,6 +2203,7 @@ export function ChartView() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Full-size chart — always in DOM so refs/ResizeObserver stay valid; zero size when browsing all */}
       <div
@@ -1921,6 +2216,7 @@ export function ChartView() {
               : "flex-1"}
         `}
       >
+        {!socialExportReady && (
         <div className="flex items-center gap-1.5 sm:gap-3 px-2 sm:px-4 py-1.5 sm:py-2 border-b border-loom-border bg-loom-surface/50 flex-wrap">
           <div className="flex flex-col gap-0.5 min-w-0 flex-1">
             <div
@@ -2052,7 +2348,7 @@ export function ChartView() {
                   Save view
                 </button>
               )}
-              <span className="loom-badge text-2xs hidden sm:inline-flex" title={aggregationHint || undefined}>{useWebGPUScatter ? "GPU" : "Canvas"}</span>
+              <span className="loom-badge text-2xs hidden sm:inline-flex" title={aggregationHint || undefined}>{useWebGPUScatter || useWebGpuScene ? "GPU" : "Canvas"}</span>
               {!useWebGPUScatter &&
                 (!!chartVisualOverrides.markStroke ||
                   !!chartVisualOverrides.glowEnabled ||
@@ -2086,44 +2382,70 @@ export function ChartView() {
             </div>
           )}
         </div>
+        )}
 
         <div
           ref={stageHostRef}
-          className="flex-1 relative min-h-0 min-h-[200px] flex items-center justify-center px-2 py-2"
+          className={`flex-1 relative min-h-0 min-h-[200px] flex items-center justify-center ${socialExportReady ? "px-0 py-0 overflow-auto" : "px-2 py-2"}`}
           style={{
             // Letterbox matte — reads as a stage, not a broken black void
-            backgroundColor: "color-mix(in srgb, var(--loom-bg) 88%, var(--loom-border))",
-            backgroundImage:
-              "radial-gradient(color-mix(in srgb, var(--loom-border) 55%, transparent) 0.6px, transparent 0.6px)",
+            backgroundColor: socialExportReady
+              ? "var(--loom-bg)"
+              : "color-mix(in srgb, var(--loom-bg) 88%, var(--loom-border))",
+            backgroundImage: socialExportReady
+              ? "none"
+              : "radial-gradient(color-mix(in srgb, var(--loom-border) 55%, transparent) 0.6px, transparent 0.6px)",
             backgroundSize: "10px 10px",
           }}
         >
-          {!isMobile &&
-            (chartAspect !== "free" ||
-              chartDevice !== "desktop" ||
-              (appSettings.chartDevice ?? "auto") !== "auto") && (
-            <div className="absolute top-1.5 left-1/2 -translate-x-1/2 z-10 pointer-events-none">
-              <span className="text-2xs font-mono text-loom-muted bg-loom-surface/90 border border-loom-border/60 rounded px-1.5 py-0.5 shadow-sm">
-                {aspectLabel(chartAspect)}
-                {" · "}
-                {chartDevice}
-                {" · "}
-                {chartFrameSize.width}×{chartFrameSize.height}
-              </span>
-            </div>
-          )}
           <div
             ref={containerRef}
             className={`relative overflow-hidden ${
-              chartFrameSize.aspectLocked || chartDevice !== "desktop"
+              !socialExportReady && (chartFrameSize.aspectLocked || chartDevice !== "desktop")
                 ? "rounded-md border border-loom-border shadow-sm"
                 : ""
-            }`}
+            } ${orbitEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
+            onPointerDown={(e) => {
+              if (!orbitEnabled) return;
+              (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+              sceneOrbitDragRef.current = {
+                x: e.clientX,
+                y: e.clientY,
+                yaw: sceneOrbit.yaw,
+                pitch: sceneOrbit.pitch,
+              };
+            }}
+            onPointerMove={(e) => {
+              const drag = sceneOrbitDragRef.current;
+              if (!drag) return;
+              const dx = e.clientX - drag.x;
+              const dy = e.clientY - drag.y;
+              setSceneOrbit((o) => ({
+                ...o,
+                yaw: drag.yaw + dx * 0.008,
+                pitch: Math.max(-1.2, Math.min(1.2, drag.pitch + dy * 0.008)),
+              }));
+            }}
+            onPointerUp={() => {
+              sceneOrbitDragRef.current = null;
+            }}
+            onPointerCancel={() => {
+              sceneOrbitDragRef.current = null;
+            }}
+            onWheel={(e) => {
+              if (!orbitEnabled) return;
+              e.preventDefault();
+              setSceneOrbit((o) => ({
+                ...o,
+                zoom: Math.max(0.4, Math.min(3, o.zoom * (e.deltaY > 0 ? 0.92 : 1.08))),
+              }));
+            }}
             style={{
               width: chartFrameSize.width,
               height: chartFrameSize.height,
-              maxWidth: "100%",
-              maxHeight: "100%",
+              maxWidth: socialExportTarget ? undefined : "100%",
+              maxHeight: socialExportTarget ? undefined : "100%",
+              flexShrink: 0,
               background: themeUi.bg,
             }}
           >
@@ -2131,23 +2453,40 @@ export function ChartView() {
             ref={canvasRef}
             className="absolute inset-0 w-full h-full"
             style={{
-              zIndex: useWebGPUScatter ? 1 : 0,
+              zIndex: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe ? 1 : 0,
               // Default WebGPU clear is near-black; hide when Canvas 2D owns the frame
               // so aspect/device resizes never flash a black slab through a cleared 2D layer.
-              visibility: useWebGPUScatter ? "visible" : "hidden",
-              pointerEvents: useWebGPUScatter ? "auto" : "none",
+              visibility: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe ? "visible" : "hidden",
+              pointerEvents: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe ? "auto" : "none",
             }}
           />
           <canvas
             ref={canvas2DRef}
+            data-loom-chart-canvas2d
             className="absolute inset-0 w-full h-full"
-            style={{ zIndex: useWebGPUScatter ? 0 : 1 }}
+            style={{ zIndex: useWebGPUScatter || useWebGpuScene ? 0 : 1 }}
           />
           <canvas
             ref={axesOverlayRef}
             className="absolute inset-0 w-full h-full pointer-events-none"
             style={{ zIndex: useWebGPUScatter ? 2 : 0 }}
           />
+          {socialExportReady &&
+            (chartAspect === "9:16" || socialExportTarget?.presetId === "stories") && (
+            <div className="absolute inset-0 z-[5] pointer-events-none" aria-hidden>
+              <div
+                className="absolute inset-x-0 top-0 border-b border-dashed border-amber-400/40 bg-amber-400/10"
+                style={{ height: "14%" }}
+              />
+              <div
+                className="absolute inset-x-0 bottom-0 border-t border-dashed border-amber-400/40 bg-amber-400/10"
+                style={{ height: "20%" }}
+              />
+              <span className="absolute top-1 left-1/2 -translate-x-1/2 text-[9px] font-mono text-amber-500/80 bg-loom-bg/70 px-1 rounded">
+                Stories safe zone
+              </span>
+            </div>
+          )}
           {renderIssue && activeChart && (
             <div className="absolute inset-0 z-20 flex items-center justify-center p-6 bg-loom-bg/85 backdrop-blur-sm">
               <div className="loom-card max-w-md w-full p-4 space-y-3 border border-loom-accent/30 shadow-lg">
@@ -2427,6 +2766,21 @@ export function ChartView() {
                   Clear link
                 </button>
               </>
+            )}
+            {!socialExportReady &&
+              (chartAspect !== "free" ||
+                chartDevice !== "desktop" ||
+                (appSettings.chartDevice ?? "auto") !== "auto") && (
+              <span
+                className="ml-auto text-2xs font-mono text-loom-muted tabular-nums"
+                title="Chart frame aspect · device · pixel size"
+              >
+                {aspectLabel(chartAspect)}
+                {" · "}
+                {chartDevice}
+                {" · "}
+                {chartFrameSize.width}×{chartFrameSize.height}
+              </span>
             )}
           </div>
         )}
@@ -3411,7 +3765,7 @@ function renderFullBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
     const cx = pad + 24 + (i + 0.5) * ((w - 2 * pad - 40) / entries.length);
     const toY = (v: number) => h - pad - 20 - ((v - globalMin) / range) * plotH;
 
-    ctx.fillStyle = cols[2] ?? cols[0];
+    ctx.fillStyle = cols[i % cols.length];
     ctx.globalAlpha = alpha;
     const q1y = toY(box.q1), q3y = toY(box.q3);
     ctx.fillRect(cx - boxW / 2, q3y, boxW, q1y - q3y);
@@ -4374,82 +4728,6 @@ function renderFullSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi
   ctx.globalAlpha = 1;
 }
 
-// --- Choropleth (simple grid map fallback) ---
-
-function renderFullChoropleth(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
-  const palette = opts?.colors ?? DEFAULT_COLORS;
-  const alpha = opts?.opacity ?? 0.85;
-  const fontFamily = opts?.fontFamily ?? "Inter";
-  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
-
-  const groups = new Map<string, number[]>();
-  for (const r of rows) {
-    const k = String(r[xi]);
-    if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? Number(r[yi]) : 1);
-  }
-  const entries = [...groups.entries()].map(([label, vals]) => ({
-    label,
-    value: aggregateValues(vals.filter(v => !isNaN(v)), agg),
-  })).sort((a, b) => b.value - a.value).slice(0, 60);
-  if (entries.length === 0) return;
-
-  const maxVal = Math.max(...entries.map(e => e.value), 1);
-  const minVal = Math.min(...entries.map(e => e.value), 0);
-  const range = maxVal - minVal || 1;
-
-  const cols = Math.ceil(Math.sqrt(entries.length * (w / h)));
-  const rowCount = Math.ceil(entries.length / cols);
-  const cellW = (w - 2 * pad) / cols;
-  const cellH = (h - 2 * pad - 10) / rowCount;
-
-  entries.forEach((entry, i) => {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const x = pad + col * cellW;
-    const y = pad + 10 + row * cellH;
-    const t = (entry.value - minVal) / range;
-    const hue = 220 - t * 180;
-    const sat = 50 + t * 30;
-    const lit = 15 + t * 40;
-    ctx.fillStyle = `hsl(${hue}, ${sat}%, ${lit}%)`;
-    ctx.globalAlpha = alpha;
-    const rx = 3;
-    ctx.beginPath();
-    ctx.roundRect(x + 1, y + 1, cellW - 2, cellH - 2, rx);
-    ctx.fill();
-
-    if (cellW > 28 && cellH > 14) {
-      ctx.fillStyle = t > 0.5 ? "#000" : "#fff";
-      ctx.globalAlpha = 0.85;
-      const fs = Math.max(7, Math.min(10, cellW / 5));
-      ctx.font = `${fs}px '${fontFamily}', sans-serif`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      const lbl = entry.label.length > Math.floor(cellW / (fs * 0.6)) ? entry.label.slice(0, Math.floor(cellW / (fs * 0.6)) - 1) + "\u2026" : entry.label;
-      ctx.fillText(lbl, x + cellW / 2, y + cellH / 2);
-    }
-  });
-
-  ctx.globalAlpha = 1;
-  const legendW = Math.min(120, w - 2 * pad);
-  const legendH = 8;
-  const lx = w - pad - legendW;
-  const ly = h - pad - legendH - 2;
-  const grad = ctx.createLinearGradient(lx, 0, lx + legendW, 0);
-  grad.addColorStop(0, "hsl(220, 50%, 15%)");
-  grad.addColorStop(0.5, "hsl(130, 65%, 35%)");
-  grad.addColorStop(1, "hsl(40, 80%, 55%)");
-  ctx.fillStyle = grad;
-  ctx.fillRect(lx, ly, legendW, legendH);
-  ctx.font = `8px '${fontFamily}', sans-serif`;
-  ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
-  ctx.textAlign = "left";
-  ctx.fillText(minVal >= 1000 ? `${(minVal/1000).toFixed(1)}k` : String(Math.round(minVal)), lx, ly - 2);
-  ctx.textAlign = "right";
-  ctx.fillText(maxVal >= 1000 ? `${(maxVal/1000).toFixed(1)}k` : String(Math.round(maxVal)), lx + legendW, ly - 2);
-}
-
 // --- Force Bubble (packed circles) ---
 
 function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
@@ -4704,6 +4982,423 @@ function renderFullSankey(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: 
     ctx.textAlign = "left";
     ctx.fillText(t.length > 12 ? t.slice(0, 11) + "\u2026" : t, rightX + nodeW + 4, r.y + r.h / 2 + 3);
   }
+}
+
+// --- Dumbbell (category × start → end) ---
+
+function renderFullDumbbell(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  si: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  if (yi < 0 || si < 0) return;
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.9;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const agg: YAggregateOption = opts?.yAggregate ?? "mean";
+
+  const groups = new Map<string, { start: number[]; end: number[]; cat: string }>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    const a = Number(r[yi]);
+    const b = Number(r[si]);
+    if (isNaN(a) || isNaN(b)) continue;
+    if (!groups.has(k)) groups.set(k, { start: [], end: [], cat: ci >= 0 ? String(r[ci]) : "" });
+    const g = groups.get(k)!;
+    g.start.push(a);
+    g.end.push(b);
+  }
+  const entries = [...groups.entries()]
+    .map(([label, g]) => ({
+      label,
+      start: aggregateValues(g.start, agg),
+      end: aggregateValues(g.end, agg),
+      cat: g.cat,
+    }))
+    .sort((a, b) => Math.abs(b.end - b.start) - Math.abs(a.end - a.start))
+    .slice(0, 20);
+  if (entries.length === 0) return;
+
+  let minV = Infinity;
+  let maxV = -Infinity;
+  for (const e of entries) {
+    minV = Math.min(minV, e.start, e.end);
+    maxV = Math.max(maxV, e.start, e.end);
+  }
+  if (minV === maxV) {
+    minV -= 1;
+    maxV += 1;
+  }
+  const range = maxV - minV;
+  const catColorMap = new Map<string, number>();
+  let nextCat = 0;
+  if (ci >= 0) {
+    for (const e of entries) {
+      if (!catColorMap.has(e.cat)) catColorMap.set(e.cat, nextCat++);
+    }
+  }
+
+  drawGridLines(ctx, minV, maxV, minV, maxV, w, h, pad, opts);
+
+  const bandH = (h - 2 * pad) / entries.length;
+  const toX = (v: number) => pad + ((v - minV) / range) * (w - 2 * pad);
+
+  entries.forEach((e, i) => {
+    const cy = pad + (i + 0.5) * bandH;
+    const x0 = toX(e.start);
+    const x1 = toX(e.end);
+    const colorIdx = ci >= 0 ? (catColorMap.get(e.cat) ?? 0) : i;
+    const color = palette[colorIdx % palette.length];
+
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = alpha * 0.55;
+    ctx.beginPath();
+    ctx.moveTo(x0, cy);
+    ctx.lineTo(x1, cy);
+    ctx.stroke();
+
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(x0, cy, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
+    ctx.beginPath();
+    ctx.arc(x1, cy, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+    ctx.globalAlpha = 1;
+    ctx.font = `${opts?.axisFontSize ?? 9}px '${fontFamily}', sans-serif`;
+    ctx.textAlign = "right";
+    ctx.fillText(e.label.length > 12 ? e.label.slice(0, 11) + "\u2026" : e.label, pad - 4, cy + 3);
+  });
+
+  ctx.globalAlpha = 1;
+}
+
+// --- Ridgeline (density per group) ---
+
+function renderFullRidgeline(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  if (yi < 0) return;
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.55;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+
+  const groups = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = String(r[yi]);
+    const v = Number(r[xi]);
+    if (isNaN(v)) continue;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(v);
+  }
+  const entries = [...groups.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .slice(0, 10);
+  if (entries.length === 0) return;
+
+  const allVals = entries.flatMap(([, vs]) => vs);
+  const gMin = Math.min(...allVals);
+  const gMax = Math.max(...allVals);
+  const range = gMax - gMin || 1;
+  const bins = 28;
+  const bandH = (h - 2 * pad) / entries.length;
+  const ridgeH = bandH * 0.85;
+
+  drawGridLines(ctx, gMin, gMax, gMin, gMax, w, h, pad, opts);
+
+  entries.forEach(([label, vals], gi) => {
+    const counts = new Array(bins).fill(0);
+    for (const v of vals) {
+      const b = Math.min(bins - 1, Math.floor(((v - gMin) / range) * bins));
+      counts[b]++;
+    }
+    const maxC = Math.max(...counts, 1);
+    const baseline = pad + (gi + 1) * bandH - 4;
+
+    ctx.beginPath();
+    ctx.moveTo(pad, baseline);
+    for (let b = 0; b < bins; b++) {
+      const x = pad + ((b + 0.5) / bins) * (w - 2 * pad);
+      const y = baseline - (counts[b] / maxC) * ridgeH;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(pad + (w - 2 * pad), baseline);
+    ctx.closePath();
+    ctx.fillStyle = palette[gi % palette.length];
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+    ctx.strokeStyle = opts?.themeBorder ?? "#2a2a30";
+    ctx.lineWidth = 0.75;
+    ctx.globalAlpha = Math.min(1, alpha + 0.25);
+    ctx.stroke();
+
+    ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+    ctx.globalAlpha = 1;
+    ctx.font = `${opts?.axisFontSize ?? 9}px '${fontFamily}', sans-serif`;
+    ctx.textAlign = "left";
+    ctx.fillText(label.length > 10 ? label.slice(0, 9) + "\u2026" : label, pad + 2, baseline - ridgeH + 10);
+  });
+
+  ctx.globalAlpha = 1;
+}
+
+// --- Hexbin density ---
+
+function renderFullHexbin(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  if (yi < 0) return;
+  const alpha = opts?.opacity ?? 0.9;
+  const [xMin, xMax] = numRange(rows, xi);
+  const [yMin, yMax] = numRange(rows, yi);
+  const plotW = w - 2 * pad;
+  const plotH = h - 2 * pad;
+  const targetHex = Math.max(8, Math.min(28, Math.round(Math.sqrt(rows.length) / 2)));
+  const hexR = Math.min(plotW, plotH) / (targetHex * 1.75);
+  const hexW = hexR * Math.sqrt(3);
+  const hexH = hexR * 1.5;
+
+  const counts = new Map<string, number>();
+  let maxC = 0;
+  for (const r of rows) {
+    const xv = Number(r[xi]);
+    const yv = Number(r[yi]);
+    if (isNaN(xv) || isNaN(yv)) continue;
+    const px = pad + ((xv - xMin) / (xMax - xMin || 1)) * plotW;
+    const py = h - pad - ((yv - yMin) / (yMax - yMin || 1)) * plotH;
+    const col = Math.round((px - pad) / hexW);
+    const row = Math.round((py - pad) / hexH);
+    const key = `${col},${row}`;
+    const n = (counts.get(key) ?? 0) + 1;
+    counts.set(key, n);
+    if (n > maxC) maxC = n;
+  }
+  if (counts.size === 0) return;
+
+  drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
+  drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
+
+  for (const [key, count] of counts) {
+    const [cs, rs] = key.split(",");
+    const col = Number(cs);
+    const row = Number(rs);
+    const cx = pad + col * hexW + (row % 2 === 0 ? 0 : hexW / 2);
+    const cy = pad + row * hexH;
+    if (cx < pad - hexR || cx > w - pad + hexR || cy < pad - hexR || cy > h - pad + hexR) continue;
+    const t = count / maxC;
+    const hue = 200 - t * 160;
+    const sat = 45 + t * 35;
+    const lit = 18 + t * 42;
+    ctx.fillStyle = `hsl(${hue}, ${sat}%, ${lit}%)`;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const ang = (Math.PI / 180) * (60 * i - 30);
+      const hx = cx + hexR * Math.cos(ang);
+      const hy = cy + hexR * Math.sin(ang);
+      if (i === 0) ctx.moveTo(hx, hy);
+      else ctx.lineTo(hx, hy);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+// --- Funnel stages ---
+
+function renderFullFunnel(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.85;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+
+  const groups = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(yi >= 0 ? Number(r[yi]) : 1);
+  }
+  const entries = [...groups.entries()]
+    .map(([label, vals]) => ({ label, value: aggregateValues(vals.filter(v => !isNaN(v)), agg) }))
+    .filter(e => e.value > 0)
+    .sort((a, b) => b.value - a.value)
+    .slice(0, 12);
+  if (entries.length === 0) return;
+
+  const maxVal = entries[0]!.value;
+  const minW = (w - 2 * pad) * 0.18;
+  const maxW = w - 2 * pad;
+  const bandH = (h - 2 * pad) / entries.length;
+  const gap = Math.min(4, bandH * 0.12);
+
+  entries.forEach((e, i) => {
+    const next = entries[i + 1];
+    const topW = minW + (e.value / maxVal) * (maxW - minW);
+    const botW = next
+      ? minW + (next.value / maxVal) * (maxW - minW)
+      : topW * 0.72;
+    const y0 = pad + i * bandH;
+    const y1 = y0 + bandH - gap;
+    const cx = w / 2;
+    const color = palette[(ci >= 0 ? i : i) % palette.length];
+
+    ctx.beginPath();
+    ctx.moveTo(cx - topW / 2, y0);
+    ctx.lineTo(cx + topW / 2, y0);
+    ctx.lineTo(cx + botW / 2, y1);
+    ctx.lineTo(cx - botW / 2, y1);
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = alpha;
+    ctx.fill();
+    ctx.strokeStyle = opts?.themeBorder ?? "#2a2a30";
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
+    ctx.font = `600 ${Math.max(9, Math.min(12, bandH * 0.28))}px '${fontFamily}', sans-serif`;
+    ctx.textAlign = "center";
+    const midY = (y0 + y1) / 2 + 4;
+    const label = e.label.length > 18 ? e.label.slice(0, 17) + "\u2026" : e.label;
+    ctx.fillText(`${label}  ·  ${formatTick(e.value)}`, cx, midY);
+  });
+
+  ctx.globalAlpha = 1;
+}
+
+// --- Parallel coordinates ---
+
+function renderFullParallel(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  columnNames: string[],
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.35;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+
+  const axes: { name: string; idx: number; min: number; max: number }[] = [];
+  for (let c = 0; c < columnNames.length; c++) {
+    if (c === ci) continue;
+    const [min, max] = numRange(rows, c);
+    const sampleN = rows.slice(0, 40).filter(r => {
+      const v = Number(r[c]);
+      return r[c] !== null && r[c] !== "" && typeof r[c] !== "boolean" && !isNaN(v);
+    }).length;
+    if (sampleN < Math.min(12, rows.length * 0.3)) continue;
+    axes.push({ name: columnNames[c]!, idx: c, min, max });
+    if (axes.length >= 8) break;
+  }
+  if (axes.length < 3) return;
+
+  const catMap = new Map<string, number>();
+  let next = 0;
+  if (ci >= 0) {
+    for (const r of rows) {
+      const k = String(r[ci]);
+      if (!catMap.has(k)) catMap.set(k, next++);
+    }
+  }
+
+  const axisXs = axes.map((_, i) => pad + (i / (axes.length - 1)) * (w - 2 * pad));
+  const plotTop = pad + 8;
+  const plotBot = h - pad - 16;
+
+  ctx.strokeStyle = opts?.themeBorder ?? "#2a2a30";
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.9;
+  axes.forEach((ax, i) => {
+    const x = axisXs[i]!;
+    ctx.beginPath();
+    ctx.moveTo(x, plotTop);
+    ctx.lineTo(x, plotBot);
+    ctx.stroke();
+    ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+    ctx.font = `${opts?.axisFontSize ?? 9}px '${fontFamily}', sans-serif`;
+    ctx.textAlign = "center";
+    const label = ax.name.length > 10 ? ax.name.slice(0, 9) + "\u2026" : ax.name;
+    ctx.fillText(label, x, h - pad + 4);
+  });
+
+  const maxLines = Math.min(rows.length, 400);
+  const stride = Math.max(1, Math.floor(rows.length / maxLines));
+  for (let ri = 0; ri < rows.length; ri += stride) {
+    const r = rows[ri]!;
+    const colorIdx = ci >= 0 ? (catMap.get(String(r[ci])) ?? 0) : 0;
+    ctx.strokeStyle = palette[colorIdx % palette.length];
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    axes.forEach((ax, i) => {
+      const v = Number(r[ax.idx]);
+      if (isNaN(v)) return;
+      const t = (v - ax.min) / (ax.max - ax.min || 1);
+      const y = plotBot - t * (plotBot - plotTop);
+      const x = axisXs[i]!;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  ctx.globalAlpha = 1;
+}
+
+function formatTick(v: number): string {
+  if (!isFinite(v)) return "";
+  const abs = Math.abs(v);
+  if (abs >= 1e6) return `${(v / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `${(v / 1e3).toFixed(1)}k`;
+  if (abs >= 10) return v.toFixed(0);
+  if (abs >= 1) return v.toFixed(1);
+  return v.toFixed(2);
 }
 
 // --- Helpers ---

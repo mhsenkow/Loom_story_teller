@@ -16,6 +16,10 @@ export interface MicrositeInput {
   slots: MicrositeSlotInfo[];
   lastUpdatedMs: number | null;
   layoutTemplate?: string;
+  /** Open Graph / link-preview image (data URL). */
+  ogImageDataUrl?: string | null;
+  /** Optional caption / description for meta tags. */
+  caption?: string | null;
 }
 
 function escapeHtml(s: string): string {
@@ -53,9 +57,35 @@ function snapshotThemeTokens(): Record<string, string> {
 
 /** Build a self-contained HTML string for the dashboard (shareable microsite). */
 export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
-  const { dashboardName, slots, lastUpdatedMs, layoutTemplate = "auto" } = input;
+  const {
+    dashboardName,
+    slots,
+    lastUpdatedMs,
+    layoutTemplate = "auto",
+    ogImageDataUrl,
+    caption,
+  } = input;
   const title = escapeHtml(dashboardName);
+  const desc = escapeHtml(
+    (caption || `${dashboardName} — data story exported from Loom`).slice(0, 280),
+  );
   const LOOM = snapshotThemeTokens();
+  const ogMeta = ogImageDataUrl
+    ? `
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${desc}" />
+  <meta property="og:image" content="${escapeHtml(ogImageDataUrl)}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${title}" />
+  <meta name="twitter:description" content="${desc}" />
+  <meta name="twitter:image" content="${escapeHtml(ogImageDataUrl)}" />
+  <meta name="description" content="${desc}" />`
+    : `
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${desc}" />
+  <meta name="description" content="${desc}" />`;
 
   // Grid: match app's gridClass and gridStyle for 1+2 / stream
   const is1p2 = layoutTemplate === "1+2";
@@ -118,7 +148,7 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${title}</title>
+  <title>${title}</title>${ogMeta}
   <style>
     * { box-sizing: border-box; }
     body {

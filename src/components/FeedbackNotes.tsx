@@ -171,14 +171,14 @@ export function FeedbackNotes() {
       {open &&
         createPortal(
           <div
-            className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-4 bg-black/40"
+            className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 loom-overlay animate-fade-in"
             role="dialog"
             aria-modal="true"
             aria-label="Leave a note"
             onClick={() => setOpen(false)}
           >
             <div
-              className="loom-card w-full max-w-md p-4 space-y-3 bg-loom-surface border border-loom-border shadow-xl"
+              className="loom-card w-full max-w-md p-4 sm:p-5 space-y-3 bg-loom-surface border border-loom-border shadow-loom-lg rounded-t-2xl sm:rounded-xl animate-slide-up mb-[var(--safe-bottom)] sm:mb-0"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between gap-2">

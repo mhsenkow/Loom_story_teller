@@ -997,15 +997,15 @@ export function ExplorerView() {
 function EmptyState() {
   const setToast = useLoomStore((s) => s.setToast);
   return (
-    <div className="relative flex flex-col items-center justify-center h-full gap-4 animate-fade-in">
-      <div className="w-16 h-16 rounded-xl bg-loom-elevated border border-loom-border flex items-center justify-center">
-        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-loom-muted">
+    <div className="relative flex flex-col items-center justify-center h-full gap-5 px-6 animate-fade-in">
+      <div className="w-16 h-16 rounded-2xl bg-loom-elevated border border-loom-border shadow-loom flex items-center justify-center">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-loom-muted">
           <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z" />
         </svg>
       </div>
-      <div className="text-center">
-        <p className="text-sm font-medium text-loom-text">Mount a data folder</p>
-        <p className="text-xs text-loom-label mt-1 max-w-[260px] mx-auto leading-relaxed">
+      <div className="text-center space-y-1.5">
+        <p className="text-sm font-semibold text-loom-text tracking-tight">Mount a data folder</p>
+        <p className="text-xs text-loom-label max-w-[280px] mx-auto leading-relaxed">
           Select a folder containing .csv or .parquet files to begin exploring
         </p>
       </div>
@@ -1015,7 +1015,7 @@ function EmptyState() {
           requestDiscoverScan();
           setToast("Scanning live feeds…");
         }}
-        className="absolute bottom-3 right-3 text-2xs text-loom-muted/50 hover:text-loom-accent transition-colors px-1.5 py-1 rounded"
+        className="absolute bottom-[max(0.75rem,var(--safe-bottom))] right-3 text-2xs text-loom-muted/60 hover:text-loom-accent transition-colors px-2 py-1.5 rounded-md hover:bg-loom-elevated"
         title="Scan live feeds for something chartable"
         aria-label="What’s interesting right now"
       >

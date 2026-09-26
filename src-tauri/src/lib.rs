@@ -46,6 +46,8 @@ pub fn run() {
             commands::create_github_issue,
             commands::open_external_url,
             commands::write_text_file,
+            commands::write_binary_file,
+            commands::reveal_in_finder,
             commands::stream_start,
             commands::stream_stop,
             commands::stream_status,

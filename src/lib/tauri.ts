@@ -226,7 +226,36 @@ export type SourceKind =
   | "world_bank"
   | "iss"
   | "hn"
-  | "crypto";
+  | "crypto"
+  | "aq"
+  | "fx"
+  | "fema"
+  | "opensky"
+  | "countries"
+  | "spacex"
+  | "nyc311"
+  | "covid"
+  | "launches";
+
+/** Canonical live poll sources — keep discover scan + sidebar in sync with this list. */
+export const ALL_SOURCE_KINDS: readonly SourceKind[] = [
+  "usgs",
+  "nws",
+  "opensky",
+  "nyc311",
+  "hn",
+  "covid",
+  "crypto",
+  "launches",
+  "spacex",
+  "fx",
+  "iss",
+  "aq",
+  "fema",
+  "countries",
+  "meteo",
+  "world_bank",
+] as const;
 
 export interface SourceStatus {
   running: boolean;
@@ -359,4 +388,46 @@ export async function exportDashboardMicrosite(html: string, defaultName: string
   a.click();
   URL.revokeObjectURL(url);
   return true;
+}
+
+/** Write binary bytes to a path chosen by the user (Tauri). */
+export async function writeBinaryFile(path: string, bytes: Uint8Array): Promise<void> {
+  if (!isTauri()) throw new Error("Tauri not available");
+  // Pass as number[] for serde; chunked base64 would also work for huge files.
+  await invoke<void>("write_binary_file", { path, bytes: Array.from(bytes) });
+}
+
+/** Reveal a file in Finder / file manager (Tauri). */
+export async function revealInFinder(path: string): Promise<void> {
+  if (!isTauri()) return;
+  await invoke<void>("reveal_in_finder", { path });
+}
+
+/**
+ * Save a Blob via native dialog and reveal it. Falls back to browser download.
+ * Returns the saved path (Tauri) or null (web / cancelled).
+ */
+export async function saveBinaryAndReveal(blob: Blob, defaultName: string): Promise<string | null> {
+  const filename = defaultName.replace(/[^\w\-.]/g, "_") || "loom-export.bin";
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+
+  if (isTauri()) {
+    const ext = filename.includes(".") ? filename.split(".").pop()! : "bin";
+    const path = await saveDialog({
+      defaultPath: filename,
+      filters: [{ name: "Export", extensions: [ext] }],
+    });
+    if (!path) return null;
+    await writeBinaryFile(path, bytes);
+    await revealInFinder(path);
+    return path;
+  }
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  return null;
 }

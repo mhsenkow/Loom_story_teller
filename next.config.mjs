@@ -4,7 +4,9 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-  distDir: "out",
+  // Keep default distDir (`.next`) so `next dev` / Turbopack do not write SSR
+  // chunks into `out/` and then fail looking for app-build-manifest.json.
+  // Static export still lands in `out/` for Tauri `frontendDist` + loft.
   turbopack: {
     rules: {
       "*.wgsl": {

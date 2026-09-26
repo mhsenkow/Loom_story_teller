@@ -405,7 +405,7 @@ export function Sidebar() {
       {isMobile && (
         <button
           type="button"
-          className="fixed inset-0 z-[35] bg-black/40 md:hidden"
+          className="fixed inset-0 z-[35] loom-overlay animate-fade-in md:hidden"
           aria-label="Close sidebar"
           onClick={toggleSidebar}
         />
@@ -422,12 +422,12 @@ export function Sidebar() {
         }}
       >
       {/* Header */}
-      <div className="flex items-center gap-2 px-4 h-[var(--topbar-height)] border-b border-loom-border flex-shrink-0">
-        <div className="w-2 h-2 rounded-full bg-loom-accent animate-pulse-subtle" />
+      <div className="flex items-center gap-2.5 px-4 h-[var(--topbar-height)] border-b border-loom-border flex-shrink-0 bg-loom-surface/95">
+        <div className="w-2 h-2 rounded-full bg-loom-accent shadow-[0_0_0_3px] shadow-loom-accent/20 animate-pulse-subtle" />
         <span className="text-sm font-semibold text-loom-text tracking-tight flex-1">Loom</span>
         <button
           type="button"
-          className="md:hidden loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted"
+          className="md:hidden loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted rounded-md"
           onClick={toggleSidebar}
           aria-label="Close sidebar"
         >
@@ -825,6 +825,139 @@ const SOURCE_DEFS: SourceCardDef[] = [
     streamPath: "stream://world_bank",
     fileName: "World Bank",
     color: "loom-success",
+  },
+  {
+    kind: "aq",
+    label: "Air quality",
+    description: "PM2.5, ozone, and AQI for NYC, London, Tokyo, Sydney, São Paulo.",
+    attribution: "Open-Meteo Air Quality · free",
+    streamPath: "stream://aq",
+    fileName: "Air Quality",
+    color: "loom-accent",
+  },
+  {
+    kind: "fx",
+    label: "FX rates",
+    description: "Daily EUR foreign-exchange rates (Frankfurter / ECB).",
+    attribution: "Frankfurter.app · free",
+    streamPath: "stream://fx",
+    fileName: "FX Rates",
+    color: "loom-success",
+  },
+  {
+    kind: "fema",
+    label: "FEMA disasters",
+    description: "Recent US disaster declarations by state and incident type.",
+    attribution: "OpenFEMA · public domain",
+    streamPath: "stream://fema",
+    fileName: "FEMA Disasters",
+    color: "loom-error",
+  },
+  {
+    kind: "opensky",
+    label: "OpenSky aircraft",
+    description: "Live aircraft positions over the contiguous US — great scatter maps.",
+    attribution: "OpenSky Network · free (rate-limited)",
+    streamPath: "stream://opensky",
+    fileName: "OpenSky Aircraft",
+    color: "loom-accent",
+  },
+  {
+    kind: "countries",
+    label: "World countries",
+    description: "Population, area, and region for every country (REST Countries).",
+    attribution: "restcountries.com · free",
+    streamPath: "stream://countries",
+    fileName: "World Countries",
+    color: "loom-success",
+  },
+  {
+    kind: "spacex",
+    label: "SpaceX history",
+    description: "Past SpaceX launches — success, cadence, flight numbers.",
+    attribution: "api.spacexdata.com · free",
+    streamPath: "stream://spacex",
+    fileName: "SpaceX Launches",
+    color: "loom-accent",
+  },
+  {
+    kind: "nyc311",
+    label: "NYC 311",
+    description: "Latest service requests — complaint type, borough, map points.",
+    attribution: "NYC Open Data · public",
+    streamPath: "stream://nyc311",
+    fileName: "NYC 311",
+    color: "loom-warning",
+  },
+  {
+    kind: "covid",
+    label: "COVID by country",
+    description: "Cumulative and daily cases/deaths worldwide (disease.sh).",
+    attribution: "disease.sh · free",
+    streamPath: "stream://covid",
+    fileName: "COVID Countries",
+    color: "loom-error",
+  },
+  {
+    kind: "launches",
+    label: "Upcoming launches",
+    description: "Next global orbital/suborbital launches by agency and pad.",
+    attribution: "The Space Devs · free",
+    streamPath: "stream://launches",
+    fileName: "Space Launches",
+    color: "loom-accent",
+  },
+];
+
+/** One-click public CSV packs (web Explore / desktop save). */
+const CURATED_OPEN_PACKS: {
+  id: string;
+  title: string;
+  blurb: string;
+  url: string;
+  source: string;
+}[] = [
+  {
+    id: "owid-co2",
+    title: "OWID CO₂ and greenhouse gases",
+    blurb: "Country-level emissions history — classic storytelling CSV.",
+    url: "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv",
+    source: "Our World in Data",
+  },
+  {
+    id: "owid-covid",
+    title: "OWID COVID-19",
+    blurb: "Cases, deaths, vaccinations by country and date.",
+    url: "https://covid.ourworldindata.org/data/owid-covid-data.csv",
+    source: "Our World in Data",
+  },
+  {
+    id: "nasa-exoplanets",
+    title: "NASA exoplanet archive (sample)",
+    blurb: "Confirmed planets — radius, mass, discovery year.",
+    url: "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+top+500+pl_name,hostname,disc_year,pl_rade,pl_bmasse,sy_dist+from+pscomppars&format=csv",
+    source: "NASA Exoplanet Archive",
+  },
+  {
+    id: "gdp-countries",
+    title: "Country GDP (datahub)",
+    blurb: "Long-run GDP by country — classic scatter vs population stories.",
+    url: "https://raw.githubusercontent.com/datasets/gdp/master/data/gdp.csv",
+    source: "datahub.io / World Bank",
+  },
+  {
+    id: "population-un",
+    title: "UN population estimates",
+    blurb: "Population by country and year.",
+    url: "https://raw.githubusercontent.com/datasets/population/master/data/population.csv",
+    source: "datahub.io / UN",
+  },
+  {
+    id: "owid-energy",
+    title: "OWID energy mix",
+    blurb: "Electricity and energy by source and country.",
+    url: "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv",
+    source: "Our World in Data",
   },
 ];
 
@@ -1585,27 +1718,99 @@ function DataRegionView({
           ))}
         </section>
 
+        {/* Curated CSV packs — one-click Explore */}
+        <section className="space-y-2.5">
+          <SectionHeading
+            title="Curated open packs"
+            lede="Famous public CSVs — Explore loads them straight into Chart."
+          />
+          <ul className="space-y-2">
+            {CURATED_OPEN_PACKS.map((pack) => (
+              <li
+                key={pack.id}
+                className="border border-loom-border rounded-lg p-2.5 bg-loom-surface/50 space-y-1.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-loom-text leading-snug">{pack.title}</p>
+                    <p className="text-2xs text-loom-muted mt-0.5 leading-snug">{pack.blurb}</p>
+                    <p className="text-[10px] text-loom-muted/80 mt-1">{pack.source}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  {canLoadInBrowser && (
+                    <button
+                      type="button"
+                      disabled={loadingId === pack.id || isScanning}
+                      onClick={() => void handleLoadCsv(pack.url, `${pack.id}.csv`, pack.id)}
+                      className="text-2xs px-2 py-1 rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50"
+                    >
+                      {loadingId === pack.id ? "Loading…" : "Explore CSV"}
+                    </button>
+                  )}
+                  {canSaveToFolder && (
+                    <button
+                      type="button"
+                      disabled={savingId === pack.id}
+                      onClick={() => void handleSaveToFolder(pack.url, `${pack.id}.csv`, pack.id)}
+                      className="text-2xs px-2 py-1 rounded border border-loom-border text-loom-muted hover:text-loom-text disabled:opacity-50"
+                    >
+                      {savingId === pack.id ? "Saving…" : "Save to folder"}
+                    </button>
+                  )}
+                  <a
+                    href={pack.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-2xs text-loom-muted hover:text-loom-accent"
+                  >
+                    Open source
+                  </a>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+
         {/* More portals */}
         <section>
-          <SectionHeading title="More portals" lede="Open in a tab, download CSV, then bring it back here." />
+          <SectionHeading title="More portals" lede="Browse catalogs in a tab, then bring CSVs back here." />
           <ul className="space-y-2.5 px-1">
             <li>
-              <a href="https://data.europa.eu" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
+              <a href="https://data.europa.eu/en/data" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
                 data.europa.eu
               </a>
-              <p className="text-2xs text-loom-muted">EU open data</p>
+              <p className="text-2xs text-loom-muted">EU open data portal</p>
             </li>
             <li>
-              <a href="https://ourworldindata.org" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
+              <a href="https://ourworldindata.org/data" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
                 Our World in Data
               </a>
-              <p className="text-2xs text-loom-muted">Global development & health</p>
+              <p className="text-2xs text-loom-muted">Global development &amp; health</p>
             </li>
             <li>
               <a href="https://data.nasa.gov" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
                 data.nasa.gov
               </a>
               <p className="text-2xs text-loom-muted">NASA open science</p>
+            </li>
+            <li>
+              <a href="https://www.fema.gov/about/openfema/data-sets" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
+                OpenFEMA datasets
+              </a>
+              <p className="text-2xs text-loom-muted">US disaster &amp; emergency data</p>
+            </li>
+            <li>
+              <a href="https://openaq.org" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
+                OpenAQ
+              </a>
+              <p className="text-2xs text-loom-muted">Global air quality measurements</p>
+            </li>
+            <li>
+              <a href="https://opensky-network.org" target="_blank" rel="noopener noreferrer" className="text-sm text-loom-text hover:text-loom-accent">
+                OpenSky Network
+              </a>
+              <p className="text-2xs text-loom-muted">Live ADS-B aircraft positions</p>
             </li>
           </ul>
         </section>

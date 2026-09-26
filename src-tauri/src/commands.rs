@@ -189,6 +189,51 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
     Ok(())
 }
 
+/// Write binary content (e.g. PNG / ZIP) to a path from the save dialog.
+#[tauri::command]
+pub async fn write_binary_file(path: String, bytes: Vec<u8>) -> Result<(), String> {
+    let path = normalize_folder_path(&path);
+    if path.is_empty() {
+        return Err("Path is empty".to_string());
+    }
+    if bytes.len() > 80 * 1024 * 1024 {
+        return Err("File too large (80MB limit)".to_string());
+    }
+    let p = Path::new(&path);
+    if let Some(parent) = p.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("Create dir failed: {}", e))?;
+    }
+    std::fs::write(p, &bytes).map_err(|e| format!("Write failed: {}", e))?;
+    Ok(())
+}
+
+/// Reveal a file in the system file manager (Finder on macOS).
+#[tauri::command]
+pub async fn reveal_in_finder(path: String) -> Result<(), String> {
+    let path = normalize_folder_path(&path);
+    if path.is_empty() {
+        return Err("Path is empty".to_string());
+    }
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err("File does not exist".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Reveal failed: {}", e))?;
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let parent = p.parent().unwrap_or(p);
+        opener::open(parent).map_err(|e| format!("Reveal failed: {}", e))?;
+        Ok(())
+    }
+}
+
 fn sanitize_ckan_q(q: Option<String>) -> Option<String> {
     let s = q?.trim().to_string();
     if s.is_empty() || s.len() > 500 {
@@ -824,6 +869,15 @@ pub async fn source_status(
         "iss" => "iss_track",
         "hn" => "hn_stories",
         "crypto" => "crypto_markets",
+        "aq" => "air_quality",
+        "fx" => "fx_rates",
+        "fema" => "fema_disasters",
+        "opensky" => "opensky_aircraft",
+        "countries" => "world_countries",
+        "spacex" => "spacex_launches",
+        "nyc311" => "nyc_311",
+        "covid" => "covid_countries",
+        "launches" => "space_launches",
         _ => return Err("Unknown source kind".to_string()),
     };
     Ok(inst.status(table, &*db).await)
@@ -854,6 +908,15 @@ pub async fn source_snapshot(
         "iss" => "iss_track",
         "hn" => "hn_stories",
         "crypto" => "crypto_markets",
+        "aq" => "air_quality",
+        "fx" => "fx_rates",
+        "fema" => "fema_disasters",
+        "opensky" => "opensky_aircraft",
+        "countries" => "world_countries",
+        "spacex" => "spacex_launches",
+        "nyc311" => "nyc_311",
+        "covid" => "covid_countries",
+        "launches" => "space_launches",
         _ => return Err("Unknown source kind".to_string()),
     };
     let order = match kind.as_str() {
@@ -864,6 +927,15 @@ pub async fn source_snapshot(
         "iss" => "ORDER BY ts DESC",
         "hn" => "ORDER BY points DESC",
         "crypto" => "ORDER BY rank ASC",
+        "aq" => "ORDER BY pm2_5 DESC",
+        "fx" => "ORDER BY rate DESC",
+        "fema" => "ORDER BY declaration_date DESC",
+        "opensky" => "ORDER BY baro_altitude DESC",
+        "countries" => "ORDER BY population DESC",
+        "spacex" => "ORDER BY date_utc DESC",
+        "nyc311" => "ORDER BY created_date DESC",
+        "covid" => "ORDER BY cases DESC",
+        "launches" => "ORDER BY net ASC",
         _ => "",
     };
     let sql = format!("SELECT * FROM {} {}", table, order);

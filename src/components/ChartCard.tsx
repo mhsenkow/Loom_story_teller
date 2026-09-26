@@ -15,29 +15,40 @@ import { buildBarFacetGrid } from "@/lib/chartTooltip";
 import type { YAggregateOption } from "@/lib/recommendations";
 import { useLoomStore } from "@/lib/store";
 import { densityAwarePointMarks } from "@/lib/chartLayout";
+import { isOddChartKind, renderOddChart, ODD_CHART_KIND_OPTIONS } from "@/lib/oddCharts";
+import { isGpuSceneKind, extractGpuScenePoints, renderGpuSceneCanvas, GPU_SCENE_KIND_OPTIONS } from "@/lib/gpuScenes";
+import { isGeoFamilyKind, isGeoMapKind, renderGeoMapCanvas, GEO_MAP_KIND_OPTIONS } from "@/lib/geoMaps";
 
 const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
 
 const KIND_LABELS: Record<string, string> = {
   scatter: "Scatter",
   bubble: "Bubble",
+  hexbin: "Hexbin",
   bar: "Bar",
   lollipop: "Lollipop",
+  dumbbell: "Dumbbell",
   histogram: "Histogram",
   line: "Line",
   heatmap: "Heatmap",
   strip: "Strip",
   violin: "Violin",
+  ridgeline: "Ridgeline",
   box: "Box",
   area: "Area",
   pie: "Pie",
+  funnel: "Funnel",
   radar: "Radar",
+  parallel: "Parallel",
   waterfall: "Waterfall",
   treemap: "Treemap",
   sunburst: "Sunburst",
   choropleth: "Choropleth",
   forceBubble: "Force Bubble",
   sankey: "Sankey",
+  ...Object.fromEntries(ODD_CHART_KIND_OPTIONS.map((o) => [o.value, o.label])),
+  ...Object.fromEntries(GPU_SCENE_KIND_OPTIONS.map((o) => [o.value, o.label])),
+  ...Object.fromEntries(GEO_MAP_KIND_OPTIONS.map((o) => [o.value, o.label])),
 };
 
 export function ChartCard({
@@ -134,16 +145,79 @@ export function ChartCard({
       drawWaterfall(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
     } else if (rec.kind === "lollipop") {
       drawLollipop(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+    } else if (rec.kind === "dumbbell" && yIdx >= 0) {
+      const sizeIdx = rec.sizeField ? data.columns.indexOf(rec.sizeField) : -1;
+      if (sizeIdx >= 0) drawDumbbell(ctx, rows, xIdx, yIdx, sizeIdx, w, h, pad, COLORS);
+    } else if (rec.kind === "ridgeline" && yIdx >= 0) {
+      drawRidgeline(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+    } else if (rec.kind === "hexbin" && yIdx >= 0) {
+      drawHexbin(ctx, rows, xIdx, yIdx, w, h, pad);
+    } else if (rec.kind === "funnel") {
+      drawFunnel(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+    } else if (rec.kind === "parallel") {
+      drawParallel(ctx, rows, data.columns, cIdx, w, h, pad, COLORS);
     } else if (rec.kind === "treemap") {
       drawTreemap(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
     } else if (rec.kind === "sunburst") {
       drawSunburst(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "choropleth") {
-      drawChoropleth(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
     } else if (rec.kind === "forceBubble") {
       drawForceBubble(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
     } else if (rec.kind === "sankey") {
       drawSankey(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
+    } else if (isGeoFamilyKind(rec.kind)) {
+      const geoKind = rec.kind === "choropleth" ? "choropleth" as const : rec.kind;
+      if (geoKind === "choropleth" || isGeoMapKind(geoKind)) {
+        renderGeoMapCanvas(
+          geoKind,
+          ctx,
+          rows,
+          data.columns,
+          {
+            xField: rec.xField,
+            yField: rec.yField,
+            colorField: rec.colorField,
+            sizeField: rec.sizeField,
+          },
+          w,
+          h,
+          pad,
+          { colors: COLORS, opacity: 0.85, pointSize: 2.2, mini: true },
+        );
+      }
+    } else if (isGpuSceneKind(rec.kind)) {
+      const packed = extractGpuScenePoints(rows, data.columns, {
+        xField: rec.xField,
+        yField: rec.yField,
+        zField: rec.zField,
+        colorField: rec.colorField,
+        sizeField: rec.sizeField,
+        timeField: rec.timeField,
+        trailId: rec.trailId,
+      }, 1200);
+      if (packed) {
+        renderGpuSceneCanvas(rec.kind, ctx, packed, w, h, pad, {
+          colors: COLORS,
+          opacity: 0.85,
+          pointSize: 2.2,
+        });
+      }
+    } else if (isOddChartKind(rec.kind)) {
+      const sizeIdx = rec.sizeField ? data.columns.indexOf(rec.sizeField) : -1;
+      renderOddChart(
+        rec.kind,
+        ctx,
+        rows,
+        data.columns,
+        xIdx,
+        yIdx,
+        cIdx,
+        sizeIdx,
+        w,
+        h,
+        pad,
+        { colors: COLORS, opacity: 0.85, pointSize: 2.5 },
+        true,
+      );
     }
   }, [rec, data, theme, colorblind]);
 
@@ -168,10 +242,11 @@ export function ChartCard({
       tabIndex={hero ? -1 : undefined}
       aria-hidden={hero || undefined}
       className={`
-        group flex flex-col rounded-lg overflow-hidden transition-all duration-150
-        border bg-loom-elevated text-left
-        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-xl hover:border-transparent" : "hover:border-loom-accent"}
-        ${!hero && isActive ? "border-loom-accent ring-1 ring-loom-accent/40" : !hero ? "border-loom-border" : ""}
+        group flex flex-col overflow-hidden text-left
+        border bg-loom-elevated
+        transition-[border-color,box-shadow,transform] duration-150
+        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-xl hover:border-transparent" : "rounded-lg hover:border-loom-accent/60 hover:shadow-loom"}
+        ${!hero && isActive ? "border-loom-accent ring-1 ring-loom-accent/35 shadow-loom" : !hero ? "border-loom-border" : ""}
         ${compact ? "w-[152px] shrink-0 snap-start rounded-md" : "w-full"}
       `}
     >
@@ -209,28 +284,19 @@ export function ChartCard({
 }
 
 function kindColor(kind: string): string {
-  switch (kind) {
-    case "scatter": return "bg-[#6c5ce7]/20 text-[#a29bfe]";
-    case "bar": return "bg-[#00d68f]/20 text-[#00d68f]";
-    case "histogram": return "bg-[#00b4d8]/20 text-[#00b4d8]";
-    case "line": return "bg-[#ff6b6b]/20 text-[#ff6b6b]";
-    case "heatmap": return "bg-[#ffd93d]/20 text-[#ffd93d]";
-    case "strip": return "bg-[#e77c5c]/20 text-[#e77c5c]";
-    case "box": return "bg-[#a29bfe]/20 text-[#a29bfe]";
-    case "area": return "bg-[#74b9ff]/20 text-[#74b9ff]";
-    case "pie": return "bg-[#e77c5c]/20 text-[#e77c5c]";
-    case "bubble": return "bg-[#00b4d8]/20 text-[#00b4d8]";
-    case "violin": return "bg-[#a29bfe]/20 text-[#a29bfe]";
-    case "radar": return "bg-[#ffd93d]/20 text-[#ffd93d]";
-    case "waterfall": return "bg-[#00d68f]/20 text-[#00d68f]";
-    case "lollipop": return "bg-[#ff6b6b]/20 text-[#ff6b6b]";
-    case "treemap": return "bg-[#55efc4]/20 text-[#55efc4]";
-    case "sunburst": return "bg-[#fd79a8]/20 text-[#fd79a8]";
-    case "choropleth": return "bg-[#81ecec]/20 text-[#81ecec]";
-    case "forceBubble": return "bg-[#fab1a0]/20 text-[#fab1a0]";
-    case "sankey": return "bg-[#dfe6e9]/20 text-[#dfe6e9]";
-    default: return "bg-loom-muted/20 text-loom-muted";
-  }
+  // Theme-aware tint via chart palette tokens (see globals.css --chart-*)
+  const n =
+    kind === "scatter" || kind === "bubble" || kind === "forceBubble" || kind === "hexbin" ? 1
+    : kind === "bar" || kind === "lollipop" || kind === "waterfall" || kind === "dumbbell" || kind === "funnel" ? 2
+    : kind === "histogram" || kind === "area" ? 3
+    : kind === "line" || kind === "parallel" ? 4
+    : kind === "heatmap" || kind === "treemap" ? 5
+    : kind === "strip" || kind === "box" || kind === "violin" || kind === "ridgeline" ? 6
+    : kind === "pie" || kind === "sunburst" || kind === "radar" ? 7
+    : kind === "choropleth" || kind === "sankey" ? 8
+    : 0;
+  if (!n) return "bg-loom-muted/20 text-loom-muted";
+  return `loom-kind-${n}`;
 }
 
 // --- Mini renderers (simple, fast, no labels) ---
@@ -873,23 +939,6 @@ function drawSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numb
   ctx.fillStyle = "#0e0e12"; ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(cx, cy, innerR * 0.5, 0, Math.PI * 2); ctx.fill();
 }
 
-function drawChoropleth(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, _colors: string[]) {
-  const groups = new Map<string, number>();
-  for (const r of rows) { const k = String(r[xi]); const v = yi >= 0 ? Number(r[yi]) : 1; groups.set(k, (groups.get(k) ?? 0) + (isNaN(v) ? 0 : v)); }
-  const entries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 30);
-  if (entries.length === 0) return;
-  const maxV = Math.max(...entries.map(([, v]) => v), 1), minV = Math.min(...entries.map(([, v]) => v), 0), range = maxV - minV || 1;
-  const cols = Math.ceil(Math.sqrt(entries.length * (w / h))), rowC = Math.ceil(entries.length / cols);
-  const cellW = (w - 2 * pad) / cols, cellH = (h - 2 * pad) / rowC;
-  entries.forEach(([, val], i) => {
-    const t = (val - minV) / range;
-    ctx.fillStyle = `hsl(${220 - t * 180}, ${50 + t * 30}%, ${15 + t * 40}%)`;
-    ctx.globalAlpha = 0.85;
-    ctx.fillRect(pad + (i % cols) * cellW + 0.5, pad + Math.floor(i / cols) * cellH + 0.5, cellW - 1, cellH - 1);
-  });
-  ctx.globalAlpha = 1;
-}
-
 function drawForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, { val: number; cat: string }>();
@@ -957,5 +1006,166 @@ function drawSankey(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
   }
   for (const [i, s] of sources.entries()) { const r = sY.get(s)!; ctx.fillStyle = COL[i % COL.length]; ctx.globalAlpha = 0.9; ctx.fillRect(lx, r.y, 3, r.h); }
   for (const [i, t] of targets.entries()) { const r = tY.get(t)!; ctx.fillStyle = COL[i % COL.length]; ctx.globalAlpha = 0.7; ctx.fillRect(rx, r.y, 3, r.h); }
+  ctx.globalAlpha = 1;
+}
+
+function drawDumbbell(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, si: number, w: number, h: number, pad: number, colors: string[]) {
+  const COL = colors.length ? colors : FALLBACK_COLORS;
+  const groups = new Map<string, { a: number[]; b: number[] }>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    const a = Number(r[yi]);
+    const b = Number(r[si]);
+    if (isNaN(a) || isNaN(b)) continue;
+    if (!groups.has(k)) groups.set(k, { a: [], b: [] });
+    groups.get(k)!.a.push(a);
+    groups.get(k)!.b.push(b);
+  }
+  const entries = [...groups.entries()].map(([label, g]) => ({
+    label,
+    a: g.a.reduce((s, v) => s + v, 0) / g.a.length,
+    b: g.b.reduce((s, v) => s + v, 0) / g.b.length,
+  })).slice(0, 10);
+  if (!entries.length) return;
+  let minV = Infinity, maxV = -Infinity;
+  for (const e of entries) { minV = Math.min(minV, e.a, e.b); maxV = Math.max(maxV, e.a, e.b); }
+  if (minV === maxV) { minV -= 1; maxV += 1; }
+  const range = maxV - minV;
+  const bandH = (h - 2 * pad) / entries.length;
+  entries.forEach((e, i) => {
+    const cy = pad + (i + 0.5) * bandH;
+    const x0 = pad + ((e.a - minV) / range) * (w - 2 * pad);
+    const x1 = pad + ((e.b - minV) / range) * (w - 2 * pad);
+    ctx.strokeStyle = COL[i % COL.length]; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
+    ctx.beginPath(); ctx.moveTo(x0, cy); ctx.lineTo(x1, cy); ctx.stroke();
+    ctx.fillStyle = COL[i % COL.length]; ctx.globalAlpha = 0.85;
+    ctx.beginPath(); ctx.arc(x0, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x1, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawRidgeline(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
+  const COL = colors.length ? colors : FALLBACK_COLORS;
+  const groups = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = String(r[yi]); const v = Number(r[xi]);
+    if (isNaN(v)) continue;
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k)!.push(v);
+  }
+  const entries = [...groups.entries()].slice(0, 6);
+  if (!entries.length) return;
+  const all = entries.flatMap(([, vs]) => vs);
+  const gMin = Math.min(...all), gMax = Math.max(...all), range = gMax - gMin || 1;
+  const bins = 16;
+  const bandH = (h - 2 * pad) / entries.length;
+  entries.forEach(([, vals], gi) => {
+    const counts = new Array(bins).fill(0);
+    for (const v of vals) counts[Math.min(bins - 1, Math.floor(((v - gMin) / range) * bins))]++;
+    const maxC = Math.max(...counts, 1);
+    const baseline = pad + (gi + 1) * bandH - 2;
+    ctx.beginPath(); ctx.moveTo(pad, baseline);
+    for (let b = 0; b < bins; b++) {
+      const x = pad + ((b + 0.5) / bins) * (w - 2 * pad);
+      ctx.lineTo(x, baseline - (counts[b] / maxC) * bandH * 0.8);
+    }
+    ctx.lineTo(w - pad, baseline); ctx.closePath();
+    ctx.fillStyle = COL[gi % COL.length]; ctx.globalAlpha = 0.45; ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawHexbin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number) {
+  const [xMin, xMax] = numericRange(rows, xi);
+  const [yMin, yMax] = numericRange(rows, yi);
+  const hexR = Math.min(w, h) / 18;
+  const hexW = hexR * Math.sqrt(3), hexH = hexR * 1.5;
+  const counts = new Map<string, number>();
+  let maxC = 0;
+  for (const r of rows) {
+    const xv = Number(r[xi]), yv = Number(r[yi]);
+    if (isNaN(xv) || isNaN(yv)) continue;
+    const px = pad + ((xv - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
+    const py = h - pad - ((yv - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
+    const col = Math.round((px - pad) / hexW), row = Math.round((py - pad) / hexH);
+    const key = `${col},${row}`;
+    const n = (counts.get(key) ?? 0) + 1;
+    counts.set(key, n); if (n > maxC) maxC = n;
+  }
+  for (const [key, count] of counts) {
+    const [cs, rs] = key.split(",");
+    const col = Number(cs), row = Number(rs);
+    const cx = pad + col * hexW + (row % 2 ? hexW / 2 : 0);
+    const cy = pad + row * hexH;
+    const t = count / maxC;
+    ctx.fillStyle = `hsl(${200 - t * 160}, ${45 + t * 35}%, ${18 + t * 42}%)`;
+    ctx.globalAlpha = 0.85;
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const ang = (Math.PI / 180) * (60 * i - 30);
+      const hx = cx + hexR * Math.cos(ang), hy = cy + hexR * Math.sin(ang);
+      if (i === 0) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
+    }
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawFunnel(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
+  const COL = colors.length ? colors : FALLBACK_COLORS;
+  const groups = new Map<string, number>();
+  for (const r of rows) {
+    const k = String(r[xi]); const v = yi >= 0 ? Number(r[yi]) : 1;
+    groups.set(k, (groups.get(k) ?? 0) + (isNaN(v) ? 0 : Math.abs(v)));
+  }
+  const entries = [...groups.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (!entries.length) return;
+  const maxVal = entries[0]![1];
+  const minW = (w - 2 * pad) * 0.2, maxW = w - 2 * pad;
+  const bandH = (h - 2 * pad) / entries.length;
+  entries.forEach(([, val], i) => {
+    const next = entries[i + 1];
+    const topW = minW + (val / maxVal) * (maxW - minW);
+    const botW = next ? minW + (next[1] / maxVal) * (maxW - minW) : topW * 0.7;
+    const y0 = pad + i * bandH, y1 = y0 + bandH - 2, cx = w / 2;
+    ctx.beginPath();
+    ctx.moveTo(cx - topW / 2, y0); ctx.lineTo(cx + topW / 2, y0);
+    ctx.lineTo(cx + botW / 2, y1); ctx.lineTo(cx - botW / 2, y1);
+    ctx.closePath();
+    ctx.fillStyle = COL[i % COL.length]; ctx.globalAlpha = 0.75; ctx.fill();
+  });
+  ctx.globalAlpha = 1;
+}
+
+function drawParallel(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames: string[], ci: number, w: number, h: number, pad: number, colors: string[]) {
+  const COL = colors.length ? colors : FALLBACK_COLORS;
+  const axes: { idx: number; min: number; max: number }[] = [];
+  for (let c = 0; c < columnNames.length; c++) {
+    if (c === ci) continue;
+    const [min, max] = numericRange(rows, c);
+    const ok = rows.slice(0, 20).some(r => !isNaN(Number(r[c])));
+    if (!ok) continue;
+    axes.push({ idx: c, min, max });
+    if (axes.length >= 5) break;
+  }
+  if (axes.length < 3) return;
+  const xs = axes.map((_, i) => pad + (i / (axes.length - 1)) * (w - 2 * pad));
+  ctx.strokeStyle = "#2a2a30"; ctx.lineWidth = 1; ctx.globalAlpha = 0.7;
+  for (const x of xs) { ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, h - pad); ctx.stroke(); }
+  const stride = Math.max(1, Math.floor(rows.length / 80));
+  for (let ri = 0; ri < rows.length; ri += stride) {
+    const r = rows[ri]!;
+    const colorIdx = ci >= 0 ? Math.abs(String(r[ci]).length) % COL.length : 0;
+    ctx.strokeStyle = COL[colorIdx]; ctx.lineWidth = 1; ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    axes.forEach((ax, i) => {
+      const v = Number(r[ax.idx]); if (isNaN(v)) return;
+      const t = (v - ax.min) / (ax.max - ax.min || 1);
+      const y = h - pad - t * (h - 2 * pad);
+      if (i === 0) ctx.moveTo(xs[i]!, y); else ctx.lineTo(xs[i]!, y);
+    });
+    ctx.stroke();
+  }
   ctx.globalAlpha = 1;
 }

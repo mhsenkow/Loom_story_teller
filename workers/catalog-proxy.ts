@@ -243,8 +243,23 @@ async function handleSource(kind: string): Promise<Response> {
   }
 
   if (kind === "iss") {
-    const r = await fetch("https://api.wheretheiss.at/v1/satellites/25544", { headers });
-    if (!r.ok) return json({ error: `ISS ${r.status}` }, 502);
+    const tip = await fetch("https://api.wheretheiss.at/v1/satellites/25544", { headers });
+    if (!tip.ok) return json({ error: `ISS ${tip.status}` }, 502);
+    return new Response(await tip.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "iss_trail") {
+    // wheretheiss.at allows ≤10 timestamps per request — one orbit (~90m) of samples.
+    const now = Math.floor(Date.now() / 1000);
+    const stamps: number[] = [];
+    for (let i = 9; i >= 0; i--) stamps.push(now - i * 600);
+    const trailUrl =
+      `https://api.wheretheiss.at/v1/satellites/25544/positions?timestamps=${stamps.join(",")}`;
+    const r = await fetch(trailUrl, { headers });
+    if (!r.ok) return json({ error: `ISS trail ${r.status}` }, 502);
     return new Response(await r.text(), {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS },
@@ -268,6 +283,111 @@ async function handleSource(kind: string): Promise<Response> {
       { headers },
     );
     if (!r.ok) return json({ error: `CoinGecko ${r.status}` }, 502);
+    return new Response(await r.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "aq") {
+    const cities = [];
+    for (const city of METEO_CITIES) {
+      const url =
+        `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${city.lat}&longitude=${city.lon}` +
+        `&current=pm2_5,pm10,ozone,nitrogen_dioxide,european_aqi`;
+      const r = await fetch(url, { headers });
+      if (!r.ok) continue;
+      const body = (await r.json()) as { current?: Record<string, unknown> };
+      cities.push({
+        name: city.name,
+        lat: city.lat,
+        lon: city.lon,
+        current: body.current ?? {},
+      });
+    }
+    return json({ cities });
+  }
+
+  if (kind === "fx") {
+    const r = await fetch("https://api.frankfurter.app/latest", { headers });
+    if (!r.ok) return json({ error: `Frankfurter ${r.status}` }, 502);
+    return new Response(await r.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "fema") {
+    const r = await fetch(
+      "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?$top=200&$orderby=declarationDate%20desc",
+      { headers },
+    );
+    if (!r.ok) return json({ error: `FEMA ${r.status}` }, 502);
+    return new Response(await r.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "opensky") {
+    const r = await fetch(
+      "https://opensky-network.org/api/states/all?lamin=24.5&lomin=-125.0&lamax=49.5&lomax=-66.5",
+      { headers },
+    );
+    if (!r.ok) return json({ error: `OpenSky ${r.status}` }, 502);
+    return new Response(await r.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "countries") {
+    const r = await fetch(
+      "https://restcountries.com/v3.1/all?fields=name,cca3,region,subregion,population,area,capital,independent",
+      { headers },
+    );
+    if (!r.ok) return json({ error: `REST Countries ${r.status}` }, 502);
+    return new Response(await r.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "spacex") {
+    const r = await fetch("https://api.spacexdata.com/v5/launches/past", { headers });
+    if (!r.ok) return json({ error: `SpaceX ${r.status}` }, 502);
+    return new Response(await r.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "nyc311") {
+    const r = await fetch(
+      "https://data.cityofnewyork.us/resource/erm2-nwe9.json?$limit=400&$order=created_date%20DESC",
+      { headers },
+    );
+    if (!r.ok) return json({ error: `NYC 311 ${r.status}` }, 502);
+    return new Response(await r.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "covid") {
+    const r = await fetch("https://disease.sh/v3/covid-19/countries", { headers });
+    if (!r.ok) return json({ error: `disease.sh ${r.status}` }, 502);
+    return new Response(await r.text(), {
+      status: 200,
+      headers: { "Content-Type": "application/json", ...CORS },
+    });
+  }
+
+  if (kind === "launches") {
+    const r = await fetch("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40&mode=list", {
+      headers,
+    });
+    if (!r.ok) return json({ error: `Space Devs ${r.status}` }, 502);
     return new Response(await r.text(), {
       status: 200,
       headers: { "Content-Type": "application/json", ...CORS },
@@ -349,11 +469,71 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
   return json({ url: issue.html_url });
 }
 
+const STORY_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
+const MAX_STORY_HTML_BYTES = 4 * 1024 * 1024;
+
+function storyId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(9));
+  return Array.from(bytes, (b) => b.toString(36).padStart(2, "0"))
+    .join("")
+    .slice(0, 12);
+}
+
+async function handlePublishStory(request: Request): Promise<Response> {
+  let payload: { html?: string; title?: string; ogImage?: string };
+  try {
+    payload = (await request.json()) as typeof payload;
+  } catch {
+    return json({ error: "Invalid JSON" }, 400);
+  }
+  const html = payload.html?.trim() ?? "";
+  if (!html || html.length > MAX_STORY_HTML_BYTES) {
+    return json({ error: "HTML missing or too large (4MB max)" }, 400);
+  }
+  if (!html.includes("<html") && !html.includes("<HTML")) {
+    return json({ error: "Expected an HTML document" }, 400);
+  }
+
+  const id = storyId();
+  const cache = caches.default;
+  const cacheUrl = new URL(`https://loom-story.internal/s/${id}`);
+  const res = new Response(html, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}`,
+      "X-Loom-Story-Title": (payload.title || "Loom story").slice(0, 120),
+    },
+  });
+  await cache.put(cacheUrl.toString(), res.clone());
+
+  const origin = new URL(request.url).origin;
+  return json({ id, url: `${origin}/s/${id}` });
+}
+
+async function handleGetStory(id: string): Promise<Response> {
+  if (!/^[a-z0-9]{8,16}$/i.test(id)) {
+    return json({ error: "Invalid story id" }, 400);
+  }
+  const cache = caches.default;
+  const cacheUrl = `https://loom-story.internal/s/${id}`;
+  const hit = await cache.match(cacheUrl);
+  if (!hit) {
+    return new Response("Story not found or expired.", {
+      status: 404,
+      headers: { "Content-Type": "text/plain; charset=utf-8", ...CORS },
+    });
+  }
+  const headers = new Headers(hit.headers);
+  headers.set("Access-Control-Allow-Origin", "*");
+  return new Response(hit.body, { status: 200, headers });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+    if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/"))) {
       return new Response(null, { status: 204, headers: CORS });
     }
 
@@ -375,6 +555,13 @@ export default {
       }
       if (url.pathname === "/api/feedback" && request.method === "POST") {
         return await handleFeedback(request, env);
+      }
+      if (url.pathname === "/api/stories" && request.method === "POST") {
+        return await handlePublishStory(request);
+      }
+      if (url.pathname.startsWith("/s/")) {
+        const id = url.pathname.slice(3).replace(/\/$/, "");
+        return await handleGetStory(id);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

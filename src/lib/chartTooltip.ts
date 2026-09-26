@@ -699,9 +699,52 @@ export function pickCanvasTooltipRowIndex(
       const { label } = lolli[i]!;
       return firstRowForLabel(rows, xIdx, label, allowed);
     }
+    case "dumbbell": {
+      if (xIdx < 0) return null;
+      const labels = [...new Set(rows.map((r) => String(r[xIdx])))].slice(0, 20);
+      if (labels.length === 0) return null;
+      const bandH = chartHeight / labels.length;
+      const i = Math.max(0, Math.min(labels.length - 1, Math.floor((chartY - pad) / bandH)));
+      return firstRowForLabel(rows, xIdx, labels[i]!, allowed);
+    }
+    case "ridgeline": {
+      if (yIdx < 0 || xIdx < 0) return null;
+      const labels = [...new Set(rows.map((r) => String(r[yIdx])))].sort((a, b) => a.localeCompare(b)).slice(0, 10);
+      if (labels.length === 0) return null;
+      const bandH = chartHeight / labels.length;
+      const i = Math.max(0, Math.min(labels.length - 1, Math.floor((chartY - pad) / bandH)));
+      const label = labels[i]!;
+      for (let ri = 0; ri < rows.length; ri++) {
+        if (!inAllowed(ri, allowed)) continue;
+        if (String(rows[ri]![yIdx]) === label) return ri;
+      }
+      return null;
+    }
+    case "hexbin":
+      return pickScatterCanvasNearest(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
+    case "funnel": {
+      if (xIdx < 0) return null;
+      const agg: YAggregateOption = yIdx < 0 ? "count" : (yAggregate ?? "sum");
+      const groups = new Map<string, number[]>();
+      for (const r of rows) {
+        const k = String(r[xIdx]);
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k)!.push(yIdx >= 0 ? Number(r[yIdx]) : 1);
+      }
+      const funnel = [...groups.entries()]
+        .map(([label, vals]) => [label, aggregateValues(vals.filter((v) => !isNaN(v)), agg)] as [string, number])
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 12);
+      if (funnel.length === 0) return null;
+      const bandH = chartHeight / funnel.length;
+      const i = Math.max(0, Math.min(funnel.length - 1, Math.floor((chartY - pad) / bandH)));
+      return firstRowForLabel(rows, xIdx, funnel[i]![0], allowed);
+    }
     case "scatter":
       return pickScatterCanvasNearest(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
     case "radar":
+    case "parallel":
     case "treemap":
     case "sunburst":
     case "choropleth":
@@ -711,6 +754,28 @@ export function pickCanvasTooltipRowIndex(
         const n = pickLineLikeNearestFixed(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
         if (n != null) return n;
       }
+      return pickFallbackNominalBands(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
+    case "bucketField":
+    case "beeswarm":
+    case "voronoi":
+    case "isoScatter":
+    case "contour":
+      return pickScatterCanvasNearest(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
+    case "waffle":
+    case "isotype":
+    case "radialBar":
+    case "isoBars":
+    case "pyramid":
+    case "slope":
+    case "chernoff":
+    case "glyphStar":
+    case "flower":
+    case "mosaic":
+    case "chord":
+    case "bump":
+    case "stream":
+    case "horizon":
+    case "spiral":
       return pickFallbackNominalBands(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
     default:
       return null;

@@ -45,14 +45,14 @@
   --safe-right: env(safe-area-inset-right, 0px);
 
   /* ---- Radii ---- */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 10px;
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
 
   /* ---- Transitions ---- */
-  --transition-fast: 120ms ease;
-  --transition-base: 200ms ease;
-  --transition-slow: 400ms ease;
+  --transition-fast: 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition-base: 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  --transition-slow: 360ms cubic-bezier(0.2, 0.8, 0.2, 1);
 
   /* ---- Semantic defaults (dark) before data-theme ---- */
   --color-bg: #0a0a0c;
@@ -70,11 +70,13 @@
   --focus-ring: 2px solid var(--color-accent);
   --selection-bg: rgba(108, 92, 231, 0.35);
   --selection-text: #ffffff;
-  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.28);
   --glass-1: rgba(17, 17, 20, 0.72);
   --glass-2: rgba(17, 17, 20, 0.85);
   --glass-blur: blur(0px);
+  --overlay-scrim: rgba(0, 0, 0, 0.48);
+  --overlay-blur: blur(6px);
   --panel-border-w: 1px;
   --btn-radius: var(--radius-md);
 
@@ -126,10 +128,12 @@ html.light {
   --btn-primary-fg: #ffffff;
   --selection-bg: rgba(184, 78, 31, 0.22);
   --selection-text: #141414;
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-2: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --shadow-2: 0 10px 28px rgba(0, 0, 0, 0.1), 0 2px 8px rgba(0, 0, 0, 0.05);
   --glass-1: rgba(250, 250, 247, 0.78);
   --glass-2: rgba(250, 250, 247, 0.92);
+  --overlay-scrim: rgba(20, 20, 18, 0.36);
+  --overlay-blur: blur(8px);
   --leading-ui: 1.45;
   --track-ui: 0.005em;
   --chart-1: #b84e1f;
@@ -160,8 +164,10 @@ html.dark {
   --btn-primary-fg: #ffffff;
   --selection-bg: rgba(123, 108, 240, 0.38);
   --selection-text: #ffffff;
-  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4), 0 1px 2px rgba(0, 0, 0, 0.3);
-  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.28);
+  --overlay-scrim: rgba(0, 0, 0, 0.52);
+  --overlay-blur: blur(6px);
   --leading-ui: 1.4;
   --chart-1: #1877F2;
   --chart-2: #F0701A;
@@ -712,18 +718,29 @@ html {
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--loom-border);
-    border-radius: 3px;
+    background: color-mix(in srgb, var(--loom-border) 85%, transparent);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--loom-muted);
+    background: color-mix(in srgb, var(--loom-muted) 70%, transparent);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
 
   ::selection {
@@ -749,18 +766,39 @@ html {
   .loom-card {
     @apply bg-loom-elevated rounded-md p-3;
     border: var(--panel-border-w) solid var(--loom-border);
-    transition: border-color var(--transition-fast);
+    box-shadow: var(--shadow-1);
+    transition:
+      border-color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      background-color var(--transition-fast),
+      transform var(--transition-fast);
   }
   .loom-card:hover {
-    border-color: var(--loom-accent);
+    border-color: color-mix(in srgb, var(--loom-accent) 55%, var(--loom-border));
   }
 
   .loom-btn {
     @apply inline-flex items-center justify-center gap-2 px-3 py-1.5
-           text-sm
-           transition-all duration-150;
+           text-sm select-none;
     font-weight: var(--weight-ui-medium);
     border-radius: var(--btn-radius);
+    transition:
+      background-color var(--transition-fast),
+      color var(--transition-fast),
+      border-color var(--transition-fast),
+      filter var(--transition-fast),
+      opacity var(--transition-fast),
+      transform var(--transition-fast),
+      box-shadow var(--transition-fast);
+  }
+  .loom-btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .loom-btn:disabled,
+  .loom-btn[aria-disabled="true"] {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
   }
   .loom-btn:focus-visible,
   button:focus-visible,
@@ -778,7 +816,7 @@ html {
     outline-offset: 1px;
   }
   .loom-btn-primary {
-    @apply loom-btn bg-loom-accent;
+    @apply loom-btn bg-loom-accent shadow-sm;
     color: var(--btn-primary-fg);
   }
   html[data-theme="contrast"] .loom-btn-primary,
@@ -786,8 +824,8 @@ html {
   html[data-theme="nes"] .loom-btn-primary {
     color: var(--btn-primary-fg);
   }
-  .loom-btn-primary:hover {
-    filter: brightness(1.12);
+  .loom-btn-primary:hover:not(:disabled) {
+    filter: brightness(1.1);
   }
   .loom-btn-ghost {
     @apply loom-btn text-loom-muted hover:text-loom-text hover:bg-loom-elevated;
@@ -808,6 +846,7 @@ html {
   }
   .loom-input:focus {
     border-color: var(--loom-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--loom-accent) 22%, transparent);
   }
 
   .loom-badge {
@@ -823,6 +862,91 @@ html {
   .loom-divider {
     @apply border-t border-loom-border;
   }
+
+  /* Segmented control (view modes, device picker, etc.) */
+  .loom-seg {
+    @apply inline-flex items-center gap-0.5 p-0.5 bg-loom-elevated;
+    border-radius: var(--radius-md);
+    border: var(--panel-border-w) solid color-mix(in srgb, var(--loom-border) 70%, transparent);
+  }
+  .loom-seg-item {
+    @apply inline-flex items-center justify-center gap-1 px-2.5 py-1.5 text-xs
+           text-loom-muted hover:text-loom-text;
+    font-weight: var(--weight-ui-medium);
+    border-radius: calc(var(--radius-md) - 2px);
+    transition:
+      background-color var(--transition-fast),
+      color var(--transition-fast),
+      box-shadow var(--transition-fast),
+      border-color var(--transition-fast);
+  }
+  .loom-seg-item[aria-pressed="true"],
+  .loom-seg-item[aria-current="page"],
+  .loom-seg-item[data-active="true"] {
+    background: var(--loom-accent);
+    color: var(--btn-primary-fg);
+    box-shadow: var(--shadow-1);
+  }
+
+  /* Quiet tab strip (panel sections) */
+  .loom-tabs {
+    @apply flex items-center gap-0.5 overflow-x-auto;
+  }
+  .loom-tab {
+    @apply relative px-3 py-2 text-xs text-loom-muted hover:text-loom-text whitespace-nowrap shrink-0;
+    font-weight: var(--weight-ui-medium);
+    border-radius: var(--radius-sm);
+    transition: color var(--transition-fast), background-color var(--transition-fast);
+  }
+  .loom-tab[aria-selected="true"] {
+    color: var(--loom-text);
+    background: color-mix(in srgb, var(--loom-elevated) 80%, transparent);
+  }
+  .loom-tab[aria-selected="true"]::after {
+    content: "";
+    position: absolute;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: var(--loom-accent);
+  }
+
+  .loom-overlay {
+    background: var(--overlay-scrim);
+    backdrop-filter: var(--overlay-blur);
+    -webkit-backdrop-filter: var(--overlay-blur);
+  }
+
+  .loom-kbd {
+    @apply inline-flex items-center px-1.5 py-0.5 rounded font-mono text-2xs
+           bg-loom-elevated text-loom-text;
+    border: var(--panel-border-w) solid var(--loom-border);
+    box-shadow: 0 1px 0 color-mix(in srgb, var(--loom-border) 80%, transparent);
+  }
+
+  .loom-list-row {
+    @apply flex items-center gap-2 rounded-md px-2 py-1.5 transition-colors;
+  }
+  .loom-list-row:hover {
+    background: color-mix(in srgb, var(--loom-elevated) 85%, transparent);
+  }
+  .loom-list-row[data-active="true"],
+  .loom-list-row[aria-current="true"] {
+    background: color-mix(in srgb, var(--loom-accent) 12%, transparent);
+    color: var(--loom-text);
+  }
+
+  /* Chart kind chips — track --chart-* so themes stay coherent */
+  .loom-kind-1 { color: var(--chart-1); background: color-mix(in srgb, var(--chart-1) 16%, transparent); }
+  .loom-kind-2 { color: var(--chart-2); background: color-mix(in srgb, var(--chart-2) 16%, transparent); }
+  .loom-kind-3 { color: var(--chart-3); background: color-mix(in srgb, var(--chart-3) 16%, transparent); }
+  .loom-kind-4 { color: var(--chart-4); background: color-mix(in srgb, var(--chart-4) 16%, transparent); }
+  .loom-kind-5 { color: var(--chart-5); background: color-mix(in srgb, var(--chart-5) 16%, transparent); }
+  .loom-kind-6 { color: var(--chart-6); background: color-mix(in srgb, var(--chart-6) 16%, transparent); }
+  .loom-kind-7 { color: var(--chart-7); background: color-mix(in srgb, var(--chart-7) 16%, transparent); }
+  .loom-kind-8 { color: var(--chart-8); background: color-mix(in srgb, var(--chart-8) 16%, transparent); }
 }
 
 @layer utilities {
@@ -831,6 +955,15 @@ html {
                 border-color var(--transition-base),
                 color var(--transition-base);
   }
+
+  /* Quiet secondary selection inside segmented controls (aspect / device) */
+  .loom-seg-item-quiet[aria-pressed="true"],
+  .loom-seg-item-quiet[data-active="true"] {
+    background: var(--loom-surface) !important;
+    color: var(--loom-text) !important;
+    box-shadow: var(--shadow-1);
+    border-color: var(--loom-border);
+  }
 }
 
 /* Mobile exploration — larger taps, less chrome density */
@@ -838,6 +971,7 @@ html {
   :root {
     --topbar-height: 52px;
     --statusbar-height: 0px;
+    --sidebar-width: min(100vw - 2.5rem, 20rem);
   }
 
   html {
@@ -851,7 +985,29 @@ html {
 
   .loom-input,
   .loom-btn-primary,
-  .loom-btn-ghost {
+  .loom-btn-ghost,
+  .loom-seg-item {
     min-height: 2.25rem;
+  }
+
+  .loom-tab {
+    min-height: 2.5rem;
+    padding-top: 0.625rem;
+    padding-bottom: 0.625rem;
+  }
+
+  .loom-card {
+    box-shadow: none;
+  }
+}
+
+/* Prefer less motion when requested */
+@media (prefers-reduced-motion: reduce) {
+  html:not(.reduced-motion) *,
+  html:not(.reduced-motion) *::before,
+  html:not(.reduced-motion) *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

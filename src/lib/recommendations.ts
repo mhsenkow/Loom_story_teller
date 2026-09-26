@@ -22,6 +22,34 @@ import {
   getCachedVizPreferences,
   type VizPreferenceModel,
 } from "./vizPreferences";
+import {
+  ODD_CHART_KIND_OPTIONS,
+  buildOddChartRec,
+  getOddRandomEncoding,
+  isOddChartKind,
+  oddChartDataSupport,
+  oddRecommendationReason,
+  type OddChartKind,
+} from "./oddCharts";
+import {
+  GPU_SCENE_KIND_OPTIONS,
+  buildGpuSceneRec,
+  isGpuSceneKind,
+  gpuSceneRecommendationReason,
+  gpuSceneDataSupport,
+  getGpuRandomEncoding,
+  type GpuSceneKind,
+} from "./gpuScenes";
+import {
+  GEO_MAP_KIND_OPTIONS,
+  buildGeoMapRec,
+  isGeoMapKind,
+  geoMapDataSupport,
+  getGeoMapRandomEncoding,
+  geoMapRecommendationReason,
+  type GeoMapKind,
+} from "./geoMaps";
+import { isGeoRegionField } from "./geoAtlas";
 
 const COLORS = VIZ_CATEGORICAL;
 
@@ -35,7 +63,34 @@ const DARK_AXIS = {
   titleFontSize: 11,
 };
 
-export type ChartKind = "scatter" | "bar" | "histogram" | "line" | "heatmap" | "strip" | "box" | "area" | "pie" | "bubble" | "violin" | "radar" | "waterfall" | "lollipop" | "treemap" | "sunburst" | "choropleth" | "forceBubble" | "sankey";
+export type ChartKind =
+  | "scatter"
+  | "bar"
+  | "histogram"
+  | "line"
+  | "heatmap"
+  | "strip"
+  | "box"
+  | "area"
+  | "pie"
+  | "bubble"
+  | "violin"
+  | "radar"
+  | "waterfall"
+  | "lollipop"
+  | "dumbbell"
+  | "ridgeline"
+  | "hexbin"
+  | "funnel"
+  | "parallel"
+  | "treemap"
+  | "sunburst"
+  | "choropleth"
+  | "forceBubble"
+  | "sankey"
+  | OddChartKind
+  | GpuSceneKind
+  | GeoMapKind;
 
 /** Aggregation for Y (or theta) encoding — sum, average, count, min, max. */
 export type YAggregateOption = "sum" | "mean" | "count" | "min" | "max";
@@ -52,23 +107,31 @@ export const Y_AGGREGATE_OPTIONS: { value: YAggregateOption; label: string }[] =
 export const CHART_KIND_OPTIONS: { value: ChartKind; label: string }[] = [
   { value: "scatter", label: "Dot (scatter)" },
   { value: "bubble", label: "Bubble" },
+  { value: "hexbin", label: "Hexbin" },
   { value: "line", label: "Line" },
   { value: "bar", label: "Bar (rect)" },
   { value: "lollipop", label: "Lollipop" },
+  { value: "dumbbell", label: "Dumbbell" },
   { value: "area", label: "Area" },
   { value: "pie", label: "Pie" },
+  { value: "funnel", label: "Funnel" },
   { value: "histogram", label: "Histogram" },
   { value: "waterfall", label: "Waterfall" },
   { value: "strip", label: "Strip" },
   { value: "violin", label: "Violin" },
+  { value: "ridgeline", label: "Ridgeline" },
   { value: "box", label: "Box" },
   { value: "radar", label: "Radar" },
+  { value: "parallel", label: "Parallel coords" },
   { value: "heatmap", label: "Heatmap" },
   { value: "treemap", label: "Treemap" },
   { value: "sunburst", label: "Sunburst" },
   { value: "forceBubble", label: "Force Bubble" },
   { value: "sankey", label: "Sankey" },
-  { value: "choropleth", label: "Choropleth" },
+  { value: "choropleth", label: "Choropleth map" },
+  ...ODD_CHART_KIND_OPTIONS,
+  ...GPU_SCENE_KIND_OPTIONS,
+  ...GEO_MAP_KIND_OPTIONS,
 ];
 
 export interface ChartRecommendation {
@@ -83,6 +146,12 @@ export interface ChartRecommendation {
   colorField: string | null;
   /** Optional size encoding (scatter, strip). */
   sizeField?: string | null;
+  /** Optional Z / depth encoding (scatter3d, terrain, iso). */
+  zField?: string | null;
+  /** Optional time encoding (trails, weave weft, firefly pulse). */
+  timeField?: string | null;
+  /** Optional entity id for trail ribbons. */
+  trailId?: string | null;
   /** Optional row facet (bar, line, area). */
   rowField?: string | null;
   /** Optional glow encoding (scatter): column drives glow on/off or intensity. */
@@ -318,6 +387,9 @@ export function createChartRec(
   tableName: string,
   extra?: {
     sizeField?: string | null;
+    zField?: string | null;
+    timeField?: string | null;
+    trailId?: string | null;
     rowField?: string | null;
     glowField?: string | null;
     outlineField?: string | null;
@@ -516,6 +588,60 @@ export function createChartRec(
       subtitle = colorField ? `colored by ${colorField}` : "lollipop — stem + dot";
       break;
     }
+    case "dumbbell": {
+      if (!yField) return null;
+      sizeField = sizeField
+        ?? numCols.find(c => c.name !== xField && c.name !== yField)?.name
+        ?? null;
+      if (!sizeField || sizeField === yField) return null;
+      enc.x = { field: xField, type: "nominal" };
+      enc.y = { field: yField, type: "quantitative", aggregate: yAggregate ?? "mean" };
+      enc.size = { field: sizeField, type: "quantitative", aggregate: yAggregate ?? "mean" };
+      if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
+      title = `${yField} → ${sizeField} by ${xField}`;
+      subtitle = colorField ? `dumbbell · split by ${colorField}` : "dumbbell — start to end";
+      break;
+    }
+    case "ridgeline": {
+      if (!yField) return null;
+      enc.x = { field: xField, type: "quantitative" };
+      enc.y = { field: yField, type: "nominal" };
+      if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
+      title = `${xField} ridges by ${yField}`;
+      subtitle = "ridgeline — overlapping densities";
+      break;
+    }
+    case "hexbin": {
+      if (!yField) return null;
+      enc.x = { field: xField, type: "quantitative", bin: { maxbins: 20 } };
+      enc.y = { field: yField, type: "quantitative", bin: { maxbins: 20 } };
+      enc.color = { aggregate: "count", type: "quantitative", scale: { scheme: "viridis" } };
+      title = `${xField} × ${yField}`;
+      subtitle = "hexbin — density tiles";
+      break;
+    }
+    case "funnel": {
+      const agg = aggForMeasure("sum");
+      enc.x = { field: xField, type: "nominal", sort: "-y" };
+      enc.y = yField
+        ? { field: yField, type: "quantitative", aggregate: agg }
+        : { aggregate: "count", type: "quantitative" };
+      if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
+      title = yField ? `${aggLabel(agg)} of ${yField} funnel` : `Count funnel by ${xField}`;
+      subtitle = "funnel — stage conversion";
+      break;
+    }
+    case "parallel": {
+      if (numCols.length < 3) return null;
+      enc.x = { field: xField, type: "quantitative" };
+      enc.y = yField
+        ? { field: yField, type: "quantitative" }
+        : { field: numCols.find(c => c.name !== xField)?.name ?? xField, type: "quantitative" };
+      if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
+      title = `Parallel: ${numCols.slice(0, 6).map(c => c.name).join(", ")}`;
+      subtitle = colorField ? `profiles by ${colorField}` : "parallel coordinates";
+      break;
+    }
     case "treemap": {
       const agg = aggForMeasure("sum");
       enc.x = { field: xField, type: "nominal" };
@@ -543,7 +669,7 @@ export function createChartRec(
         ? { field: yField, type: "quantitative" }
         : { aggregate: "count", type: "quantitative" };
       title = yField ? `${yField} by region` : `Count by region`;
-      subtitle = `geographic — ${xField}`;
+      subtitle = `filled polygons — ${xField}`;
       break;
     }
     case "forceBubble": {
@@ -576,8 +702,29 @@ export function createChartRec(
       subtitle = weightOk ? `weighted by ${yField}` : "flow between categories";
       break;
     }
-    default:
+    default: {
+      if (isGpuSceneKind(kind)) {
+        return buildGpuSceneRec(kind, columns, xField, yField, colorField, {
+          sizeField,
+          zField: extra?.zField,
+          timeField: extra?.timeField,
+          trailId: extra?.trailId,
+        });
+      }
+      if (isGeoMapKind(kind)) {
+        return buildGeoMapRec(kind, columns, xField, yField, colorField, {
+          sizeField,
+          yAggregate,
+        });
+      }
+      if (isOddChartKind(kind)) {
+        return buildOddChartRec(kind, columns, xField, yField, colorField, tableName, {
+          sizeField,
+          yAggregate,
+        });
+      }
       return null;
+    }
   }
 
   const mark =
@@ -593,6 +740,11 @@ export function createChartRec(
     kind === "radar" ? { type: "line" as const, strokeWidth: 1.5 } :
     kind === "waterfall" ? { type: "bar" as const, cornerRadiusTopLeft: 2, cornerRadiusTopRight: 2 } :
     kind === "lollipop" ? { type: "circle" as const, size: 60 } :
+    kind === "dumbbell" ? { type: "rule" as const } :
+    kind === "ridgeline" ? { type: "area" as const, opacity: 0.55 } :
+    kind === "hexbin" ? { type: "rect" as const } :
+    kind === "funnel" ? { type: "bar" as const, cornerRadius: 2 } :
+    kind === "parallel" ? { type: "line" as const, opacity: 0.45 } :
     kind === "treemap" ? { type: "rect" as const } :
     kind === "sunburst" ? { type: "arc" as const } :
     kind === "choropleth" ? { type: "geoshape" as const } :
@@ -601,8 +753,8 @@ export function createChartRec(
     "rect";
 
   const effectiveYAggregate: YAggregateOption | undefined =
-    (kind === "bar" || kind === "line" || kind === "area" || kind === "pie" || kind === "waterfall" || kind === "lollipop" || kind === "radar" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble")
-      ? (!yField ? "count" : (yAggregate ?? (kind === "line" ? "mean" : "sum")))
+    (kind === "bar" || kind === "line" || kind === "area" || kind === "pie" || kind === "waterfall" || kind === "lollipop" || kind === "radar" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "dumbbell")
+      ? (!yField ? "count" : (yAggregate ?? (kind === "line" || kind === "dumbbell" ? "mean" : "sum")))
       : undefined;
 
   return {
@@ -1212,6 +1364,105 @@ export function recommend(
     }
   }
 
+  // --- DUMBBELL: category × two numerics (before → after / range) ---
+  if (numCols.length >= 2) {
+    for (const nom of nomCols.slice(0, 3)) {
+      if (nom.distinct_count < 2 || nom.distinct_count > 24) continue;
+      for (let i = 0; i < Math.min(numCols.length, 3); i++) {
+        for (let j = i + 1; j < Math.min(numCols.length, 4); j++) {
+          recs.push({
+            id: `dumbbell-${nom.name}-${numCols[i].name}-${numCols[j].name}`,
+            kind: "dumbbell",
+            title: `${numCols[i].name} → ${numCols[j].name} by ${nom.name}`,
+            subtitle: "dumbbell — start to end",
+            score: 67,
+            spec: {},
+            xField: nom.name,
+            yField: numCols[i].name,
+            colorField: null,
+            sizeField: numCols[j].name,
+            yAggregate: "mean",
+          });
+          if (recs.filter(r => r.kind === "dumbbell").length >= 4) break;
+        }
+        if (recs.filter(r => r.kind === "dumbbell").length >= 4) break;
+      }
+      if (recs.filter(r => r.kind === "dumbbell").length >= 4) break;
+    }
+  }
+
+  // --- RIDGELINE: numeric density stacked by category ---
+  for (const nom of nomCols.slice(0, 3)) {
+    if (nom.distinct_count < 2 || nom.distinct_count > 10) continue;
+    for (const num of numCols.slice(0, 3)) {
+      recs.push({
+        id: `ridgeline-${num.name}-${nom.name}`,
+        kind: "ridgeline",
+        title: `${num.name} ridges by ${nom.name}`,
+        subtitle: "ridgeline — overlapping densities",
+        score: 65,
+        spec: {},
+        xField: num.name,
+        yField: nom.name,
+        colorField: null,
+      });
+    }
+  }
+
+  // --- HEXBIN: dense two-numeric density (prefer when crowded) ---
+  for (let i = 0; i < numCols.length && i < 3; i++) {
+    for (let j = i + 1; j < numCols.length && j < 4; j++) {
+      recs.push({
+        id: `hexbin-${numCols[i].name}-${numCols[j].name}`,
+        kind: "hexbin",
+        title: `${numCols[i].name} × ${numCols[j].name}`,
+        subtitle: dense ? "hexbin — density for crowded points" : "hexbin — density tiles",
+        score: veryDense ? 78 : dense ? 70 : 58,
+        spec: {},
+        xField: numCols[i].name,
+        yField: numCols[j].name,
+        colorField: null,
+      });
+      if (recs.filter(r => r.kind === "hexbin").length >= 3) break;
+    }
+    if (recs.filter(r => r.kind === "hexbin").length >= 3) break;
+  }
+
+  // --- FUNNEL: ordered stages (category × value) ---
+  for (const nom of nomCols.slice(0, 3)) {
+    if (nom.distinct_count < 3 || nom.distinct_count > 12) continue;
+    for (const num of numCols.slice(0, 2)) {
+      recs.push({
+        id: `funnel-${nom.name}-${num.name}`,
+        kind: "funnel",
+        title: `${num.name} funnel by ${nom.name}`,
+        subtitle: "funnel — stage conversion",
+        score: 64,
+        spec: {},
+        xField: nom.name,
+        yField: num.name,
+        colorField: null,
+      });
+    }
+  }
+
+  // --- PARALLEL: 3+ numeric axes ---
+  if (numCols.length >= 3) {
+    const axes = numCols.slice(0, 6);
+    const groupCol = nomCols.find(c => c.distinct_count >= 2 && c.distinct_count <= 10) ?? null;
+    recs.push({
+      id: `parallel-${axes.map(c => c.name).join("-")}`,
+      kind: "parallel",
+      title: `Parallel: ${axes.map(c => c.name).join(", ")}`,
+      subtitle: groupCol ? `profiles by ${groupCol.name}` : "parallel coordinates",
+      score: 61,
+      spec: {},
+      xField: axes[0].name,
+      yField: axes[1].name,
+      colorField: groupCol?.name ?? null,
+    });
+  }
+
   // --- TREEMAP: nominal × numeric (part-of-whole rectangles) ---
   for (const nom of nomCols.slice(0, 3)) {
     if (nom.distinct_count < 3 || nom.distinct_count > 30) continue;
@@ -1250,17 +1501,16 @@ export function recommend(
     }
   }
 
-  // --- CHOROPLETH: nominal with geo-like names × numeric ---
-  const geoPatterns = /^(country|state|province|region|iso|code|fips|geo|territory|nation|county)/i;
-  const geoCol = nomCols.find(c => geoPatterns.test(c.name) && c.distinct_count >= 3);
+  // --- CHOROPLETH: region-like columns × numeric (real polygon map) ---
+  const geoCol = nomCols.find(c => isGeoRegionField(c.name) && c.distinct_count >= 3);
   if (geoCol) {
     for (const num of numCols.slice(0, 2)) {
       recs.push({
         id: `choropleth-${geoCol.name}-${num.name}`,
         kind: "choropleth",
         title: `${num.name} by ${geoCol.name}`,
-        subtitle: `geographic — ${geoCol.name}`,
-        score: 72,
+        subtitle: `filled map — ${geoCol.name}`,
+        score: 78,
         spec: {},
         xField: geoCol.name,
         yField: num.name,
@@ -1308,6 +1558,44 @@ export function recommend(
   }
 
   // Sort by score (with local viz preference boost), then diversify so Suggest / rail aren't 20 near-identical bars
+  // Sprinkle creative odd charts when the schema can support them
+  const oddKindsShuffle = [...ODD_CHART_KIND_OPTIONS.map((o) => o.value)].sort(() => Math.random() - 0.5);
+  for (const ok of oddKindsShuffle.slice(0, 8)) {
+    if (!oddChartDataSupport(columns, ok).ok) continue;
+    const enc = getOddRandomEncoding(columns, ok);
+    if (!enc) continue;
+    const rec = buildOddChartRec(ok, columns, enc.xField, enc.yField, enc.colorField, name, {
+      sizeField: enc.sizeField,
+    });
+    if (rec) {
+      rec.score = 58 + Math.floor(Math.random() * 12);
+      recs.push(rec);
+    }
+  }
+
+  // Sprinkle geography charts (maps / globe) when lat/lon columns exist
+  const hasLonLat =
+    columns.some((c) => /^(lat|latitude)$/i.test(c.name)) &&
+    columns.some((c) => /^(lon|lng|long|longitude)$/i.test(c.name));
+  if (hasLonLat) {
+    const geoKindsShuffle = [...GEO_MAP_KIND_OPTIONS.map((o) => o.value)].sort(() => Math.random() - 0.5);
+    let geoAdded = 0;
+    for (const gk of geoKindsShuffle) {
+      if (geoAdded >= 4) break;
+      if (!geoMapDataSupport(columns, gk).ok) continue;
+      const enc = getGeoMapRandomEncoding(columns, gk);
+      if (!enc) continue;
+      const rec = buildGeoMapRec(gk, columns, enc.xField, enc.yField, enc.colorField, {
+        sizeField: enc.sizeField,
+        score: 76 + Math.floor(Math.random() * 12),
+      });
+      if (rec) {
+        recs.push(rec);
+        geoAdded += 1;
+      }
+    }
+  }
+
   const model = prefs !== undefined ? prefs : getCachedVizPreferences();
   const boosted = applyPreferenceBoosts(recs, model, columns);
   return diversifyRecommendations(boosted, 40);
@@ -1371,11 +1659,25 @@ export function recommendStorySequence(
     used.add(hist.id);
   }
 
-  // 4. Relationship (scatter)
+  // 4. Relationship (scatter) or map when lat/lon / regions dominate
   const scatter = pick("scatter");
   if (scatter && !used.has(scatter.id)) {
     sequence.push(scatter);
     used.add(scatter.id);
+  }
+
+  // 4b. Geography when the schema supports it
+  const geoStory =
+    pick("choropleth") ??
+    pick("geoPoints") ??
+    pick("geoBubbles") ??
+    pick("globe") ??
+    pick("geoHex") ??
+    pick("globeTrail") ??
+    pick("arcMap");
+  if (geoStory && !used.has(geoStory.id)) {
+    sequence.push(geoStory);
+    used.add(geoStory.id);
   }
 
   // 5. Fill to 3–5 with next best variety (avoid duplicate kind)
@@ -1572,6 +1874,47 @@ export function getRandomEncoding(
       const colorLol = nomCols.length > 1 && Math.random() > 0.6 ? pick(nomCols.filter(c => c.name !== xLol.name && c.distinct_count <= 10)) ?? null : null;
       return { xField: xLol.name, yField: yLol?.name ?? null, colorField: colorLol?.name ?? null };
     }
+    case "dumbbell": {
+      if (numCols.length < 2) return null;
+      const xDb = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 24));
+      if (!xDb) return null;
+      const shuffled = [...numCols].sort(() => Math.random() - 0.5);
+      const colorDb = nomCols.length > 1 && Math.random() > 0.6
+        ? pick(nomCols.filter(c => c.name !== xDb.name && c.distinct_count <= 8)) ?? null
+        : null;
+      return {
+        xField: xDb.name,
+        yField: shuffled[0]!.name,
+        colorField: colorDb?.name ?? null,
+        sizeField: shuffled[1]!.name,
+      };
+    }
+    case "ridgeline": {
+      const yRidge = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 10));
+      const xRidge = pick(numCols);
+      if (!xRidge || !yRidge) return null;
+      return { xField: xRidge.name, yField: yRidge.name, colorField: null };
+    }
+    case "hexbin": {
+      if (numCols.length < 2) return null;
+      const a = pick(numCols)!;
+      const b = pick(numCols.filter(c => c.name !== a.name)) ?? numCols.find(c => c.name !== a.name);
+      if (!b) return null;
+      return { xField: a.name, yField: b.name, colorField: null };
+    }
+    case "funnel": {
+      const xFun = pick(nomCols.filter(c => c.distinct_count >= 3 && c.distinct_count <= 12));
+      if (!xFun) return null;
+      const yFun = numCols.length > 0 ? pick(numCols)! : null;
+      return { xField: xFun.name, yField: yFun?.name ?? null, colorField: null };
+    }
+    case "parallel": {
+      if (numCols.length < 3) return null;
+      const x = pick(numCols)!;
+      const y = pick(numCols.filter(c => c.name !== x.name));
+      const color = nomCols.find(c => c.distinct_count >= 2 && c.distinct_count <= 10) ?? null;
+      return { xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null };
+    }
     case "treemap": {
       const xTree = pick(nomCols.filter(c => c.distinct_count >= 3 && c.distinct_count <= 30));
       if (!xTree) return null;
@@ -1587,8 +1930,7 @@ export function getRandomEncoding(
       return { xField: xSun.name, yField: ySun?.name ?? null, colorField: innerSun?.name ?? null };
     }
     case "choropleth": {
-      const geoP = /^(country|state|province|region|iso|code|fips|geo|territory|nation|county)/i;
-      const geoCols = nomCols.filter(c => geoP.test(c.name) && c.distinct_count >= 3);
+      const geoCols = nomCols.filter(c => isGeoRegionField(c.name) && c.distinct_count >= 3);
       const geoCol = geoCols.length > 0 ? pick(geoCols)! : pick(nomCols.filter(c => c.distinct_count >= 3));
       if (!geoCol) return null;
       const yGeo = numCols.length > 0 ? pick(numCols)! : null;
@@ -1612,6 +1954,9 @@ export function getRandomEncoding(
       return { xField: a.name, yField: yVal?.name ?? null, colorField: b.name };
     }
     default:
+      if (isGpuSceneKind(kind)) return getGpuRandomEncoding(columns, kind);
+      if (isGeoMapKind(kind)) return getGeoMapRandomEncoding(columns, kind);
+      if (isOddChartKind(kind)) return getOddRandomEncoding(columns, kind);
       return null;
   }
 }
@@ -1624,7 +1969,6 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
   const nomCols = columns.filter(c => inferType(c.data_type, c.name) === "nominal");
   const timeCols = columns.filter(c => inferType(c.data_type, c.name) === "temporal");
   const nom = (min: number, max: number) => nomCols.filter(c => c.distinct_count >= min && c.distinct_count <= max);
-  const geoP = /^(country|state|province|region|iso|code|fips|geo|territory|nation|county)/i;
 
   switch (kind) {
     case "scatter":
@@ -1638,6 +1982,26 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
       return nom(2, kind === "lollipop" ? 30 : 50).length >= 1
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need a category (2–" + (kind === "lollipop" ? "30" : "50") + " distinct values)" };
+    case "dumbbell":
+      return nom(2, 24).length >= 1 && numCols.length >= 2
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a category (2–24) + two numeric columns" };
+    case "ridgeline":
+      return nomCols.some(c => c.distinct_count >= 2 && c.distinct_count <= 10) && numCols.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need category (2–10 groups) + numeric" };
+    case "hexbin":
+      return numCols.length >= 2
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need ≥2 numeric columns" };
+    case "funnel":
+      return nom(3, 12).length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a category (3–12 stages)" };
+    case "parallel":
+      return numCols.length >= 3
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need ≥3 numeric columns" };
     case "line":
     case "area":
       return (timeCols.length > 0 || nomCols.length > 0)
@@ -1680,7 +2044,7 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need a category (3–40 distinct values)" };
     case "choropleth": {
-      const geo = nomCols.filter(c => geoP.test(c.name) && c.distinct_count >= 3);
+      const geo = nomCols.filter(c => isGeoRegionField(c.name) && c.distinct_count >= 3);
       const any = nomCols.filter(c => c.distinct_count >= 3);
       return geo.length >= 1 || any.length >= 1
         ? { ok: true, reason: "" }
@@ -1691,6 +2055,9 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need two categories (2–20 distinct each)" };
     default:
+      if (isGpuSceneKind(kind)) return gpuSceneDataSupport(columns, kind);
+      if (isGeoMapKind(kind)) return geoMapDataSupport(columns, kind);
+      if (isOddChartKind(kind)) return oddChartDataSupport(columns, kind);
       return { ok: true, reason: "" };
   }
 }
@@ -1785,17 +2152,30 @@ export function getRecommendationReason(rec: ChartRecommendation): string {
       return "Sequential categories → show cumulative gains and losses";
     case "lollipop":
       return "Category vs value → clean stem+dot, easier to read than bars";
+    case "dumbbell":
+      return "Two measures per category → before/after or range comparison";
+    case "ridgeline":
+      return "Numeric density stacked by group → compare shapes without overlap clutter";
+    case "hexbin":
+      return "Two numerics when points pile up → hexagonal density instead of overplot";
+    case "funnel":
+      return "Ordered stages → conversion or attrition through a pipeline";
+    case "parallel":
+      return "Three or more numerics → multi-axis profiles across rows or groups";
     case "treemap":
       return "Nested rectangles → part-of-whole with optional hierarchy";
     case "sunburst":
       return "Radial slices → hierarchical composition at a glance";
     case "choropleth":
-      return "Geographic regions → values mapped to color on a map";
+      return "Region codes joined to world/US polygons — real filled map";
     case "forceBubble":
       return "Packed circles → size comparison without axes, grouped by category";
     case "sankey":
       return "Two categories → flow and volume between groups";
     default:
+      if (isGpuSceneKind(kind)) return gpuSceneRecommendationReason(kind);
+      if (isGeoMapKind(kind)) return geoMapRecommendationReason(kind);
+      if (isOddChartKind(kind)) return oddRecommendationReason(kind);
       return "Fits your column types and cardinality";
   }
 }
@@ -1891,21 +2271,28 @@ export function recommendSourceStory(
     k: ChartKind, title: string, subtitle: string, score: number,
     xField: string, yField: string | null, colorField: string | null,
     yAgg?: YAggregateOption | null,
+    sizeField?: string | null,
+    extraEnc?: { zField?: string | null; timeField?: string | null; trailId?: string | null },
   ): ChartRecommendation => ({
     id: mkId(), kind: k, title, subtitle, score, spec: {},
     xField, yField, colorField, yAggregate: yAgg ?? null,
+    sizeField: sizeField ?? undefined,
+    zField: extraEnc?.zField ?? undefined,
+    timeField: extraEnc?.timeField ?? undefined,
+    trailId: extraEnc?.trailId ?? undefined,
   });
 
   if (kind === "usgs") {
     return {
       title: "Earthquake Analytics",
       charts: [
-        mk("scatter", "Quakes by location", "Latitude vs longitude — where do they cluster?", 95, "longitude", "latitude", "mag_type"),
-        mk("histogram", "Magnitude distribution", "How strong are the quakes?", 90, "magnitude", null, null),
-        mk("line", "Quakes over time", "Temporal pattern of seismic activity", 88, "ts", null, null, "count"),
-        mk("bar", "Quakes by network", "Which seismic networks report most?", 85, "net", null, null, "count"),
-        mk("scatter", "Depth vs magnitude", "Do deeper quakes tend to be stronger?", 82, "depth", "magnitude", null),
-      ].slice(0, 5),
+        mk("geoPoints", "Quake map", "Projected locations on coastlines", 98, "longitude", "latitude", "mag_type", null, "magnitude"),
+        mk("geoHex", "Quake hex density", "Where energy piles up on the map", 96, "longitude", "latitude", "mag_type"),
+        mk("globe", "Quake globe", "Spin the planet — quakes as points", 95, "longitude", "latitude", "mag_type", null, "magnitude"),
+        mk("scatter3d", "Orbit depth cloud", "Lat · lon · depth — drag to orbit", 94, "longitude", "latitude", "mag_type", null, "magnitude", { zField: "depth" }),
+        mk("quakeTerrain", "Magnitude terrain", "Heightfield where energy piles up", 92, "longitude", "latitude", "mag_type", null, "magnitude", { zField: "magnitude" }),
+        mk("firefly", "Firefly aftershocks", "Soft glow by magnitude", 88, "longitude", "latitude", "mag_type", null, "magnitude", { timeField: "time" }),
+      ].slice(0, 6),
     };
   }
 
@@ -1913,12 +2300,13 @@ export function recommendSourceStory(
     return {
       title: "World Weather Comparison",
       charts: [
+        mk("geoBubbles", "City climate map", "Five cities as bubbles on coastlines", 96, "longitude", "latitude", "city", null, "temperature"),
         mk("line", "Temperature over time", "How does temperature vary across cities?", 95, "ts", "temperature", "city"),
-        mk("bar", "Average temperature by city", "Compare baseline temps", 90, "city", "temperature", null, "mean"),
-        mk("line", "Wind speed trends", "Wind patterns across locations", 85, "ts", "wind_speed", "city"),
-        mk("bar", "Precipitation by city", "Who gets the most rain?", 82, "city", "precipitation", null, "sum"),
-        mk("histogram", "Humidity distribution", "Global humidity spread", 78, "humidity", null, null),
-      ].slice(0, 5),
+        mk("stream", "Temp streams by city", "Organic stacked climate flow", 92, "ts", "temperature", "city"),
+        mk("beeswarm", "Temp swarm by city", "Every reading as a dot", 88, "city", "temperature", null),
+        mk("horizon", "Horizon temperature", "Folded bands of heat", 86, "ts", "temperature", null),
+        mk("radialBar", "City temp wheel", "Polar comparison", 82, "city", "temperature", null, "mean"),
+      ].slice(0, 6),
     };
   }
 
@@ -1939,11 +2327,11 @@ export function recommendSourceStory(
     return {
       title: "Global Development Indicators",
       charts: [
+        mk("choropleth", "World by indicator", "ISO3 countries filled by latest value", 98, "country_code", "value", null, "max"),
         mk("bar", "GDP by country (latest)", "Economic output across nations", 95, "country_name", "value", null, "max"),
         mk("line", "Indicators over time", "How do key metrics change globally?", 90, "yr", "value", "indicator_name", "mean"),
         mk("bar", "Top 10 by population", "Most populous nations", 85, "country_name", "value", null, "max"),
         mk("scatter", "Year vs indicator value", "How values evolve over time (per country)", 82, "yr", "value", "country_code"),
-        mk("histogram", "Value distribution", "Spread of indicator values", 78, "value", null, null),
       ].slice(0, 5),
     };
   }
@@ -1952,10 +2340,11 @@ export function recommendSourceStory(
     return {
       title: "ISS orbital track",
       charts: [
-        mk("scatter", "Orbital path", "Latitude vs longitude trail", 95, "longitude", "latitude", null),
-        mk("line", "Altitude over time", "How high is the station?", 90, "ts", "altitude_km", null),
-        mk("line", "Velocity over time", "Orbital speed", 85, "ts", "velocity_kmh", null),
-        mk("scatter", "Altitude vs velocity", "Do they move together?", 80, "altitude_km", "velocity_kmh", null),
+        mk("globeTrail", "Orbit on the globe", "Great-circle path around the sphere", 98, "longitude", "latitude", null, null, "altitude_km", { timeField: "ts" }),
+        mk("geoPoints", "Ground track map", "Projected path on coastlines", 96, "longitude", "latitude", null, null, "altitude_km", { timeField: "ts" }),
+        mk("trailRibbon", "Orbital ribbons", "Path fades through recent samples", 94, "longitude", "latitude", null, null, "altitude_km", { timeField: "ts" }),
+        mk("scatter3d", "Altitude cloud", "Lon · lat · altitude", 90, "longitude", "latitude", null, null, "velocity_kmh", { zField: "altitude_km", timeField: "ts" }),
+        mk("line", "Altitude over time", "How high is the station?", 86, "ts", "altitude_km", null),
       ].slice(0, 5),
     };
   }
@@ -1977,9 +2366,125 @@ export function recommendSourceStory(
       title: "Crypto markets",
       charts: [
         mk("bar", "Market cap leaders", "Top coins by size", 95, "symbol", "market_cap", null, "max"),
-        mk("scatter", "Price vs 24h change", "Winners and losers today", 92, "price_usd", "change_24h_pct", "symbol"),
-        mk("bar", "24h volume", "Where is the trading activity?", 88, "symbol", "volume_24h", null, "max"),
-        mk("histogram", "Daily change %", "How wild is the market?", 82, "change_24h_pct", null, null),
+        mk("bump", "Rank drama (proxy)", "Order by market moves", 90, "symbol", "change_24h_pct", "symbol"),
+        mk("spiral", "Price spiral", "Market cap curling outward", 88, "symbol", "market_cap", null),
+        mk("beeswarm", "Change swarm", "24h % as bees", 85, "symbol", "change_24h_pct", null),
+        mk("isoScatter", "Price · change · volume", "Pseudo-3D market space", 82, "price_usd", "change_24h_pct", "symbol", null, "volume_24h"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "aq") {
+    return {
+      title: "City air quality",
+      charts: [
+        mk("geoBubbles", "AQI on the map", "Cities as pollution bubbles", 96, "longitude", "latitude", "city", null, "pm2_5"),
+        mk("bar", "PM2.5 by city", "Who is breathing the most fine particulate?", 95, "city", "pm2_5", null, "max"),
+        mk("bar", "European AQI", "Compare air quality index across cities", 90, "city", "european_aqi", null, "max"),
+        mk("scatter", "PM2.5 vs ozone", "Do pollutants move together?", 85, "pm2_5", "ozone", "city"),
+        mk("bar", "NO₂ by city", "Traffic and combustion signal", 80, "city", "nitrogen_dioxide", null, "max"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "fx") {
+    return {
+      title: "FX rates (EUR base)",
+      charts: [
+        mk("bar", "Rates vs EUR", "How many units per euro?", 95, "quote", "rate", null, "max"),
+        mk("histogram", "Rate distribution", "Spread of EUR crosses", 85, "rate", null, null),
+        mk("bar", "Top quotes", "Strongest currencies against EUR", 80, "quote", "rate", null, "max"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "fema") {
+    return {
+      title: "FEMA disaster declarations",
+      charts: [
+        mk("choropleth", "Declarations by state", "US states filled by declaration count", 98, "state", null, null, "count"),
+        mk("bar", "By incident type", "What kinds of disasters are declared?", 95, "incident_type", null, null, "count"),
+        mk("bar", "By state", "Which states see the most declarations?", 90, "state", null, null, "count"),
+        mk("bar", "Declaration type", "Major disaster vs emergency", 85, "declaration_type", null, null, "count"),
+        mk("histogram", "Fiscal year declared", "When were they declared?", 78, "fy_declared", null, null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "opensky") {
+    return {
+      title: "Aircraft over the US",
+      charts: [
+        mk("globeTrail", "Flight globe", "Craft paths wrapped on the sphere", 98, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
+        mk("geoPoints", "Sky map", "Projected positions on coastlines", 96, "longitude", "latitude", "origin_country", null, "baro_altitude"),
+        mk("geoBubbles", "Altitude bubbles", "Sized by barometric altitude", 94, "longitude", "latitude", "origin_country", null, "baro_altitude"),
+        mk("trailRibbon", "Flight ribbons", "Each craft leaves a fading trail", 92, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
+        mk("scatter3d", "Altitude orbit cloud", "Lon · lat · altitude — drag to orbit", 88, "longitude", "latitude", "origin_country", null, "velocity", { zField: "baro_altitude" }),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "countries") {
+    return {
+      title: "World countries",
+      charts: [
+        mk("choropleth", "Population map", "Countries filled by population", 98, "cca3", "population", "region", "max"),
+        mk("bar", "Population leaders", "Most populous countries", 95, "name", "population", "region", "max"),
+        mk("bucketField", "Regions as fields", "Countries as dots in regional paddocks", 90, "region", "population", "region", null, "area"),
+        mk("glyphStar", "Country stars", "Multivariate star glyphs", 86, "name", "population", "area", null, "density"),
+        mk("isoBars", "Isometric population", "Fake-3D country blocks", 82, "name", "population", "region", "max"),
+        mk("waffle", "Region waffle", "Share of countries by region", 78, "region", null, null, "count"),
+      ].slice(0, 6),
+    };
+  }
+
+  if (kind === "spacex") {
+    return {
+      title: "SpaceX launch history",
+      charts: [
+        mk("bar", "Success vs failure", "How often do missions succeed?", 95, "success", null, null, "count"),
+        mk("line", "Flights over time", "Launch cadence", 90, "date_utc", null, null, "count"),
+        mk("bar", "By rocket", "Which vehicles flew most?", 85, "rocket", null, null, "count"),
+        mk("histogram", "Flight numbers", "Mission sequence spread", 78, "flight_number", null, null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "nyc311") {
+    return {
+      title: "NYC 311 complaints",
+      charts: [
+        mk("geoPoints", "Complaint map", "Tickets on a projected basemap", 98, "longitude", "latitude", "borough"),
+        mk("geoHex", "Complaint density", "Hexbins of 311 heat", 96, "longitude", "latitude", "borough"),
+        mk("bar", "Top complaint types", "What are New Yorkers reporting?", 92, "complaint_type", null, null, "count"),
+        mk("bar", "By borough", "Where do tickets concentrate?", 86, "borough", null, null, "count"),
+        mk("bar", "By agency", "Who responds?", 80, "agency", null, null, "count"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "covid") {
+    return {
+      title: "COVID-19 by country",
+      charts: [
+        mk("choropleth", "Cases world map", "Countries filled by cumulative cases", 98, "country", "cases", "continent", "max"),
+        mk("bar", "Cases leaders", "Highest cumulative cases", 95, "country", "cases", "continent", "max"),
+        mk("pyramid", "Cases ↔ deaths", "Mirror comparison by country", 90, "country", "cases", null, null, "deaths"),
+        mk("slope", "Cases → deaths", "Lean diagonal of severity", 86, "country", "cases_per_million", null, null, "deaths_per_million"),
+        mk("mosaic", "Continent × country share", "Joint composition", 82, "continent", "cases", "country", "sum"),
+        mk("isotype", "Case units", "Icon stacks of magnitude", 78, "continent", "cases", null, "sum"),
+      ].slice(0, 6),
+    };
+  }
+
+  if (kind === "launches") {
+    return {
+      title: "Upcoming space launches",
+      charts: [
+        mk("bar", "By agency", "Who is launching next?", 95, "agency", null, null, "count"),
+        mk("bar", "By location", "Which pads are busiest?", 90, "location", null, null, "count"),
+        mk("bar", "By rocket", "Vehicles on the schedule", 85, "rocket", null, null, "count"),
+        mk("bar", "Status mix", "Go / Hold / TBD", 80, "status", null, null, "count"),
       ].slice(0, 5),
     };
   }
@@ -2012,6 +2517,55 @@ export const SOURCE_SQL_SNIPPETS: Record<string, { name: string; sql: string }[]
     { name: "Population (2023)", sql: "SELECT country_name, value FROM world_bank WHERE indicator_id = 'SP.POP.TOTL' AND yr = 2023 ORDER BY value DESC LIMIT 20" },
     { name: "Life expectancy trend", sql: "SELECT yr, AVG(value) AS avg_le FROM world_bank WHERE indicator_id = 'SP.DYN.LE00.IN' GROUP BY yr ORDER BY yr" },
     { name: "CO₂ top emitters", sql: "SELECT country_name, value FROM world_bank WHERE indicator_id = 'EN.ATM.CO2E.PC' AND yr = 2022 ORDER BY value DESC LIMIT 15" },
+  ],
+  iss: [
+    { name: "Latest position", sql: "SELECT * FROM iss_track ORDER BY ts DESC LIMIT 20" },
+    { name: "Altitude trail", sql: "SELECT ts, altitude_km, velocity_kmh FROM iss_track ORDER BY ts" },
+  ],
+  hn: [
+    { name: "Top by points", sql: "SELECT title, points, num_comments, author FROM hn_stories ORDER BY points DESC LIMIT 20" },
+    { name: "Discussion intensity", sql: "SELECT title, points, num_comments FROM hn_stories ORDER BY num_comments DESC LIMIT 20" },
+  ],
+  crypto: [
+    { name: "Market leaders", sql: "SELECT symbol, name, price_usd, market_cap, change_24h_pct FROM crypto_markets ORDER BY rank ASC LIMIT 20" },
+    { name: "Biggest movers", sql: "SELECT symbol, change_24h_pct, price_usd, volume_24h FROM crypto_markets ORDER BY ABS(change_24h_pct) DESC LIMIT 20" },
+  ],
+  aq: [
+    { name: "PM2.5 leaders", sql: "SELECT city, pm2_5, pm10, european_aqi, ts FROM air_quality ORDER BY pm2_5 DESC" },
+    { name: "AQI comparison", sql: "SELECT city, european_aqi, ozone, nitrogen_dioxide FROM air_quality ORDER BY european_aqi DESC" },
+  ],
+  fx: [
+    { name: "All rates", sql: "SELECT quote, rate, as_of FROM fx_rates ORDER BY rate DESC" },
+    { name: "Major pairs", sql: "SELECT quote, rate FROM fx_rates WHERE quote IN ('USD','GBP','JPY','CHF','CAD') ORDER BY quote" },
+  ],
+  fema: [
+    { name: "Recent declarations", sql: "SELECT state, incident_type, declaration_title, declaration_date FROM fema_disasters ORDER BY declaration_date DESC LIMIT 30" },
+    { name: "By incident type", sql: "SELECT incident_type, COUNT(*) AS cnt FROM fema_disasters GROUP BY incident_type ORDER BY cnt DESC" },
+    { name: "By state", sql: "SELECT state, COUNT(*) AS cnt FROM fema_disasters GROUP BY state ORDER BY cnt DESC LIMIT 20" },
+  ],
+  opensky: [
+    { name: "Airborne sample", sql: "SELECT callsign, origin_country, latitude, longitude, baro_altitude, velocity FROM opensky_aircraft WHERE NOT on_ground ORDER BY baro_altitude DESC LIMIT 50" },
+    { name: "By country", sql: "SELECT origin_country, COUNT(*) AS aircraft FROM opensky_aircraft GROUP BY origin_country ORDER BY aircraft DESC LIMIT 20" },
+  ],
+  countries: [
+    { name: "Population top 30", sql: "SELECT name, region, population, area, density FROM world_countries ORDER BY population DESC LIMIT 30" },
+    { name: "By region", sql: "SELECT region, COUNT(*) AS countries, SUM(population) AS pop FROM world_countries GROUP BY region ORDER BY pop DESC" },
+  ],
+  spacex: [
+    { name: "Recent flights", sql: "SELECT name, date_utc, success, flight_number FROM spacex_launches ORDER BY date_utc DESC LIMIT 30" },
+    { name: "Success rate", sql: "SELECT success, COUNT(*) AS cnt FROM spacex_launches GROUP BY success" },
+  ],
+  nyc311: [
+    { name: "Top complaints", sql: "SELECT complaint_type, COUNT(*) AS cnt FROM nyc_311 GROUP BY complaint_type ORDER BY cnt DESC LIMIT 20" },
+    { name: "By borough", sql: "SELECT borough, COUNT(*) AS cnt FROM nyc_311 GROUP BY borough ORDER BY cnt DESC" },
+  ],
+  covid: [
+    { name: "Cases leaders", sql: "SELECT country, cases, deaths, today_cases, continent FROM covid_countries ORDER BY cases DESC LIMIT 30" },
+    { name: "Per million", sql: "SELECT country, cases_per_million, deaths_per_million FROM covid_countries ORDER BY cases_per_million DESC LIMIT 30" },
+  ],
+  launches: [
+    { name: "Upcoming", sql: "SELECT name, net, agency, location, rocket, status FROM space_launches ORDER BY net ASC LIMIT 40" },
+    { name: "By agency", sql: "SELECT agency, COUNT(*) AS cnt FROM space_launches GROUP BY agency ORDER BY cnt DESC" },
   ],
 };
 

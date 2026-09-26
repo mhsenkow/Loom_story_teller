@@ -376,7 +376,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
 }
 
 export default function Home() {
-  const { viewMode, setViewMode, dataSourcesExpanded, dashboardsExpanded, previewCapture } = useLoomStore();
+  const { viewMode, setViewMode, dataSourcesExpanded, dashboardsExpanded, previewCapture, socialExportReady } = useLoomStore();
   return (
     <>
       <ThemeApplicator />
@@ -390,6 +390,7 @@ export default function Home() {
           dataSourcesExpanded={dataSourcesExpanded}
           dashboardsExpanded={dashboardsExpanded}
           previewCapture={previewCapture}
+          socialExportReady={socialExportReady}
         />
       </ErrorBoundary>
       <PromptDialog />
@@ -458,6 +459,7 @@ function HomeContent({
   dataSourcesExpanded,
   dashboardsExpanded,
   previewCapture,
+  socialExportReady,
 }: {
   viewMode: "explorer" | "chart" | "query";
   setViewMode: (m: "explorer" | "chart" | "query") => void;
@@ -469,6 +471,7 @@ function HomeContent({
     total: number;
     label: string;
   } | null;
+  socialExportReady: boolean;
 }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [helpTab, setHelpTab] = useState<"shortcuts" | "feedback">("shortcuts");
@@ -510,6 +513,10 @@ function HomeContent({
       }
       if (e.key === "Escape") {
         setShortcutsOpen(false);
+        if (useLoomStore.getState().socialExportReady) {
+          useLoomStore.getState().setSocialExportReady(false);
+          useLoomStore.getState().setSocialExportTarget(null);
+        }
         return;
       }
       if ((e.metaKey || e.ctrlKey) && e.key >= "1" && e.key <= "6") {
@@ -626,29 +633,31 @@ function HomeContent({
     <div className="flex flex-col h-dvh max-h-dvh w-screen bg-loom-bg transition-theme overflow-hidden">
       {shortcutsOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 loom-overlay animate-fade-in"
           onClick={() => setShortcutsOpen(false)}
           role="dialog"
           aria-modal="true"
           aria-label="Help: shortcuts and feedback"
         >
           <div
-            className="loom-card max-w-md w-full p-4 space-y-3 bg-loom-surface border border-loom-border shadow-xl"
+            className="loom-card max-w-md w-full p-4 sm:p-5 space-y-3.5 bg-loom-surface border border-loom-border shadow-loom-lg rounded-t-2xl sm:rounded-xl animate-slide-up max-h-[min(90dvh,40rem)] overflow-y-auto mb-[var(--safe-bottom)] sm:mb-0"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between">
-              <div className="flex gap-1 rounded bg-loom-elevated/50 p-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="loom-seg">
                 <button
                   type="button"
                   onClick={() => setHelpTab("shortcuts")}
-                  className={`px-2.5 py-1 text-xs font-medium rounded ${helpTab === "shortcuts" ? "bg-loom-accent text-white" : "text-loom-muted hover:text-loom-text"}`}
+                  aria-pressed={helpTab === "shortcuts"}
+                  className="loom-seg-item"
                 >
                   Shortcuts
                 </button>
                 <button
                   type="button"
                   onClick={() => setHelpTab("feedback")}
-                  className={`px-2.5 py-1 text-xs font-medium rounded ${helpTab === "feedback" ? "bg-loom-accent text-white" : "text-loom-muted hover:text-loom-text"}`}
+                  aria-pressed={helpTab === "feedback"}
+                  className="loom-seg-item"
                 >
                   Feedback
                 </button>
@@ -656,7 +665,7 @@ function HomeContent({
               <button
                 type="button"
                 onClick={() => setShortcutsOpen(false)}
-                className="loom-btn-ghost p-1 rounded"
+                className="loom-btn-ghost p-1.5 rounded-md min-h-9 min-w-9"
                 aria-label="Close"
               >
                 ×
@@ -664,17 +673,17 @@ function HomeContent({
             </div>
 
             {helpTab === "shortcuts" && (
-              <ul className="text-xs text-loom-text space-y-2">
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">1</kbd> Explorer · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">2</kbd> Chart · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">3</kbd> Query</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘1</kbd>–<kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘6</kbd> Panel tabs (Stats → Settings)</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">[</kbd> Sidebar · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">]</kbd> Right panel</li>
-                <li className="pt-1 text-loom-muted font-medium">Scatter</li>
+              <ul className="text-xs text-loom-text space-y-2.5 leading-relaxed">
+                <li><kbd className="loom-kbd">1</kbd> Explorer · <kbd className="loom-kbd">2</kbd> Chart · <kbd className="loom-kbd">3</kbd> Query</li>
+                <li><kbd className="loom-kbd">⌘1</kbd>–<kbd className="loom-kbd">⌘6</kbd> Panel tabs (Stats → Settings)</li>
+                <li><kbd className="loom-kbd">[</kbd> Sidebar · <kbd className="loom-kbd">]</kbd> Right panel</li>
+                <li className="pt-1 text-loom-muted font-medium text-2xs uppercase tracking-wider">Scatter</li>
                 <li>Two-finger scroll pans · pinch / mouse wheel zooms toward cursor · double-click resets</li>
                 <li className="md:hidden">On phone: chart fills the screen · Scan for viz cards · swipe Keep / Skip · Edit opens Encoding</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">+</kbd>/<kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">−</kbd> Zoom · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">0</kbd> Reset · arrows pan (Shift = faster)</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">V</kbd> Pan · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">C</kbd> Crosshair · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">G</kbd> Lasso</li>
-                <li><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">Shift</kbd>+drag brush select · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">L</kbd> Link tooltip · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">Esc</kbd> Clear</li>
-                <li className="pt-1"><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">⌘</kbd><kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono ml-1">Enter</kbd> Run query · <kbd className="px-1.5 py-0.5 rounded bg-loom-elevated font-mono">?</kbd> This help</li>
+                <li><kbd className="loom-kbd">+</kbd>/<kbd className="loom-kbd">−</kbd> Zoom · <kbd className="loom-kbd">0</kbd> Reset · arrows pan (Shift = faster)</li>
+                <li><kbd className="loom-kbd">V</kbd> Pan · <kbd className="loom-kbd">C</kbd> Crosshair · <kbd className="loom-kbd">G</kbd> Lasso</li>
+                <li><kbd className="loom-kbd">Shift</kbd>+drag brush select · <kbd className="loom-kbd">L</kbd> Link tooltip · <kbd className="loom-kbd">Esc</kbd> Clear</li>
+                <li className="pt-1"><kbd className="loom-kbd">⌘</kbd><kbd className="loom-kbd ml-1">Enter</kbd> Run query · <kbd className="loom-kbd">?</kbd> This help</li>
               </ul>
             )}
 
@@ -738,22 +747,22 @@ function HomeContent({
         </div>
       )}
       {/* Top Bar spans full width */}
-      <TopBar onOpenShortcuts={() => setShortcutsOpen(true)} />
+      {!socialExportReady && <TopBar onOpenShortcuts={() => setShortcutsOpen(true)} />}
 
       {/* Main Body: Sidebar + Canvas + Panel. When dataSourcesExpanded, sidebar takes over. */}
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          <Sidebar />
+          {!socialExportReady && <Sidebar />}
 
           {/* Canvas Area — hidden when Data & sources is expanded; shows dashboard when dashboards expanded */}
-          <main className={`relative bg-loom-bg overflow-hidden transition-[flex] duration-200 flex flex-col ${dataSourcesExpanded ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}>
-            {dashboardsExpanded ? (
+          <main className={`relative bg-loom-bg overflow-hidden transition-[flex] duration-200 flex flex-col ${dataSourcesExpanded && !socialExportReady ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}>
+            {dashboardsExpanded && !socialExportReady ? (
               <DashboardCanvas onCollapse={() => useLoomStore.getState().setDashboardsExpanded(false)} />
             ) : (
               <>
-                {!dataSourcesExpanded && viewMode === "explorer" && <ExplorerView />}
-                {!dataSourcesExpanded && viewMode === "chart" && <ChartView />}
-                {!dataSourcesExpanded && viewMode === "query" && <QueryView />}
+                {!dataSourcesExpanded && viewMode === "explorer" && !socialExportReady && <ExplorerView />}
+                {(!dataSourcesExpanded || socialExportReady) && (viewMode === "chart" || socialExportReady) && <ChartView />}
+                {!dataSourcesExpanded && viewMode === "query" && !socialExportReady && <QueryView />}
               </>
             )}
             {previewCapture && (
@@ -780,13 +789,30 @@ function HomeContent({
                 </div>
               </div>
             )}
+            {socialExportReady && !previewCapture && (
+              <div className="absolute top-2 right-2 z-30 flex items-center gap-2">
+                <span className="text-2xs font-mono text-loom-muted bg-loom-surface/90 border border-loom-border rounded px-2 py-1">
+                  Share ready · Esc to exit
+                </span>
+                <button
+                  type="button"
+                  className="text-2xs px-2 py-1 rounded border border-loom-border bg-loom-surface text-loom-text hover:border-loom-accent"
+                  onClick={() => {
+                    useLoomStore.getState().setSocialExportReady(false);
+                    useLoomStore.getState().setSocialExportTarget(null);
+                  }}
+                >
+                  Exit
+                </button>
+              </div>
+            )}
           </main>
 
-          <DetailPanel />
+          {!socialExportReady && <DetailPanel />}
         </div>
 
         {/* Preview as footer */}
-        <PreviewFooter />
+        {!socialExportReady && <PreviewFooter />}
       </div>
     </div>
   );

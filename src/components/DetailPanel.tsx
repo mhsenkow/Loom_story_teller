@@ -65,9 +65,19 @@ import {
 } from "@/lib/smartAnalytics";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
-import { exportDashboardMicrosite } from "@/lib/tauri";
+import { exportDashboardMicrosite, streamSnapshot, isTauri, isTauri as checkTauri } from "@/lib/tauri";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
-import { streamSnapshot, isTauri as checkTauri } from "@/lib/tauri";
+import {
+  SOCIAL_PRESETS,
+  getSocialPreset,
+  buildSocialCaption,
+  shareOrDownloadFile,
+  copyTextToClipboard,
+  slugifyFilename,
+  publishStoryToWorker,
+  recordCanvasVideo,
+} from "@/lib/socialExport";
+import { downloadBlob } from "@/lib/zipStore";
 
 const TABS: { key: PanelTab; label: string }[] = [
   { key: "stats", label: "Stats" },
@@ -88,33 +98,33 @@ export function DetailPanel() {
       {/* Mobile backdrop */}
       <button
         type="button"
-        className="md:hidden fixed inset-0 z-[35] bg-black/40"
+        className="md:hidden fixed inset-0 z-[35] loom-overlay animate-fade-in"
         aria-label="Close detail panel"
         onClick={togglePanel}
       />
       <aside
         className={`
-          flex flex-col bg-loom-surface flex-shrink-0
+          flex flex-col bg-loom-surface flex-shrink-0 animate-slide-up md:animate-none
           md:relative md:h-full md:w-[var(--panel-width)] md:border-l md:border-loom-border md:z-auto
           fixed inset-x-0 bottom-0 z-40 w-full
-          border-t border-loom-border rounded-t-xl shadow-loom-lg
+          border-t border-loom-border rounded-t-2xl shadow-loom-lg
           md:max-h-none md:rounded-none md:shadow-none md:inset-auto
           ${panelTab === "chart" ? "max-h-[min(90dvh,44rem)]" : "max-h-[min(82dvh,36rem)]"}
         `}
         style={{ paddingBottom: "var(--safe-bottom)" }}
       >
         {/* Mobile sheet chrome */}
-        <div className="md:hidden relative flex items-center justify-between px-3 pt-3 pb-1 shrink-0">
-          <div className="pointer-events-none absolute left-1/2 top-1.5 h-1 w-10 -translate-x-1/2 rounded-full bg-loom-border" />
-          <span className="text-xs font-medium text-loom-text">
+        <div className="md:hidden relative flex items-center justify-between px-4 pt-3.5 pb-1.5 shrink-0">
+          <div className="pointer-events-none absolute left-1/2 top-2 h-1 w-10 -translate-x-1/2 rounded-full bg-loom-border/80" />
+          <span className="text-sm font-semibold text-loom-text tracking-tight">
             {TABS.find((t) => t.key === panelTab)?.label ?? "Details"}
           </span>
-          <button type="button" onClick={togglePanel} className="loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted text-lg leading-none" aria-label="Close">
+          <button type="button" onClick={togglePanel} className="loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted text-lg leading-none rounded-md" aria-label="Close">
             ×
           </button>
         </div>
       {/* Tab Bar */}
-      <div role="tablist" aria-label="Panel sections" className="flex items-center gap-0.5 px-2 min-h-[var(--topbar-height)] border-b border-loom-border flex-nowrap overflow-x-auto scrollbar-none">
+      <div role="tablist" aria-label="Panel sections" className="loom-tabs px-1.5 sm:px-2 min-h-[var(--topbar-height)] border-b border-loom-border">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -149,13 +159,7 @@ export function DetailPanel() {
                 queueMicrotask(() => document.getElementById(`panel-tab-${last.key}`)?.focus());
               }
             }}
-            className={`
-              px-3 py-2 md:py-1 text-xs font-medium rounded transition-all duration-100 whitespace-nowrap shrink-0
-              ${panelTab === tab.key
-                ? "bg-loom-elevated text-loom-text"
-                : "text-loom-muted hover:text-loom-text"
-              }
-            `}
+            className="loom-tab"
           >
             {tab.label}
           </button>
@@ -169,8 +173,8 @@ export function DetailPanel() {
         ) : panelTab === "dashboards" ? (
           <DashboardsView />
         ) : !selectedFile ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-loom-muted">Select a file to inspect</p>
+          <div className="flex items-center justify-center h-full px-6 py-10">
+            <p className="text-sm text-loom-muted text-center leading-relaxed">Select a file to inspect</p>
           </div>
         ) : panelTab === "stats" ? (
           <StatsView />
@@ -328,6 +332,7 @@ function DashboardsView() {
       slots,
       lastUpdatedMs: active.lastRefreshedAt ?? null,
       layoutTemplate: active.layoutTemplate ?? "auto",
+      ogImageDataUrl: slots.find((s) => s.snapshotDataUrl)?.snapshotDataUrl ?? null,
     });
     try {
       const ok = await exportDashboardMicrosite(html, `${active.name}.html`);
@@ -425,7 +430,7 @@ function DashboardsView() {
       )}
 
       {active && active.slots.length > 0 && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={handleExportMicrosite}
@@ -433,6 +438,37 @@ function DashboardsView() {
             title="Export dashboard as a self-contained HTML file (data lineage included)"
           >
             Export as microsite
+          </button>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const { exportStoryCarouselZip } = await import("@/lib/exportStoryCarousel");
+                const presetId = useLoomStore.getState().socialPresetId;
+                const result = await exportStoryCarouselZip(active.id, presetId);
+                if (!result) {
+                  setToast("Could not capture story slides");
+                  return;
+                }
+                const name = `${active.name.replace(/[^\w\-]+/g, "_")}-carousel.zip`;
+                const { saveBinaryAndReveal, isTauri: tauri } = await import("@/lib/tauri");
+                const { shareOrDownloadFile } = await import("@/lib/socialExport");
+                if (tauri()) {
+                  const path = await saveBinaryAndReveal(result.blob, name);
+                  setToast(path ? `Saved ${result.count}-slide pack` : "Save cancelled");
+                } else {
+                  await shareOrDownloadFile(result.blob, name, active.name);
+                  setToast(`Exported ${result.count}-slide carousel ZIP`);
+                }
+              } catch (e) {
+                console.error(e);
+                setToast("Carousel export failed");
+              }
+            }}
+            className="text-xs py-1.5 px-2 rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10"
+            title="Export chart slots as numbered PNGs for Instagram carousel / Stories"
+          >
+            Export carousel ZIP
           </button>
         </div>
       )}
@@ -1396,7 +1432,7 @@ function StatRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-// --- Export tab: Chart (PNG/SVG) + Data (CSV) ---
+// --- Export tab: Social packs + Chart (PNG/SVG) + Data (CSV) ---
 
 function ExportView() {
   const {
@@ -1407,31 +1443,73 @@ function ExportView() {
     sampleRows,
     queryResult,
     chartVisualOverrides,
+    chartTitleOverrides,
+    aiSuggestionReason,
+    socialPresetId,
+    setSocialPresetId,
+    exportBurnIn,
+    setExportBurnIn,
+    exportSupersample,
+    setExportSupersample,
+    socialExportReady,
+    setSocialExportReady,
+    setSocialExportTarget,
+    setToast,
+    setViewMode,
+    dashboards,
+    activeDashboardId,
+    vegaSpec,
   } = useLoomStore();
   const [pngFeedback, setPngFeedback] = useState(false);
   const [svgFeedback, setSvgFeedback] = useState(false);
   const [configFeedback, setConfigFeedback] = useState(false);
+  const [captionFeedback, setCaptionFeedback] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
 
   const clearError = useCallback(() => {
     setCopyError(null);
   }, []);
 
+  const displayTitle = activeChart
+    ? (chartTitleOverrides[activeChart.id] ?? activeChart.title)
+    : "";
+
+  const captionText = useMemo(() => {
+    if (!activeChart) return "";
+    return buildSocialCaption({
+      title: displayTitle,
+      subtitle: activeChart.subtitle,
+      reason: aiSuggestionReason ?? getRecommendationReason(activeChart),
+      source: selectedFile?.name,
+      handle: exportBurnIn.includeHandle ? exportBurnIn.handleText : null,
+    });
+  }, [activeChart, displayTitle, aiSuggestionReason, selectedFile, exportBurnIn]);
+
+  const runPlatformPng = useCallback(async (): Promise<Blob | null> => {
+    const { capturePlatformPng } = await import("@/lib/capturePlatformPng");
+    return capturePlatformPng(socialPresetId, { supersample: exportSupersample });
+  }, [socialPresetId, exportSupersample]);
+
   const handleCopyPng = useCallback(async () => {
-    if (!pngExportHandler) return;
     setCopyError(null);
+    setBusy("png");
     try {
-      const blob = await pngExportHandler();
+      const blob = (await runPlatformPng()) ?? (pngExportHandler ? await pngExportHandler() : null);
       if (blob) {
         await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
         setPngFeedback(true);
         setTimeout(() => setPngFeedback(false), 2000);
+      } else {
+        setCopyError("Could not capture chart PNG.");
       }
     } catch (e) {
       console.warn("Copy PNG failed:", e);
-      setCopyError("Clipboard access denied. Use a secure context (HTTPS or localhost) and allow clipboard permission.");
+      setCopyError("Clipboard access denied. Use HTTPS/localhost and allow clipboard permission.");
+    } finally {
+      setBusy(null);
     }
-  }, [pngExportHandler]);
+  }, [runPlatformPng, pngExportHandler]);
 
   const handleCopySvg = useCallback(async () => {
     if (!svgExportHandler) return;
@@ -1450,23 +1528,53 @@ function ExportView() {
   }, [svgExportHandler]);
 
   const handleDownloadPng = useCallback(async () => {
-    if (!pngExportHandler) return;
     setCopyError(null);
+    setBusy("download");
     try {
-      const blob = await pngExportHandler();
+      const blob = (await runPlatformPng()) ?? (pngExportHandler ? await pngExportHandler() : null);
       if (blob) {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `chart-${Date.now()}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
+        const preset = getSocialPreset(socialPresetId);
+        const name = `${slugifyFilename(displayTitle || "chart")}-${preset.id}.png`;
+        downloadBlob(blob, name);
+        setToast(`Downloaded ${preset.label} PNG`);
+      } else {
+        setCopyError("Could not capture chart PNG.");
       }
     } catch (e) {
       console.warn("Download PNG failed:", e);
       setCopyError("Export failed.");
+    } finally {
+      setBusy(null);
     }
-  }, [pngExportHandler]);
+  }, [runPlatformPng, pngExportHandler, socialPresetId, displayTitle, setToast]);
+
+  const handleSharePng = useCallback(async () => {
+    setCopyError(null);
+    setBusy("share");
+    try {
+      const blob = (await runPlatformPng()) ?? (pngExportHandler ? await pngExportHandler() : null);
+      if (!blob) {
+        setCopyError("Could not capture chart PNG.");
+        return;
+      }
+      const preset = getSocialPreset(socialPresetId);
+      const name = `${slugifyFilename(displayTitle || "chart")}-${preset.id}.png`;
+      const { saveBinaryAndReveal } = await import("@/lib/tauri");
+      if (isTauri()) {
+        const path = await saveBinaryAndReveal(blob, name);
+        setToast(path ? "Saved — revealed in Finder" : "Save cancelled");
+      } else {
+        const result = await shareOrDownloadFile(blob, name, displayTitle || "Loom chart");
+        setToast(result === "shared" ? "Opened share sheet" : "Downloaded PNG");
+      }
+    } catch (e) {
+      if (e instanceof Error && e.name === "AbortError") return;
+      console.warn("Share PNG failed:", e);
+      setCopyError("Share failed.");
+    } finally {
+      setBusy(null);
+    }
+  }, [runPlatformPng, pngExportHandler, socialPresetId, displayTitle, setToast]);
 
   const handleDownloadSvg = useCallback(async () => {
     if (!svgExportHandler) return;
@@ -1475,18 +1583,24 @@ function ExportView() {
       const svg = await svgExportHandler();
       if (svg) {
         const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `chart-${Date.now()}.svg`;
-        a.click();
-        URL.revokeObjectURL(url);
+        downloadBlob(blob, `${slugifyFilename(displayTitle || "chart")}.svg`);
       }
     } catch (e) {
       console.warn("Download SVG failed:", e);
       setCopyError("Export failed.");
     }
-  }, [svgExportHandler]);
+  }, [svgExportHandler, displayTitle]);
+
+  const handleCopyCaption = useCallback(async () => {
+    if (!captionText) return;
+    const ok = await copyTextToClipboard(captionText);
+    if (ok) {
+      setCaptionFeedback(true);
+      setTimeout(() => setCaptionFeedback(false), 2000);
+    } else {
+      setCopyError("Clipboard access denied.");
+    }
+  }, [captionText]);
 
   const handleCopyChartConfig = useCallback(() => {
     if (!activeChart) return;
@@ -1512,14 +1626,241 @@ function ExportView() {
     }
   }, [activeChart, chartVisualOverrides]);
 
+  const handleToggleShareReady = useCallback(() => {
+    const next = !socialExportReady;
+    setSocialExportReady(next);
+    if (next) {
+      setViewMode("chart");
+      const preset = getSocialPreset(socialPresetId);
+      if (preset.width && preset.height) {
+        setSocialExportTarget({
+          width: preset.width,
+          height: preset.height,
+          pixelRatio: exportSupersample,
+          presetId: socialPresetId,
+        });
+        if (preset.aspectId) {
+          useLoomStore.getState().setAppSettings((s) => ({ ...s, chartAspect: preset.aspectId! }));
+        }
+      }
+      setToast("Share ready — Esc to exit");
+    } else {
+      setSocialExportTarget(null);
+    }
+  }, [
+    socialExportReady,
+    setSocialExportReady,
+    setViewMode,
+    socialPresetId,
+    exportSupersample,
+    setSocialExportTarget,
+    setToast,
+  ]);
+
+  const handleCarouselZip = useCallback(async () => {
+    const dashId = activeDashboardId ?? dashboards[0]?.id;
+    if (!dashId) {
+      setCopyError("Create a story dashboard first (Dashboards → Tell a story).");
+      return;
+    }
+    setBusy("carousel");
+    setCopyError(null);
+    try {
+      const { exportStoryCarouselZip } = await import("@/lib/exportStoryCarousel");
+      const result = await exportStoryCarouselZip(dashId, socialPresetId);
+      if (!result) {
+        setCopyError("Could not capture story slides.");
+        return;
+      }
+      const dash = useLoomStore.getState().dashboards.find((d) => d.id === dashId);
+      const name = `${slugifyFilename(dash?.name || "story")}-carousel.zip`;
+      const { saveBinaryAndReveal, isTauri: tauri } = await import("@/lib/tauri");
+      if (tauri()) {
+        const path = await saveBinaryAndReveal(result.blob, name);
+        setToast(path ? `Saved ${result.count}-slide pack` : "Save cancelled");
+      } else {
+        await shareOrDownloadFile(result.blob, name, dash?.name || "Story pack");
+        setToast(`Exported ${result.count}-slide carousel ZIP`);
+      }
+    } catch (e) {
+      console.warn(e);
+      setCopyError("Carousel export failed.");
+    } finally {
+      setBusy(null);
+    }
+  }, [activeDashboardId, dashboards, socialPresetId, setToast]);
+
+  const handleStoryBundle = useCallback(async () => {
+    const dashId = activeDashboardId ?? dashboards[0]?.id;
+    if (!dashId) {
+      setCopyError("Create a story dashboard first.");
+      return;
+    }
+    setBusy("bundle");
+    try {
+      const st = useLoomStore.getState();
+      const dash = st.dashboards.find((d) => d.id === dashId);
+      if (!dash) return;
+      const slots = dash.slots.map((slot) => {
+        const v = st.chartViews.find((x) => x.id === slot.viewId);
+        return {
+          label: v?.name ?? slot.viewId,
+          viewType: slot.viewType,
+          snapshotDataUrl: v?.snapshotImageDataUrl ?? null,
+          sourceLabel: v?.fileName,
+        };
+      });
+      const ogSlot = slots.find((s) => s.snapshotDataUrl);
+      const html = buildDashboardMicrositeHtml({
+        dashboardName: dash.name,
+        slots,
+        lastUpdatedMs: dash.lastRefreshedAt ?? null,
+        layoutTemplate: dash.layoutTemplate ?? "auto",
+        ogImageDataUrl: ogSlot?.snapshotDataUrl ?? null,
+        caption: captionText || undefined,
+      });
+      const enc = new TextEncoder();
+      const entries: { name: string; data: Uint8Array }[] = [
+        { name: "index.html", data: enc.encode(html) },
+        { name: "caption.txt", data: enc.encode(captionText || dash.name) },
+      ];
+      if (vegaSpec) {
+        entries.push({
+          name: "chart-spec.json",
+          data: enc.encode(JSON.stringify(vegaSpec, null, 2)),
+        });
+      }
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i]!;
+        if (!s.snapshotDataUrl?.startsWith("data:")) continue;
+        const b64 = s.snapshotDataUrl.split(",")[1];
+        if (!b64) continue;
+        const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        entries.push({
+          name: `slides/${String(i + 1).padStart(2, "0")}.png`,
+          data: bin,
+        });
+      }
+      const { buildZip } = await import("@/lib/zipStore");
+      const zipBytes = buildZip(entries);
+      const ab = zipBytes.buffer.slice(
+        zipBytes.byteOffset,
+        zipBytes.byteOffset + zipBytes.byteLength,
+      ) as ArrayBuffer;
+      const blob = new Blob([ab], { type: "application/zip" });
+      const name = `${slugifyFilename(dash.name)}-story-bundle.zip`;
+      downloadBlob(blob, name);
+      setToast("Story bundle downloaded");
+    } catch (e) {
+      console.warn(e);
+      setCopyError("Story bundle failed.");
+    } finally {
+      setBusy(null);
+    }
+  }, [activeDashboardId, dashboards, captionText, vegaSpec, setToast]);
+
+  const handlePublishStory = useCallback(async () => {
+    const dashId = activeDashboardId ?? dashboards[0]?.id;
+    if (!dashId) {
+      setCopyError("Create a story dashboard first.");
+      return;
+    }
+    setBusy("publish");
+    try {
+      const st = useLoomStore.getState();
+      const dash = st.dashboards.find((d) => d.id === dashId);
+      if (!dash) return;
+      const slots = dash.slots.map((slot) => {
+        const v = st.chartViews.find((x) => x.id === slot.viewId);
+        return {
+          label: v?.name ?? slot.viewId,
+          viewType: slot.viewType,
+          snapshotDataUrl: v?.snapshotImageDataUrl ?? null,
+          sourceLabel: v?.fileName,
+        };
+      });
+      const og = slots.find((s) => s.snapshotDataUrl)?.snapshotDataUrl ?? null;
+      const html = buildDashboardMicrositeHtml({
+        dashboardName: dash.name,
+        slots,
+        lastUpdatedMs: dash.lastRefreshedAt ?? null,
+        layoutTemplate: dash.layoutTemplate ?? "auto",
+        ogImageDataUrl: og,
+        caption: captionText || undefined,
+      });
+      const published = await publishStoryToWorker({
+        html,
+        title: dash.name,
+        ogImageDataUrl: og,
+      });
+      if (published) {
+        await copyTextToClipboard(published.url);
+        setToast(`Published — URL copied`);
+      } else {
+        setCopyError("Publish unavailable offline — download the story bundle instead.");
+      }
+    } catch (e) {
+      console.warn(e);
+      setCopyError("Publish failed.");
+    } finally {
+      setBusy(null);
+    }
+  }, [activeDashboardId, dashboards, captionText, setToast]);
+
+  const handleExportVideo = useCallback(async () => {
+    setBusy("video");
+    setCopyError(null);
+    try {
+      setViewMode("chart");
+      const preset = getSocialPreset(socialPresetId === "current" ? "stories" : socialPresetId);
+      if (preset.width && preset.height) {
+        setSocialExportTarget({
+          width: preset.width,
+          height: preset.height,
+          pixelRatio: 1,
+          presetId: preset.id,
+        });
+        if (preset.aspectId) {
+          useLoomStore.getState().setAppSettings((s) => ({ ...s, chartAspect: preset.aspectId! }));
+        }
+      }
+      await new Promise((r) => setTimeout(r, 600));
+      // Prefer the 2D canvas (always painted during social export)
+      const canvas =
+        document.querySelector<HTMLCanvasElement>("[data-loom-chart-canvas2d]") ||
+        document.querySelector<HTMLCanvasElement>("main canvas");
+      if (!canvas) {
+        setCopyError("Chart canvas not ready.");
+        return;
+      }
+      const blob = await recordCanvasVideo(canvas, { durationMs: 6000, fps: 30 });
+      setSocialExportTarget(null);
+      if (!blob) {
+        setCopyError("Video export not supported in this browser.");
+        return;
+      }
+      const ext = blob.type.includes("mp4") ? "mp4" : "webm";
+      const name = `${slugifyFilename(displayTitle || "chart")}-reel.${ext}`;
+      await shareOrDownloadFile(blob, name, displayTitle || "Loom reel");
+      setToast("Short video exported");
+    } catch (e) {
+      console.warn(e);
+      setCopyError("Video export failed.");
+      setSocialExportTarget(null);
+    } finally {
+      setBusy(null);
+    }
+  }, [socialPresetId, setSocialExportTarget, setViewMode, displayTitle, setToast]);
+
   const hasChartExport = activeChart && (pngExportHandler || svgExportHandler);
   const hasTableData = sampleRows && sampleRows.rows.length > 0 && selectedFile;
   const hasQueryData = queryResult && queryResult.rows.length > 0;
+  const preset = getSocialPreset(socialPresetId);
 
   return (
     <div className="p-3 space-y-4">
       <p className="text-2xs text-loom-muted">
-        Export the current chart (PNG/SVG) or data (CSV) from here.
+        Export post-ready images for social, story carousels, or data (CSV).
       </p>
       {copyError && (
         <p className="text-2xs text-amber-500/90 bg-amber-500/10 rounded px-2 py-1.5 flex items-center justify-between gap-2">
@@ -1527,6 +1868,137 @@ function ExportView() {
           <button type="button" onClick={clearError} className="shrink-0 text-loom-muted hover:text-loom-text" aria-label="Dismiss">×</button>
         </p>
       )}
+
+      {/* Social / platform */}
+      <div className="space-y-1.5">
+        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Social</span>
+        <div className="loom-card space-y-2">
+          <label className="block text-2xs text-loom-muted">
+            Platform size
+            <select
+              className="loom-input w-full mt-1 text-xs"
+              value={socialPresetId}
+              onChange={(e) => setSocialPresetId(e.target.value as typeof socialPresetId)}
+            >
+              {SOCIAL_PRESETS.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}{p.width ? ` (${p.width}×${p.height})` : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className="text-2xs text-loom-muted">{preset.blurb}</p>
+          <label className="flex items-center gap-2 text-2xs text-loom-text">
+            <input
+              type="checkbox"
+              checked={exportSupersample === 2}
+              onChange={(e) => setExportSupersample(e.target.checked ? 2 : 1)}
+            />
+            2× supersample (sharper feed posts)
+          </label>
+          <button
+            type="button"
+            onClick={handleToggleShareReady}
+            className={`w-full px-3 py-2 text-xs font-medium rounded border transition-colors ${
+              socialExportReady
+                ? "border-loom-accent bg-loom-accent/15 text-loom-accent"
+                : "text-loom-text bg-loom-elevated border-loom-border hover:border-loom-accent"
+            }`}
+          >
+            {socialExportReady ? "Exit share-ready frame" : "Share-ready preview"}
+          </button>
+          <div className="border-t border-loom-border/50 pt-2 space-y-1.5">
+            <span className="text-2xs text-loom-muted">Burn-in footer</span>
+            {(
+              [
+                ["includeSource", "Source file"],
+                ["includeTimestamp", "Timestamp"],
+                ["includeHandle", "Handle"],
+                ["includeLoomMark", "Made with Loom"],
+              ] as const
+            ).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-2xs text-loom-text">
+                <input
+                  type="checkbox"
+                  checked={!!exportBurnIn[key]}
+                  onChange={(e) =>
+                    setExportBurnIn((prev) => ({ ...prev, [key]: e.target.checked }))
+                  }
+                />
+                {label}
+              </label>
+            ))}
+            {exportBurnIn.includeHandle && (
+              <input
+                type="text"
+                className="loom-input w-full text-xs"
+                placeholder="@handle"
+                value={exportBurnIn.handleText}
+                onChange={(e) =>
+                  setExportBurnIn((prev) => ({ ...prev, handleText: e.target.value }))
+                }
+              />
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={handleCopyCaption}
+            disabled={!captionText}
+            className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+          >
+            {captionFeedback ? "Caption copied!" : "Copy post caption"}
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadPng}
+            disabled={!hasChartExport || !!busy}
+            className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+          >
+            {busy === "download" ? "Capturing…" : `Download ${preset.label} PNG`}
+          </button>
+          <button
+            type="button"
+            onClick={handleSharePng}
+            disabled={!hasChartExport || !!busy}
+            className="w-full px-3 py-2 text-xs font-medium text-loom-accent bg-loom-accent/10 border border-loom-accent/40 rounded hover:bg-loom-accent/20 disabled:opacity-50"
+          >
+            {busy === "share" ? "Preparing…" : "Share image…"}
+          </button>
+          <button
+            type="button"
+            onClick={handleCarouselZip}
+            disabled={!!busy}
+            className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+            title="Export active story dashboard as numbered PNGs in a ZIP"
+          >
+            {busy === "carousel" ? "Building carousel…" : "Story → carousel ZIP"}
+          </button>
+          <button
+            type="button"
+            onClick={handleStoryBundle}
+            disabled={!!busy}
+            className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+          >
+            {busy === "bundle" ? "Bundling…" : "Download story bundle"}
+          </button>
+          <button
+            type="button"
+            onClick={handlePublishStory}
+            disabled={!!busy}
+            className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+          >
+            {busy === "publish" ? "Publishing…" : "Publish story link"}
+          </button>
+          <button
+            type="button"
+            onClick={handleExportVideo}
+            disabled={!hasChartExport || !!busy}
+            className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+          >
+            {busy === "video" ? "Recording…" : "Export short video (Reel)"}
+          </button>
+        </div>
+      </div>
 
       {/* Chart export */}
       <div className="space-y-1.5">
@@ -1539,11 +2011,11 @@ function ExportView() {
               <button
                 type="button"
                 onClick={handleCopyPng}
-                disabled={!pngExportHandler}
+                disabled={!pngExportHandler || !!busy}
                 aria-label="Copy chart as PNG to clipboard"
                 className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent hover:bg-loom-elevated/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {pngFeedback ? "Copied!" : "Copy as PNG"}
+                {pngFeedback ? "Copied!" : busy === "png" ? "Capturing…" : "Copy as PNG"}
               </button>
               <button
                 type="button"
@@ -1563,15 +2035,6 @@ function ExportView() {
                 {configFeedback ? "Copied!" : "Copy chart config (JSON)"}
               </button>
               <div className="border-t border-loom-border/50 pt-2 mt-2 space-y-2">
-                <button
-                  type="button"
-                  onClick={handleDownloadPng}
-                  disabled={!pngExportHandler}
-                  aria-label="Download chart as PNG file"
-                  className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent transition-colors disabled:opacity-50"
-                >
-                  Download PNG
-                </button>
                 <button
                   type="button"
                   onClick={handleDownloadSvg}
@@ -2348,6 +2811,11 @@ function ChartPanelView() {
   const showY = caps.yChannel;
   const showColor = caps.colorChannel;
   const showSize = caps.sizeChannel;
+  /** Pyramid / slope / dumbbell need the second measure visible — not buried under More. */
+  const sizeInPrimary =
+    activeChart.kind === "pyramid" ||
+    activeChart.kind === "slope" ||
+    activeChart.kind === "dumbbell";
   const showAggregate = caps.aggregate;
   const effectiveAggregate: YAggregateOption = !activeChart.yField
     ? "count"
@@ -2508,9 +2976,9 @@ function ChartPanelView() {
                   ["x", "X"],
                   ["y", "Y"],
                   ["color", "Color"],
-                  ["size", "Size"],
-                ] as const
-              ).map(([key, label]) => {
+                    ["size", channelLabels.size],
+                  ] as const
+                ).map(([key, label]) => {
                 const on = !!encodingLocks[key];
                 return (
                   <button
@@ -2596,7 +3064,7 @@ function ChartPanelView() {
                 />
               )}
 
-              {showColor && (
+              {showColor && !(activeChart.kind === "pyramid" || activeChart.kind === "slope") && (
                 <EncodingSlot
                   label={channelLabels.color}
                   value={activeChart.colorField ?? ""}
@@ -2648,6 +3116,17 @@ function ChartPanelView() {
                   }
                 />
               )}
+              {showSize && sizeInPrimary && (
+                <EncodingSlot
+                  label={channelLabels.size}
+                  value={activeChart.sizeField ?? ""}
+                  options={numericOptions}
+                  allowEmpty
+                  emptyLabel="None"
+                  typeHint={activeChart.sizeField ? colType(activeChart.sizeField) : undefined}
+                  onChange={(v) => applyEncodingExtra("size", v === "" ? "__none__" : v)}
+                />
+              )}
             </div>
 
             {(showSize || showRow || showGlowOutline || showOpacityEnc) && (
@@ -2665,9 +3144,9 @@ function ChartPanelView() {
                 </button>
                 {moreChannelsOpen && (
                   <div className="space-y-2">
-                    {showSize && (
+                    {showSize && !sizeInPrimary && (
                       <EncodingSlot
-                        label="Size"
+                        label={channelLabels.size}
                         value={activeChart.sizeField ?? ""}
                         options={numericOptions}
                         allowEmpty

@@ -14,6 +14,7 @@ import {
   getBestSuggestion,
   getTopSuggestions,
   diversifyRecommendations,
+  recommendSourceStory,
 } from "../recommendations";
 import { chartCapabilities, encodingChannelLabels } from "../chartSupport";
 import type { ColumnInfo, QueryResult } from "../store";
@@ -36,6 +37,8 @@ const mixedColumns: ColumnInfo[] = [
 const richColumns: ColumnInfo[] = [
   ...mixedColumns,
   { name: "z", data_type: "FLOAT", null_count: 0, distinct_count: 40, min_value: "1", max_value: "40" },
+  { name: "latitude", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "-60", max_value: "60" },
+  { name: "longitude", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "-180", max_value: "180" },
 ];
 
 describe("recommendations", () => {
@@ -181,12 +184,22 @@ describe("recommendations", () => {
   });
 
   describe("kind coverage", () => {
-    it("lists all 19 chart kinds", () => {
-      expect(CHART_KIND_OPTIONS.map((o) => o.value).sort()).toEqual([
-        "area", "bar", "box", "bubble", "choropleth", "forceBubble", "heatmap",
-        "histogram", "line", "lollipop", "pie", "radar", "sankey", "scatter",
-        "strip", "sunburst", "treemap", "violin", "waterfall",
-      ].sort());
+    it("lists classic + odd + geo chart kinds", () => {
+      const kinds = CHART_KIND_OPTIONS.map((o) => o.value);
+      expect(kinds).toContain("scatter");
+      expect(kinds).toContain("sankey");
+      expect(kinds).toContain("bucketField");
+      expect(kinds).toContain("chernoff");
+      expect(kinds).toContain("isoScatter");
+      expect(kinds).toContain("voronoi");
+      expect(kinds).toContain("geoPoints");
+      expect(kinds).toContain("geoBubbles");
+      expect(kinds).toContain("geoHex");
+      expect(kinds).toContain("globe");
+      expect(kinds).toContain("globeTrail");
+      expect(kinds).toContain("arcMap");
+      expect(kinds).toContain("choropleth");
+      expect(CHART_KIND_OPTIONS.length).toBeGreaterThanOrEqual(40);
     });
 
     it("every selectable kind has support check + encoding labels + capabilities", () => {
@@ -292,6 +305,29 @@ describe("recommendations", () => {
       expect(getBestSuggestion(recs)?.id).toBe(diversifyRecommendations(recs, 1)[0]?.id);
     });
 
+    it("recommend sprinkles geo kinds when lat/lon or region columns exist", () => {
+      const recs = recommend(richColumns, null, "geo.csv");
+      const kinds = new Set(recs.map((r) => r.kind));
+      expect(kinds.has("choropleth")).toBe(true);
+      expect(
+        kinds.has("geoPoints") ||
+          kinds.has("geoBubbles") ||
+          kinds.has("geoHex") ||
+          kinds.has("globe") ||
+          kinds.has("globeTrail") ||
+          kinds.has("arcMap"),
+      ).toBe(true);
+    });
+
+    it("cca3 alone is enough for choropleth in recommend()", () => {
+      const cols: ColumnInfo[] = [
+        { name: "cca3", data_type: "VARCHAR", null_count: 0, distinct_count: 40, min_value: null, max_value: null },
+        { name: "population", data_type: "BIGINT", null_count: 0, distinct_count: 40, min_value: "1", max_value: "1e9" },
+      ];
+      const recs = recommend(cols, null, "countries.csv");
+      expect(recs.some((r) => r.kind === "choropleth" && r.xField === "cca3")).toBe(true);
+    });
+
     it("prefers mean over sum for proportion / percent fields", () => {
       const cols: ColumnInfo[] = [
         { name: "Region", data_type: "VARCHAR", null_count: 0, distinct_count: 9, min_value: null, max_value: null },
@@ -313,17 +349,15 @@ describe("recommendations", () => {
         },
       ];
       const recs = recommend(cols, null, "fuel_region.csv");
-      const meanRate = recs.find(
-        (r) => r.id.includes("bar-mean") && r.yField?.includes("Proportion"),
+      const rateBars = recs.filter(
+        (r) => r.kind === "bar" && r.yField?.includes("Proportion"),
       );
-      const sumRate = recs.find(
-        (r) => r.id.includes("bar-sum") && r.yField?.includes("Proportion"),
-      );
+      const meanRate = rateBars.find((r) => r.id.includes("bar-mean"));
       expect(meanRate).toBeDefined();
-      expect(sumRate).toBeDefined();
-      expect(meanRate!.score).toBeGreaterThan(sumRate!.score);
-      const rateCharts = recs.filter((r) => r.yField?.includes("Proportion"));
-      const bestRate = [...rateCharts].sort((a, b) => b.score - a.score)[0];
+      // Sum-of-rates is heavily penalized and may be diversified out; when present it loses.
+      const sumRate = rateBars.find((r) => r.id.includes("bar-sum"));
+      if (sumRate) expect(meanRate!.score).toBeGreaterThan(sumRate.score);
+      const bestRate = [...rateBars].sort((a, b) => b.score - a.score)[0];
       expect(bestRate?.id).toContain("bar-mean");
     });
 
@@ -354,6 +388,22 @@ describe("recommendations", () => {
       expect(geo).toBeDefined();
       expect(geo!.score).toBeGreaterThan(90);
       expect(geo!.subtitle).toMatch(/geographic/i);
+    });
+  });
+
+  describe("source story geo seeds", () => {
+    const emptyStats: ColumnInfo[] = [];
+    it("usgs / iss / opensky / fema / countries prefer geography charts first", () => {
+      expect(recommendSourceStory("usgs", emptyStats, null).charts[0]?.kind).toBe("geoPoints");
+      expect(recommendSourceStory("iss", emptyStats, null).charts[0]?.kind).toBe("globeTrail");
+      expect(recommendSourceStory("opensky", emptyStats, null).charts[0]?.kind).toBe("globeTrail");
+      expect(recommendSourceStory("fema", emptyStats, null).charts[0]?.kind).toBe("choropleth");
+      expect(recommendSourceStory("countries", emptyStats, null).charts[0]?.kind).toBe("choropleth");
+      expect(recommendSourceStory("covid", emptyStats, null).charts[0]?.kind).toBe("choropleth");
+      expect(recommendSourceStory("world_bank", emptyStats, null).charts[0]?.kind).toBe("choropleth");
+      expect(recommendSourceStory("nyc311", emptyStats, null).charts[0]?.kind).toBe("geoPoints");
+      expect(recommendSourceStory("meteo", emptyStats, null).charts[0]?.kind).toBe("geoBubbles");
+      expect(recommendSourceStory("aq", emptyStats, null).charts[0]?.kind).toBe("geoBubbles");
     });
   });
 });

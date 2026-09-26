@@ -37,23 +37,25 @@ export function PreviewFooter() {
 
   return (
     <div
-      className="flex flex-col border-t border-loom-border bg-loom-surface max-md:pb-[var(--safe-bottom)]"
+      className="flex flex-col border-t border-loom-border bg-loom-surface/95 backdrop-blur-sm max-md:pb-[var(--safe-bottom)]"
       style={{ paddingBottom: expanded ? undefined : undefined }}
     >
       {/* Tab bar + expand toggle */}
       <div className="flex items-center justify-between min-h-11 sm:min-h-[var(--statusbar-height)] sm:h-[var(--statusbar-height)]">
-        <div className="flex items-center gap-0.5 px-2">
+        <div className="loom-seg ml-2 my-1 sm:my-0">
           <button
             type="button"
             onClick={() => setFooterTab("preview")}
-            className={`min-h-9 sm:min-h-0 px-3 sm:px-2.5 py-1.5 sm:py-1 text-2xs font-medium rounded transition-colors ${footerTab === "preview" ? "bg-loom-elevated text-loom-text" : "text-loom-muted hover:text-loom-text"}`}
+            aria-pressed={footerTab === "preview"}
+            className="loom-seg-item loom-seg-item-quiet min-h-9 sm:min-h-0 px-3 sm:px-2.5 text-2xs border border-transparent"
           >
             Preview
           </button>
           <button
             type="button"
             onClick={() => setFooterTab("schema")}
-            className={`min-h-9 sm:min-h-0 px-3 sm:px-2.5 py-1.5 sm:py-1 text-2xs font-medium rounded transition-colors ${footerTab === "schema" ? "bg-loom-elevated text-loom-text" : "text-loom-muted hover:text-loom-text"}`}
+            aria-pressed={footerTab === "schema"}
+            className="loom-seg-item loom-seg-item-quiet min-h-9 sm:min-h-0 px-3 sm:px-2.5 text-2xs border border-transparent"
           >
             Schema
           </button>
@@ -75,7 +77,7 @@ export function PreviewFooter() {
           <button
             type="button"
             onClick={() => setExpanded(!expanded)}
-            className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-2xs text-loom-muted hover:text-loom-text grid place-items-center"
+            className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-2xs text-loom-muted hover:text-loom-text hover:bg-loom-elevated rounded-md grid place-items-center transition-colors"
             title={expanded ? "Collapse" : "Expand"}
             aria-label={expanded ? "Collapse preview" : "Expand preview"}
           >
