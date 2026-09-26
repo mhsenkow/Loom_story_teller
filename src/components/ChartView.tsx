@@ -1706,11 +1706,11 @@ export function ChartView() {
 
   // Always show suggestions panel when a file is selected. Expand toggles full-browse grid.
   const suggestionHeader = (
-    <div className={`flex flex-col border-b border-loom-border flex-shrink-0 ${isMobile && !suggestionsExpanded ? "gap-0 px-2 py-1.5" : "gap-2 px-2.5 py-2"}`}>
+    <div className={`flex flex-col border-b border-loom-border flex-shrink-0 ${isMobile && !suggestionsExpanded ? "gap-0 px-3 py-2" : "gap-2 px-2.5 py-2"}`}>
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1 flex items-baseline gap-2">
           <p className="text-xs font-semibold text-loom-text leading-tight">
-            {isMobile && !suggestionsExpanded ? "Charts" : "Suggestions"}
+            Suggestions
           </p>
           <p className="text-2xs text-loom-muted tabular-nums">
             {chartRecs.length}
@@ -1845,7 +1845,7 @@ export function ChartView() {
           ${suggestionsExpanded
             ? "order-1 w-full flex-1 flex flex-col min-h-0 border-b border-loom-border"
             : mobileRail
-              ? "order-2 shrink-0 border-t border-loom-border flex flex-col max-h-[min(30%,10.5rem)] pb-[env(safe-area-inset-bottom,0px)]"
+              ? "order-2 shrink-0 border-t border-loom-border flex flex-col max-h-[min(32%,11.5rem)] pb-[env(safe-area-inset-bottom,0px)]"
               : "w-[220px] flex-shrink-0 overflow-y-auto border-r border-loom-border"}
         `}
       >
@@ -1856,7 +1856,7 @@ export function ChartView() {
             ${suggestionsExpanded
               ? "overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 content-start"
               : mobileRail
-                ? "overflow-x-auto overflow-y-hidden flex flex-row gap-2 px-2 pb-1.5 scrollbar-none snap-x snap-mandatory"
+                ? "overflow-x-auto overflow-y-hidden flex flex-row gap-3 px-3 pt-1.5 pb-2.5 scrollbar-none snap-x snap-mandatory"
                 : "overflow-y-auto p-2 grid grid-cols-1 gap-2"}
           `}
         >

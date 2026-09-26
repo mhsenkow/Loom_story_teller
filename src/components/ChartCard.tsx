@@ -166,16 +166,16 @@ export function ChartCard({
         group flex flex-col rounded-lg overflow-hidden transition-all duration-150
         border bg-loom-elevated hover:border-loom-accent text-left
         ${isActive ? "border-loom-accent ring-1 ring-loom-accent/40" : "border-loom-border"}
-        ${compact ? "w-[148px] shrink-0 snap-start" : "w-full"}
+        ${compact ? "w-[152px] shrink-0 snap-start rounded-md" : "w-full"}
       `}
     >
-      <div ref={containerRef} className={`relative w-full bg-loom-bg ${compact ? "aspect-[5/3] min-h-[72px]" : "aspect-[4/3] min-h-[80px]"}`}>
+      <div ref={containerRef} className={`relative w-full bg-loom-bg ${compact ? "aspect-[5/3] min-h-[72px] rounded-t-md" : "aspect-[4/3] min-h-[80px]"}`}>
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full"
         />
       </div>
-      <div className={`flex flex-col gap-0.5 text-left ${compact ? "px-1.5 py-1" : "px-2.5 py-2"}`}>
+      <div className={`flex flex-col gap-0.5 text-left ${compact ? "px-2 py-1.5" : "px-2.5 py-2"}`}>
         {!compact && (
           <div className="flex items-center gap-1.5">
             <span className={`
