@@ -10,6 +10,7 @@
 import { useState, useCallback, useMemo, type ReactNode, type DragEvent } from "react";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
+import { ChartKindPicker } from "@/components/ChartKindPicker";
 import {
   COLOR_PALETTES,
   palettesGrouped,
@@ -40,7 +41,6 @@ import {
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import {
   createChartRec,
-  CHART_KIND_OPTIONS,
   Y_AGGREGATE_OPTIONS,
   getRecommendationReason,
   getRandomEncoding,
@@ -2683,6 +2683,8 @@ function ChartPanelView() {
     [activeChart, columnStats, tableName, setActiveChart, extraFromChart, setToast],
   );
 
+  const kindSupport = useCallback((kind: ChartKind) => chartKindDataSupport(columnStats, kind), [columnStats]);
+
   const applyYAggregate = useCallback(
     (agg: YAggregateOption) => {
       if (!activeChart || columnStats.length === 0) return;
@@ -2939,27 +2941,14 @@ function ChartPanelView() {
 
             <div className="flex gap-1.5 items-stretch">
               <div className="flex-1 min-w-0">
-                <label className="sr-only" htmlFor="loom-chart-kind">Chart type</label>
-                <select
-                  id="loom-chart-kind"
+                <ChartKindPicker
                   value={activeChart.kind}
-                  onChange={(e) => {
-                    const v = e.target.value as ChartKind;
+                  support={kindSupport}
+                  onChange={(v) => {
                     if (!chartKindDataSupport(columnStats, v).ok) return;
                     applyChartType(v);
                   }}
-                  className="loom-input w-full text-xs py-2 min-h-9"
-                  title="Unavailable types need different columns"
-                >
-                  {CHART_KIND_OPTIONS.map((opt) => {
-                    const { ok, reason } = chartKindDataSupport(columnStats, opt.value);
-                    return (
-                      <option key={opt.value} value={opt.value} disabled={!ok} title={!ok ? reason : undefined}>
-                        {ok ? opt.label : `${opt.label} (n/a)`}
-                      </option>
-                    );
-                  })}
-                </select>
+                />
               </div>
               <button
                 type="button"

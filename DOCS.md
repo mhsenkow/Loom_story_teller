@@ -150,6 +150,7 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 | `src/lib/ollama.ts` | Ollama API for “Suggest with AI”. |
 | `src/lib/webgpu.ts` | WebGPU device, pipeline, buffer upload, draw for scatter. |
 | `src/components/ChartView.tsx` | Main chart area, suggestion grid, Smart overlays (anomaly/trend/forecast/ref lines/clusters), title edit, export handler registration. |
+| `src/components/ChartKindPicker.tsx` | Searchable chart type picker in Encoding (grouped Classic / Creative / 3D & GPU / Maps; ↑/↓ Enter Esc; type-to-search from the closed trigger; “Fits this table” filter). Ranking + synonyms in `src/lib/chartKindSearch.ts`. |
 | `src/components/DetailPanel.tsx` | Right panel: Stats, Chart (Encoding \| Visual secondary header; encoding, Visual, bar stack, ref lines, trail, marginals), Export, Smart (anomaly, forecast, trend, ref lines, clustering, correlation matrix). |
 | `src/lib/smartAnalytics.ts` | Anomaly, forecast, trend, reference lines, clustering; pure functions over rows/columns. |
 | `src/components/ExplorerView.tsx` | Virtualized data table, filters, saved views, undo/redo, column profiling, linked highlight. |
