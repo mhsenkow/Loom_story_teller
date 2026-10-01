@@ -206,13 +206,22 @@ export function buildCubeAxis(values: unknown[], field: string, maxBins = CUBE_M
   };
 }
 
-/** Aggregate sample rows into a binned rows × columns × depth cube. */
-export function buildDataCube(
-  rows: unknown[][],
-  columns: string[],
-  enc: CubeEncoding,
-  maxBins = CUBE_MAX_BINS,
-): DataCube | null {
+interface BinnedRows {
+  ax: BuiltAxis;
+  ay: BuiltAxis;
+  az: BuiltAxis;
+  /** Per sample row: bin index on each axis (-1 = skipped) and measure value. */
+  bx: Int32Array;
+  by: Int32Array;
+  bz: Int32Array;
+  val: Float64Array;
+  aggregate: YAggregateOption;
+  valueField: string | null;
+  valueLabel: string;
+}
+
+/** Bin every row once; the cube and the pivot table aggregate from the same bins. */
+function binRows(rows: unknown[][], columns: string[], enc: CubeEncoding, maxBins: number): BinnedRows | null {
   if (!enc.yField || !enc.zField) return null;
   const xi = columns.indexOf(enc.xField);
   const yi = columns.indexOf(enc.yField);
@@ -226,63 +235,94 @@ export function buildDataCube(
   const az = buildCubeAxis(rows.map((r) => r[zi]), enc.zField, maxBins);
   if (!ax || !ay || !az) return null;
 
-  const nx = ax.axis.labels.length;
-  const ny = ay.axis.labels.length;
-  const nz = az.axis.labels.length;
-  const size = nx * ny * nz;
-  const count = new Uint32Array(size);
-  const valid = new Uint32Array(size);
-  const sum = new Float64Array(size);
-  const min = new Float64Array(size).fill(Infinity);
-  const max = new Float64Array(size).fill(-Infinity);
-  const first = new Int32Array(size).fill(-1);
-
-  for (let r = 0; r < rows.length; r++) {
+  const n = rows.length;
+  const bx = new Int32Array(n);
+  const by = new Int32Array(n);
+  const bz = new Int32Array(n);
+  const val = new Float64Array(n);
+  for (let r = 0; r < n; r++) {
     const row = rows[r]!;
-    const a = ax.indexOf(row[xi]);
-    const b = ay.indexOf(row[yi]);
-    const c = az.indexOf(row[zi]);
-    if (a < 0 || b < 0 || c < 0) continue;
-    const k = (a * ny + b) * nz + c;
-    count[k]! += 1;
-    if (first[k] === -1) first[k] = r;
-    if (vi >= 0) {
-      const v = asNumber(row[vi]);
-      if (Number.isFinite(v)) {
-        valid[k]! += 1;
-        sum[k]! += v;
-        if (v < min[k]!) min[k] = v;
-        if (v > max[k]!) max[k] = v;
-      }
+    bx[r] = ax.indexOf(row[xi]);
+    by[r] = ay.indexOf(row[yi]);
+    bz[r] = az.indexOf(row[zi]);
+    val[r] = vi >= 0 ? asNumber(row[vi]) : NaN;
+  }
+  return {
+    ax, ay, az, bx, by, bz, val, aggregate,
+    valueField: vi >= 0 ? enc.valueField! : null,
+    valueLabel: vi >= 0 && aggregate !== "count" ? `${AGG_LABEL[aggregate]} of ${enc.valueField}` : "Rows",
+  };
+}
+
+/** Running aggregate for one group of rows. */
+class Acc {
+  count = 0;
+  valid = 0;
+  sum = 0;
+  min = Infinity;
+  max = -Infinity;
+  first = -1;
+  add(r: number, v: number) {
+    this.count += 1;
+    if (this.first === -1) this.first = r;
+    if (Number.isFinite(v)) {
+      this.valid += 1;
+      this.sum += v;
+      if (v < this.min) this.min = v;
+      if (v > this.max) this.max = v;
     }
+  }
+  /** Aggregated value, or null when nothing measurable landed here. */
+  value(agg: YAggregateOption): number | null {
+    if (this.count === 0) return null;
+    if (agg === "count") return this.count;
+    if (this.valid === 0) return null;
+    if (agg === "sum") return this.sum;
+    if (agg === "mean") return this.sum / this.valid;
+    return agg === "min" ? this.min : this.max;
+  }
+}
+
+/** Aggregate sample rows into a binned rows × columns × depth cube. */
+export function buildDataCube(
+  rows: unknown[][],
+  columns: string[],
+  enc: CubeEncoding,
+  maxBins = CUBE_MAX_BINS,
+): DataCube | null {
+  const b = binRows(rows, columns, enc, maxBins);
+  if (!b) return null;
+  const nx = b.ax.axis.labels.length;
+  const ny = b.ay.axis.labels.length;
+  const nz = b.az.axis.labels.length;
+  const accs = new Map<number, Acc>();
+  for (let r = 0; r < rows.length; r++) {
+    if (b.bx[r]! < 0 || b.by[r]! < 0 || b.bz[r]! < 0) continue;
+    const k = (b.bx[r]! * ny + b.by[r]!) * nz + b.bz[r]!;
+    let acc = accs.get(k);
+    if (!acc) accs.set(k, (acc = new Acc()));
+    acc.add(r, b.val[r]!);
   }
 
   const raw: Omit<CubeCell, "t" | "s">[] = [];
   let vMin = Infinity;
   let vMax = -Infinity;
-  for (let a = 0; a < nx; a++) {
-    for (let b = 0; b < ny; b++) {
-      for (let c = 0; c < nz; c++) {
-        const k = (a * ny + b) * nz + c;
-        if (count[k] === 0) continue;
-        let value: number;
-        if (aggregate === "count") value = count[k]!;
-        else if (valid[k] === 0) continue;
-        else if (aggregate === "sum") value = sum[k]!;
-        else if (aggregate === "mean") value = sum[k]! / valid[k]!;
-        else if (aggregate === "min") value = min[k]!;
-        else value = max[k]!;
-        raw.push({ xi: a, yi: b, zi: c, value, count: count[k]!, rowIndex: first[k]! });
-        vMin = Math.min(vMin, value);
-        vMax = Math.max(vMax, value);
-      }
-    }
+  for (const k of [...accs.keys()].sort((p, q) => p - q)) {
+    const acc = accs.get(k)!;
+    const value = acc.value(b.aggregate);
+    if (value == null) continue;
+    const zi = k % nz;
+    const yi = Math.floor(k / nz) % ny;
+    const xi = Math.floor(k / (nz * ny));
+    raw.push({ xi, yi, zi, value, count: acc.count, rowIndex: acc.first });
+    vMin = Math.min(vMin, value);
+    vMax = Math.max(vMax, value);
   }
-  if (raw.length === 0) return null;
+  if (raw.length === 0 || nx === 0) return null;
 
   const span = vMax - vMin;
   // Additive measures read as magnitude (size from zero); averages/extremes read relative to each other.
-  const zeroBased = (aggregate === "count" || aggregate === "sum") && vMin >= 0;
+  const zeroBased = (b.aggregate === "count" || b.aggregate === "sum") && vMin >= 0;
   const cells: CubeCell[] = raw.map((c) => ({
     ...c,
     t: span > 0 ? (c.value - vMin) / span : 1,
@@ -290,16 +330,104 @@ export function buildDataCube(
   }));
 
   return {
-    x: ax.axis,
-    y: ay.axis,
-    z: az.axis,
+    x: b.ax.axis,
+    y: b.ay.axis,
+    z: b.az.axis,
     cells,
     vMin,
     vMax,
-    aggregate,
-    valueField: vi >= 0 ? enc.valueField! : null,
-    valueLabel: vi >= 0 && aggregate !== "count" ? `${AGG_LABEL[aggregate]} of ${enc.valueField}` : "Rows",
+    aggregate: b.aggregate,
+    valueField: b.valueField,
+    valueLabel: b.valueLabel,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Pivot table (2D projection: one depth slice, or rolled up across depth)
+// ---------------------------------------------------------------------------
+
+export interface PivotTable {
+  rowField: string;
+  colField: string;
+  depthField: string;
+  rows: string[];
+  cols: string[];
+  /** values[row][col]; null = empty cell. */
+  values: (number | null)[][];
+  rowTotals: (number | null)[];
+  colTotals: (number | null)[];
+  grand: number | null;
+  vMin: number;
+  vMax: number;
+  valueLabel: string;
+  /** Depth label being shown, or null when rolled up across all depth. */
+  sliceLabel: string | null;
+}
+
+/**
+ * Rows × columns table for one depth slice (or all depth when `slice` is null).
+ * Totals re-aggregate raw rows, so averages / min / max stay correct.
+ */
+export function buildPivotTable(
+  rows: unknown[][],
+  columns: string[],
+  enc: CubeEncoding,
+  slice: number | null,
+  maxBins = CUBE_MAX_BINS,
+): PivotTable | null {
+  const b = binRows(rows, columns, enc, maxBins);
+  if (!b) return null;
+  const nx = b.ax.axis.labels.length;
+  const ny = b.ay.axis.labels.length;
+  const nz = b.az.axis.labels.length;
+  const sl = slice != null && slice >= 0 && slice < nz ? slice : null;
+  const cell = Array.from({ length: nx }, () => Array.from({ length: ny }, () => new Acc()));
+  const rowAcc = Array.from({ length: nx }, () => new Acc());
+  const colAcc = Array.from({ length: ny }, () => new Acc());
+  const all = new Acc();
+  for (let r = 0; r < rows.length; r++) {
+    const x = b.bx[r]!;
+    const y = b.by[r]!;
+    const z = b.bz[r]!;
+    if (x < 0 || y < 0 || z < 0) continue;
+    if (sl != null && z !== sl) continue;
+    const v = b.val[r]!;
+    cell[x]![y]!.add(r, v);
+    rowAcc[x]!.add(r, v);
+    colAcc[y]!.add(r, v);
+    all.add(r, v);
+  }
+  const values = cell.map((row) => row.map((a) => a.value(b.aggregate)));
+  const flat = values.flat().filter((v): v is number => v != null);
+  return {
+    rowField: b.ax.axis.field,
+    colField: b.ay.axis.field,
+    depthField: b.az.axis.field,
+    rows: b.ax.axis.labels,
+    cols: b.ay.axis.labels,
+    values,
+    rowTotals: rowAcc.map((a) => a.value(b.aggregate)),
+    colTotals: colAcc.map((a) => a.value(b.aggregate)),
+    grand: all.value(b.aggregate),
+    vMin: flat.length ? Math.min(...flat) : 0,
+    vMax: flat.length ? Math.max(...flat) : 0,
+    valueLabel: b.valueLabel,
+    sliceLabel: sl != null ? b.az.axis.labels[sl]! : null,
+  };
+}
+
+/**
+ * Position-independent identity of a cell (field=label for all three axes),
+ * so a voxel can be followed across a pivot that permutes the axes.
+ */
+export function cubeCellKey(cube: Pick<DataCube, "x" | "y" | "z">, cell: Pick<CubeCell, "xi" | "yi" | "zi">): string {
+  return [
+    `${cube.x.field}=${cube.x.labels[cell.xi]}`,
+    `${cube.y.field}=${cube.y.labels[cell.yi]}`,
+    `${cube.z.field}=${cube.z.labels[cell.zi]}`,
+  ]
+    .sort()
+    .join("\u0001");
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +503,8 @@ export interface CubeCamera {
   yaw: number;
   pitch: number;
   zoom: number;
+  /** Shift the cube up (+) / down (−) in NDC, e.g. to make room for a docked table. */
+  offsetY?: number;
 }
 
 const CAMERA_DIST = 7.2;
@@ -438,6 +568,9 @@ export function cubeView(cam: CubeCamera, w: number, h: number): CubeView {
   m[13] = 0;
   m[14] = p22 * -d + p32;
   m[15] = d;
+  // Screen-space shift: clip.y += offsetY · clip.w (perspective-correct translate in NDC).
+  const oy = cam.offsetY ?? 0;
+  if (oy) for (const c of [0, 4, 8, 12]) m[c + 1] = m[c + 1]! + oy * m[c + 3]!;
   // Light fixed in view space (upper-left, toward viewer) → world via Rᵀ.
   const lv = [-0.35, 0.75, 0.55];
   const len = Math.hypot(lv[0]!, lv[1]!, lv[2]!);
@@ -468,21 +601,41 @@ export function cubeVoxelHalf(cube: DataCube, cell: CubeCell): number {
 }
 
 /** Cells sorted far → near for painter's order / alpha blending. */
-export function sortCellsBackToFront(cube: DataCube, v: CubeView): { cell: CubeCell; depth: number }[] {
+/** Per-frame voxel placement / visibility shared by Canvas, WebGPU, and picking. */
+export interface CubeCellStyle {
+  /** Depth layer in focus; other layers render as ghosts and can't be picked. */
+  slice?: number | null;
+  /** Override voxel centers (pivot transitions). */
+  centerOf?: (cell: CubeCell) => [number, number, number];
+}
+
+export const CUBE_GHOST_ALPHA = 0.1;
+
+export function cubeCellPosition(cube: DataCube, cell: CubeCell, style?: CubeCellStyle): [number, number, number] {
+  return style?.centerOf?.(cell) ?? cubeCellCenter(cube, cell.xi, cell.yi, cell.zi);
+}
+
+/** 1 for voxels in focus, CUBE_GHOST_ALPHA for voxels outside the active slice. */
+export function cubeCellAlphaScale(cell: CubeCell, style?: CubeCellStyle): number {
+  return style?.slice != null && cell.zi !== style.slice ? CUBE_GHOST_ALPHA : 1;
+}
+
+export function sortCellsBackToFront(cube: DataCube, v: CubeView, style?: CubeCellStyle): { cell: CubeCell; depth: number }[] {
   return cube.cells
     .map((cell) => {
-      const [x, y, z] = cubeCellCenter(cube, cell.xi, cell.yi, cell.zi);
+      const [x, y, z] = cubeCellPosition(cube, cell, style);
       return { cell, depth: projectCube(v, x, y, z).depth };
     })
     .sort((a, b) => b.depth - a.depth);
 }
 
-/** Front-most voxel under a CSS-pixel point, or null. */
-export function pickDataCubeCell(cube: DataCube, v: CubeView, px: number, py: number): CubeCell | null {
+/** Front-most voxel under a CSS-pixel point, or null. Ghosted (out-of-slice) voxels are skipped. */
+export function pickDataCubeCell(cube: DataCube, v: CubeView, px: number, py: number, style?: CubeCellStyle): CubeCell | null {
   let best: CubeCell | null = null;
   let bestDepth = Infinity;
   for (const cell of cube.cells) {
-    const [x, y, z] = cubeCellCenter(cube, cell.xi, cell.yi, cell.zi);
+    if (cubeCellAlphaScale(cell, style) < 1) continue;
+    const [x, y, z] = cubeCellPosition(cube, cell, style);
     const p = projectCube(v, x, y, z);
     const radius = Math.max(4, ((cubeVoxelHalf(cube, cell) * v.fy * v.h) / 2 / p.depth) * 1.25);
     if (Math.hypot(px - p.sx, py - p.sy) <= radius && p.depth < bestDepth) {
@@ -513,7 +666,7 @@ export function cubeCellTooltip(cube: DataCube, cell: CubeCell): { columns: stri
 // Canvas 2D rendering (fallback + capture + chrome layers over WebGPU)
 // ---------------------------------------------------------------------------
 
-export interface DataCubeRenderOpts {
+export interface DataCubeRenderOpts extends CubeCellStyle {
   /** Sequential ramp for value → color. */
   ramp: string[];
   opacity: number;
@@ -524,7 +677,8 @@ export interface DataCubeRenderOpts {
   themeBorder?: string;
   themeBg?: string;
   showLegend?: boolean;
-  hovered?: { xi: number; yi: number; zi: number } | null;
+  /** Hovered cell; `zi: null` highlights the whole depth pillar (pivot table roll-up). */
+  hovered?: { xi: number; yi: number; zi: number | null } | null;
   /** Thumbnail mode — no labels / legend. */
   mini?: boolean;
 }
@@ -638,13 +792,14 @@ export function drawDataCubeBackLayer(ctx: CanvasRenderingContext2D, cube: DataC
 
 /** Voxels via painter's algorithm (Canvas fallback only — WebGPU draws these otherwise). */
 export function drawDataCubeVoxels(ctx: CanvasRenderingContext2D, cube: DataCube, v: CubeView, opts: DataCubeRenderOpts): void {
-  const sorted = sortCellsBackToFront(cube, v);
+  const sorted = sortCellsBackToFront(cube, v, opts);
   ctx.save();
   ctx.lineJoin = "round";
   for (const { cell } of sorted) {
-    const [cx, cy, cz] = cubeCellCenter(cube, cell.xi, cell.yi, cell.zi);
+    const [cx, cy, cz] = cubeCellPosition(cube, cell, opts);
     const hs = cubeVoxelHalf(cube, cell);
-    const { rgb, alpha } = cubeCellColor(cell, opts.ramp, opts.opacity);
+    const { rgb, alpha: baseAlpha } = cubeCellColor(cell, opts.ramp, opts.opacity);
+    const alpha = baseAlpha * cubeCellAlphaScale(cell, opts);
     for (const face of FACES) {
       const pts = face.c.map(([a, b, c]) => projectCube(v, cx + a * hs, cy + b * hs, cz + c * hs));
       // Back-face cull by screen winding (CCW from outside → negative area in y-down screen space).
@@ -657,7 +812,7 @@ export function drawDataCubeVoxels(ctx: CanvasRenderingContext2D, cube: DataCube
       if (area >= 0) continue;
       const k = cubeShade(face.n, v.light);
       ctx.fillStyle = rgba(rgb, k, alpha);
-      ctx.strokeStyle = rgba(rgb, k * 0.7, Math.min(1, alpha + 0.15));
+      ctx.strokeStyle = rgba(rgb, k * 0.7, Math.min(1, alpha + 0.15 * cubeCellAlphaScale(cell, opts)));
       ctx.lineWidth = opts.mini ? 0.5 : 0.75;
       ctx.beginPath();
       pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy)));
@@ -704,14 +859,39 @@ export function drawDataCubeFrontLayer(
     ctx.stroke();
   }
 
+  // Active slice: dashed frame around the depth layer in focus.
+  const slice = opts.slice ?? null;
+  if (slice != null && slice >= 0 && slice < cube.z.labels.length) {
+    const zc = ez - (slice + 0.5) * pitch;
+    const m = pitch * 0.08;
+    const frame: Vec3[] = [[-ex - m, -ey - m, zc], [ex + m, -ey - m, zc], [ex + m, ey + m, zc], [-ex - m, ey + m, zc]];
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = withAlphaHex(text, 0.7);
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    frame.forEach((p, i) => {
+      const q = projectCube(v, p[0], p[1], p[2]);
+      if (i === 0) ctx.moveTo(q.sx, q.sy); else ctx.lineTo(q.sx, q.sy);
+    });
+    ctx.closePath();
+    ctx.stroke();
+    ctx.restore();
+  }
+
   const hov = opts.hovered;
-  const hovCell = hov ? cube.cells.find((c) => c.xi === hov.xi && c.yi === hov.yi && c.zi === hov.zi) : null;
-  if (hovCell) {
-    const [cx, cy, cz] = cubeCellCenter(cube, hovCell.xi, hovCell.yi, hovCell.zi);
-    const hs = cubeVoxelHalf(cube, hovCell) * 1.08;
+  const hovCells = hov
+    ? cube.cells.filter(
+        (c) => c.xi === hov.xi && c.yi === hov.yi && (hov.zi == null ? slice == null || c.zi === slice : c.zi === hov.zi),
+      )
+    : [];
+  const hovCell = hovCells[0] ?? null;
+  ctx.strokeStyle = text;
+  ctx.lineWidth = 1.5;
+  for (const hc of hovCells) {
+    const [cx, cy, cz] = cubeCellPosition(cube, hc, opts);
+    const hs = cubeVoxelHalf(cube, hc) * 1.08;
     const vc = boxCorners(hs, hs, hs).map((c) => projectCube(v, cx + c[0], cy + c[1], cz + c[2]));
-    ctx.strokeStyle = text;
-    ctx.lineWidth = 1.5;
     for (const [a, b] of BOX_EDGES) {
       ctx.beginPath();
       ctx.moveTo(vc[a]!.sx, vc[a]!.sy);
@@ -843,7 +1023,7 @@ export function drawDataCubeFrontLayer(
     depthEdge,
     cube.z,
     (i) => [depthEdge[0][0], floorY, ez - half - i * pitch],
-    hovCell?.zi ?? null,
+    hov?.zi ?? slice,
     cube.z.field,
     "mid",
   );
@@ -854,7 +1034,7 @@ export function drawDataCubeFrontLayer(
   ctx.font = `10px ${font}, sans-serif`;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText(fitTextEllipsis(ctx, "Data cube · drag to orbit · scroll to zoom", v.w - 24), 12, v.h - 10);
+  ctx.fillText(fitTextEllipsis(ctx, opts.slice != null ? "Slice · click a voxel or Esc for all layers · [ ] to step" : "Data cube · drag to orbit · click a voxel to slice", v.w - 24), 12, v.h - 10);
   ctx.restore();
 }
 

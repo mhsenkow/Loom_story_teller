@@ -10,10 +10,12 @@
 
 import cubeWgslRaw from "@/shaders/cube.wgsl";
 import {
-  cubeCellCenter,
+  cubeCellAlphaScale,
   cubeCellColor,
+  cubeCellPosition,
   cubeVoxelHalf,
   sortCellsBackToFront,
+  type CubeCellStyle,
   type CubeView,
   type DataCube,
 } from "./dataCube";
@@ -150,16 +152,17 @@ export class LoomCubeRenderer {
   }
 
   /** Draw voxels for `view`; colors come from the same helper as the Canvas fallback. */
-  render(cube: DataCube, view: CubeView, ramp: string[], opacity: number) {
+  render(cube: DataCube, view: CubeView, ramp: string[], opacity: number, style?: CubeCellStyle) {
     const { device, context, pipeline, uniformBuffer, vertexBuffer, bindGroup, canvas } = this;
     if (!device || !context || !pipeline || !uniformBuffer || !vertexBuffer || !bindGroup || !canvas) return;
     if (canvas.width <= 0 || canvas.height <= 0) return;
 
-    const sorted = sortCellsBackToFront(cube, view);
+    const sorted = sortCellsBackToFront(cube, view, style);
     const inst = new Float32Array(sorted.length * 8);
     sorted.forEach(({ cell }, i) => {
-      const [x, y, z] = cubeCellCenter(cube, cell.xi, cell.yi, cell.zi);
-      const { rgb, alpha } = cubeCellColor(cell, ramp, opacity);
+      const [x, y, z] = cubeCellPosition(cube, cell, style);
+      const { rgb, alpha: baseAlpha } = cubeCellColor(cell, ramp, opacity);
+      const alpha = baseAlpha * cubeCellAlphaScale(cell, style);
       const o = i * 8;
       inst[o] = x;
       inst[o + 1] = y;

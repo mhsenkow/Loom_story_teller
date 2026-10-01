@@ -47,8 +47,12 @@ import {
 import { isGeoMapKind, renderGeoMapCanvas, isWebGpuGlobeKind } from "@/lib/geoMaps";
 import { LoomSceneRenderer } from "@/lib/webgpuScenes";
 import { LoomCubeRenderer } from "@/lib/webgpuCube";
+import { DataCubePivotBar, DataCubePivotTable, type CubeAxisSlot, type CubeHoverCell } from "@/components/DataCubePivot";
 import {
   buildDataCube,
+  buildPivotTable,
+  cubeCellCenter,
+  cubeCellKey,
   cubeCellTooltip,
   cubeView,
   drawDataCubeBackLayer,
@@ -393,9 +397,16 @@ export function ChartView() {
   const rendererRef = useRef<LoomRenderer | null>(null);
   const sceneRendererRef = useRef<LoomSceneRenderer | null>(null);
   const cubeRendererRef = useRef<LoomCubeRenderer | null>(null);
-  const [cubeHover, setCubeHover] = useState<{ xi: number; yi: number; zi: number } | null>(null);
+  const [cubeHover, setCubeHover] = useState<CubeHoverCell | null>(null);
+  /** Focused depth layer (null = all layers / rolled up). */
+  const [cubeSlice, setCubeSlice] = useState<number | null>(null);
+  const [cubeTableOpen, setCubeTableOpen] = useState(false);
+  /** Pivot transition: voxel start positions keyed by cubeCellKey; progress 0→1 in cubeAnim. */
+  const cubeTransitionRef = useRef<{ cube: DataCube; from: Map<string, [number, number, number]> } | null>(null);
+  const prevCubeRef = useRef<DataCube | null>(null);
+  const [cubeAnim, setCubeAnim] = useState(1);
   /** Last cube frame (data + layout) for hover picking and PNG export. */
-  const cubeFrameRef = useRef<{ cube: DataCube; opts: DataCubeRenderOpts; w: number; h: number } | null>(null);
+  const cubeFrameRef = useRef<{ cube: DataCube; opts: DataCubeRenderOpts; w: number; h: number; baseCamera: { yaw: number; pitch: number; zoom: number } } | null>(null);
   const [gpuReady, setGpuReady] = useState(false);
   const [sceneOrbit, setSceneOrbit] = useState({ yaw: 0.55, pitch: 0.35, zoom: 1 });
   const sceneOrbitDragRef = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
@@ -458,6 +469,139 @@ export function ChartView() {
     activeChart?.yAggregate,
     sampleRows,
   ]);
+  const pivotTable = useMemo(() => {
+    if (!cubeTableOpen || activeChart?.kind !== "dataCube" || !sampleRows?.rows?.length) return null;
+    return buildPivotTable(
+      sampleRows.rows,
+      sampleRows.columns,
+      {
+        xField: activeChart.xField,
+        yField: activeChart.yField,
+        zField: activeChart.zField,
+        valueField: activeChart.sizeField,
+        aggregate: activeChart.yAggregate,
+      },
+      cubeSlice,
+    );
+  }, [
+    cubeTableOpen,
+    cubeSlice,
+    activeChart?.kind,
+    activeChart?.xField,
+    activeChart?.yField,
+    activeChart?.zField,
+    activeChart?.sizeField,
+    activeChart?.yAggregate,
+    sampleRows,
+  ]);
+
+  // A new depth field means old slice indices are meaningless.
+  useEffect(() => {
+    setCubeSlice(null);
+  }, [activeChart?.zField, activeChart?.kind]);
+  useEffect(() => {
+    if (dataCube && cubeSlice != null && cubeSlice >= dataCube.z.labels.length) setCubeSlice(null);
+  }, [dataCube, cubeSlice]);
+
+  // Pivot animation: when the same three fields are re-assigned to different axes,
+  // fly each voxel from its old grid position to its new one.
+  useEffect(() => {
+    const prev = prevCubeRef.current;
+    prevCubeRef.current = dataCube;
+    if (!prev || !dataCube || prev === dataCube) return;
+    const fields = (c: DataCube) => [c.x.field, c.y.field, c.z.field];
+    const same = [...fields(prev)].sort().join("\u0001") === [...fields(dataCube)].sort().join("\u0001");
+    if (!same || fields(prev).join("\u0001") === fields(dataCube).join("\u0001")) return;
+    const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (reduced || appSettings.reducedMotion) return;
+    const from = new Map<string, [number, number, number]>();
+    for (const cell of prev.cells) from.set(cubeCellKey(prev, cell), cubeCellCenter(prev, cell.xi, cell.yi, cell.zi));
+    cubeTransitionRef.current = { cube: dataCube, from };
+    const start = performance.now();
+    const DURATION = 650;
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / DURATION);
+      setCubeAnim(t);
+      if (t < 1) raf = requestAnimationFrame(tick);
+      else cubeTransitionRef.current = null;
+    };
+    setCubeAnim(0);
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [dataCube, appSettings.reducedMotion]);
+
+  /** Re-assign the cube's three fields (pivot) through the normal encoding path. */
+  const applyCubeAxes = useCallback(
+    (next: Record<CubeAxisSlot, string>) => {
+      if (!activeChart || activeChart.kind !== "dataCube" || columnStats.length === 0) return;
+      const table = selectedFile?.name?.replace(/\.\w+$/, "") ?? "";
+      const rec = createChartRec("dataCube", columnStats, next.x, next.y, null, table, {
+        zField: next.z,
+        sizeField: activeChart.sizeField ?? null,
+        yAggregate: activeChart.yAggregate ?? null,
+        tooltipFields: activeChart.tooltipFields,
+        tooltipKeyField: activeChart.tooltipKeyField ?? null,
+      });
+      if (rec) setActiveChart(rec);
+    },
+    [activeChart, columnStats, selectedFile?.name, setActiveChart],
+  );
+  const cubeAxes = useCallback(
+    (): Record<CubeAxisSlot, string> => ({
+      x: activeChart?.xField ?? "",
+      y: activeChart?.yField ?? "",
+      z: activeChart?.zField ?? "",
+    }),
+    [activeChart?.xField, activeChart?.yField, activeChart?.zField],
+  );
+  const swapCubeAxes = useCallback(
+    (a: CubeAxisSlot, b: CubeAxisSlot) => {
+      const cur = cubeAxes();
+      applyCubeAxes({ ...cur, [a]: cur[b], [b]: cur[a] });
+    },
+    [cubeAxes, applyCubeAxes],
+  );
+  const rotateCubeAxes = useCallback(() => {
+    const cur = cubeAxes();
+    applyCubeAxes({ x: cur.z, y: cur.x, z: cur.y });
+  }, [cubeAxes, applyCubeAxes]);
+  const replaceCubeAxis = useCallback(
+    (slot: CubeAxisSlot, column: string) => {
+      if (!sampleRows?.columns.includes(column)) return;
+      const cur = cubeAxes();
+      const other = (Object.keys(cur) as CubeAxisSlot[]).find((k) => cur[k] === column);
+      // Dropping a field that's already on another axis swaps them (pivot-table behaviour).
+      if (other) {
+        if (other !== slot) swapCubeAxes(other, slot);
+        return;
+      }
+      applyCubeAxes({ ...cur, [slot]: column });
+    },
+    [cubeAxes, applyCubeAxes, swapCubeAxes, sampleRows?.columns],
+  );
+
+  // [ / ] step depth slices, Esc returns to all layers.
+  useEffect(() => {
+    if (activeChart?.kind !== "dataCube" || !dataCube) return;
+    const nz = dataCube.z.labels.length;
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement;
+      if (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "]") {
+        e.preventDefault();
+        setCubeSlice((s) => (s == null ? 0 : s + 1 >= nz ? null : s + 1));
+      } else if (e.key === "[") {
+        e.preventDefault();
+        setCubeSlice((s) => (s == null ? nz - 1 : s - 1 < 0 ? null : s - 1));
+      } else if (e.key === "Escape") {
+        setCubeSlice((s) => (s == null ? s : null));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeChart?.kind, dataCube]);
   const orbitEnabled =
     !!activeChart &&
     (activeChart.kind === "scatter3d" ||
@@ -953,7 +1097,13 @@ export function ChartView() {
           // Voxels may live on the WebGPU layer — redraw the whole cube on Canvas instead of compositing.
           ctx.save();
           ctx.scale(w / cubeFrame.w, h / cubeFrame.h);
-          renderDataCubeCanvas(ctx, cubeFrame.cube, cubeFrame.w, cubeFrame.h, { ...cubeFrame.opts, hovered: null });
+          renderDataCubeCanvas(ctx, cubeFrame.cube, cubeFrame.w, cubeFrame.h, {
+            ...cubeFrame.opts,
+            camera: cubeFrame.baseCamera,
+            centerOf: undefined,
+            showLegend: overrides.legendPosition !== "none",
+            hovered: null,
+          });
           ctx.restore();
         } else {
         // 2D layer first (theme fill / full chart); WebGPU scatter on top; axes last
@@ -1109,7 +1259,7 @@ export function ChartView() {
         const rect = el.getBoundingClientRect();
         const px = ((e.clientX - rect.left) / rect.width) * frame.w;
         const py = ((e.clientY - rect.top) / rect.height) * frame.h;
-        const cell = pickDataCubeCell(frame.cube, cubeView(frame.opts.camera, frame.w, frame.h), px, py);
+        const cell = pickDataCubeCell(frame.cube, cubeView(frame.opts.camera, frame.w, frame.h), px, py, frame.opts);
         if (!cell) {
           setChartTooltip(null);
           setCubeHover(null);
@@ -1510,25 +1660,43 @@ export function ChartView() {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         return;
       }
+      const tr = cubeTransitionRef.current;
+      const animating = !!tr && tr.cube === dataCube && cubeAnim < 1;
+      const ease = 1 - Math.pow(1 - cubeAnim, 3);
+      const centerOf = animating
+        ? (cell: DataCube["cells"][number]): [number, number, number] => {
+            const to = cubeCellCenter(dataCube, cell.xi, cell.yi, cell.zi);
+            const from = tr!.from.get(cubeCellKey(dataCube, cell));
+            if (!from) return to;
+            return [from[0] + (to[0] - from[0]) * ease, from[1] + (to[1] - from[1]) * ease, from[2] + (to[2] - from[2]) * ease];
+          }
+        : undefined;
+      // Docked pivot table covers the lower ~44% — lift and shrink the cube into the space above.
+      const camera = cubeTableOpen && !forceCanvasCapture
+        ? { ...sceneOrbit, zoom: sceneOrbit.zoom * 0.7, offsetY: 0.45 }
+        : sceneOrbit;
       const cubeOpts: DataCubeRenderOpts = {
         ramp: continuousStops,
         opacity,
-        camera: sceneOrbit,
+        camera,
+        slice: cubeSlice,
+        centerOf,
         fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
         themeText: themeUi.text,
         themeMuted: themeUi.muted,
         themeBorder: themeUi.border,
         themeBg: themeUi.bg,
-        showLegend: chartVisualOverrides.legendPosition !== "none",
+        // The HTML pivot bar carries the legend live; Canvas draws it only for capture / export.
+        showLegend: chartVisualOverrides.legendPosition !== "none" && (forceCanvasCapture || !!socialExportReady),
         hovered: cubeHover,
       };
-      cubeFrameRef.current = { cube: dataCube, opts: cubeOpts, w, h };
+      cubeFrameRef.current = { cube: dataCube, opts: cubeOpts, w, h, baseCamera: sceneOrbit };
       if (useWebGpuCube && cubeRendererRef.current && octx) {
-        const view = cubeView(sceneOrbit, w, h);
+        const view = cubeView(camera, w, h);
         ctx.fillStyle = themeUi.bg;
         ctx.fillRect(0, 0, w, h);
         const far = drawDataCubeBackLayer(ctx, dataCube, view, cubeOpts);
-        cubeRendererRef.current.render(dataCube, view, continuousStops, opacity);
+        cubeRendererRef.current.render(dataCube, view, continuousStops, opacity, cubeOpts);
         octx.setTransform(dpr, 0, 0, dpr, 0, 0);
         drawDataCubeFrontLayer(octx, dataCube, view, far, cubeOpts);
         octx.setTransform(1, 0, 0, 1, 0, 0);
@@ -2033,7 +2201,7 @@ export function ChartView() {
     }
 
     drawOneFrame(1);
-  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops]);
+  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim]);
 
   // Axes overlay for WebGPU scatter; clear when not scatter so overlay doesn't sit on top of line/bar
   useEffect(() => {
@@ -2573,8 +2741,14 @@ export function ChartView() {
                 pitch: Math.max(-1.2, Math.min(1.2, drag.pitch + dy * 0.008)),
               }));
             }}
-            onPointerUp={() => {
+            onPointerUp={(e) => {
+              const drag = sceneOrbitDragRef.current;
               sceneOrbitDragRef.current = null;
+              // A click (not a drag) on the cube slices to that voxel's depth layer; empty space clears.
+              if (activeChart?.kind === "dataCube" && drag && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) {
+                const hz = cubeHover?.zi;
+                setCubeSlice((s) => (hz == null ? null : s === hz ? null : hz));
+              }
             }}
             onPointerCancel={() => {
               sceneOrbitDragRef.current = null;
@@ -2762,6 +2936,33 @@ export function ChartView() {
               onMouseLeave={handleCanvas2DPointerLeave}
               aria-hidden
             />
+          )}
+          {activeChart?.kind === "dataCube" && dataCube && !socialExportReady && !previewCaptureActive && (
+            <>
+              <DataCubePivotBar
+                cube={dataCube}
+                ramp={continuousStops}
+                showLegend={chartVisualOverrides.legendPosition !== "none"}
+                slice={cubeSlice}
+                tableOpen={cubeTableOpen}
+                onSlice={setCubeSlice}
+                onToggleTable={() => setCubeTableOpen((o) => !o)}
+                onSwap={swapCubeAxes}
+                onRotate={rotateCubeAxes}
+                onReplace={replaceCubeAxis}
+              />
+              {cubeTableOpen && pivotTable && (
+                <DataCubePivotTable
+                  table={pivotTable}
+                  ramp={continuousStops}
+                  hover={cubeHover}
+                  onHover={(cell) => {
+                    setCubeHover(cell ? { ...cell, zi: cubeSlice } : null);
+                    if (!cell) setChartTooltip(null);
+                  }}
+                />
+              )}
+            </>
           )}
           {brushRect && (
             <div
