@@ -10,6 +10,7 @@
 // The actual data lives in DuckDB on the Rust side.
 // =================================================================
 
+import type { DiveLink, DiveQuery } from "./dive";
 import { create } from "zustand";
 import type { ChartRecommendation } from "./recommendations";
 import type {
@@ -72,7 +73,7 @@ export interface QueryResult {
   total_rows: number;
 }
 
-export type ViewMode = "explorer" | "chart" | "query";
+export type ViewMode = "explorer" | "chart" | "query" | "dive";
 export type PanelTab = "stats" | "chart" | "export" | "smart" | "settings" | "dashboards";
 
 /** Saved chart view: file + chart config + visual overrides + optional snapshot image for dashboards. */
@@ -369,6 +370,10 @@ interface LoomState {
   showMarginals: boolean;
   /** Query snapshots for diffing. */
   querySnapshots: { id: string; name: string; columns: string[]; rows: (string | number | boolean | null)[][]; at: number }[];
+  /** Dive (Scuba-style explore): current query, tied to the dataset path it was built for. */
+  diveQuery: { src: string; query: DiveQuery } | null;
+  /** Dive opened from a shared #dive= link, waiting for its dataset to be open. */
+  diveLink: DiveLink | null;
   /** NL-to-SQL input. */
   nlQueryInput: string;
   /** Toast message (shown briefly; null = hidden). */
@@ -449,6 +454,8 @@ interface LoomState {
   setColumnStats: (stats: ColumnInfo[]) => void;
   setSampleRows: (rows: QueryResult | null) => void;
   setViewMode: (mode: ViewMode) => void;
+  setDiveQuery: (v: { src: string; query: DiveQuery } | null) => void;
+  setDiveLink: (v: DiveLink | null) => void;
   setPanelTab: (tab: PanelTab) => void;
   toggleSidebar: () => void;
   togglePanel: () => void;
@@ -640,6 +647,8 @@ const initialState = {
   connectScatterTrail: false,
   showMarginals: false,
   querySnapshots: [] as { id: string; name: string; columns: string[]; rows: (string | number | boolean | null)[][]; at: number }[],
+  diveQuery: null as { src: string; query: DiveQuery } | null,
+  diveLink: null as DiveLink | null,
   nlQueryInput: "",
   toastMessage: null as string | null,
   chartViews: [] as ChartViewItem[],
@@ -685,6 +694,8 @@ export const useLoomStore = create<LoomState>((set, get) => ({
   setColumnStats: (stats) => set({ columnStats: stats }),
   setSampleRows: (rows) => set({ sampleRows: rows }),
   setViewMode: (mode) => set({ viewMode: mode }),
+  setDiveQuery: (v) => set({ diveQuery: v }),
+  setDiveLink: (v) => set({ diveLink: v }),
   setPanelTab: (tab) => set({ panelTab: tab }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),

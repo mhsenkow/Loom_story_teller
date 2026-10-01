@@ -33,7 +33,7 @@ For contributors and AI: where things live and how they connect. For a shorter a
 
 - **Folder / files**: `mountedFolder`, `files`, `isScanning`
 - **Selection**: `selectedFile`, `columnStats`, `sampleRows`, `selectedRowIndices`
-- **View**: `viewMode` (explorer | chart | query), `panelTab` (stats | chart | export | smart | settings), `suggestionsExpanded`
+- **View**: `viewMode` (explorer | chart | query | dive), `panelTab` (stats | chart | export | smart | settings), `suggestionsExpanded`
 - **App settings**: `appSettings` (theme, uiChrome, font, faces, fontScale, reducedMotion, colorblindCharts, `chartAspect`, `chartDevice`). **Onboarding**: `onboardingDismissed`. Chart framing: `src/lib/chartViewport.ts` (social aspects + mobile/tablet/desktop width); TopBar picks presets; ChartView fits a centered stage.
 - **Chart**: `vegaSpec`, `activeChart`, `chartVisualOverrides`, `chartTitleOverrides`, `aiSuggestionReason`, `chartAnnotations`. Encoding: `glowField`, `outlineField`, `opacityField`. **Interaction**: `chartInteractionMode` (pan | crosshair | lasso), `crosshairPos`, `rulerPins`, `lassoPoints`, `pinnedTooltips`, `customRefLines`. **Options**: `barStackMode` (grouped | stacked | percent), `connectScatterTrail`, `showMarginals`.
 - **Linked highlight**: `hoveredRowIndex` — table ↔ chart hover sync.
@@ -105,6 +105,17 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 | Clustering | `runClustering` | k (2–8) | Scatter points colored by cluster |
 
 **Clear all overlays** sets `smartResults` to `null`. **Correlation matrix** is computed in the Smart tab (pairwise Pearson); result is shown as a heatmap table in DetailPanel.
+
+---
+
+## Dive (Scuba-style explore)
+
+`src/components/DiveView.tsx` (+ `DiveTimeSeries.tsx`), view mode `dive` (TopBar **Dive**, key **4**).
+
+- **Engine** — `src/lib/dive.ts` is pure: `profileDiveColumns` (time / number / category), `defaultDiveQuery`, `sanitizeDiveQuery` (keeps a query valid when columns change), `runDive` (filters → time window anchored at the newest row → group-by + metrics incl. percentiles via linear `quantile` → top-N ranking → compare window → per-group bucketed series → newest samples), `diveToSql` (equivalent DuckDB SQL for the current view), `encodeDiveLink` / `decodeDiveLink` (`#dive=` base64url JSON with `src` dataset path).
+- **Rows** — `src/lib/diveSource.ts` `loadDiveDataset`: desktop pulls up to 30k rows through DuckDB (`USING SAMPLE` for files, newest-first for `wiki_stream`, whole source tables); web uses the stream/source JS buffers (8k), full mock data for demo files, else the in-store sample. Live paths (`stream://…`) re-pull every 5 s web / 10 s desktop while **Live** is on.
+- **State** — `diveQuery` `{ src, query }` in the store (query is tied to the dataset path it was built for); `diveLink` holds a shared link until its dataset opens. `WebSessionResume` reads `#dive=` on load, opens stream / `mock://` sources itself, and lands in Dive. DiveView mirrors the query into the hash with `replaceState`.
+- **Handoffs** — **Open as cube** replaces `sampleRows` with the matched rows (≤20k) and builds a `dataCube` rec (2 group-bys + time, or 3 group-bys). **SQL → Open in Query** (desktop) sets `querySql`.
 
 ---
 

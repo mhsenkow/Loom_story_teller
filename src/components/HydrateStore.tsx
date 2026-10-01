@@ -34,7 +34,7 @@ import {
   getVizPreferencesRaw,
   setPersistedVizPreferences,
 } from "@/lib/persist";
-import type { ChartViewItem, QueryViewItem, DashboardItem } from "@/lib/store";
+import type { ChartViewItem, QueryViewItem, DashboardItem, ViewMode } from "@/lib/store";
 import {
   readIbmToolsShared,
   normalizeTheme,
@@ -145,7 +145,7 @@ export function HydrateStore() {
       setLastSession({
         folderPath: session.folderPath,
         filePath: session.filePath,
-        viewMode: (session.viewMode as "explorer" | "chart" | "query") || "explorer",
+        viewMode: (["explorer", "chart", "query", "dive"].includes(session.viewMode) ? session.viewMode : "explorer") as ViewMode,
       });
 
     const qh = getQueryHistory();

@@ -11,7 +11,7 @@
 
 import { useState, useRef } from "react";
 import { useLoomStore } from "@/lib/store";
-import type { DashboardSlot, DashboardLayoutTemplate } from "@/lib/store";
+import type { DashboardSlot, DashboardLayoutTemplate, ViewMode } from "@/lib/store";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { DetailPanel } from "@/components/DetailPanel";
@@ -19,6 +19,7 @@ import { PreviewFooter } from "@/components/PreviewFooter";
 import { ExplorerView } from "@/components/ExplorerView";
 import { ChartView } from "@/components/ChartView";
 import { QueryView } from "@/components/QueryView";
+import { DiveView } from "@/components/DiveView";
 import { ThemeApplicator } from "@/components/ThemeApplicator";
 import { HydrateStore } from "@/components/HydrateStore";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -461,8 +462,8 @@ function HomeContent({
   previewCapture,
   socialExportReady,
 }: {
-  viewMode: "explorer" | "chart" | "query";
-  setViewMode: (m: "explorer" | "chart" | "query") => void;
+  viewMode: ViewMode;
+  setViewMode: (m: ViewMode) => void;
   dataSourcesExpanded: boolean;
   dashboardsExpanded: boolean;
   previewCapture: {
@@ -539,6 +540,9 @@ function HomeContent({
           break;
         case "3":
           setViewMode("query");
+          break;
+        case "4":
+          setViewMode("dive");
           break;
         case "[":
           useLoomStore.getState().toggleSidebar();
@@ -674,7 +678,7 @@ function HomeContent({
 
             {helpTab === "shortcuts" && (
               <ul className="text-xs text-loom-text space-y-2.5 leading-relaxed">
-                <li><kbd className="loom-kbd">1</kbd> Explorer · <kbd className="loom-kbd">2</kbd> Chart · <kbd className="loom-kbd">3</kbd> Query</li>
+                <li><kbd className="loom-kbd">1</kbd> Explorer · <kbd className="loom-kbd">2</kbd> Chart · <kbd className="loom-kbd">3</kbd> Query · <kbd className="loom-kbd">4</kbd> Dive</li>
                 <li><kbd className="loom-kbd">⌘1</kbd>–<kbd className="loom-kbd">⌘6</kbd> Panel tabs (Stats → Settings)</li>
                 <li><kbd className="loom-kbd">[</kbd> Sidebar · <kbd className="loom-kbd">]</kbd> Right panel</li>
                 <li className="pt-1 text-loom-muted font-medium text-2xs uppercase tracking-wider">Scatter</li>
@@ -763,6 +767,7 @@ function HomeContent({
                 {!dataSourcesExpanded && viewMode === "explorer" && !socialExportReady && <ExplorerView />}
                 {(!dataSourcesExpanded || socialExportReady) && (viewMode === "chart" || socialExportReady) && <ChartView />}
                 {!dataSourcesExpanded && viewMode === "query" && !socialExportReady && <QueryView />}
+                {!dataSourcesExpanded && viewMode === "dive" && !socialExportReady && <DiveView />}
               </>
             )}
             {previewCapture && (

@@ -20,6 +20,7 @@ const VIEW_MODES: { key: ViewMode; label: string; short: string; shortcut: strin
   { key: "explorer", label: "Explorer", short: "Data", shortcut: "1" },
   { key: "chart", label: "Chart", short: "Chart", shortcut: "2" },
   { key: "query", label: "Query", short: "SQL", shortcut: "3" },
+  { key: "dive", label: "Dive", short: "Dive", shortcut: "4" },
 ];
 
 const DEVICES: { id: ChartDeviceId; label: string; icon: "phone" | "tablet" | "desktop" | "auto" }[] = [

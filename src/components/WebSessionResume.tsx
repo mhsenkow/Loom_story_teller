@@ -3,6 +3,8 @@
 // =================================================================
 // In-memory poll buffers die on refresh. If the user last viewed a live
 // source, reconnect once and open Chart so the site isn’t an empty shell.
+// A shared `#dive=` link wins: reopen its stream (or demo file) and land
+// in Dive with the shared query.
 // =================================================================
 
 "use client";
@@ -10,8 +12,11 @@
 import { useEffect, useRef } from "react";
 import { useLoomStore } from "@/lib/store";
 import { getLastSession } from "@/lib/persist";
+import { decodeDiveLink } from "@/lib/dive";
 import {
+  inspectFile,
   isTauri,
+  scanFolder,
   sourceStart,
   sourceSnapshot,
   streamStart,
@@ -44,20 +49,46 @@ export function WebSessionResume() {
   const ran = useRef(false);
 
   useEffect(() => {
-    if (ran.current || isTauri()) return;
+    if (ran.current) return;
     ran.current = true;
 
+    const link = typeof window !== "undefined" ? decodeDiveLink(window.location.hash) : null;
+    if (link) {
+      useLoomStore.setState({ diveLink: link, viewMode: "dive" });
+    }
+    if (isTauri()) return;
+    const landView = link ? ("dive" as const) : ("chart" as const);
+
+    if (link?.src.startsWith("mock://")) {
+      void (async () => {
+        try {
+          const files = await scanFolder("");
+          const entry = files.find((f) => f.path === link.src);
+          const inspect = await inspectFile(link.src, 500);
+          useLoomStore.setState({
+            selectedFile: entry ?? { path: link.src, name: link.src.replace(/^mock:\/\//, ""), extension: "csv", row_count: inspect.sample.total_rows, size_bytes: 0 },
+            columnStats: inspect.stats,
+            sampleRows: inspect.sample,
+            viewMode: "dive",
+          });
+        } catch {
+          /* leave the link banner up */
+        }
+      })();
+      return;
+    }
+
     const session = getLastSession();
-    const path = session?.filePath;
+    const path = link?.src.startsWith("stream://") ? link.src : session?.filePath;
     if (!path?.startsWith("stream://")) return;
 
     // Let Onboarding / hydrate settle; skip if user already loaded something.
     const id = window.setTimeout(() => {
       void (async () => {
         if (useLoomStore.getState().selectedFile) return;
-        // First-visit discover modal still open — don’t fight it.
+        // First-visit discover modal still open — don’t fight it (unless a link asked for this stream).
         try {
-          if (!window.localStorage.getItem("loom-discover-v1")) return;
+          if (!link && !window.localStorage.getItem("loom-discover-v1")) return;
         } catch {
           /* continue */
         }
@@ -67,8 +98,12 @@ export function WebSessionResume() {
         try {
           if (kind === "wiki") {
             await streamStart();
-            await new Promise((r) => setTimeout(r, 800));
-            const snap = await streamSnapshot(500);
+            // Fresh SSE buffers start empty — give a shared link a few seconds to fill.
+            let snap = await new Promise<Awaited<ReturnType<typeof streamSnapshot>>>((r) => setTimeout(() => r(streamSnapshot(500)), 800));
+            for (let i = 0; link && i < 6 && !snap.sample.rows.length; i++) {
+              await new Promise((r) => setTimeout(r, 800));
+              snap = await streamSnapshot(500);
+            }
             if (!snap.sample.rows.length) return;
             const file = {
               path,
@@ -85,7 +120,7 @@ export function WebSessionResume() {
               streamActive: true,
               chartRecs: story.charts,
               activeChart: story.charts[0] ?? null,
-              viewMode: "chart",
+              viewMode: landView,
               panelTab: "chart",
               dataSourcesExpanded: false,
               dataRegionOpen: false,
@@ -112,7 +147,7 @@ export function WebSessionResume() {
             streamActive: true,
             chartRecs: story.charts,
             activeChart: story.charts[0] ?? null,
-            viewMode: "chart",
+            viewMode: landView,
             panelTab: "chart",
             dataSourcesExpanded: false,
             dataRegionOpen: false,

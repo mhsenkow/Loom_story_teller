@@ -25,6 +25,15 @@
   - **Pivot it** — drag the **Rows / Columns / Depth** chips onto each other (or click two, or **↻ Pivot** to rotate all three) and the voxels fly to their new positions; drop a Schema column on a chip to replace that axis. **Slice** a depth layer with ◀ ▶, `[` / `]`, or by clicking a voxel (other layers ghost; Esc for all). **▦ Table** docks a linked pivot table (rows × columns for the slice, or rolled up across depth, with row / column / grand totals) — hover a cell to light its voxels.
 - **Export** — Copy or download PNG/SVG; copy chart config as JSON. Annotations and custom ref lines are per chart.
 
+### Dive (Scuba-style slice and dice)
+- **Ask questions by clicking** — pick a **time window** (last 15 min → last year, ending at the newest row), **filters**, **group by** (nested), and **metrics** (count, count distinct, sum, avg, min, max, **p50 / p90 / p99**). Results update instantly.
+- **Three views of one query** — **Time series** (auto or fixed buckets, one line per top group), **Table** (ranked groups with totals), **Samples** (newest matching raw rows).
+- **Compare** with the previous period, 1 day, 1 week, or 4 weeks earlier — dashed ghost lines and green/red % deltas.
+- **Drill in** — click any value to filter to it (and stop grouping by it); ⌥-click to exclude it.
+- **Live** — on Wikipedia / USGS / NWS and other feeds the dive auto-refreshes.
+- **Share** — the whole query lives in the URL (`#dive=…`); links to live feeds and demo files reopen the dataset on load. **SQL** shows the equivalent DuckDB query (open it in Query on desktop). **Open as cube** sends the filtered rows to the Data cube.
+- Works on web and desktop: the engine runs in the browser over the loaded rows (desktop pulls a 30k-row DuckDB sample first; web streams use their 8k-row buffer; uploaded CSVs on web use the 500-row sample).
+
 ### Query
 - **SQL editor** — Run DuckDB SQL against `loom_active`. Schema browser (Tables + Columns) and click-to-insert. **Validation** (parentheses, SELECT/WITH) before run.
 - **Results** — Paginated grid, copy cell/row, export CSV. **Query history** and **snippets** (save/load named SQL). **Snapshot** current result and **Diff** vs a snapshot (row count delta).
@@ -255,6 +264,8 @@ Loom_story_teller/
 │   │   ├── tauri.ts             # Typed IPC bridge (invoke wrappers)
 │   │   ├── vega.ts              # Vega-Lite spec builders
 │   │   ├── webgpu.ts            # WebGPU pipeline (scatter)
+│   │   ├── dive.ts              # Dive engine: filters, group by, metrics/percentiles, buckets, compare, SQL, links
+│   │   ├── diveSource.ts        # Dive row loading (DuckDB sample on desktop, JS buffers on web)
 │   │   ├── dataCube.ts          # Data cube binning, aggregation, camera, Canvas renderer, hover pick
 │   │   ├── webgpuCube.ts        # WebGPU instanced-voxel renderer for the data cube (cube.wgsl)
 │   │   ├── recommendations.ts  # Heuristics + recommendStreamStory / recommendSourceStory + SQL snippets

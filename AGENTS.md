@@ -20,7 +20,7 @@ Use this file plus [DOCS.md](DOCS.md) (architecture) and [README.md](README.md) 
 
 | Path | Role |
 |------|------|
-| `src/app/` | Next.js App Router: `layout.tsx`, `page.tsx` (shell + three-panel layout) |
+| `src/app/` | Next.js App Router: `layout.tsx`, `page.tsx` (shell + three-panel layout; views: explorer / chart / query / dive) |
 | `src/components/` | One main React component per file (PascalCase) |
 | `src/lib/` | TypeScript **without** React: store, IPC, Vega, WebGPU, recommendations, analytics |
 | `src/shaders/` | WGSL for WebGPU scatter |
