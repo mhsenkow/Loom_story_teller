@@ -14,7 +14,7 @@ import { GEO_MAP_NON_CARTESIAN } from "./geoMaps";
 export interface ChartRenderIssue {
   title: string;
   message: string;
-  code: "no_data" | "no_rows" | "bad_x" | "bad_y" | "bad_color" | "bad_size" | "bad_target" | "insufficient_numeric";
+  code: "no_data" | "no_rows" | "bad_x" | "bad_y" | "bad_z" | "bad_color" | "bad_size" | "bad_target" | "insufficient_numeric";
 }
 
 /** Kinds where Canvas renderers bail out without a Y column (no count fallback). */
@@ -22,6 +22,7 @@ const KINDS_REQUIRING_Y_FIELD = new Set<string>([
   "scatter", "bubble", "heatmap", "strip", "box", "violin",
   "dumbbell", "ridgeline", "hexbin", "parallel",
   "beeswarm", "voronoi", "isoScatter", "contour", "pyramid", "slope", "bump", "stream", "horizon",
+  "dataCube",
 ]);
 
 /** Structural reasons the current chart cannot draw on the loaded sample. */
@@ -83,6 +84,18 @@ export function getChartRenderIssue(
         title: "Size column missing",
         message: `“${chart.sizeField}” is not in the sample.`,
         code: "bad_size",
+      };
+    }
+  }
+
+  if (chart.kind === "dataCube") {
+    if (!chart.zField || cols.indexOf(chart.zField) < 0) {
+      return {
+        title: "Data cube needs a depth column",
+        message: chart.zField
+          ? `Depth field “${chart.zField}” is not in the sample.`
+          : "Map a third column to Depth so rows × columns can stack into a cube.",
+        code: "bad_z",
       };
     }
   }
@@ -246,6 +259,8 @@ export interface ChartCapabilities {
   /** Primary category / X slot — false when canvas ignores encoding X (e.g. radar uses all numerics). */
   xChannel: boolean;
   yChannel: boolean;
+  /** Third spatial axis (scatter3d Z, data cube depth). */
+  zChannel: boolean;
   colorChannel: boolean;
   sizeChannel: boolean;
   aggregate: boolean;
@@ -274,15 +289,16 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     // Radar/parallel draw every numeric column as an axis; X/Y slots are identity-only for parallel
     xChannel: kind !== "radar" && kind !== "parallel",
     yChannel: kind !== "histogram" && kind !== "radar" && kind !== "parallel",
+    zChannel: kind === "scatter3d" || kind === "dataCube",
     // Show Color only when the canvas reads colorField / cIdx for this kind
     colorChannel: ![
-      "histogram", "pie", "heatmap", "hexbin", "box", "waterfall", "choropleth", "ridgeline",
+      "histogram", "pie", "heatmap", "hexbin", "box", "waterfall", "choropleth", "ridgeline", "dataCube",
     ].includes(kind),
     sizeChannel: pointMarks || kind === "dumbbell" || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || kind === "pyramid" || kind === "slope" || kind === "chernoff" || kind === "glyphStar" || kind === "flower" || isGpuSceneKind(kind),
     aggregate: ["bar", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind),
     facetRow: false,
-    markPoints: pointMarks || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || isGpuSceneKind(kind),
-    opacityChannel: pointMarks || kind === "strip" || kind === "parallel" || kind === "bucketField" || kind === "beeswarm" || isGpuSceneKind(kind),
+    markPoints: pointMarks || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || (isGpuSceneKind(kind) && kind !== "dataCube"),
+    opacityChannel: pointMarks || kind === "strip" || kind === "parallel" || kind === "bucketField" || kind === "beeswarm" || (isGpuSceneKind(kind) && kind !== "dataCube"),
     glowOutline: pointMarks || kind === "firefly",
     markMotif: cartesian && !["heatmap", "hexbin", "choropleth", "strip", "box", "violin", "ridgeline", "dumbbell", "contour", "voronoi"].includes(kind) && !isGpuSceneKind(kind) && !(GEO_MAP_NON_CARTESIAN as Set<string>).has(kind),
     barMarks: kind === "bar" || kind === "histogram" || kind === "waterfall" || kind === "lollipop" || kind === "funnel" || kind === "isoBars",
@@ -382,6 +398,8 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
       return base("Lon", "Lat", "Color", "Height");
     case "loomWeave":
       return base("Warp", "Value", "Color", "Weft");
+    case "dataCube":
+      return base("Rows", "Columns", "Color", "Value");
     default:
       return base("X", "Y", "Color");
   }

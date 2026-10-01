@@ -46,6 +46,18 @@ import {
 } from "@/lib/gpuScenes";
 import { isGeoMapKind, renderGeoMapCanvas, isWebGpuGlobeKind } from "@/lib/geoMaps";
 import { LoomSceneRenderer } from "@/lib/webgpuScenes";
+import { LoomCubeRenderer } from "@/lib/webgpuCube";
+import {
+  buildDataCube,
+  cubeCellTooltip,
+  cubeView,
+  drawDataCubeBackLayer,
+  drawDataCubeFrontLayer,
+  pickDataCubeCell,
+  renderDataCubeCanvas,
+  type DataCube,
+  type DataCubeRenderOpts,
+} from "@/lib/dataCube";
 import {
   resolveChartPad,
   contrastingInk,
@@ -380,6 +392,10 @@ export function ChartView() {
   }, [hostSize.w, hostSize.h, chartAspect, chartDevice, socialExportTarget]);
   const rendererRef = useRef<LoomRenderer | null>(null);
   const sceneRendererRef = useRef<LoomSceneRenderer | null>(null);
+  const cubeRendererRef = useRef<LoomCubeRenderer | null>(null);
+  const [cubeHover, setCubeHover] = useState<{ xi: number; yi: number; zi: number } | null>(null);
+  /** Last cube frame (data + layout) for hover picking and PNG export. */
+  const cubeFrameRef = useRef<{ cube: DataCube; opts: DataCubeRenderOpts; w: number; h: number } | null>(null);
   const [gpuReady, setGpuReady] = useState(false);
   const [sceneOrbit, setSceneOrbit] = useState({ yaw: 0.55, pitch: 0.35, zoom: 1 });
   const sceneOrbitDragRef = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
@@ -419,9 +435,33 @@ export function ChartView() {
     gpuReady &&
     !forceCanvasCapture &&
     !!sceneRendererRef.current;
+  const useWebGpuCube =
+    activeChart?.kind === "dataCube" &&
+    gpuReady &&
+    !forceCanvasCapture &&
+    !!cubeRendererRef.current;
+  const dataCube = useMemo(() => {
+    if (activeChart?.kind !== "dataCube" || !sampleRows?.rows?.length) return null;
+    return buildDataCube(sampleRows.rows, sampleRows.columns, {
+      xField: activeChart.xField,
+      yField: activeChart.yField,
+      zField: activeChart.zField,
+      valueField: activeChart.sizeField,
+      aggregate: activeChart.yAggregate,
+    });
+  }, [
+    activeChart?.kind,
+    activeChart?.xField,
+    activeChart?.yField,
+    activeChart?.zField,
+    activeChart?.sizeField,
+    activeChart?.yAggregate,
+    sampleRows,
+  ]);
   const orbitEnabled =
     !!activeChart &&
     (activeChart.kind === "scatter3d" ||
+      activeChart.kind === "dataCube" ||
       activeChart.kind === "firefly" ||
       activeChart.kind === "globe" ||
       activeChart.kind === "globeTrail");
@@ -769,15 +809,24 @@ export function ChartView() {
     let cancelled = false;
     const kind = activeChart?.kind ?? "";
     const wantScene = isWebGpuDrawableScene(kind);
+    const wantCube = kind === "dataCube";
 
     rendererRef.current?.destroy();
     sceneRendererRef.current?.destroy();
+    cubeRendererRef.current?.destroy();
     rendererRef.current = null;
     sceneRendererRef.current = null;
+    cubeRendererRef.current = null;
     setGpuReady(false);
 
     void (async () => {
-      if (wantScene) {
+      if (wantCube) {
+        const cubeRenderer = new LoomCubeRenderer();
+        cubeRendererRef.current = cubeRenderer;
+        const ok = await cubeRenderer.init(canvas);
+        if (!cancelled && ok) setGpuReady(true);
+        else if (!cancelled) cubeRendererRef.current = null;
+      } else if (wantScene) {
         const scene = new LoomSceneRenderer();
         sceneRendererRef.current = scene;
         const ok = await scene.init(canvas);
@@ -796,8 +845,10 @@ export function ChartView() {
       cancelled = true;
       rendererRef.current?.destroy();
       sceneRendererRef.current?.destroy();
+      cubeRendererRef.current?.destroy();
       rendererRef.current = null;
       sceneRendererRef.current = null;
+      cubeRendererRef.current = null;
       setGpuReady(false);
     };
   }, [activeChart?.kind]);
@@ -897,6 +948,14 @@ export function ChartView() {
         const themeUi = getThemeUiColors(st.appSettings.theme);
         ctx.fillStyle = themeUi.bg;
         ctx.fillRect(0, 0, w, h);
+        const cubeFrame = ac.kind === "dataCube" ? cubeFrameRef.current : null;
+        if (cubeFrame) {
+          // Voxels may live on the WebGPU layer — redraw the whole cube on Canvas instead of compositing.
+          ctx.save();
+          ctx.scale(w / cubeFrame.w, h / cubeFrame.h);
+          renderDataCubeCanvas(ctx, cubeFrame.cube, cubeFrame.w, cubeFrame.h, { ...cubeFrame.opts, hovered: null });
+          ctx.restore();
+        } else {
         // 2D layer first (theme fill / full chart); WebGPU scatter on top; axes last
         try {
           ctx.drawImage(canvas2D, 0, 0);
@@ -916,6 +975,7 @@ export function ChartView() {
           } catch {
             /* ignore */
           }
+        }
         }
         // Attribution burn-in for platform / social PNG exports
         if (st.socialExportTarget) {
@@ -1038,6 +1098,31 @@ export function ChartView() {
       const hit = canvas2DHitRef.current;
       const ac = activeChart;
       const sr = sampleRowsRef.current;
+      if (ac?.kind === "dataCube") {
+        const frame = cubeFrameRef.current;
+        const el = containerRef.current;
+        if (!frame || !el || sceneOrbitDragRef.current) {
+          setChartTooltip(null);
+          setCubeHover(null);
+          return;
+        }
+        const rect = el.getBoundingClientRect();
+        const px = ((e.clientX - rect.left) / rect.width) * frame.w;
+        const py = ((e.clientY - rect.top) / rect.height) * frame.h;
+        const cell = pickDataCubeCell(frame.cube, cubeView(frame.opts.camera, frame.w, frame.h), px, py);
+        if (!cell) {
+          setChartTooltip(null);
+          setCubeHover(null);
+          setHoveredRowIndex(null);
+          return;
+        }
+        const tip = cubeCellTooltip(frame.cube, cell);
+        setChartTooltip({ clientX: e.clientX, clientY: e.clientY, rowIndex: cell.rowIndex, row: tip.row, columns: tip.columns });
+        setCubeHover((prev) =>
+          prev && prev.xi === cell.xi && prev.yi === cell.yi && prev.zi === cell.zi ? prev : { xi: cell.xi, yi: cell.yi, zi: cell.zi },
+        );
+        return;
+      }
       if (!hit || !containerRef.current || !ac || !sr?.rows.length) return;
       const rect = containerRef.current.getBoundingClientRect();
       const relX = e.clientX - rect.left;
@@ -1076,6 +1161,7 @@ export function ChartView() {
   );
   const handleCanvas2DPointerLeave = useCallback(() => {
     setChartTooltip(null);
+    setCubeHover(null);
     setHoveredRowIndex(null);
   }, [setHoveredRowIndex]);
 
@@ -1393,6 +1479,65 @@ export function ChartView() {
   useEffect(() => {
     if (!canvasSized || !activeChart || !sampleRows) return;
     if (activeChart.kind !== "scatter") scatterDataRef.current = null;
+    if (activeChart.kind !== "dataCube") cubeFrameRef.current = null;
+
+    // Data cube: back walls on 2D canvas → voxels on WebGPU (or 2D) → labels on the overlay
+    if (activeChart.kind === "dataCube") {
+      canvas2DHitRef.current = null;
+      const canvas2D = canvas2DRef.current;
+      const overlay = axesOverlayRef.current;
+      const ctx = canvas2D?.getContext("2d");
+      const octx = overlay?.getContext("2d");
+      if (!canvas2D || !ctx) return;
+      const dpr = window.devicePixelRatio || 1;
+      const w = canvas2D.width / dpr;
+      const h = canvas2D.height / dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      if (octx && overlay) {
+        octx.setTransform(1, 0, 0, 1, 0, 0);
+        octx.clearRect(0, 0, overlay.width, overlay.height);
+      }
+      if (!dataCube) {
+        cubeFrameRef.current = null;
+        ctx.fillStyle = themeUi.bg;
+        ctx.fillRect(0, 0, w, h);
+        ctx.fillStyle = themeUi.muted;
+        ctx.font = `12px ${chartVisualOverrides.fontFamily ?? "Inter"}, sans-serif`;
+        ctx.textAlign = "center";
+        ctx.fillText("No rows land in the cube — try other Rows / Columns / Depth fields", w / 2, h / 2);
+        ctx.textAlign = "left";
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        return;
+      }
+      const cubeOpts: DataCubeRenderOpts = {
+        ramp: continuousStops,
+        opacity,
+        camera: sceneOrbit,
+        fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+        themeText: themeUi.text,
+        themeMuted: themeUi.muted,
+        themeBorder: themeUi.border,
+        themeBg: themeUi.bg,
+        showLegend: chartVisualOverrides.legendPosition !== "none",
+        hovered: cubeHover,
+      };
+      cubeFrameRef.current = { cube: dataCube, opts: cubeOpts, w, h };
+      if (useWebGpuCube && cubeRendererRef.current && octx) {
+        const view = cubeView(sceneOrbit, w, h);
+        ctx.fillStyle = themeUi.bg;
+        ctx.fillRect(0, 0, w, h);
+        const far = drawDataCubeBackLayer(ctx, dataCube, view, cubeOpts);
+        cubeRendererRef.current.render(dataCube, view, continuousStops, opacity);
+        octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        drawDataCubeFrontLayer(octx, dataCube, view, far, cubeOpts);
+        octx.setTransform(1, 0, 0, 1, 0, 0);
+      } else {
+        renderDataCubeCanvas(ctx, dataCube, w, h, cubeOpts);
+      }
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      return;
+    }
 
     // WebGPU particle / 3D scenes (scatter3d, firefly) + live globe points
     if (
@@ -1888,12 +2033,14 @@ export function ChartView() {
     }
 
     drawOneFrame(1);
-  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime]);
+  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops]);
 
   // Axes overlay for WebGPU scatter; clear when not scatter so overlay doesn't sit on top of line/bar
   useEffect(() => {
     const overlay = axesOverlayRef.current;
     if (!overlay) return;
+    // Data cube owns the overlay (labels drawn in the main render pass).
+    if (activeChart?.kind === "dataCube") return;
     const ctx = overlay.getContext("2d");
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
@@ -2348,7 +2495,7 @@ export function ChartView() {
                   Save view
                 </button>
               )}
-              <span className="loom-badge text-2xs hidden sm:inline-flex" title={aggregationHint || undefined}>{useWebGPUScatter || useWebGpuScene ? "GPU" : "Canvas"}</span>
+              <span className="loom-badge text-2xs hidden sm:inline-flex" title={aggregationHint || undefined}>{useWebGPUScatter || useWebGpuScene || useWebGpuCube ? "GPU" : "Canvas"}</span>
               {!useWebGPUScatter &&
                 (!!chartVisualOverrides.markStroke ||
                   !!chartVisualOverrides.glowEnabled ||
@@ -2453,23 +2600,23 @@ export function ChartView() {
             ref={canvasRef}
             className="absolute inset-0 w-full h-full"
             style={{
-              zIndex: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe ? 1 : 0,
+              zIndex: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe || useWebGpuCube ? 1 : 0,
               // Default WebGPU clear is near-black; hide when Canvas 2D owns the frame
               // so aspect/device resizes never flash a black slab through a cleared 2D layer.
-              visibility: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe ? "visible" : "hidden",
-              pointerEvents: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe ? "auto" : "none",
+              visibility: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe || useWebGpuCube ? "visible" : "hidden",
+              pointerEvents: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe || useWebGpuCube ? "auto" : "none",
             }}
           />
           <canvas
             ref={canvas2DRef}
             data-loom-chart-canvas2d
             className="absolute inset-0 w-full h-full"
-            style={{ zIndex: useWebGPUScatter || useWebGpuScene ? 0 : 1 }}
+            style={{ zIndex: useWebGPUScatter || useWebGpuScene || useWebGpuCube ? 0 : 1 }}
           />
           <canvas
             ref={axesOverlayRef}
             className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ zIndex: useWebGPUScatter ? 2 : 0 }}
+            style={{ zIndex: useWebGPUScatter || useWebGpuCube ? 2 : 0 }}
           />
           {socialExportReady &&
             (chartAspect === "9:16" || socialExportTarget?.presetId === "stories") && (
@@ -2610,7 +2757,7 @@ export function ChartView() {
           {activeChart && activeChart.kind !== "scatter" && (
             <div
               className="absolute inset-0 w-full h-full"
-              style={{ zIndex: 2, cursor: "crosshair" }}
+              style={{ zIndex: 2, cursor: activeChart.kind === "dataCube" ? "grab" : "crosshair" }}
               onMouseMove={handleCanvas2DPointerMove}
               onMouseLeave={handleCanvas2DPointerLeave}
               aria-hidden

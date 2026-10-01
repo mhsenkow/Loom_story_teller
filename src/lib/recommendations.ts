@@ -34,6 +34,7 @@ import {
 import {
   GPU_SCENE_KIND_OPTIONS,
   buildGpuSceneRec,
+  suggestDataCubeRec,
   isGpuSceneKind,
   gpuSceneRecommendationReason,
   gpuSceneDataSupport,
@@ -709,6 +710,7 @@ export function createChartRec(
           zField: extra?.zField,
           timeField: extra?.timeField,
           trailId: extra?.trailId,
+          yAggregate,
         });
       }
       if (isGeoMapKind(kind)) {
@@ -1572,6 +1574,10 @@ export function recommend(
       recs.push(rec);
     }
   }
+
+  // Three usable dimensions → offer the rows × columns × depth data cube
+  const cubeRec = suggestDataCubeRec(columns, 66 + Math.floor(Math.random() * 10));
+  if (cubeRec) recs.push(cubeRec);
 
   // Sprinkle geography charts (maps / globe) when lat/lon columns exist
   const hasLonLat =

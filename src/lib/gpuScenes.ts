@@ -1,16 +1,17 @@
 // =================================================================
 // Loom — GPU / 3D / Particle scene chart kinds (shortlist)
 // =================================================================
-// Five WebGL-era scenes from the viz catalog:
-//   scatter3d · trailRibbon · quakeTerrain · firefly · loomWeave
+// WebGL-era scenes from the viz catalog:
+//   scatter3d · trailRibbon · quakeTerrain · firefly · loomWeave · dataCube
 // Specs stay encoding-portable; pixels prefer WebGPU when available,
 // with Canvas 2D fallbacks for capture / unsupported GPUs.
 // =================================================================
 
 import type { ColumnInfo } from "./store";
-import type { ChartKind, ChartRecommendation } from "./recommendations";
+import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
+import { pickDataCubeEncoding, rankCubeDimensions } from "./dataCube";
 
 export const GPU_SCENE_KINDS = [
   "scatter3d",
@@ -18,6 +19,7 @@ export const GPU_SCENE_KINDS = [
   "quakeTerrain",
   "firefly",
   "loomWeave",
+  "dataCube",
 ] as const;
 
 export type GpuSceneKind = (typeof GPU_SCENE_KINDS)[number];
@@ -28,6 +30,7 @@ export const GPU_SCENE_KIND_OPTIONS: { value: GpuSceneKind; label: string }[] = 
   { value: "quakeTerrain", label: "Quake terrain" },
   { value: "firefly", label: "Firefly field" },
   { value: "loomWeave", label: "Loom weave" },
+  { value: "dataCube", label: "Data cube 3D" },
 ];
 
 /** Scenes that are not classic Cartesian 2D axes. */
@@ -35,9 +38,10 @@ export const GPU_SCENE_NON_CARTESIAN = new Set<string>([
   "scatter3d",
   "quakeTerrain",
   "loomWeave",
+  "dataCube",
 ]);
 
-/** WebGPU kinds drawn by LoomSceneRenderer (terrain / weave / trails use Canvas). */
+/** WebGPU kinds drawn by LoomSceneRenderer (terrain / weave / trails use Canvas; dataCube has LoomCubeRenderer). */
 export function isWebGpuDrawableScene(kind: string): boolean {
   return kind === "scatter3d" || kind === "firefly";
 }
@@ -53,6 +57,7 @@ export function gpuSceneRecommendationReason(kind: GpuSceneKind): string {
     quakeTerrain: "Heightfield mesh — peaks rise where magnitude piles up",
     firefly: "Soft additive sprites; brightness from size / recency / anomaly",
     loomWeave: "Warp = categories, weft = time; thread thickness = value",
+    dataCube: "Rows × columns × depth — each voxel is one cell; size + color = value",
   };
   return map[kind];
 }
@@ -90,6 +95,10 @@ export function gpuSceneDataSupport(
       return nom.length >= 1 && (num.length >= 1 || time.length >= 1)
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need a category + numeric/time" };
+    case "dataCube":
+      return rankCubeDimensions(columns).length >= 3
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need three columns to span rows · columns · depth" };
     default:
       return { ok: false, reason: "Unknown scene" };
   }
@@ -108,6 +117,13 @@ export function getGpuRandomEncoding(
     return t.includes("VARCHAR") || t.includes("TEXT") || t.includes("BOOL");
   });
   const pick = <T,>(arr: T[]): T | undefined => arr[Math.floor(Math.random() * arr.length)];
+  if (kind === "dataCube") {
+    const dims = rankCubeDimensions(columns).slice(0, 5).sort(() => Math.random() - 0.5);
+    if (dims.length < 3) return null;
+    const used = new Set(dims.slice(0, 3).map((c) => c.name));
+    const measure = pick(num.filter((c) => !used.has(c.name) && c.distinct_count > 12)) ?? null;
+    return { xField: dims[0]!.name, yField: dims[1]!.name, colorField: null, sizeField: measure?.name ?? null };
+  }
   if (kind === "loomWeave") {
     const x = pick(nom.filter((c) => c.distinct_count >= 2 && c.distinct_count <= 24));
     const y = pick(num);
@@ -273,11 +289,13 @@ export function buildGpuSceneRec(
     sizeField?: string | null;
     timeField?: string | null;
     trailId?: string | null;
+    yAggregate?: YAggregateOption | null;
     score?: number;
     title?: string;
     subtitle?: string;
   },
 ): ChartRecommendation | null {
+  if (kind === "dataCube") return buildDataCubeRec(columns, xField, yField, opts);
   const num = columns.filter((c) => {
     const t = c.data_type.toUpperCase();
     return ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL", "HUGEINT"].some((n) => t.includes(n));
@@ -317,6 +335,7 @@ export function buildGpuSceneRec(
       title: timeField ? `Weave · ${xField} × ${timeField}` : `Weave · ${xField}`,
       subtitle: "warp categories · weft time · thickness = value",
     },
+    dataCube: { title: "", subtitle: "" },
   };
 
   const meta = titles[kind];
@@ -348,6 +367,86 @@ export function buildGpuSceneRec(
     timeField: timeField ?? undefined,
     trailId: trailId ?? undefined,
   };
+}
+
+/**
+ * Data cube rec: X = rows, Y = columns, Z = depth, size = value measure.
+ * The Vega-Lite spec is the honest 2D fallback — a rows × columns heatmap
+ * with depth collapsed (SVG export / portable spec).
+ */
+function buildDataCubeRec(
+  columns: ColumnInfo[],
+  xField: string,
+  yField: string | null,
+  opts?: {
+    zField?: string | null;
+    sizeField?: string | null;
+    yAggregate?: YAggregateOption | null;
+    score?: number;
+    title?: string;
+    subtitle?: string;
+  },
+): ChartRecommendation | null {
+  const byName = (n: string | null | undefined) => (n ? columns.find((c) => c.name === n) : undefined);
+  if (!byName(xField)) return null;
+  const dims = rankCubeDimensions(columns);
+  const y = byName(yField) ?? dims.find((c) => c.name !== xField);
+  if (!y) return null;
+  const z = byName(opts?.zField) ?? dims.find((c) => c.name !== xField && c.name !== y.name);
+  if (!z) return null;
+  const measure = byName(opts?.sizeField);
+  const sizeField = measure && isNumericColumn(measure) ? measure.name : null;
+  const agg: YAggregateOption = sizeField ? (opts?.yAggregate && opts.yAggregate !== "count" ? opts.yAggregate : "sum") : "count";
+  const vlType = (c: ColumnInfo) => (isNumericColumn(c) && c.distinct_count > 12 ? "quantitative" : "ordinal");
+  const axisEnc = (c: ColumnInfo) => (vlType(c) === "quantitative" ? { field: c.name, type: "quantitative", bin: true } : { field: c.name, type: "ordinal" });
+  const vlAgg = agg === "mean" ? "mean" : agg;
+  const color = sizeField
+    ? { field: sizeField, type: "quantitative", aggregate: vlAgg, scale: { scheme: "blues" } }
+    : { aggregate: "count", type: "quantitative", scale: { scheme: "blues" } };
+  const aggWord: Record<YAggregateOption, string> = { sum: "sum", mean: "avg", count: "count", min: "min", max: "max" };
+
+  return {
+    id: `gpu-dataCube-${xField}-${y.name}-${z.name}-${sizeField ?? "count"}-${agg}`,
+    kind: "dataCube" as ChartKind,
+    title: opts?.title ?? `${xField} × ${y.name} × ${z.name}`,
+    subtitle: opts?.subtitle ?? (sizeField ? `${aggWord[agg]} of ${sizeField} per cell · drag to orbit` : "rows per cell · drag to orbit"),
+    score: opts?.score ?? 84,
+    spec: {
+      $schema: "https://vega.github.io/schema/vega-lite/v5.json",
+      description: `Data cube collapsed along ${z.name}`,
+      mark: { type: "rect" },
+      encoding: {
+        x: axisEnc(y),
+        y: axisEnc(byName(xField)!),
+        color,
+      },
+      width: "container",
+      height: "container",
+    },
+    xField,
+    yField: y.name,
+    colorField: null,
+    zField: z.name,
+    sizeField: sizeField ?? undefined,
+    yAggregate: sizeField ? agg : null,
+  };
+}
+
+/** Schema-only best guess for a data cube, as a ready rec (for recommend / discover). */
+export function suggestDataCubeRec(columns: ColumnInfo[], score = 74): ChartRecommendation | null {
+  const enc = pickDataCubeEncoding(columns);
+  if (!enc) return null;
+  return buildDataCubeRec(columns, enc.xField, enc.yField, {
+    zField: enc.zField,
+    sizeField: enc.valueField,
+    yAggregate: enc.aggregate,
+    score,
+  });
+}
+
+function isNumericColumn(c: ColumnInfo): boolean {
+  const t = c.data_type.toUpperCase();
+  return ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL", "HUGEINT", "TINYINT", "SMALLINT"].some((n) => t.includes(n));
 }
 
 // ---------------------------------------------------------------------------

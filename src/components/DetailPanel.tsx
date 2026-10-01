@@ -2541,6 +2541,9 @@ function ChartPanelView() {
   const extraFromChart = useCallback(
     () => ({
       sizeField: activeChart?.sizeField ?? null,
+      zField: activeChart?.zField ?? null,
+      timeField: activeChart?.timeField ?? null,
+      trailId: activeChart?.trailId ?? null,
       rowField: activeChart?.rowField ?? null,
       glowField: activeChart?.glowField ?? null,
       outlineField: activeChart?.outlineField ?? null,
@@ -2552,6 +2555,9 @@ function ChartPanelView() {
     }),
     [
       activeChart?.sizeField,
+      activeChart?.zField,
+      activeChart?.timeField,
+      activeChart?.trailId,
       activeChart?.rowField,
       activeChart?.glowField,
       activeChart?.outlineField,
@@ -2615,9 +2621,10 @@ function ChartPanelView() {
   );
 
   const applyEncodingExtra = useCallback(
-    (slot: "size" | "row" | "glow" | "outline" | "opacity", colName: string) => {
+    (slot: "size" | "z" | "row" | "glow" | "outline" | "opacity", colName: string) => {
       if (!activeChart || columnStats.length === 0) return;
       const sizeField = slot === "size" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.sizeField ?? null);
+      const zField = slot === "z" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.zField ?? null);
       const rowField = slot === "row" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.rowField ?? null);
       const glowField = slot === "glow" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.glowField ?? null);
       const outlineField = slot === "outline" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.outlineField ?? null);
@@ -2631,6 +2638,9 @@ function ChartPanelView() {
         tableName,
         {
           sizeField,
+          zField,
+          timeField: activeChart.timeField ?? null,
+          trailId: activeChart.trailId ?? null,
           rowField,
           glowField,
           outlineField,
@@ -2815,7 +2825,10 @@ function ChartPanelView() {
   const sizeInPrimary =
     activeChart.kind === "pyramid" ||
     activeChart.kind === "slope" ||
-    activeChart.kind === "dumbbell";
+    activeChart.kind === "dumbbell" ||
+    activeChart.kind === "dataCube";
+  const isDataCube = activeChart.kind === "dataCube";
+  const cubeAggregate: YAggregateOption = activeChart.sizeField ? (activeChart.yAggregate ?? "sum") : "count";
   const showAggregate = caps.aggregate;
   const effectiveAggregate: YAggregateOption = !activeChart.yField
     ? "count"
@@ -3116,15 +3129,49 @@ function ChartPanelView() {
                   }
                 />
               )}
+              {caps.zChannel && (
+                <EncodingSlot
+                  label={isDataCube ? "Depth" : "Z"}
+                  value={activeChart.zField ?? ""}
+                  options={isDataCube ? allColOptions : numericOptions}
+                  allowEmpty={!isDataCube}
+                  emptyLabel="Auto"
+                  typeHint={activeChart.zField ? colType(activeChart.zField) : undefined}
+                  onChange={(v) => applyEncodingExtra("z", v === "" ? "__none__" : v)}
+                />
+              )}
               {showSize && sizeInPrimary && (
                 <EncodingSlot
                   label={channelLabels.size}
                   value={activeChart.sizeField ?? ""}
                   options={numericOptions}
                   allowEmpty
-                  emptyLabel="None"
+                  emptyLabel={isDataCube ? "Row count" : "None"}
                   typeHint={activeChart.sizeField ? colType(activeChart.sizeField) : undefined}
                   onChange={(v) => applyEncodingExtra("size", v === "" ? "__none__" : v)}
+                  trailing={
+                    isDataCube ? (
+                      <div className="flex items-center gap-2 pl-0.5">
+                        <label className="text-2xs text-loom-muted shrink-0" htmlFor="loom-cube-agg">
+                          Aggregate
+                        </label>
+                        <select
+                          id="loom-cube-agg"
+                          value={cubeAggregate}
+                          onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)}
+                          disabled={!activeChart.sizeField}
+                          className="loom-input flex-1 text-xs py-1.5 min-h-8"
+                          title="How each cell's rows are summarized"
+                        >
+                          {Y_AGGREGATE_OPTIONS.filter((opt) => opt.value !== "count" || !activeChart.sizeField).map((opt) => (
+                            <option key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : undefined
+                  }
                 />
               )}
             </div>

@@ -56,6 +56,7 @@ const CHART_KIND_LABELS: Record<string, string> = Object.fromEntries([
   ["quakeTerrain", "Quake terrain"],
   ["firefly", "Firefly"],
   ["loomWeave", "Loom weave"],
+  ["dataCube", "Data cube"],
 ]);
 
 function chartKindLabel(kind: string): string {

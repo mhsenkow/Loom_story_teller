@@ -10,13 +10,14 @@
 import { useEffect, useRef, useCallback } from "react";
 import type { ChartRecommendation } from "@/lib/recommendations";
 import type { QueryResult } from "@/lib/store";
-import { discreteSeriesColors, resolveChartColors, sampleContinuous } from "@/lib/chartPalettes";
+import { discreteSeriesColors, getThemeUiColors, resolveChartColors, sampleContinuous } from "@/lib/chartPalettes";
 import { buildBarFacetGrid } from "@/lib/chartTooltip";
 import type { YAggregateOption } from "@/lib/recommendations";
 import { useLoomStore } from "@/lib/store";
 import { densityAwarePointMarks } from "@/lib/chartLayout";
 import { isOddChartKind, renderOddChart, ODD_CHART_KIND_OPTIONS } from "@/lib/oddCharts";
 import { isGpuSceneKind, extractGpuScenePoints, renderGpuSceneCanvas, GPU_SCENE_KIND_OPTIONS } from "@/lib/gpuScenes";
+import { buildDataCube, renderDataCubeCanvas } from "@/lib/dataCube";
 import { isGeoFamilyKind, isGeoMapKind, renderGeoMapCanvas, GEO_MAP_KIND_OPTIONS } from "@/lib/geoMaps";
 
 const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
@@ -184,6 +185,28 @@ export function ChartCard({
           { colors: COLORS, opacity: 0.85, pointSize: 2.2, mini: true },
         );
       }
+    } else if (rec.kind === "dataCube") {
+      const cube = buildDataCube(rows, data.columns, {
+        xField: rec.xField,
+        yField: rec.yField,
+        zField: rec.zField,
+        valueField: rec.sizeField,
+        aggregate: rec.yAggregate,
+      });
+      if (cube) {
+        const ui = getThemeUiColors(theme);
+        renderDataCubeCanvas(ctx, cube, w, h, {
+          ramp: COLORS,
+          opacity: 0.9,
+          camera: { yaw: 0.62, pitch: 0.42, zoom: hero ? 1 : 1.12 },
+          themeBg: "rgba(0,0,0,0)",
+          themeText: ui.text,
+          themeMuted: ui.muted,
+          themeBorder: ui.border,
+          mini: !hero,
+          showLegend: hero,
+        });
+      }
     } else if (isGpuSceneKind(rec.kind)) {
       const packed = extractGpuScenePoints(rows, data.columns, {
         xField: rec.xField,
@@ -219,7 +242,7 @@ export function ChartCard({
         true,
       );
     }
-  }, [rec, data, theme, colorblind]);
+  }, [rec, data, theme, colorblind, hero]);
 
   useEffect(() => {
     draw();

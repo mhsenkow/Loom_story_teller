@@ -376,7 +376,7 @@ function pickAutoPaletteId(
   colorFieldType?: string | null,
 ): string {
   const kind = chartKind ?? "";
-  if (kind === "heatmap" || kind === "choropleth") return "seq-blue";
+  if (kind === "heatmap" || kind === "choropleth" || kind === "dataCube") return "seq-blue";
   if (kind === "waterfall") return "semantic";
   if (colorFieldType === "quantitative" || colorFieldType === "ordinal") return "seq-blue";
   return "categorical";
@@ -427,7 +427,8 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
   const continuous =
     isContinuousKind(palette.kind) ||
     opts.chartKind === "heatmap" ||
-    opts.chartKind === "choropleth";
+    opts.chartKind === "choropleth" ||
+    opts.chartKind === "dataCube";
 
   if (!continuous && colors.length < 8) {
     colors = sampleCategorical(colors, 8, false);

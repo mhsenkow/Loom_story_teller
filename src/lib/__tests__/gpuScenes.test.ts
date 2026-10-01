@@ -21,13 +21,14 @@ const cols: ColumnInfo[] = [
 ];
 
 describe("gpuScenes shortlist", () => {
-  it("registers five scene kinds from the plan shortlist", () => {
+  it("registers the scene kinds from the plan shortlist plus the data cube", () => {
     expect(GPU_SCENE_KINDS).toEqual([
       "scatter3d",
       "trailRibbon",
       "quakeTerrain",
       "firefly",
       "loomWeave",
+      "dataCube",
     ]);
     for (const k of GPU_SCENE_KINDS) {
       expect(isGpuSceneKind(k)).toBe(true);

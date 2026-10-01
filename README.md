@@ -21,6 +21,7 @@
 - **Visual controls** — Typography (font, title weight, tick rotation), marks (shape, outline, jitter, bar radius, line style, smooth curve), axes and grid, layout (padding, legend, data labels), atmosphere (background, blend, glow, entrance animation). **Responsive** — compact padding and smaller type when the panel is narrow.
 - **Interactivity** — **Pan** (drag) and **zoom** (wheel) on scatter. **Brush** (Shift+drag) or **Lasso** (freeform polygon) to select points and sync to table selection. **Crosshair** mode shows live (x, y) and ruler pins for Δx/Δy. **Tooltip pinning** — click a point to pin its tooltip. **Mini-map** when zoomed. **Custom reference lines** from the Chart panel.
 - **Smart tab** — **Anomaly** (Z-score, IQR, MAD), **Forecast**, **Trend line**, **Reference lines**, **Clustering**, and **Correlation matrix** (pairwise Pearson heatmap). Overlays draw on the chart; filter table to anomalies.
+- **Data cube 3D** — Pick **Rows**, **Columns**, and **Depth** (any column type: categories, numbers, dates are binned to ≤12 slots) plus an optional **Value** with Sum / Average / Min / Max (default: row count). Each non-empty cell is a voxel sized and colored by its value. Drag to orbit, scroll to zoom, hover a voxel for its row · column · depth and value. Renders with WebGPU when available (Canvas 2D fallback for exports and thumbnails).
 - **Export** — Copy or download PNG/SVG; copy chart config as JSON. Annotations and custom ref lines are per chart.
 
 ### Query
@@ -253,6 +254,8 @@ Loom_story_teller/
 │   │   ├── tauri.ts             # Typed IPC bridge (invoke wrappers)
 │   │   ├── vega.ts              # Vega-Lite spec builders
 │   │   ├── webgpu.ts            # WebGPU pipeline (scatter)
+│   │   ├── dataCube.ts          # Data cube binning, aggregation, camera, Canvas renderer, hover pick
+│   │   ├── webgpuCube.ts        # WebGPU instanced-voxel renderer for the data cube (cube.wgsl)
 │   │   ├── recommendations.ts  # Heuristics + recommendStreamStory / recommendSourceStory + SQL snippets
 │   │   ├── ollama.ts            # Ollama API for AI suggestions
 │   │   ├── mock-data.ts         # Browser fallbacks when not in Tauri
