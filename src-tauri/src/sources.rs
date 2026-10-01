@@ -874,7 +874,7 @@ pub async fn source_start(
                 // Seed one orbit (~10 samples) so trail ribbons work immediately.
                 // wheretheiss.at allows ≤10 timestamps per request.
                 {
-                    let empty = true;
+                    let mut empty = true;
                     if let Ok(c) = db_c.conn.lock() {
                         empty = c
                             .query_row("SELECT COUNT(*) FROM iss_track", [], |r| r.get::<_, i64>(0))
