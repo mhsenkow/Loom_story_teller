@@ -1,5 +1,9 @@
 import type { Config } from "tailwindcss";
 
+/** Theme token color that also supports Tailwind opacity modifiers (`/20`). */
+const token = (cssVar: string) =>
+  `color-mix(in srgb, var(${cssVar}) calc(<alpha-value> * 100%), transparent)`;
+
 const config: Config = {
   content: [
     "./src/**/*.{js,ts,jsx,tsx,mdx}",
@@ -11,19 +15,22 @@ const config: Config = {
         "2xs": ["0.6875rem", { lineHeight: "1rem", letterSpacing: "0.01em" }],
       },
       colors: {
+        // Tokens are hex CSS vars, which Tailwind 3 can't split into channels,
+        // so `bg-loom-accent/20`-style opacity modifiers generated NO CSS.
+        // color-mix + <alpha-value> makes every `/NN` modifier work.
         loom: {
-          bg:       "var(--loom-bg)",
-          surface:  "var(--loom-surface)",
-          elevated: "var(--loom-elevated)",
-          border:   "var(--loom-border)",
-          text:     "var(--loom-text)",
-          muted:    "var(--loom-muted)",
-          label:    "var(--loom-label)",
-          accent:   "var(--loom-accent)",
-          "accent-dim": "var(--loom-accent-dim)",
-          success:  "var(--loom-success)",
-          warning:  "var(--loom-warning)",
-          error:    "var(--loom-error)",
+          bg:       token("--loom-bg"),
+          surface:  token("--loom-surface"),
+          elevated: token("--loom-elevated"),
+          border:   token("--loom-border"),
+          text:     token("--loom-text"),
+          muted:    token("--loom-muted"),
+          label:    token("--loom-label"),
+          accent:   token("--loom-accent"),
+          "accent-dim": token("--loom-accent-dim"),
+          success:  token("--loom-success"),
+          warning:  token("--loom-warning"),
+          error:    token("--loom-error"),
         },
       },
       fontFamily: {
