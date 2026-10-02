@@ -194,10 +194,9 @@ export function ChartView() {
     ? "desktop"
     : isMobile
       ? "mobile"
-      : resolveDevice(
-          appSettings.chartDevice ?? "auto",
-          (appSettings.chartDevice ?? "auto") === "auto" ? hostSize.w || viewportW : viewportW,
-        );
+      // "Auto" means the real device (window width). The stage host is often narrow on a
+      // laptop with both side panels open, and treating it as a phone boxed the chart into 390px.
+      : resolveDevice(appSettings.chartDevice ?? "auto", viewportW);
 
   const openChartEditor = useCallback(() => {
     setPanelTab("chart");
@@ -1053,6 +1052,11 @@ export function ChartView() {
     return () => cancelAnimationFrame(raf);
   }, [activeChart?.kind, useWebGpuScene]);
 
+  // The stage only mounts once a file is selected. A shared #chart= link can
+  // land in Chart view before its dataset loads, so the observers below must
+  // re-attach when the stage appears (otherwise canvases stay 300×150, blank).
+  const stageMounted = !!selectedFile;
+
   // Measure the stage host so we can fit social / device frames inside it.
   useEffect(() => {
     if (suggestionsExpanded) return;
@@ -1067,7 +1071,7 @@ export function ChartView() {
     });
     observer.observe(host);
     return () => observer.disconnect();
-  }, [suggestionsExpanded]);
+  }, [suggestionsExpanded, stageMounted]);
 
   // Resize all three canvases (WebGPU, 2D, axes overlay). Re-attach when chart panel is visible again.
   useEffect(() => {
@@ -1096,7 +1100,7 @@ export function ChartView() {
     });
     observer.observe(container);
     return () => observer.disconnect();
-  }, [suggestionsExpanded, chartFrameSize.width, chartFrameSize.height, socialExportTarget]);
+  }, [suggestionsExpanded, chartFrameSize.width, chartFrameSize.height, socialExportTarget, stageMounted]);
 
   // Register PNG/SVG export handlers for the Export tab
   useEffect(() => {
@@ -3652,25 +3656,40 @@ function applyLineDash(ctx: CanvasRenderingContext2D, style?: string) {
   }
 }
 
-// --- Monotone curve interpolation (Catmull-Rom-like) ---
+// --- Monotone cubic interpolation (Fritsch–Carlson) ---
+// Smooth, but never overshoots the data: no dips below zero or false peaks between points.
 function drawSmoothLine(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) {
-  if (pts.length < 2) return;
-  if (pts.length === 2) {
-    ctx.moveTo(pts[0].x, pts[0].y);
-    ctx.lineTo(pts[1].x, pts[1].y);
+  const n = pts.length;
+  if (n < 2) return;
+  ctx.moveTo(pts[0]!.x, pts[0]!.y);
+  if (n === 2) {
+    ctx.lineTo(pts[1]!.x, pts[1]!.y);
     return;
   }
-  ctx.moveTo(pts[0].x, pts[0].y);
-  for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[Math.min(pts.length - 1, i + 2)];
-    const cp1x = p1.x + (p2.x - p0.x) / 6;
-    const cp1y = p1.y + (p2.y - p0.y) / 6;
-    const cp2x = p2.x - (p3.x - p1.x) / 6;
-    const cp2y = p2.y - (p3.y - p1.y) / 6;
-    ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, p2.x, p2.y);
+  const dx: number[] = [];
+  const slope: number[] = [];
+  for (let i = 0; i < n - 1; i++) {
+    dx.push(pts[i + 1]!.x - pts[i]!.x || 1e-6);
+    slope.push((pts[i + 1]!.y - pts[i]!.y) / dx[i]!);
+  }
+  const m: number[] = [slope[0]!];
+  for (let i = 1; i < n - 1; i++) {
+    const a = slope[i - 1]!;
+    const b = slope[i]!;
+    if (a * b <= 0) m.push(0);
+    else {
+      // Weighted harmonic mean keeps the curve inside each segment's range
+      const w1 = 2 * dx[i]! + dx[i - 1]!;
+      const w2 = dx[i]! + 2 * dx[i - 1]!;
+      m.push((w1 + w2) / (w1 / a + w2 / b));
+    }
+  }
+  m.push(slope[n - 2]!);
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = pts[i]!;
+    const p1 = pts[i + 1]!;
+    const h = dx[i]! / 3;
+    ctx.bezierCurveTo(p0.x + h, p0.y + m[i]! * h, p1.x - h, p1.y - m[i + 1]! * h, p1.x, p1.y);
   }
 }
 
