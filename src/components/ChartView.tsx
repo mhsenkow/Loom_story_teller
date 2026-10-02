@@ -1088,14 +1088,17 @@ export function ChartView() {
         const dpr = stageDpr();
         const w = Math.round(width * dpr);
         const h = Math.round(height * dpr);
+        // Assigning width/height clears a canvas even at the same value. The observer
+        // re-fires on re-attach with an unchanged size, React skips the redraw (same
+        // containerSize), and the chart would stay wiped — so only touch real changes.
         [canvas, canvas2D, axesOverlay].forEach(c => {
-          c.width = w;
-          c.height = h;
+          if (c.width !== w) c.width = w;
+          if (c.height !== h) c.height = h;
           c.style.width = `${width}px`;
           c.style.height = `${height}px`;
         });
         setCanvasSized(true);
-        setContainerSize({ w: width, h: height });
+        setContainerSize((prev) => (prev.w === width && prev.h === height ? prev : { w: width, h: height }));
       }
     });
     observer.observe(container);
@@ -2218,8 +2221,10 @@ export function ChartView() {
 
         // Legend: prefer what the renderer reported; otherwise fall back to color-field categories
         let legendEntries = ropts.legend;
-        // Odd, geo, and scene renderers draw their own keys
-        if (legendEntries == null && cIdx >= 0 && !paintsOwnBackground && !isOddChartKind(kind)) {
+        // Odd and scene renderers draw their own keys; maps only draw ramps, so
+        // categorical color on point / bubble / globe / arc maps uses this legend.
+        const categoricalMap = isGeoMapKind(kind) && kind !== "geoHex";
+        if (legendEntries == null && cIdx >= 0 && (!paintsOwnBackground || categoricalMap) && !isOddChartKind(kind)) {
           const seen = new Map<string, number>();
           for (const r of rows) {
             const k = String(r[cIdx]);
