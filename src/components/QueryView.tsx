@@ -176,7 +176,7 @@ export function QueryView() {
       <div className="border-b border-loom-border bg-loom-surface/50 p-2.5 sm:p-3 space-y-2">
         <div className="flex items-center gap-1.5 sm:gap-2 mb-1 sm:mb-2 flex-wrap">
           <span className="text-xs text-loom-muted font-mono shrink-0">SQL</span>
-          <span className="text-2xs text-loom-muted truncate min-w-0 max-w-[42vw] sm:max-w-none">
+          <span className="text-2xs text-loom-muted truncate min-w-0 max-w-[42vw] sm:max-w-none" title={`loom_active = ${selectedFile.name}`}>
             <code className="text-loom-accent">loom_active</code>
             <span className="hidden sm:inline"> = {selectedFile.name}</span>
           </span>
@@ -190,6 +190,7 @@ export function QueryView() {
                 if (sql) setLocalSql(sql);
               }}
               title="Query history"
+              aria-label="Query history"
             >
               <option value="">History</option>
               {queryHistory.slice(0, 15).map((item, i) => (
@@ -211,6 +212,7 @@ export function QueryView() {
                 }
               }}
               title="Saved snippets"
+              aria-label="Saved snippets"
             >
               <option value="">Snippets</option>
               {querySnippets.map((s) => (
@@ -227,6 +229,7 @@ export function QueryView() {
                 if (!isNaN(idx) && STREAM_SQL_SNIPPETS[idx]) setLocalSql(STREAM_SQL_SNIPPETS[idx].sql);
               }}
               title="Pre-built stream queries"
+              aria-label="Pre-built stream queries"
             >
               <option value="">Stream queries</option>
               {STREAM_SQL_SNIPPETS.map((s, i) => (
@@ -248,6 +251,7 @@ export function QueryView() {
                   if (!isNaN(idx) && snippets[idx]) setLocalSql(snippets[idx].sql);
                 }}
                 title="Pre-built queries for this source"
+                aria-label="Pre-built queries for this source"
               >
                 <option value="">Source queries</option>
                 {snippets.map((s, i) => (
@@ -294,9 +298,11 @@ export function QueryView() {
             <span className="hidden sm:inline">Save view</span>
           </button>
           <button
+            type="button"
             onClick={handleExecute}
             disabled={isQuerying}
             className="loom-btn-primary text-xs min-h-9 sm:min-h-0 px-3"
+            title="Run query (⌘/Ctrl + Enter)"
           >
             {isQuerying ? "Running..." : "Execute"}
             <span className="text-2xs opacity-60 ml-1 font-mono hidden sm:inline">&#x21B5;</span>
@@ -318,7 +324,8 @@ export function QueryView() {
               }
             }}
             placeholder="Ask in plain English... (press Enter)"
-            className="loom-input flex-1 text-2xs py-1 px-2 font-mono"
+            aria-label="Describe a query in plain English"
+            className="loom-input flex-1 min-w-0 text-2xs py-1 px-2 font-mono"
           />
           {queryResult && (
             <button
@@ -333,6 +340,8 @@ export function QueryView() {
           {querySnapshots.length > 0 && (
             <select
               className="loom-input text-2xs py-0.5 max-w-[100px]"
+              aria-label="Compare results with a snapshot"
+              title="Compare results with a snapshot"
               value={diffSnapshotId ?? ""}
               onChange={(e) => setDiffSnapshotId(e.target.value || null)}
             >
@@ -356,11 +365,12 @@ export function QueryView() {
                 }
               }}
               className="loom-input font-mono text-xs h-24 w-full resize-none"
+              aria-label="SQL query"
               placeholder="SELECT * FROM loom_active WHERE ..."
               spellCheck={false}
             />
             {!validation.valid && validation.error && (
-              <p className="text-2xs text-amber-500 mt-1 font-mono">{validation.error}</p>
+              <p className="text-2xs text-loom-warning mt-1 font-mono">{validation.error}</p>
             )}
           </div>
           {(columnStats?.length ?? 0) > 0 && (
@@ -368,9 +378,10 @@ export function QueryView() {
               <button
                 type="button"
                 onClick={() => setSchemaOpen((o) => !o)}
+                aria-expanded={schemaOpen}
                 className="w-full px-2 py-1 text-left text-2xs font-semibold text-loom-text bg-loom-elevated/80 border-b border-loom-border"
               >
-                Schema {schemaOpen ? "▼" : "▶"}
+                Schema <span aria-hidden>{schemaOpen ? "▼" : "▶"}</span>
               </button>
               {schemaOpen && (
                 <div className="max-h-48 overflow-y-auto py-1">
@@ -400,7 +411,7 @@ export function QueryView() {
       {/* Error */}
       {queryError && (
         <div className="px-4 py-2 bg-loom-error/10 border-b border-loom-error/30">
-          <p className="text-xs font-mono text-loom-error">{queryError}</p>
+          <p className="text-xs font-mono text-loom-error whitespace-pre-wrap break-words" role="alert">{queryError}</p>
         </div>
       )}
 
@@ -409,10 +420,17 @@ export function QueryView() {
         {contextMenu && (
           <div
             className="fixed z-50 min-w-[120px] py-1 bg-loom-surface border border-loom-border rounded shadow-lg text-xs"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
+            style={{
+              // Keep the menu on-screen near the right / bottom edges
+              left: Math.max(4, Math.min(contextMenu.x, window.innerWidth - 136)),
+              top: Math.max(4, Math.min(contextMenu.y, window.innerHeight - 72)),
+            }}
+            role="menu"
+            aria-label="Result cell actions"
           >
             <button
               type="button"
+              role="menuitem"
               className="w-full px-3 py-1.5 text-left text-loom-text hover:bg-loom-elevated"
               onClick={() => copyCell(contextMenu.rowIndex, contextMenu.colIndex)}
             >
@@ -420,6 +438,7 @@ export function QueryView() {
             </button>
             <button
               type="button"
+              role="menuitem"
               className="w-full px-3 py-1.5 text-left text-loom-text hover:bg-loom-elevated"
               onClick={() => copyRow(contextMenu.rowIndex)}
             >
@@ -433,14 +452,14 @@ export function QueryView() {
           <>
             <div className="sticky max-md:static top-0 z-10 flex items-center gap-2 px-3 py-1 bg-loom-bg border-b border-loom-border flex-wrap">
               <span className="text-2xs text-loom-muted font-mono">
-                {queryResult.total_rows} rows &middot; {queryResult.columns.length} cols
+                {queryResult.total_rows.toLocaleString()} rows &middot; {queryResult.columns.length} cols
               </span>
               {queryResult.rows.length > queryResultPageSize && (
                 <span className="text-2xs text-loom-muted font-mono flex items-center gap-1">
                   Page
-                  <button type="button" onClick={() => setQueryResultPage(queryResultPage - 1)} disabled={queryResultPage <= 0} className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">←</button>
+                  <button type="button" onClick={() => setQueryResultPage(queryResultPage - 1)} disabled={queryResultPage <= 0} aria-label="Previous page" className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">←</button>
                   <span>{queryResultPage + 1} of {Math.ceil(queryResult.rows.length / queryResultPageSize)}</span>
-                  <button type="button" onClick={() => setQueryResultPage(queryResultPage + 1)} disabled={queryResultPage >= Math.ceil(queryResult.rows.length / queryResultPageSize) - 1} className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">→</button>
+                  <button type="button" onClick={() => setQueryResultPage(queryResultPage + 1)} disabled={queryResultPage >= Math.ceil(queryResult.rows.length / queryResultPageSize) - 1} aria-label="Next page" className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">→</button>
                 </span>
               )}
               <button
@@ -469,10 +488,10 @@ export function QueryView() {
                 return (
                   <span className="text-2xs font-mono ml-2">
                     Diff vs <strong>{snap.name}</strong>:
-                    <span className={added > 0 ? "text-green-500 ml-1" : added < 0 ? "text-red-500 ml-1" : "text-loom-muted ml-1"}>
+                    <span className={added > 0 ? "text-loom-success ml-1" : added < 0 ? "text-loom-error ml-1" : "text-loom-muted ml-1"}>
                       {added > 0 ? `+${added}` : added} rows
                     </span>
-                    {colsDiff && <span className="text-amber-500 ml-1">cols changed</span>}
+                    {colsDiff && <span className="text-loom-warning ml-1">cols changed</span>}
                   </span>
                 );
               })()}
@@ -498,7 +517,8 @@ export function QueryView() {
                       {row.map((cell, ci) => (
                         <td
                           key={ci}
-                          className="px-3 py-1.5 text-loom-text whitespace-nowrap"
+                          className="px-3 py-1.5 text-loom-text whitespace-nowrap max-w-[320px] truncate"
+                          title={typeof cell === "string" && cell.length > 40 ? cell : undefined}
                           onContextMenu={(e) => {
                             e.preventDefault();
                             setContextMenu({ x: e.clientX, y: e.clientY, rowIndex: absoluteRi, colIndex: ci });
@@ -519,9 +539,19 @@ export function QueryView() {
               </tbody>
             </table>
           </>
-        ) : !queryError && !isQuerying ? (
-          <div className="flex items-center justify-center h-full text-sm text-loom-muted">
-            Run a query to see results
+        ) : queryResult && !queryError ? (
+          <div className="flex flex-col items-center justify-center gap-1 h-full px-4 text-center">
+            <p className="text-sm text-loom-text">No rows returned</p>
+            {queryResult.columns.length > 0 && (
+              <p className="text-2xs text-loom-muted font-mono max-w-full truncate" title={queryResult.columns.join(", ")}>
+                Columns: {queryResult.columns.join(", ")}
+              </p>
+            )}
+          </div>
+        ) : !queryError ? (
+          <div className="flex flex-col items-center justify-center gap-1 h-full px-4 text-center">
+            <p className="text-sm text-loom-muted">Run a query to see results</p>
+            <p className="text-2xs text-loom-muted">Press Execute or ⌘/Ctrl + Enter in the editor</p>
           </div>
         ) : null}
       </div>

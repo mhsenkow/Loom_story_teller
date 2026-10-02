@@ -1197,7 +1197,7 @@ function DiscoverDatasetCard({
     <div className={`border border-loom-border rounded-md p-3 space-y-2.5 bg-loom-surface/40 ${expanded ? "flex flex-col min-w-0" : ""}`}>
       <div className="min-w-0 flex-1">
         {ds.organization && (
-          <p className="text-2xs text-loom-muted truncate mb-0.5">{ds.organization}</p>
+          <p className="text-2xs text-loom-muted truncate mb-0.5" title={ds.organization}>{ds.organization}</p>
         )}
         <p className="text-sm font-medium text-loom-text leading-snug line-clamp-2">{ds.title}</p>
       </div>
@@ -1599,7 +1599,7 @@ function DataRegionView({
                 {mountedFolder ? (
                   <div className="border border-loom-border rounded-md p-2.5 flex items-center justify-between gap-2 bg-loom-surface/40">
                     <div className="min-w-0">
-                      <p className="text-sm font-medium text-loom-text truncate">{folderName ?? "Folder"}</p>
+                      <p className="text-sm font-medium text-loom-text truncate" title={folderName ?? undefined}>{folderName ?? "Folder"}</p>
                       <p className="text-2xs text-loom-muted font-mono truncate" title={mountedFolder}>
                         {mountedFolder}
                       </p>
@@ -1641,7 +1641,7 @@ function DataRegionView({
             <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>
           )}
           {dataGovError && (
-            <p className="text-2xs text-amber-500/90 px-1 py-1">{dataGovError}</p>
+            <p className="text-2xs text-loom-warning px-1 py-1" role="alert">{dataGovError}</p>
           )}
           {!dataGovLoading && !dataGovError && dataGovDatasets.length === 0 && (
             <p className="text-2xs text-loom-muted px-1 py-2">No datasets matched. Try different search terms.</p>
@@ -1702,7 +1702,7 @@ function DataRegionView({
             loading={ukLoading}
           />
           {ukLoading && <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>}
-          {ukError && <p className="text-2xs text-amber-500/90 px-1 py-1">{ukError}</p>}
+          {ukError && <p className="text-2xs text-loom-warning px-1 py-1" role="alert">{ukError}</p>}
           {!ukLoading && !ukError && ukDatasets.length === 0 && (
             <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found. Try different search terms.</p>
           )}
@@ -1764,7 +1764,7 @@ function DataRegionView({
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-loom-text leading-snug">{pack.title}</p>
                     <p className="text-2xs text-loom-muted mt-0.5 leading-snug">{pack.blurb}</p>
-                    <p className="text-[10px] text-loom-muted/80 mt-1">{pack.source}</p>
+                    <p className="text-2xs text-loom-muted/80 mt-1">{pack.source}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -2092,8 +2092,10 @@ function FileItem({
 }) {
   return (
     <button
+      type="button"
       onClick={onSelect}
       disabled={isInspecting}
+      aria-current={isSelected ? "true" : undefined}
       className={`
         w-full flex items-center gap-2.5 px-3 py-2 text-left
         transition-all duration-100
@@ -2121,7 +2123,7 @@ function FileItem({
         )}
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-xs font-medium text-loom-text truncate">{file.name}</p>
+        <p className="text-xs font-medium text-loom-text truncate" title={file.name}>{file.name}</p>
         <p className="text-2xs text-loom-muted font-mono">
           {isInspecting ? "Loading…" : `${formatNumber(file.row_count)} rows · ${formatBytes(file.size_bytes)}`}
         </p>

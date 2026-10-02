@@ -38,7 +38,6 @@ export function PreviewFooter() {
   return (
     <div
       className="flex flex-col border-t border-loom-border bg-loom-surface/95 backdrop-blur-sm max-md:pb-[var(--safe-bottom)]"
-      style={{ paddingBottom: expanded ? undefined : undefined }}
     >
       {/* Tab bar + expand toggle */}
       <div className="flex items-center justify-between min-h-11 sm:min-h-[var(--statusbar-height)] sm:h-[var(--statusbar-height)]">
@@ -80,8 +79,9 @@ export function PreviewFooter() {
             className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 text-2xs text-loom-muted hover:text-loom-text hover:bg-loom-elevated rounded-md grid place-items-center transition-colors"
             title={expanded ? "Collapse" : "Expand"}
             aria-label={expanded ? "Collapse preview" : "Expand preview"}
+            aria-expanded={expanded}
           >
-            {expanded ? "▼" : "▶"}
+            <span aria-hidden>{expanded ? "▼" : "▲"}</span>
           </button>
         </div>
       </div>
@@ -109,7 +109,11 @@ export function PreviewFooter() {
                   {sampleRows.rows.slice(0, 50).map((row, ri) => (
                     <tr key={ri} className="border-b border-loom-border/50 hover:bg-loom-elevated/50">
                       {row.map((cell, ci) => (
-                        <td key={ci} className="px-2 py-1 text-loom-text whitespace-nowrap">
+                        <td
+                          key={ci}
+                          className="px-2 py-1 text-loom-text whitespace-nowrap max-w-[240px] truncate"
+                          title={typeof cell === "string" && cell.length > 30 ? cell : undefined}
+                        >
                           {cell === null ? <span className="text-loom-muted italic">null</span> : String(cell)}
                         </td>
                       ))}

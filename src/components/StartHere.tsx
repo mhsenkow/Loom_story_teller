@@ -59,7 +59,7 @@ export function StartHere({
           }}
           className="loom-btn-primary min-h-11 text-sm font-semibold rounded-lg"
         >
-          ✦ What’s interesting right now
+          <span aria-hidden>✦</span> What’s interesting right now
         </button>
         <button type="button" onClick={openDataSources} className="loom-btn-ghost min-h-11 text-sm rounded-lg border border-loom-border">
           Browse open data &amp; demos

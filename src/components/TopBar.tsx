@@ -212,8 +212,11 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       <div className="flex-1 min-w-0" />
 
       {selectedFile && (
-        <div className="hidden sm:flex items-center gap-1.5 mr-1 min-w-0 max-w-[28vw] sm:max-w-[180px] px-2 py-1 rounded-md bg-loom-elevated/60 border border-loom-border/60">
-          <span className="w-1.5 h-1.5 rounded-full bg-loom-success shrink-0" />
+        <div
+          className="hidden sm:flex items-center gap-1.5 mr-1 min-w-0 max-w-[180px] lg:max-w-[240px] px-2 py-1 rounded-md bg-loom-elevated/60 border border-loom-border/60"
+          title={selectedFile.name}
+        >
+          <span className="w-1.5 h-1.5 rounded-full bg-loom-success shrink-0" aria-hidden />
           <span className="text-xs text-loom-muted font-mono truncate">
             {selectedFile.name}
           </span>
@@ -225,7 +228,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           type="button"
           onClick={() => setShareSheetOpen(true)}
           disabled={!activeChart || !hasData}
-          className="min-h-10 px-3 sm:px-3.5 text-xs font-semibold rounded-md bg-loom-accent text-white disabled:opacity-40 shadow-sm flex items-center gap-1.5 shrink-0"
+          className="min-h-10 px-3 sm:px-3.5 text-xs font-semibold rounded-md bg-loom-accent text-[color:var(--btn-primary-fg)] disabled:opacity-40 shadow-sm flex items-center gap-1.5 shrink-0"
           aria-label="Share chart"
           title="Share this chart as an image or link"
         >

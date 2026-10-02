@@ -162,7 +162,7 @@ const DEFAULT_TABLE_ENHANCE = {
 };
 
 export function ExplorerView() {
-  const { selectedFile, sampleRows, columnStats, tablePrefs, setTablePrefs, setViewMode, setPanelTab, panelOpen, togglePanel, smartResults, tableFilterRowIndices, setTableFilterRowIndices, tableColumnFilters, setTableColumnFilter, selectedRowIndices, setSelectedRowIndices, tableViews, addTableView, removeTableView, applyTableView, tableUndoStack, tableRedoStack, pushTableUndo, undoTable, redoTable, hoveredRowIndex, setHoveredRowIndex, setToast, setPromptDialog, querySql } = useLoomStore();
+  const { selectedFile, sampleRows, columnStats, tablePrefs, setTablePrefs, setViewMode, setPanelTab, panelOpen, togglePanel, smartResults, tableFilterRowIndices, setTableFilterRowIndices, tableColumnFilters, setTableColumnFilter, setTableColumnFilters, selectedRowIndices, setSelectedRowIndices, tableViews, addTableView, removeTableView, applyTableView, tableUndoStack, tableRedoStack, pushTableUndo, undoTable, redoTable, hoveredRowIndex, setHoveredRowIndex, setToast, setPromptDialog, querySql } = useLoomStore();
   const isMobile = useIsMobile();
   const [displayOpen, setDisplayOpen] = useState(false);
   /** Column filter row is opt-in on phones so the grid gets more vertical room. */
@@ -511,7 +511,11 @@ export function ExplorerView() {
       {contextMenu && (
         <div
           className="fixed z-50 min-w-[120px] py-1 bg-loom-surface border border-loom-border rounded shadow-lg text-xs"
-          style={{ left: contextMenu.x, top: contextMenu.y }}
+          style={{
+            // Keep the menu on-screen near the right / bottom edges
+            left: Math.max(4, Math.min(contextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 136)),
+            top: Math.max(4, Math.min(contextMenu.y, (typeof window !== "undefined" ? window.innerHeight : 9999) - 72)),
+          }}
           role="menu"
           aria-label="Table cell actions"
         >
@@ -535,12 +539,17 @@ export function ExplorerView() {
       )}
       {/* Compact File Header */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-loom-border bg-loom-surface/50 text-2xs min-h-0 min-w-0 shrink-0">
-        <h2 className="text-xs font-semibold text-loom-text truncate max-w-[140px]">{selectedFile.name}</h2>
-        <span className="text-loom-muted font-mono shrink-0">{formatNumber(selectedFile.row_count)}r &middot; {columnStats.length}c</span>
+        <h2 className="text-xs font-semibold text-loom-text truncate max-w-[140px] sm:max-w-[280px]" title={selectedFile.name}>{selectedFile.name}</h2>
+        <span
+          className="text-loom-muted font-mono shrink-0"
+          title={`${selectedFile.row_count.toLocaleString()} rows · ${columnStats.length} columns`}
+        >
+          {formatNumber(selectedFile.row_count)}<span className="hidden sm:inline"> rows</span><span className="sm:hidden">r</span> &middot; {columnStats.length}<span className="hidden sm:inline"> cols</span><span className="sm:hidden">c</span>
+        </span>
         <div className="flex-1 min-w-0" />
         {selectedRowIndices.length > 0 && (
           <div className="flex items-center gap-1.5 shrink-0">
-            <span className="text-loom-muted">{selectedRowIndices.length} sel</span>
+            <span className="text-loom-muted">{selectedRowIndices.length} selected</span>
             <button type="button" onClick={clearRowSelection} className="loom-btn-ghost py-0 px-1">Clear</button>
             <button
               type="button"
@@ -554,6 +563,7 @@ export function ExplorerView() {
                 }
               }}
               className="loom-btn-primary py-0 px-1.5"
+              title="Download selected rows as CSV"
             >
               CSV
             </button>
@@ -570,7 +580,7 @@ export function ExplorerView() {
 
       {/* Compact toolbar row */}
       {tableFilterRowIndices != null && tableFilterRowIndices.length > 0 && (
-        <div className="flex items-center gap-2 px-3 py-1 border-b border-amber-500/30 bg-amber-500/5 text-2xs">
+        <div className="flex items-center gap-2 px-3 py-1 border-b border-loom-warning/30 bg-loom-warning/5 text-2xs">
           <span className="text-loom-muted">Filtered: {tableFilterRowIndices.length} rows</span>
           <button type="button" onClick={() => setTableFilterRowIndices(null)} className="loom-btn-ghost text-2xs py-0 px-1">Clear</button>
         </div>
@@ -588,16 +598,18 @@ export function ExplorerView() {
             </button>
           ) : (
             [
-              { key: "showSparklines" as const, label: "Spark" },
-              { key: "showValueBars" as const, label: "Bars" },
-              { key: "showHeat" as const, label: "Heat" },
-              { key: "showTrendCue" as const, label: "Trend" },
-              { key: "showNullRate" as const, label: "Null%" },
-            ].map(({ key, label }) => (
+              { key: "showSparklines" as const, label: "Spark", hint: "Sparklines in numeric column headers" },
+              { key: "showValueBars" as const, label: "Bars", hint: "Inline value bars in numeric cells" },
+              { key: "showHeat" as const, label: "Heat", hint: "Heat tint on numeric cells" },
+              { key: "showTrendCue" as const, label: "Trend", hint: "Trend arrows in numeric column headers" },
+              { key: "showNullRate" as const, label: "Null%", hint: "Share of empty values per column" },
+            ].map(({ key, label, hint }) => (
               <button
                 key={key}
                 type="button"
                 onClick={() => toggleEnhance(key)}
+                aria-pressed={tableEnhance[key]}
+                title={hint}
                 className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance[key] ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
               >
                 {label}
@@ -614,6 +626,7 @@ export function ExplorerView() {
                   key={key}
                   type="button"
                   onClick={() => toggleEnhance(key)}
+                  aria-pressed={tableEnhance[key]}
                   className={`min-h-9 px-2 rounded text-2xs ${tableEnhance[key] ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-loom-border"}`}
                 >
                   {label}
@@ -622,13 +635,14 @@ export function ExplorerView() {
               <button
                 type="button"
                 onClick={() => setShowColumnFilters((v) => !v)}
+                aria-pressed={showColumnFilters}
                 className={`min-h-9 px-2 rounded text-2xs ${showColumnFilters ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-loom-border"}`}
               >
                 Filters
               </button>
             </div>
           )}
-          {!isMobile && <span className="text-loom-muted">|</span>}
+          {!isMobile && <span className="text-loom-muted" aria-hidden>|</span>}
           <div className="relative">
             <button
               type="button"
@@ -661,17 +675,19 @@ export function ExplorerView() {
                           }}
                           className="rounded border-loom-border accent-loom-accent"
                         />
-                        <span className="truncate">{col}</span>
+                        <span className="truncate" title={col}>{col}</span>
                       </label>
                     );
                   })}
-                  <button
-                    type="button"
-                    onClick={() => setTablePrefs({ visibleColumns: null, columnOrder: null })}
-                    className="w-full mt-2 mx-2 px-2 py-1 text-2xs text-loom-muted hover:text-loom-text border border-loom-border rounded"
-                  >
-                    Reset to all
-                  </button>
+                  <div className="px-2 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => setTablePrefs({ visibleColumns: null, columnOrder: null })}
+                      className="w-full px-2 py-1 text-2xs text-loom-muted hover:text-loom-text border border-loom-border rounded"
+                    >
+                      Reset to all
+                    </button>
+                  </div>
                 </div>
                 <div className="fixed inset-0 z-40" aria-hidden onClick={() => setColumnsOpen(false)} />
               </>
@@ -682,6 +698,8 @@ export function ExplorerView() {
               type="button"
               onClick={() => setViewsOpen((o) => !o)}
               aria-expanded={viewsOpen}
+              aria-haspopup="menu"
+              title="Save or restore table views"
               className={`min-h-9 sm:min-h-0 px-2.5 sm:px-2 py-0.5 rounded border text-loom-text ${viewsOpen ? "border-loom-accent bg-loom-accent/20" : "border-loom-border hover:border-loom-muted"}`}
             >
               Views
@@ -710,7 +728,7 @@ export function ExplorerView() {
                   </button>
                   {tableViews.map((v) => (
                     <div key={v.id} className="flex items-center gap-1 px-2 py-0.5 group">
-                      <button type="button" onClick={() => { pushTableUndo(); applyTableView(v.id); setFilterInputValues(v.columnFilters ?? {}); setViewsOpen(false); }} className="flex-1 text-left text-2xs text-loom-text hover:bg-loom-elevated truncate">
+                      <button type="button" onClick={() => { pushTableUndo(); applyTableView(v.id); setFilterInputValues(v.columnFilters ?? {}); setViewsOpen(false); }} className="flex-1 text-left text-2xs text-loom-text hover:bg-loom-elevated truncate" title={v.name}>
                         {v.name}
                       </button>
                       <button type="button" onClick={() => removeTableView(v.id)} className="opacity-0 group-hover:opacity-100 text-loom-muted hover:text-loom-text text-2xs" aria-label={`Remove ${v.name}`}>×</button>
@@ -722,14 +740,14 @@ export function ExplorerView() {
               </>
             )}
           </div>
-          <span className="text-loom-border/50 hidden sm:inline">|</span>
-          <button type="button" onClick={undoTable} disabled={tableUndoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Undo">↶</button>
-          <button type="button" onClick={redoTable} disabled={tableRedoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Redo">↷</button>
+          <span className="text-loom-border hidden sm:inline" aria-hidden>|</span>
+          <button type="button" onClick={undoTable} disabled={tableUndoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Undo" aria-label="Undo table change">↶</button>
+          <button type="button" onClick={redoTable} disabled={tableRedoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Redo" aria-label="Redo table change">↷</button>
           {!isMobile && (
             <>
-              <span className="text-loom-border/50">|</span>
-              <button type="button" onClick={() => toggleEnhance("sparklineViz", "line")} className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance.sparklineViz === "line" ? "bg-loom-accent/20 text-loom-text" : "text-loom-muted"}`}>Line</button>
-              <button type="button" onClick={() => toggleEnhance("sparklineViz", "histogram")} className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance.sparklineViz === "histogram" ? "bg-loom-accent/20 text-loom-text" : "text-loom-muted"}`}>Hist</button>
+              <span className="text-loom-border" aria-hidden>|</span>
+              <button type="button" onClick={() => toggleEnhance("sparklineViz", "line")} aria-pressed={tableEnhance.sparklineViz === "line"} title="Header sparklines as lines" className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance.sparklineViz === "line" ? "bg-loom-accent/20 text-loom-text" : "text-loom-muted"}`}>Line</button>
+              <button type="button" onClick={() => toggleEnhance("sparklineViz", "histogram")} aria-pressed={tableEnhance.sparklineViz === "histogram"} title="Header sparklines as histograms" className={`px-1.5 py-0.5 rounded text-2xs ${tableEnhance.sparklineViz === "histogram" ? "bg-loom-accent/20 text-loom-text" : "text-loom-muted"}`}>Hist</button>
             </>
           )}
         </div>
@@ -753,10 +771,10 @@ export function ExplorerView() {
         return (
           <div className="px-3 py-2 border-b border-loom-border bg-loom-surface/80 text-2xs space-y-1 animate-fade-in">
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-loom-text">{profilingCol} <span className="font-normal text-loom-muted">{stat?.data_type ?? ""}</span></span>
-              <button type="button" onClick={() => setProfilingCol(null)} className="text-loom-muted hover:text-loom-text">×</button>
+              <span className="font-semibold text-loom-text truncate min-w-0" title={profilingCol}>{profilingCol} <span className="font-normal text-loom-muted">{stat?.data_type ?? ""}</span></span>
+              <button type="button" onClick={() => setProfilingCol(null)} className="text-loom-muted hover:text-loom-text min-w-6 min-h-6 shrink-0" aria-label={`Close ${profilingCol} profile`}>×</button>
             </div>
-            <div className="flex gap-4 text-loom-muted">
+            <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-loom-muted">
               <span>Null: {nullCount} ({vals.length > 0 ? ((nullCount / vals.length) * 100).toFixed(1) : 0}%)</span>
               <span>Unique: {unique}</span>
               {stat?.min_value != null && <span>Min: {stat.min_value}</span>}
@@ -873,6 +891,7 @@ export function ExplorerView() {
                         if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
                       }}
                       title="Click to sort, right-click or long-press to profile, drag to reorder"
+                      aria-sort={isSorted ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                     >
                       <div className="flex flex-col gap-0.5">
                         <span className="inline-flex items-center gap-1">
@@ -882,8 +901,8 @@ export function ExplorerView() {
                               {sortDir === "asc" ? "↑" : "↓"}
                             </span>
                           )}
-                          {trend === 1 && <span className="text-green-500/90 font-normal" aria-label="trend up">↑</span>}
-                          {trend === -1 && <span className="text-amber-500/90 font-normal" aria-label="trend down">↓</span>}
+                          {trend === 1 && <span className="text-loom-success font-normal" aria-label="trend up">↑</span>}
+                          {trend === -1 && <span className="text-loom-warning font-normal" aria-label="trend down">↓</span>}
                           {nullP != null && (
                             <span className="text-loom-muted/80 font-normal normal-case" title={`${nullP.toFixed(1)}% null`}>
                               {nullP >= 1 ? `${nullP.toFixed(0)}%∅` : "<1%∅"}
@@ -898,7 +917,7 @@ export function ExplorerView() {
                             {colData.values.length >= 2 && enhance.sparklineViz === "histogram" && (
                               <MiniHistogram values={colData.values} className="opacity-80" />
                             )}
-                            <span className="text-[10px] text-loom-muted/80 font-normal normal-case">
+                            <span className="text-2xs text-loom-muted/80 font-normal normal-case">
                               {colData.min === colData.max
                                 ? colData.min.toLocaleString()
                                 : `${colData.min.toLocaleString()} – ${colData.max.toLocaleString()}`}
@@ -912,8 +931,8 @@ export function ExplorerView() {
               </tr>
               {(!isMobile || showColumnFilters) && (
               <tr className="bg-loom-surface/50">
-                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-20 bg-loom-surface w-8" style={{ top: 40 }} />
-                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-20 bg-loom-surface w-10" style={{ top: 40 }} />
+                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-10 bg-loom-surface w-8" />
+                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-10 bg-loom-surface w-10" />
                 {columns.map((col) => (
                   <th key={col} className="px-1 py-0.5 border-b border-loom-border">
                     <input
@@ -930,6 +949,26 @@ export function ExplorerView() {
               )}
             </thead>
             <tbody>
+              {displayRows.length === 0 && (
+                <tr>
+                  <td colSpan={columns.length + 2} className="px-4 py-8 text-center font-sans text-xs text-loom-muted">
+                    No rows match the current filters.{" "}
+                    <button
+                      type="button"
+                      className="text-loom-accent hover:underline"
+                      onClick={() => {
+                        setTableFilterRowIndices(null);
+                        for (const t of Object.values(filterDebounceRef.current)) clearTimeout(t);
+                        filterDebounceRef.current = {};
+                        setTableColumnFilters({});
+                        setFilterInputValues({});
+                      }}
+                    >
+                      Clear filters
+                    </button>
+                  </td>
+                </tr>
+              )}
               {useVirtual
                 ? (() => {
                   const items = rowVirtualizer.getVirtualItems();
@@ -946,7 +985,7 @@ export function ExplorerView() {
                         return (
                           <tr
                             key={virtualRow.key}
-                            className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 ${isAnomaly ? "bg-amber-500/10 border-l-2 border-l-amber-500" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
+                            className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 ${isAnomaly ? "bg-loom-warning/10 border-l-2 border-l-loom-warning" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
                             title={isAnomaly ? "Marked as anomaly (Smart tab)" : undefined}
                             aria-rowindex={ri + 1}
                             onMouseEnter={() => setHoveredRowIndex(originalIdx)}
@@ -977,7 +1016,7 @@ export function ExplorerView() {
                   return (
                     <tr
                       key={ri}
-                      className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 transition-colors ${isAnomaly ? "bg-amber-500/10 border-l-2 border-l-amber-500" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
+                      className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 transition-colors ${isAnomaly ? "bg-loom-warning/10 border-l-2 border-l-loom-warning" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
                       title={isAnomaly ? "Marked as anomaly (Smart tab)" : undefined}
                       aria-rowindex={ri + 1}
                       onMouseEnter={() => setHoveredRowIndex(originalIdx)}
