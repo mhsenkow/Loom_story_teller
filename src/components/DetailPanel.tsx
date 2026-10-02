@@ -4051,13 +4051,20 @@ function ChartPanelView() {
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Legend position</label>
                 <select
-                  value={chartVisualOverrides.legendPosition ?? "none"}
+                  value={chartVisualOverrides.legendPosition ?? "auto"}
                   onChange={(e) => updateOverride("legendPosition", e.target.value)}
                   className="loom-input w-full text-xs py-1.5"
                   disabled={!caps.legend}
                 >
-                  {["none", "top-right", "bottom", "right"].map((p) => (
-                    <option key={p} value={p}>{p === "none" ? "None" : p === "top-right" ? "Top right" : p}</option>
+                  {[
+                    ["auto", "Auto (emptiest corner)"],
+                    ["top-right", "Top right"],
+                    ["top-left", "Top left"],
+                    ["bottom-right", "Bottom right"],
+                    ["bottom-left", "Bottom left"],
+                    ["none", "None"],
+                  ].map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
                 {!caps.legend && (

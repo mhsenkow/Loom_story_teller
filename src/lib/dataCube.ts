@@ -15,6 +15,7 @@ import type { ColumnInfo } from "./store";
 import type { YAggregateOption } from "./recommendations";
 import { sampleContinuous } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
+import { drawEmptyMessage, drawRampKey, mixColor, resolveChartInk, withAlpha, type ChartInk } from "./chartInk";
 
 export type CubeAxisKind = "category" | "numeric" | "time";
 
@@ -740,7 +741,7 @@ export function drawDataCubeBackLayer(ctx: CanvasRenderingContext2D, cube: DataC
   let far = 0;
   proj.forEach((p, i) => { if (p.depth > proj[far]!.depth) far = i; });
   const fc = corners[far]!;
-  const border = opts.themeBorder ?? "#3a3a44";
+  const ink = cubeInk(opts);
 
   ctx.save();
   ctx.lineWidth = 1;
@@ -757,7 +758,7 @@ export function drawDataCubeBackLayer(ctx: CanvasRenderingContext2D, cube: DataC
       p[others[1]!] = b! * ext[others[1]!]!;
       return p;
     });
-    ctx.fillStyle = withAlphaHex(border, 0.08);
+    ctx.fillStyle = withAlpha(ink.wall, 1);
     ctx.beginPath();
     wallPts.forEach((p, i) => {
       const s = projectCube(v, p[0], p[1], p[2]);
@@ -766,7 +767,7 @@ export function drawDataCubeBackLayer(ctx: CanvasRenderingContext2D, cube: DataC
     ctx.closePath();
     ctx.fill();
     // Gridlines at bin boundaries
-    ctx.strokeStyle = withAlphaHex(border, opts.mini ? 0.35 : 0.55);
+    ctx.strokeStyle = opts.mini ? withAlpha(ink.grid, 0.75) : ink.grid;
     for (const axis of others) {
       const other = others.find((a) => a !== axis)!;
       const n = Math.round((2 * ext[axis]!) / pitch);
@@ -824,9 +825,19 @@ export function drawDataCubeVoxels(ctx: CanvasRenderingContext2D, cube: DataCube
   ctx.restore();
 }
 
-function withAlphaHex(color: string, a: number): string {
-  const rgb = parseHex(color);
-  return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`;
+/**
+ * Chrome colors mixed from the theme bg → text so walls, gridlines and box
+ * edges stay visible in light and dark themes (raw `themeBorder` is nearly
+ * the bg in dark themes). Transparent bgs fall back to the document theme.
+ */
+function cubeInk(opts: DataCubeRenderOpts): ChartInk & { wall: string; grid: string; edge: string } {
+  const ink = resolveChartInk(opts);
+  return {
+    ...ink,
+    wall: withAlpha(mixColor(ink.bg, ink.text, 0.5), ink.light ? 0.05 : 0.06),
+    grid: mixColor(ink.bg, ink.text, ink.light ? 0.16 : 0.2),
+    edge: mixColor(ink.bg, ink.text, ink.light ? 0.38 : 0.42),
+  };
 }
 
 /**
@@ -843,13 +854,13 @@ export function drawDataCubeFrontLayer(
   const { ex, ey, ez, pitch } = cubeExtents(cube);
   const corners = boxCorners(ex, ey, ez);
   const proj = corners.map((c) => projectCube(v, c[0], c[1], c[2]));
-  const text = opts.themeText ?? "#e8e8ec";
-  const muted = opts.themeMuted ?? "#8a8a96";
-  const border = opts.themeBorder ?? "#3a3a44";
+  const ink = cubeInk(opts);
+  const text = ink.text;
+  const muted = ink.muted;
   const font = opts.fontFamily ?? "Inter";
 
   ctx.save();
-  ctx.strokeStyle = withAlphaHex(border, 0.9);
+  ctx.strokeStyle = ink.edge;
   ctx.lineWidth = 1;
   for (const [a, b] of BOX_EDGES) {
     if (a === far || b === far) continue;
@@ -867,7 +878,7 @@ export function drawDataCubeFrontLayer(
     const frame: Vec3[] = [[-ex - m, -ey - m, zc], [ex + m, -ey - m, zc], [ex + m, ey + m, zc], [-ex - m, ey + m, zc]];
     ctx.save();
     ctx.setLineDash([5, 4]);
-    ctx.strokeStyle = withAlphaHex(text, 0.7);
+    ctx.strokeStyle = withAlpha(text, 0.7);
     ctx.lineWidth = 1.25;
     ctx.beginPath();
     frame.forEach((p, i) => {
@@ -978,6 +989,10 @@ export function drawDataCubeFrontLayer(
       if (i % step !== 0 && !isHover) continue;
       const p = pts[i]!;
       ctx.font = `${isHover ? 600 : 400} 10px ${font}, sans-serif`;
+      ctx.strokeStyle = withAlpha(ink.bg, 0.85);
+      ctx.lineWidth = 3;
+      ctx.lineJoin = "round";
+      ctx.strokeText(labels[i]!, p.sx + ox * 8, p.sy + oy * 8);
       ctx.fillStyle = isHover ? text : muted;
       ctx.fillText(labels[i]!, p.sx + ox * 8, p.sy + oy * 8);
     }
@@ -1039,28 +1054,21 @@ export function drawDataCubeFrontLayer(
 }
 
 function drawCubeLegend(ctx: CanvasRenderingContext2D, cube: DataCube, v: CubeView, opts: DataCubeRenderOpts): void {
-  const font = opts.fontFamily ?? "Inter";
-  const barW = Math.min(120, v.w * 0.28);
-  const x = v.w - barW - 14;
-  const y = 16;
-  const steps = 24;
-  for (let i = 0; i < steps; i++) {
-    const t = i / (steps - 1);
-    ctx.fillStyle = sampleContinuous(opts.ramp.length ? opts.ramp : ["#c6dbef", "#08519c"], 0.15 + 0.85 * t);
-    ctx.fillRect(x + (barW * i) / steps, y + 14, barW / steps + 0.5, 7);
-  }
-  ctx.font = `600 10px ${font}, sans-serif`;
-  ctx.fillStyle = opts.themeText ?? "#e8e8ec";
-  ctx.textAlign = "right";
-  ctx.textBaseline = "alphabetic";
-  ctx.fillText(fitTextEllipsis(ctx, cube.valueLabel, barW + 40), x + barW, y + 10);
-  ctx.font = `10px ${font}, sans-serif`;
-  ctx.fillStyle = opts.themeMuted ?? "#8a8a96";
-  ctx.textBaseline = "top";
-  ctx.textAlign = "left";
-  ctx.fillText(formatCubeNumber(cube.vMin), x, y + 24);
-  ctx.textAlign = "right";
-  ctx.fillText(formatCubeNumber(cube.vMax), x + barW, y + 24);
+  const ramp = opts.ramp.length ? opts.ramp : ["#c6dbef", "#08519c"];
+  const width = Math.max(110, Math.min(170, v.w * 0.3));
+  // Same 0.15 → 1 slice of the ramp the voxels use, with round tick values under it.
+  drawRampKey(ctx, {
+    x: v.w - width - 12,
+    y: 12,
+    width,
+    min: cube.vMin,
+    max: cube.vMax,
+    colorAt: (t) => sampleContinuous(ramp, 0.15 + 0.85 * t),
+    title: cube.valueLabel,
+    ink: resolveChartInk(opts),
+    fontFamily: opts.fontFamily ?? "Inter",
+    panel: true,
+  });
 }
 
 /** Full Canvas 2D frame: background, back walls, voxels, front chrome. */
@@ -1073,8 +1081,16 @@ export function renderDataCubeCanvas(
 ): void {
   const v = cubeView(opts.camera, w, h);
   ctx.save();
-  ctx.fillStyle = opts.themeBg ?? "#0a0a0c";
-  ctx.fillRect(0, 0, w, h);
+  const ink = resolveChartInk(opts);
+  if (ink.paintBg) {
+    ctx.fillStyle = ink.bg;
+    ctx.fillRect(0, 0, w, h);
+  }
+  if (!cube.cells.length) {
+    drawEmptyMessage(ctx, w, h, "No rows land in the cube — try other fields", ink, opts.fontFamily ?? "Inter", opts.mini);
+    ctx.restore();
+    return;
+  }
   const far = drawDataCubeBackLayer(ctx, cube, v, opts);
   drawDataCubeVoxels(ctx, cube, v, opts);
   drawDataCubeFrontLayer(ctx, cube, v, far, opts);

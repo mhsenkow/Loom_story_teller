@@ -7,8 +7,14 @@
 
 import type { ChartKind } from "./recommendations";
 
+/** Kinds with no edge axes — they don't need tick / axis-title gutters. */
 const NON_CARTESIAN = new Set<ChartKind>([
-  "pie", "treemap", "sunburst", "forceBubble", "sankey", "radar", "choropleth",
+  "pie", "treemap", "sunburst", "forceBubble", "sankey", "radar", "funnel",
+  // Maps and 3D scenes label inside their own frame
+  "choropleth", "geoPoints", "geoBubbles", "geoHex", "globe", "globeTrail", "arcMap",
+  "scatter3d", "trailRibbon", "quakeTerrain", "firefly", "loomWeave", "dataCube",
+  // Glyph / radial creative kinds
+  "chernoff", "glyphStar", "flower", "waffle", "isotype", "spiral", "radialBar", "chord",
 ]);
 
 /** Bottom of title band (px from canvas top) for each title layout. */

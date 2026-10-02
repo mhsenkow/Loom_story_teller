@@ -13,6 +13,7 @@ import {
   titlePositions,
   titlePreferCenter,
 } from "./chartLayout";
+import { formatAxisValue, layoutBandLabels, niceTicks } from "./chartAxes";
 
 export type ChartBackgroundStyle =
   | "default"
@@ -45,6 +46,13 @@ export interface ChartLookOpts {
   tickCount?: number;
   tickRotation?: number;
   fontFamily?: string;
+}
+
+/** Plot area in canvas px. Pass instead of a uniform `pad` when a renderer shifts its plot (e.g. a category-label gutter). */
+export type PlotRect = { left: number; top: number; right: number; bottom: number };
+
+function plotRect(w: number, h: number, pad: number | PlotRect): PlotRect {
+  return typeof pad === "number" ? { left: pad, top: pad, right: w - pad, bottom: h - pad } : pad;
 }
 
 /** Full-bleed atmosphere behind marks — must differ by design system. */
@@ -204,16 +212,13 @@ export function drawAxisFrame(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
-  pad: number,
+  pad: number | PlotRect,
   opts?: ChartLookOpts,
 ): void {
   const style = (opts?.axisStyle ?? "rule") as ChartAxisStyle;
   const color = opts?.axisLineColor ?? opts?.themeBorder ?? "#2a2a30";
   const lw = opts?.axisLineWidth ?? 1;
-  const left = pad;
-  const right = w - pad;
-  const top = pad;
-  const bottom = h - pad;
+  const { left, right, top, bottom } = plotRect(w, h, pad);
 
   ctx.save();
   ctx.strokeStyle = color;
@@ -302,13 +307,20 @@ export function drawAxisFrame(
   ctx.restore();
 }
 
-/** Grid dialect tied to design system — horizontal-only for newspaper/Tufte soft. */
+/** Value domains for gridlines; `null` on an axis = categorical (no rules across it). */
+export type GridDomains = { x?: [number, number] | null; y?: [number, number] | null };
+
+/**
+ * Grid dialect tied to design system — horizontal-only for newspaper/Tufte soft.
+ * With `domains`, rules sit on the same round values as the tick labels.
+ */
 export function drawChartGrid(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
-  pad: number,
+  pad: number | PlotRect,
   opts?: ChartLookOpts,
+  domains?: GridDomains,
 ): void {
   if (opts?.showGrid === false) return;
   const style = opts?.gridStyle ?? "solid";
@@ -316,10 +328,7 @@ export function drawChartGrid(
   const axis = opts?.axisStyle ?? "rule";
   const n = Math.max(2, opts?.tickCount ?? 5);
   const alpha = opts?.gridOpacity ?? 0.5;
-  const left = pad;
-  const right = w - pad;
-  const top = pad;
-  const bottom = h - pad;
+  const { left, right, top, bottom } = plotRect(w, h, pad);
 
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -328,18 +337,28 @@ export function drawChartGrid(
   if (style === "dashed") ctx.setLineDash([6, 4]);
   else if (style === "dotted") ctx.setLineDash([2, 3]);
 
+  const tickFractions = (d: [number, number]) =>
+    niceTicks(d[0], d[1], n, false).ticks.map((v) => (v - d[0]) / (d[1] - d[0] || 1));
+  const evenFractions = Array.from({ length: n + 1 }, (_, i) => i / n);
+
   // Newspaper / mercury / tape: horizontal rules only (less chartjunk)
   const horizontalOnly = axis === "mercury" || axis === "tape" || axis === "spine";
-  for (let i = 0; i <= n; i++) {
-    const y = top + (i / n) * (bottom - top);
-    ctx.beginPath();
-    ctx.moveTo(left, y);
-    ctx.lineTo(right, y);
-    ctx.stroke();
+  if (domains?.y !== null) {
+    const ys = domains?.y ? tickFractions(domains.y) : evenFractions;
+    for (const t of ys) {
+      if (t < -1e-6 || t > 1 + 1e-6) continue;
+      const y = Math.round(bottom - t * (bottom - top)) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(left, y);
+      ctx.lineTo(right, y);
+      ctx.stroke();
+    }
   }
-  if (!horizontalOnly) {
-    for (let i = 0; i <= n; i++) {
-      const x = left + (i / n) * (right - left);
+  if (!horizontalOnly && domains?.x !== null) {
+    const xs = domains?.x ? tickFractions(domains.x) : evenFractions;
+    for (const t of xs) {
+      if (t < -1e-6 || t > 1 + 1e-6) continue;
+      const x = Math.round(left + t * (right - left)) + 0.5;
       ctx.beginPath();
       ctx.moveTo(x, top);
       ctx.lineTo(x, bottom);
@@ -350,13 +369,11 @@ export function drawChartGrid(
   ctx.restore();
 }
 
-function formatTick(v: number): string {
-  if (Math.abs(v) >= 1_000_000) return (v / 1_000_000).toFixed(1) + "M";
-  if (Math.abs(v) >= 1000) return (v / 1000).toFixed(1) + "K";
-  return Number.isInteger(v) ? String(v) : v.toFixed(1);
-}
-
-/** Tick labels + stub marks — density/placement depends on axisStyle. */
+/**
+ * Tick labels + stub marks at round values inside [min, max] — density/placement
+ * depends on axisStyle. Pass `show.x = false` for category axes (draw those with
+ * `drawBandAxisX`) and `show.y = false` for horizontal-band charts.
+ */
 export function drawChartTicks(
   ctx: CanvasRenderingContext2D,
   xMin: number,
@@ -365,20 +382,18 @@ export function drawChartTicks(
   yMax: number,
   w: number,
   h: number,
-  pad: number,
+  pad: number | PlotRect,
   opts?: ChartLookOpts,
+  show: { x?: boolean; y?: boolean; xFormat?: (v: number, step: number) => string; yFormat?: (v: number, step: number) => string } = {},
 ): void {
   const n = Math.max(2, opts?.tickCount ?? 5);
   const fontFamily = opts?.fontFamily ?? "Inter";
   const axisLabelColor = opts?.axisLabelColor ?? "#6b6b78";
-  const fontSize = opts?.axisFontSize ?? 9;
+  const fontSize = Math.max(9, opts?.axisFontSize ?? 10);
   const rotDeg = opts?.tickRotation ?? 0;
   const rotRad = (rotDeg * Math.PI) / 180;
   const axis = (opts?.axisStyle ?? "rule") as ChartAxisStyle;
-  const left = pad;
-  const right = w - pad;
-  const top = pad;
-  const bottom = h - pad;
+  const { left, right, top, bottom } = plotRect(w, h, pad);
   const stub = axis === "index" || axis === "mercury" ? 5 : axis === "ladder" ? 7 : 4;
 
   ctx.save();
@@ -386,50 +401,238 @@ export function drawChartTicks(
   ctx.strokeStyle = opts?.axisLineColor ?? opts?.themeBorder ?? axisLabelColor;
   ctx.lineWidth = Math.max(1, (opts?.axisLineWidth ?? 1) * 0.7);
   ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+  ctx.textBaseline = "alphabetic";
 
   // X ticks
-  ctx.textAlign = "center";
-  for (let i = 0; i <= n; i++) {
-    const v = xMin + (i / n) * (xMax - xMin);
-    const x = left + (i / n) * (right - left);
-    // stub upward from baseline
-    if (axis !== "spine") {
-      ctx.beginPath();
-      ctx.moveTo(x, bottom);
-      ctx.lineTo(x, bottom + (axis === "mercury" ? stub + 1 : stub));
-      ctx.stroke();
-    }
-    const labelY = Math.min(h - 4, bottom + stub + fontSize + 2);
-    const label = formatTick(v);
-    if (rotDeg !== 0) {
-      ctx.save();
-      ctx.translate(x, labelY);
-      ctx.rotate(-rotRad);
-      ctx.fillText(label, 0, 0);
-      ctx.restore();
-    } else {
-      // Soft-clamp edge labels so they don't clip the canvas
-      const tw = ctx.measureText(label).width;
-      const lx = Math.max(tw / 2 + 4, Math.min(w - tw / 2 - 4, x));
-      ctx.fillText(label, lx, labelY);
+  if (show.x !== false && Number.isFinite(xMin) && Number.isFinite(xMax)) {
+    const xs = niceTicks(xMin, xMax, n, false);
+    const span = xMax - xMin || 1;
+    ctx.textAlign = "center";
+    let lastRight = -Infinity;
+    for (const v of xs.ticks) {
+      const x = left + ((v - xMin) / span) * (right - left);
+      if (x < left - 0.5 || x > right + 0.5) continue;
+      // stub downward from baseline
+      if (axis !== "spine") {
+        ctx.beginPath();
+        ctx.moveTo(x, bottom);
+        ctx.lineTo(x, bottom + (axis === "mercury" ? stub + 1 : stub));
+        ctx.stroke();
+      }
+      const labelY = Math.min(h - 4, bottom + stub + fontSize + 2);
+      const label = show.xFormat ? show.xFormat(v, xs.step) : formatAxisValue(v, xs.step);
+      if (rotDeg !== 0) {
+        ctx.save();
+        ctx.translate(x, labelY);
+        ctx.rotate(-rotRad);
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+      } else {
+        // Soft-clamp edge labels so they don't clip; skip any that would collide
+        const tw = ctx.measureText(label).width;
+        const lx = Math.max(tw / 2 + 4, Math.min(w - tw / 2 - 4, x));
+        if (lx - tw / 2 < lastRight + 6) continue;
+        ctx.fillText(label, lx, labelY);
+        lastRight = lx + tw / 2;
+      }
     }
   }
 
   // Y ticks
-  ctx.textAlign = "right";
-  for (let i = 0; i <= n; i++) {
-    const v = yMin + (i / n) * (yMax - yMin);
-    const y = bottom - (i / n) * (bottom - top);
-    if (axis !== "mercury") {
-      ctx.beginPath();
-      ctx.moveTo(left, y);
-      ctx.lineTo(left - stub, y);
-      ctx.stroke();
+  if (show.y !== false && Number.isFinite(yMin) && Number.isFinite(yMax)) {
+    const ys = niceTicks(yMin, yMax, n, false);
+    const span = yMax - yMin || 1;
+    ctx.textAlign = "right";
+    for (const v of ys.ticks) {
+      const y = bottom - ((v - yMin) / span) * (bottom - top);
+      if (y < top - 0.5 || y > bottom + 0.5) continue;
+      if (axis !== "mercury") {
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(left - stub, y);
+        ctx.stroke();
+      }
+      const label = show.yFormat ? show.yFormat(v, ys.step) : formatAxisValue(v, ys.step);
+      const lx = Math.max(4, left - stub - 4);
+      const ly = Math.max(fontSize, Math.min(h - 4, y + fontSize * 0.35));
+      ctx.fillText(label, lx, ly);
     }
-    const label = formatTick(v);
-    const lx = Math.max(4, left - stub - 4);
-    const ly = Math.max(fontSize, Math.min(h - 4, y + fontSize * 0.35));
-    ctx.fillText(label, lx, ly);
+  }
+  ctx.restore();
+}
+
+/**
+ * Category labels under a band axis. `centers` are the band midpoints in px.
+ * Ordered axes (time, sorted keys) thin to evenly spaced flat labels; nominal
+ * axes go flat → ellipsized → angled so every bar keeps a readable name.
+ */
+export function drawBandAxisX(
+  ctx: CanvasRenderingContext2D,
+  labels: string[],
+  centers: number[],
+  bandWidth: number,
+  w: number,
+  h: number,
+  pad: number | PlotRect,
+  opts?: ChartLookOpts,
+  mode: "nominal" | "ordered" = "nominal",
+): void {
+  if (labels.length === 0) return;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const color = opts?.axisLabelColor ?? opts?.themeMuted ?? "#6b6b78";
+  const baseFont = Math.max(9, opts?.axisFontSize ?? 10);
+  const { bottom } = plotRect(w, h, pad);
+  // Labels live between the baseline and the axis field name near the canvas floor
+  const room = Math.max(14, h - bottom - 22);
+
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.textBaseline = "top";
+
+  if (mode === "ordered") {
+    ctx.font = `${baseFont}px '${fontFamily}', sans-serif`;
+    const widest = Math.max(...labels.map((l) => ctx.measureText(l).width));
+    const slot = Math.max(1, widest + 14);
+    const span = Math.max(1, (centers[centers.length - 1] ?? 0) - (centers[0] ?? 0));
+    const maxLabels = Math.max(2, Math.floor(span / slot) + 1);
+    const every = Math.max(1, Math.ceil(labels.length / maxLabels));
+    ctx.textAlign = "center";
+    let lastRight = -Infinity;
+    for (let i = 0; i < labels.length; i += every) {
+      const text = labels[i]!;
+      const tw = ctx.measureText(text).width;
+      const x = Math.max(tw / 2 + 4, Math.min(w - tw / 2 - 4, centers[i]!));
+      if (x - tw / 2 < lastRight + 8) continue;
+      ctx.fillText(text, x, bottom + 6);
+      lastRight = x + tw / 2;
+    }
+    ctx.restore();
+    return;
+  }
+
+  const lay = layoutBandLabels(ctx, labels, bandWidth, room, fontFamily, baseFont);
+  ctx.font = `${lay.fontSize}px '${fontFamily}', sans-serif`;
+  labels.forEach((label, i) => {
+    if (i % lay.every !== 0) return;
+    const text = fitTextEllipsis(ctx, label, lay.maxWidth);
+    const x = centers[i]!;
+    if (lay.angle === 0) {
+      ctx.textAlign = "center";
+      ctx.fillText(text, x, bottom + 6);
+    } else {
+      ctx.save();
+      ctx.translate(x + lay.fontSize * 0.3, bottom + 6);
+      ctx.rotate(lay.angle);
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+    }
+  });
+  ctx.restore();
+}
+
+/** Category labels left of a horizontal band axis, right-aligned to `x`. */
+export function drawBandAxisY(
+  ctx: CanvasRenderingContext2D,
+  labels: string[],
+  centers: number[],
+  bandHeight: number,
+  x: number,
+  maxWidth: number,
+  opts?: ChartLookOpts,
+): void {
+  if (labels.length === 0) return;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const color = opts?.axisLabelColor ?? opts?.themeMuted ?? "#6b6b78";
+  const fontSize = Math.max(9, Math.min(opts?.axisFontSize ?? 11, bandHeight * 0.6));
+  const every = Math.max(1, Math.ceil((fontSize + 2) / Math.max(1, bandHeight)));
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  labels.forEach((label, i) => {
+    if (i % every !== 0) return;
+    ctx.fillText(fitTextEllipsis(ctx, label, maxWidth), x, centers[i]!);
+  });
+  ctx.restore();
+}
+
+/**
+ * Tick stubs + labels at explicit x positions (time axes, custom scales).
+ * Labels that would collide with the previous one are skipped.
+ */
+export function drawPositionedLabelsX(
+  ctx: CanvasRenderingContext2D,
+  items: { x: number; label: string }[],
+  w: number,
+  h: number,
+  pad: number | PlotRect,
+  opts?: ChartLookOpts,
+): void {
+  const { left, right, bottom } = plotRect(w, h, pad);
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const fontSize = Math.max(9, opts?.axisFontSize ?? 10);
+  ctx.save();
+  ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+  ctx.strokeStyle = opts?.axisLineColor ?? opts?.themeBorder ?? "#6b6b78";
+  ctx.lineWidth = Math.max(1, (opts?.axisLineWidth ?? 1) * 0.7);
+  ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  let lastRight = -Infinity;
+  for (const it of items) {
+    if (it.x < left - 0.5 || it.x > right + 0.5) continue;
+    const tw = ctx.measureText(it.label).width;
+    const lx = Math.max(tw / 2 + 4, Math.min(w - tw / 2 - 4, it.x));
+    if (lx - tw / 2 < lastRight + 8) continue;
+    ctx.beginPath();
+    ctx.moveTo(it.x, bottom);
+    ctx.lineTo(it.x, bottom + 4);
+    ctx.stroke();
+    ctx.fillText(it.label, lx, Math.min(h - 4, bottom + 4 + fontSize + 2));
+    lastRight = lx + tw / 2;
+  }
+  ctx.restore();
+}
+
+/** Vertical sequential key (top = high). Labels sit right of the ramp. */
+export function drawColorRamp(
+  ctx: CanvasRenderingContext2D,
+  stops: string[],
+  sample: (stops: string[], t: number) => string,
+  x: number,
+  y: number,
+  height: number,
+  lowLabel: string,
+  highLabel: string,
+  opts?: ChartLookOpts,
+  title?: string,
+): void {
+  if (!stops.length || height < 24) return;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const rampW = 8;
+  ctx.save();
+  const steps = Math.max(8, Math.round(height / 3));
+  for (let i = 0; i < steps; i++) {
+    const t = 1 - i / (steps - 1);
+    ctx.fillStyle = sample(stops, t);
+    ctx.fillRect(x, y + (i / steps) * height, rampW, height / steps + 0.75);
+  }
+  ctx.strokeStyle = opts?.themeBorder ?? "#2a2a30";
+  ctx.lineWidth = 0.5;
+  ctx.strokeRect(x + 0.25, y + 0.25, rampW - 0.5, height - 0.5);
+  ctx.fillStyle = opts?.axisLabelColor ?? opts?.themeMuted ?? "#6b6b78";
+  ctx.font = `9px '${fontFamily}', sans-serif`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "top";
+  ctx.fillText(highLabel, x + rampW + 4, y);
+  ctx.textBaseline = "bottom";
+  ctx.fillText(lowLabel, x + rampW + 4, y + height);
+  if (title) {
+    ctx.textBaseline = "bottom";
+    ctx.fillText(fitTextEllipsis(ctx, title, 64), x, y - 4);
   }
   ctx.restore();
 }

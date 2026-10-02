@@ -28,6 +28,20 @@ import {
   type AtlasBundle,
   type AtlasKind,
 } from "./geoAtlas";
+import {
+  resolveChartInk,
+  inkTint,
+  withAlpha,
+  rampColor,
+  sequentialStops,
+  drawEmptyMessage,
+  drawRampKey,
+  rampKeyHeight,
+  drawSizeKey,
+  categoryIndex,
+  radiusFromPointSize,
+  type ChartInk,
+} from "./chartInk";
 
 export const GEO_MAP_KINDS = [
   "geoPoints",
@@ -102,7 +116,6 @@ export function geoMapDataSupport(
   columns: ColumnInfo[],
   kind: GeoMapKind | "choropleth",
 ): { ok: boolean; reason: string } {
-  const num = columns.filter(isNumCol);
   const lat = columns.find((c) => isLatField(c.name));
   const lon = columns.find((c) => isLonField(c.name));
   const region = columns.find((c) => isGeoRegionField(c.name));
@@ -239,7 +252,9 @@ export interface GeoRenderOpts {
   themeText?: string;
   themeMuted?: string;
   themeBorder?: string;
+  /** Opaque bg is painted; transparent / omitted lets the host surface show through. */
   themeBg?: string;
+  /** Visual → Point size (UI units, 12 = default) or a literal radius for thumbnails. */
   pointSize?: number;
   yAggregate?: YAggregateOption | null;
   yaw?: number;
@@ -274,23 +289,36 @@ function agg(vals: number[], how: YAggregateOption): number {
   }
 }
 
-function seqColor(t: number, stops?: string[]): string {
-  const clamped = Math.max(0, Math.min(1, t));
-  if (stops && stops.length >= 2) {
-    const i = clamped * (stops.length - 1);
-    const lo = Math.floor(i);
-    return stops[Math.min(lo, stops.length - 1)]!;
-  }
-  const hue = 220 - clamped * 180;
-  const sat = 50 + clamped * 30;
-  const lit = 18 + clamped * 42;
-  return `hsl(${hue}, ${sat}%, ${lit}%)`;
+const AGG_WORD: Record<YAggregateOption, string> = { sum: "Sum", mean: "Avg", count: "Count", min: "Min", max: "Max" };
+
+/** Theme-derived basemap colors that separate from the background in light and dark themes. */
+type MapInk = ChartInk & { land: string; landEdge: string; graticule: string; ocean: string; halo: string };
+
+function mapInk(opts: GeoRenderOpts): MapInk {
+  const ink = resolveChartInk(opts);
+  return {
+    ...ink,
+    land: inkTint(ink, ink.light ? 0.1 : 0.15),
+    landEdge: inkTint(ink, ink.light ? 0.34 : 0.36),
+    graticule: inkTint(ink, ink.light ? 0.08 : 0.09),
+    ocean: inkTint(ink, ink.light ? 0.03 : 0.05),
+    halo: ink.bg,
+  };
 }
 
-function withAlpha(hex: string, a: number): string {
-  const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
-  if (!m) return hex;
-  return `rgba(${parseInt(m[1]!, 16)},${parseInt(m[2]!, 16)},${parseInt(m[3]!, 16)},${Math.max(0, Math.min(1, a))})`;
+function paintBackground(ctx: CanvasRenderingContext2D, w: number, h: number, ink: MapInk) {
+  if (!ink.paintBg) return;
+  ctx.fillStyle = ink.bg;
+  ctx.fillRect(0, 0, w, h);
+}
+
+/** Insets that keep the map clear of the title band (top) and an optional key strip (bottom). */
+function mapInsets(pad: number, reserveBottom = 0): { side: number; top: number; bottom: number } {
+  // `pad` is sized for the title band; a ~2:1 world map is width-bound on
+  // square / portrait / phone stages, so keep the full pad only on top.
+  const side = Math.max(8, Math.round(pad * 0.25));
+  const bottom = Math.max(12, Math.round(pad * 0.5)) + reserveBottom;
+  return { side, top: pad, bottom };
 }
 
 function fitProjection(
@@ -299,39 +327,114 @@ function fitProjection(
   w: number,
   h: number,
   pad: number,
+  reserveBottom = 0,
 ): GeoProjection {
-  // `pad` is sized for the title band; a ~2:1 world map is width-bound on
-  // square / portrait / phone stages, so keep the full pad only on top.
-  const side = Math.max(8, Math.round(pad * 0.25));
-  const bottom = Math.max(12, Math.round(pad * 0.5));
+  const { side, top, bottom } = mapInsets(pad, reserveBottom);
   return projection.fitExtent(
     [
-      [side, pad],
-      [w - side, h - bottom],
+      [side, top],
+      [w - side, Math.max(top + 20, h - bottom)],
     ],
     { type: "FeatureCollection", features: atlas.features },
   );
 }
 
-function drawLandOutline(
+/** Lon/lat bounding box of points, or null when they span too much of the globe to zoom in. */
+function regionalBounds(pts: { lon: number; lat: number }[]): [[number, number], [number, number]] | null {
+  if (!pts.length) return null;
+  let lo0 = Infinity, lo1 = -Infinity, la0 = Infinity, la1 = -Infinity;
+  for (const p of pts) {
+    if (p.lon < lo0) lo0 = p.lon;
+    if (p.lon > lo1) lo1 = p.lon;
+    if (p.lat < la0) la0 = p.lat;
+    if (p.lat > la1) la1 = p.lat;
+  }
+  // Wide spreads (or antimeridian-straddling sets) read best on the whole world.
+  if (lo1 - lo0 > 100 || la1 - la0 > 60) return null;
+  // Pad 15% each side with a minimum ~3° window so a single city still shows its coastline.
+  const minSpan = 3;
+  const padLon = Math.max((lo1 - lo0) * 0.15, (minSpan - (lo1 - lo0)) / 2, 0.5);
+  const padLat = Math.max((la1 - la0) * 0.15, (minSpan - (la1 - la0)) / 2, 0.5);
+  return [
+    [Math.max(-180, lo0 - padLon), Math.max(-85, la0 - padLat)],
+    [Math.min(180, lo1 + padLon), Math.min(85, la1 + padLat)],
+  ];
+}
+
+/**
+ * Projection for point layers: whole-world Equal Earth when the data is
+ * global, else Mercator fitted to the points' (padded) extent so a
+ * city-scale dataset isn't two dots on a world map.
+ */
+function fitPointsProjection(
+  pts: { lon: number; lat: number }[],
+  atlas: AtlasBundle,
+  w: number,
+  h: number,
+  pad: number,
+  reserveBottom = 0,
+): { projection: GeoProjection; regional: [[number, number], [number, number]] | null } {
+  const bounds = regionalBounds(pts);
+  if (!bounds) return { projection: fitProjection(geoEqualEarth(), atlas, w, h, pad, reserveBottom), regional: null };
+  const { side, top, bottom } = mapInsets(pad, reserveBottom);
+  const [[x0, y0], [x1, y1]] = bounds;
+  const projection = geoMercator().fitExtent(
+    [
+      [side, top],
+      [w - side, Math.max(top + 20, h - bottom)],
+    ],
+    {
+      type: "Feature",
+      properties: {},
+      geometry: { type: "MultiPoint", coordinates: [[x0, y0], [x1, y0], [x1, y1], [x0, y1]] },
+    },
+  );
+  return { projection, regional: bounds };
+}
+
+/** US state borders add context when a regional view sits inside the lower 48 / AK / HI. */
+function drawRegionalDetail(
+  ctx: CanvasRenderingContext2D,
+  path: ReturnType<typeof geoPath>,
+  bounds: [[number, number], [number, number]],
+  ink: MapInk,
+) {
+  const [[x0, y0], [x1, y1]] = bounds;
+  if (x1 < -170 || x0 > -60 || y1 < 15 || y0 > 72) return;
+  const us = getUsAtlas();
+  ctx.save();
+  ctx.strokeStyle = ink.landEdge;
+  ctx.globalAlpha = 0.7;
+  ctx.lineWidth = 0.6;
+  ctx.setLineDash([3, 2]);
+  for (const f of us.features) {
+    const p = path(f);
+    if (p) ctx.stroke(new Path2D(p));
+  }
+  ctx.restore();
+}
+
+function drawBasemap(
   ctx: CanvasRenderingContext2D,
   path: ReturnType<typeof geoPath>,
   atlas: AtlasBundle,
-  border: string,
-  fill?: string,
+  ink: MapInk,
+  graticule: boolean,
 ) {
-  if (fill) {
-    ctx.fillStyle = fill;
-    for (const f of atlas.features) {
-      const p = path(f);
-      if (!p) continue;
-      const region = new Path2D(p);
-      ctx.fill(region);
-    }
+  ctx.save();
+  if (graticule) {
+    ctx.strokeStyle = ink.graticule;
+    ctx.lineWidth = 0.5;
+    const g = path(geoGraticule10());
+    if (g) ctx.stroke(new Path2D(g));
   }
-  ctx.strokeStyle = border;
+  ctx.fillStyle = ink.land;
+  for (const f of atlas.features) {
+    const p = path(f);
+    if (p) ctx.fill(new Path2D(p));
+  }
+  ctx.strokeStyle = ink.landEdge;
   ctx.lineWidth = 0.6;
-  ctx.globalAlpha = 0.55;
   if (atlas.outline) {
     const p = path(atlas.outline);
     if (p) ctx.stroke(new Path2D(p));
@@ -341,41 +444,15 @@ function drawLandOutline(
       if (p) ctx.stroke(new Path2D(p));
     }
   }
-  ctx.globalAlpha = 1;
+  ctx.restore();
 }
 
-function drawLegendBar(
-  ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  pad: number,
-  minV: number,
-  maxV: number,
-  muted: string,
-  fontFamily: string,
-  stops?: string[],
-) {
-  const legendW = Math.min(120, w - 2 * pad);
-  const legendH = 8;
-  const lx = w - pad - legendW;
-  const ly = h - pad - legendH - 2;
-  const grad = ctx.createLinearGradient(lx, 0, lx + legendW, 0);
-  if (stops && stops.length >= 2) {
-    stops.forEach((c, i) => grad.addColorStop(i / (stops.length - 1), c));
-  } else {
-    grad.addColorStop(0, "hsl(220, 50%, 18%)");
-    grad.addColorStop(0.5, "hsl(130, 65%, 35%)");
-    grad.addColorStop(1, "hsl(40, 80%, 55%)");
-  }
-  ctx.fillStyle = grad;
-  ctx.fillRect(lx, ly, legendW, legendH);
-  ctx.font = `8px '${fontFamily}', sans-serif`;
-  ctx.fillStyle = muted;
-  ctx.textAlign = "left";
-  const fmt = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)));
-  ctx.fillText(fmt(minV), lx, ly - 2);
-  ctx.textAlign = "right";
-  ctx.fillText(fmt(maxV), lx + legendW, ly - 2);
+/** Key strip height reserved under the map when a ramp / size key is shown. */
+const MAP_KEY_H = rampKeyHeight(true) + 6;
+
+function keyOrigin(w: number, h: number, pad: number): { x: number; y: number; width: number } {
+  const { side, bottom } = mapInsets(pad);
+  return { x: side, y: h - bottom - MAP_KEY_H + 4, width: Math.max(80, Math.min(180, w * 0.36)) };
 }
 
 /** Real polygon choropleth. */
@@ -390,8 +467,17 @@ export function renderGeoChoropleth(
   pad: number,
   opts: GeoRenderOpts,
 ): void {
+  const ink = mapInk(opts);
+  const font = opts.fontFamily ?? "Inter";
+  const mini = !!opts.mini;
+  ctx.save();
+  paintBackground(ctx, w, h, ink);
   const ri = columns.indexOf(regionField);
-  if (ri < 0) return;
+  if (ri < 0) {
+    drawEmptyMessage(ctx, w, h, "Choose a country / state column", ink, font, mini);
+    ctx.restore();
+    return;
+  }
   const vi = valueField ? columns.indexOf(valueField) : -1;
   const how: YAggregateOption = vi < 0 ? "count" : (opts.yAggregate ?? "sum");
   const samples = rows.slice(0, 40).map((r) => r[ri]);
@@ -409,31 +495,27 @@ export function renderGeoChoropleth(
   let minV = Infinity;
   let maxV = -Infinity;
   for (const [idx, vals] of groups) {
-    const v = agg(vals.filter((x) => !isNaN(x)), how);
+    const finite = vals.filter((x) => !isNaN(x));
+    if (!finite.length && how !== "count") continue;
+    const v = agg(finite, how);
     values.set(idx, v);
     minV = Math.min(minV, v);
     maxV = Math.max(maxV, v);
   }
-  if (!Number.isFinite(minV)) {
-    minV = 0;
-    maxV = 1;
-  }
-  const span = maxV - minV || 1;
-  const bg = opts.themeBg ?? "#0a0a0c";
-  const muted = opts.themeMuted ?? "#6b6b78";
-  const border = opts.themeBorder ?? "#2a2a30";
-  ctx.save();
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, w, h);
-
+  const showKey = !mini && values.size > 0;
   const projection = fitProjection(
     atlasKind === "us" ? geoMercator() : geoEqualEarth(),
     atlas,
     w,
     h,
     pad,
+    showKey ? MAP_KEY_H : 0,
   );
   const path = geoPath(projection, undefined);
+  const stops = sequentialStops(ink, opts.continuousStops);
+  // Keep the lowest value off the background tone so small regions still read.
+  const colorAt = (t: number) => rampColor(stops, 0.12 + 0.88 * t);
+  const span = maxV - minV;
 
   for (let i = 0; i < atlas.features.length; i++) {
     const f = atlas.features[i]!;
@@ -441,21 +523,33 @@ export function renderGeoChoropleth(
     if (!p) continue;
     const region = new Path2D(p);
     const v = values.get(i);
+    ctx.globalAlpha = 1;
     if (v == null) {
-      ctx.fillStyle = withAlpha(border, 0.25);
+      ctx.fillStyle = ink.land;
     } else {
-      ctx.fillStyle = seqColor((v - minV) / span, opts.continuousStops);
+      ctx.fillStyle = colorAt(span > 0 ? (v - minV) / span : 1);
+      ctx.globalAlpha = Math.max(0.6, opts.opacity ?? 0.9);
     }
-    ctx.globalAlpha = opts.opacity ?? 0.9;
     ctx.fill(region);
-    ctx.strokeStyle = border;
-    ctx.lineWidth = 0.4;
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = v == null ? ink.landEdge : withAlpha(ink.bg, 0.85);
+    ctx.lineWidth = mini ? 0.35 : 0.5;
     ctx.stroke(region);
   }
   ctx.globalAlpha = 1;
-  if (!opts.mini && values.size > 0) {
-    drawLegendBar(ctx, w, h, pad, minV, maxV, muted, opts.fontFamily ?? "Inter", opts.continuousStops);
+  if (values.size === 0) {
+    drawEmptyMessage(ctx, w, h, `No ${regionField} values matched map regions`, ink, font, mini);
+  } else if (showKey) {
+    const k = keyOrigin(w, h, pad);
+    drawRampKey(ctx, {
+      ...k,
+      min: minV,
+      max: maxV,
+      colorAt,
+      title: valueField && vi >= 0 ? `${AGG_WORD[how]} of ${valueField}` : "Rows",
+      ink,
+      fontFamily: font,
+    });
   }
   ctx.restore();
 }
@@ -485,30 +579,68 @@ function resolveLonLat(
   return { lonI, latI };
 }
 
+type GeoPoint = { lon: number; lat: number; category: number; size: number };
+
 function collectPoints(
   rows: unknown[][],
   lonI: number,
   latI: number,
   colorI: number,
   sizeI: number,
-): { lon: number; lat: number; category: number; size: number }[] {
-  const catMap = new Map<string, number>();
-  const out: { lon: number; lat: number; category: number; size: number }[] = [];
+): GeoPoint[] {
+  // Category ids follow first appearance across all rows so they line up with the shared legend.
+  const catMap = categoryIndex(rows, colorI);
+  const out: GeoPoint[] = [];
   for (const r of rows) {
     const lon = num(r[lonI]);
     const lat = num(r[latI]);
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
     if (Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
-    let cat = 0;
-    if (colorI >= 0) {
-      const k = String(r[colorI] ?? "");
-      if (!catMap.has(k)) catMap.set(k, catMap.size % 8);
-      cat = catMap.get(k)!;
-    }
-    const size = sizeI >= 0 ? num(r[sizeI]) : 1;
-    out.push({ lon, lat, category: cat, size: Number.isFinite(size) ? size : 1 });
+    const cat = colorI >= 0 ? (catMap.get(String(r[colorI])) ?? 0) : 0;
+    const size = sizeI >= 0 ? num(r[sizeI]) : NaN;
+    out.push({ lon, lat, category: cat, size });
   }
   return out;
+}
+
+/** Area-true radius scale for a size field (null when there is no usable size data). */
+function sizeScale(
+  pts: GeoPoint[],
+  rMin: number,
+  rMax: number,
+): { radiusOf: (v: number) => number; min: number; max: number } | null {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const p of pts) {
+    if (!Number.isFinite(p.size)) continue;
+    if (p.size < lo) lo = p.size;
+    if (p.size > hi) hi = p.size;
+  }
+  if (!Number.isFinite(lo) || !(hi > lo)) return null;
+  // Non-negative data: radius ∝ √value so area reads true; otherwise √ of the min-max position.
+  const zeroBased = lo >= 0;
+  const radiusOf = (v: number) => {
+    if (!Number.isFinite(v)) return rMin;
+    const t = zeroBased ? Math.max(0, v) / hi : (v - lo) / (hi - lo);
+    return Math.max(rMin, rMax * Math.sqrt(Math.max(0, Math.min(1, t))));
+  };
+  return { radiusOf, min: lo, max: hi };
+}
+
+function pointColor(colors: string[], p: GeoPoint): string {
+  return colors[p.category % colors.length] ?? colors[0] ?? "#6c5ce7";
+}
+
+function drawDot(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, fill: string, alpha: number, halo: string, haloW: number) {
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = withAlpha(fill, alpha);
+  ctx.fill();
+  if (haloW > 0) {
+    ctx.strokeStyle = withAlpha(halo, 0.85);
+    ctx.lineWidth = haloW;
+    ctx.stroke();
+  }
 }
 
 function renderProjectedPoints(
@@ -525,88 +657,151 @@ function renderProjectedPoints(
   opts: GeoRenderOpts,
   mode: "points" | "bubbles" | "hex",
 ): void {
+  const ink = mapInk(opts);
+  const font = opts.fontFamily ?? "Inter";
+  const mini = !!opts.mini;
+  ctx.save();
+  paintBackground(ctx, w, h, ink);
   const { lonI, latI } = resolveLonLat(columns, xField, yField);
-  if (lonI < 0 || latI < 0) return;
+  const atlas = getWorldAtlas();
+  if (lonI < 0 || latI < 0) {
+    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini);
+    ctx.restore();
+    return;
+  }
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const sizeI = sizeField ? columns.indexOf(sizeField) : -1;
   const pts = collectPoints(rows, lonI, latI, colorI, sizeI);
-  const bg = opts.themeBg ?? "#0a0a0c";
-  const border = opts.themeBorder ?? "#2a2a30";
-  const muted = opts.themeMuted ?? "#6b6b78";
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
-  const atlas = getWorldAtlas();
-  ctx.save();
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, w, h);
+  const sized = mode !== "hex" && sizeI >= 0;
+  const showKey = !mini && pts.length > 0 && (mode === "hex" || sized);
 
-  const projection = fitProjection(geoEqualEarth(), atlas, w, h, pad);
+  const { projection, regional } = fitPointsProjection(pts, atlas, w, h, pad, showKey ? MAP_KEY_H : 0);
   const path = geoPath(projection, undefined);
-  drawLandOutline(ctx, path, atlas, border, withAlpha(border, 0.12));
+  drawBasemap(ctx, path, atlas, ink, !mini && !regional);
+  if (regional) drawRegionalDetail(ctx, path, regional, ink);
 
-  // Graticule
-  ctx.strokeStyle = withAlpha(muted, 0.25);
-  ctx.lineWidth = 0.5;
-  const g = path(geoGraticule10());
-  if (g) ctx.stroke(new Path2D(g));
-
-  if (mode === "hex") {
-    const cols = Math.max(12, Math.floor((w - 2 * pad) / 18));
-    const rowsN = Math.max(8, Math.floor((h - 2 * pad) / 16));
-    const counts = Array.from({ length: rowsN }, () => Array(cols).fill(0));
-    let maxC = 1;
-    for (const p of pts) {
-      const xy = projection([p.lon, p.lat]);
-      if (!xy) continue;
-      const [px, py] = xy;
-      const c = Math.min(cols - 1, Math.max(0, Math.floor(((px - pad) / (w - 2 * pad)) * cols)));
-      const r = Math.min(rowsN - 1, Math.max(0, Math.floor(((py - pad) / (h - 2 * pad)) * rowsN)));
-      counts[r]![c]! += 1;
-      maxC = Math.max(maxC, counts[r]![c]!);
-    }
-    const hexR = Math.min((w - 2 * pad) / cols, (h - 2 * pad) / rowsN) * 0.45;
-    for (let r = 0; r < rowsN; r++) {
-      for (let c = 0; c < cols; c++) {
-        const n = counts[r]![c]!;
-        if (n <= 0) continue;
-        const cx = pad + ((c + 0.5) / cols) * (w - 2 * pad);
-        const cy = pad + ((r + 0.5) / rowsN) * (h - 2 * pad);
-        const t = n / maxC;
-        ctx.fillStyle = seqColor(t, opts.continuousStops);
-        ctx.globalAlpha = (opts.opacity ?? 0.85) * (0.35 + t * 0.65);
-        ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-          const a = (Math.PI / 3) * i + Math.PI / 6;
-          const x = cx + hexR * Math.cos(a);
-          const y = cy + hexR * Math.sin(a);
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-  } else {
-    const sizes = pts.map((p) => p.size);
-    const sMin = Math.min(...sizes, 1);
-    const sMax = Math.max(...sizes, 1);
-    const sSpan = sMax - sMin || 1;
-    const base = opts.pointSize ?? (mode === "bubbles" ? 6 : 3.5);
-    for (const p of pts) {
-      const xy = projection([p.lon, p.lat]);
-      if (!xy) continue;
-      const [px, py] = xy;
-      const r =
-        mode === "bubbles"
-          ? base * (0.5 + Math.sqrt((p.size - sMin) / sSpan) * 2.2)
-          : base * (0.7 + ((p.size - sMin) / sSpan) * 0.8);
-      ctx.fillStyle = withAlpha(colors[p.category % colors.length] ?? "#6c5ce7", opts.opacity ?? 0.85);
-      ctx.beginPath();
-      ctx.arc(px, py, Math.max(1.2, r), 0, Math.PI * 2);
-      ctx.fill();
-    }
+  if (pts.length === 0) {
+    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini);
+    ctx.restore();
+    return;
   }
-  ctx.globalAlpha = 1;
+
+  const alpha = opts.opacity ?? 0.85;
+  if (mode === "hex") {
+    const { side, top, bottom } = mapInsets(pad, showKey ? MAP_KEY_H : 0);
+    const plotW = w - 2 * side;
+    const plotH = h - top - bottom;
+    const hr = mini
+      ? Math.max(3.5, Math.min(7, Math.min(w, h) / 26))
+      : Math.max(6, Math.min(16, Math.min(plotW, plotH) / 28));
+    const hw = Math.sqrt(3) * hr;
+    const rowH = 1.5 * hr;
+    const bins = new Map<string, { cx: number; cy: number; n: number }>();
+    let maxC = 0;
+    for (const p of pts) {
+      const xy = projection([p.lon, p.lat]);
+      if (!xy) continue;
+      const row = Math.round((xy[1] - top) / rowH);
+      const off = row & 1 ? hw / 2 : 0;
+      const col = Math.round((xy[0] - side - off) / hw);
+      const key = `${row}:${col}`;
+      let b = bins.get(key);
+      if (!b) {
+        b = { cx: side + col * hw + off, cy: top + row * rowH, n: 0 };
+        bins.set(key, b);
+      }
+      b.n += 1;
+      if (b.n > maxC) maxC = b.n;
+    }
+    const stops = sequentialStops(ink, opts.continuousStops);
+    const colorAt = (t: number) => rampColor(stops, 0.15 + 0.85 * t);
+    const minC = 1;
+    for (const b of bins.values()) {
+      const t = maxC > minC ? (b.n - minC) / (maxC - minC) : 1;
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a = (Math.PI / 3) * i + Math.PI / 6;
+        const x = b.cx + hr * Math.cos(a);
+        const y = b.cy + hr * Math.sin(a);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.globalAlpha = Math.max(0.75, alpha);
+      ctx.fillStyle = colorAt(t);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = withAlpha(ink.bg, 0.7);
+      ctx.lineWidth = 0.6;
+      ctx.stroke();
+    }
+    if (showKey) {
+      drawRampKey(ctx, { ...keyOrigin(w, h, pad), min: minC, max: Math.max(minC, maxC), colorAt, title: "Rows per hex", ink, fontFamily: font });
+    }
+    ctx.restore();
+    return;
+  }
+
+  const n = pts.length;
+  const density = n > 4000 ? 0.6 : n > 1500 ? 0.75 : 1;
+  const base = radiusFromPointSize(opts.pointSize, mode === "bubbles" ? 5 : 3.2) * density;
+  const rMin = Math.max(mini ? 1.6 : 2.2, mode === "bubbles" ? base * 0.6 : base * 0.7);
+  const rMax = mode === "bubbles"
+    ? Math.max(rMin * 2, Math.min(mini ? 9 : 26, Math.min(w, h) * (mini ? 0.06 : 0.045)))
+    : Math.max(rMin * 2, base * 2.2);
+  const scale = sized ? sizeScale(pts, rMin, rMax) : null;
+  const radius = (p: GeoPoint) => (scale ? scale.radiusOf(p.size) : Math.max(rMin, base));
+  // Largest first so small markers stay visible on top.
+  const drawn = scale ? [...pts].sort((a, b) => (Number.isFinite(b.size) ? b.size : -Infinity) - (Number.isFinite(a.size) ? a.size : -Infinity)) : pts;
+  const markAlpha = mode === "bubbles" ? Math.min(alpha, 0.75) : alpha * (n > 1500 ? 0.8 : 1);
+  const haloW = n > 4000 ? 0 : mode === "bubbles" ? 1 : 0.75;
+  for (const p of drawn) {
+    const xy = projection([p.lon, p.lat]);
+    if (!xy) continue;
+    drawDot(ctx, xy[0], xy[1], radius(p), pointColor(colors, p), markAlpha, ink.halo, haloW);
+  }
+  if (showKey && scale) {
+    const { side, bottom } = mapInsets(pad);
+    drawSizeKey(ctx, {
+      x: side,
+      bottom: h - bottom + 2,
+      min: scale.min,
+      max: scale.max,
+      radiusOf: scale.radiusOf,
+      title: sizeField ?? undefined,
+      ink,
+      fontFamily: font,
+      fill: colorI >= 0 ? ink.muted : colors[0],
+      maxWidth: w - 2 * side,
+    });
+  }
   ctx.restore();
+}
+
+/** Mean direction of points on the sphere → [lon, lat] degrees. */
+function sphericalCentroid(pts: { lon: number; lat: number }[]): [number, number] {
+  let x = 0, y = 0, z = 0;
+  for (const p of pts) {
+    const l = (p.lon * Math.PI) / 180;
+    const f = (p.lat * Math.PI) / 180;
+    x += Math.cos(f) * Math.cos(l);
+    y += Math.cos(f) * Math.sin(l);
+    z += Math.sin(f);
+  }
+  const lon = (Math.atan2(y, x) * 180) / Math.PI;
+  const lat = (Math.atan2(z, Math.hypot(x, y)) * 180) / Math.PI;
+  return [Number.isFinite(lon) ? lon : 0, Number.isFinite(lat) ? lat : 0];
+}
+
+type SphereFrame = { cx: number; cy: number; R: number };
+
+/** Globe disc that sits under the title band and inside the side / bottom insets. */
+function globeFrame(w: number, h: number, pad: number, zoom: number, reserveBottom: number): SphereFrame {
+  const { side, top, bottom } = mapInsets(pad, reserveBottom);
+  const availW = Math.max(20, w - 2 * side);
+  const availH = Math.max(20, h - top - bottom);
+  return { cx: w / 2, cy: top + availH / 2, R: (Math.min(availW, availH) / 2) * 0.96 * zoom };
 }
 
 function lonLatToSphere(
@@ -614,15 +809,11 @@ function lonLatToSphere(
   lat: number,
   yaw: number,
   pitch: number,
-  zoom: number,
-  w: number,
-  h: number,
-  _pad: number,
+  frame: SphereFrame,
 ): { sx: number; sy: number; visible: boolean; depth: number } {
   const lam = ((lon - (yaw * 180) / Math.PI + 540) % 360) - 180;
-  const phi = lat;
   const lamR = (lam * Math.PI) / 180;
-  const phiR = (phi * Math.PI) / 180;
+  const phiR = (lat * Math.PI) / 180;
   const x = Math.cos(phiR) * Math.sin(lamR);
   const y = Math.sin(phiR);
   const z = Math.cos(phiR) * Math.cos(lamR);
@@ -630,13 +821,10 @@ function lonLatToSphere(
   const sp = Math.sin(pitch);
   const y2 = y * cp - z * sp;
   const z2 = y * sp + z * cp;
-  const R = Math.min(w, h) * 0.38 * zoom;
-  const cx = w / 2;
-  const cy = h / 2;
   return {
-    sx: cx + x * R,
-    sy: cy - y2 * R,
-    visible: z2 > -0.05,
+    sx: frame.cx + x * frame.R,
+    sy: frame.cy - y2 * frame.R,
+    visible: z2 > 0,
     depth: z2,
   };
 }
@@ -655,36 +843,41 @@ function renderGlobeLike(
   opts: GeoRenderOpts,
   trails: boolean,
 ): void {
+  const ink = mapInk(opts);
+  const font = opts.fontFamily ?? "Inter";
+  const mini = !!opts.mini;
+  ctx.save();
+  paintBackground(ctx, w, h, ink);
   const { lonI, latI } = resolveLonLat(columns, xField, yField);
-  if (lonI < 0 || latI < 0) return;
+  if (lonI < 0 || latI < 0) {
+    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini);
+    ctx.restore();
+    return;
+  }
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const sizeI = sizeField ? columns.indexOf(sizeField) : -1;
-  const yaw = opts.yaw ?? 0.4;
-  const pitch = opts.pitch ?? 0.25;
-  const zoom = opts.zoom ?? 1;
-  const bg = opts.themeBg ?? "#0a0a0c";
-  const border = opts.themeBorder ?? "#2a2a30";
-  const muted = opts.themeMuted ?? "#6b6b78";
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
   const atlas = getWorldAtlas();
+  const pts = collectPoints(rows, lonI, latI, colorI, sizeI);
+  // Without an orbit camera (thumbnails), face the data instead of a fixed meridian.
+  const centroid = opts.yaw == null && pts.length ? sphericalCentroid(pts) : null;
+  const yaw = opts.yaw ?? (centroid ? (centroid[0] * Math.PI) / 180 : 0.4);
+  const pitch = opts.pitch ?? (centroid ? (Math.max(-60, Math.min(60, centroid[1])) * Math.PI) / 180 : 0.25);
+  const zoom = opts.zoom ?? 1;
 
-  ctx.save();
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, w, h);
+  const base = radiusFromPointSize(opts.pointSize, 3.2);
+  const rMin = Math.max(mini ? 1.6 : 2.2, base * 0.7);
+  const scale = sizeI >= 0 ? sizeScale(pts, rMin, Math.max(rMin * 2, base * 2.6)) : null;
+  const showKey = !mini && !!scale;
+  const frame = globeFrame(w, h, pad, zoom, showKey ? MAP_KEY_H : 0);
+  const { cx, cy, R } = frame;
 
-  const R = Math.min(w, h) * 0.38 * zoom;
-  const cx = w / 2;
-  const cy = h / 2;
-
-  // Sphere disc
-  const grd = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.3, R * 0.1, cx, cy, R);
-  grd.addColorStop(0, withAlpha(border, 0.35));
-  grd.addColorStop(1, withAlpha(border, 0.08));
-  ctx.fillStyle = grd;
+  // Ocean disc + rim
+  ctx.fillStyle = ink.ocean;
   ctx.beginPath();
   ctx.arc(cx, cy, R, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = border;
+  ctx.strokeStyle = ink.landEdge;
   ctx.lineWidth = 1;
   ctx.stroke();
 
@@ -693,69 +886,65 @@ function renderGlobeLike(
     .translate([cx, cy])
     .scale(R);
   const path = geoPath(projection, undefined);
-  ctx.fillStyle = withAlpha(border, 0.2);
-  for (const f of atlas.features) {
-    const p = path(f);
-    if (!p) continue;
-    ctx.fill(new Path2D(p));
-  }
-  ctx.strokeStyle = withAlpha(muted, 0.35);
-  ctx.lineWidth = 0.5;
-  if (atlas.outline) {
-    const land = path(atlas.outline);
-    if (land) ctx.stroke(new Path2D(land));
-  }
+  drawBasemap(ctx, path, atlas, ink, !mini);
 
-  const pts = collectPoints(rows, lonI, latI, colorI, sizeI);
-  const sizes = pts.map((p) => p.size);
-  const sMin = Math.min(...sizes, 1);
-  const sMax = Math.max(...sizes, 1);
-  const sSpan = sMax - sMin || 1;
-  const base = opts.pointSize ?? 3.5;
+  const radius = (p: GeoPoint) => (scale ? scale.radiusOf(p.size) : Math.max(rMin, base));
+  const alpha = opts.opacity ?? 0.85;
 
-  if (trails && pts.length >= 2) {
-    // Unwrap by time order (row order) with antimeridian continuity on sphere as short segments.
-    const projected = pts
-      .map((p) => ({ ...p, ...lonLatToSphere(p.lon, p.lat, yaw, pitch, zoom, w, h, pad) }))
-      .filter((p) => p.visible);
-    for (let i = 1; i < projected.length; i++) {
-      const a = projected[i - 1]!;
-      const b = projected[i]!;
-      const fade = 0.2 + 0.8 * (i / (projected.length - 1));
-      ctx.strokeStyle = withAlpha(colors[b.category % colors.length] ?? "#6c5ce7", (opts.opacity ?? 0.85) * fade);
-      ctx.lineWidth = Math.max(1.5, base * (0.5 + ((b.size - sMin) / sSpan)));
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(a.sx, a.sy);
-      ctx.lineTo(b.sx, b.sy);
-      ctx.stroke();
+  if (pts.length === 0) {
+    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini);
+  } else if (trails && pts.length >= 2) {
+    const projected = pts.map((p) => ({ ...p, ...lonLatToSphere(p.lon, p.lat, yaw, pitch, frame) }));
+    // Each color group is its own path in row order (time order upstream).
+    const byCat = new Map<number, typeof projected>();
+    for (const p of projected) {
+      const list = byCat.get(p.category) ?? [];
+      list.push(p);
+      byCat.set(p.category, list);
     }
-    const tip = projected[projected.length - 1];
-    if (tip) {
-      ctx.fillStyle = withAlpha(colors[tip.category % colors.length] ?? "#6c5ce7", opts.opacity ?? 0.9);
-      ctx.beginPath();
-      ctx.arc(tip.sx, tip.sy, base * 1.3, 0, Math.PI * 2);
-      ctx.fill();
+    ctx.lineCap = "round";
+    for (const [cat, list] of byCat) {
+      const col = colors[cat % colors.length] ?? colors[0]!;
+      for (let i = 1; i < list.length; i++) {
+        const a = list[i - 1]!;
+        const b = list[i]!;
+        if (!a.visible || !b.visible) continue;
+        const fade = 0.25 + 0.75 * (i / (list.length - 1));
+        ctx.strokeStyle = withAlpha(col, alpha * fade);
+        ctx.lineWidth = Math.max(1.5, radius(b) * 0.8);
+        ctx.beginPath();
+        ctx.moveTo(a.sx, a.sy);
+        ctx.lineTo(b.sx, b.sy);
+        ctx.stroke();
+      }
+      const tip = list[list.length - 1];
+      if (tip?.visible) drawDot(ctx, tip.sx, tip.sy, Math.max(rMin, radius(tip) * 1.3), col, Math.min(1, alpha + 0.1), ink.halo, 1);
     }
   } else {
     const drawn = pts
-      .map((p) => ({ ...p, ...lonLatToSphere(p.lon, p.lat, yaw, pitch, zoom, w, h, pad) }))
+      .map((p) => ({ ...p, ...lonLatToSphere(p.lon, p.lat, yaw, pitch, frame) }))
       .filter((p) => p.visible)
       .sort((a, b) => a.depth - b.depth);
+    const haloW = drawn.length > 4000 ? 0 : 0.75;
     for (const p of drawn) {
-      const r = base * (0.6 + Math.sqrt((p.size - sMin) / sSpan) * 1.6);
-      ctx.fillStyle = withAlpha(colors[p.category % colors.length] ?? "#6c5ce7", opts.opacity ?? 0.85);
-      ctx.beginPath();
-      ctx.arc(p.sx, p.sy, Math.max(1.2, r), 0, Math.PI * 2);
-      ctx.fill();
+      drawDot(ctx, p.sx, p.sy, radius(p), pointColor(colors, p), alpha * (0.55 + 0.45 * p.depth), ink.halo, haloW);
     }
   }
 
-  if (!opts.mini) {
-    ctx.fillStyle = muted;
-    ctx.font = `10px '${opts.fontFamily ?? "Inter"}', sans-serif`;
-    ctx.textAlign = "left";
-    ctx.fillText(trails ? "Globe trails · drag to spin" : "Globe · drag to spin", pad, h - 10);
+  if (showKey && scale) {
+    const { side, bottom } = mapInsets(pad);
+    drawSizeKey(ctx, {
+      x: side,
+      bottom: h - bottom + 2,
+      min: scale.min,
+      max: scale.max,
+      radiusOf: scale.radiusOf,
+      title: sizeField ?? undefined,
+      ink,
+      fontFamily: font,
+      fill: colorI >= 0 ? ink.muted : colors[0],
+      maxWidth: w - 2 * side,
+    });
   }
   ctx.restore();
 }
@@ -772,54 +961,58 @@ function renderArcMap(
   pad: number,
   opts: GeoRenderOpts,
 ): void {
+  const ink = mapInk(opts);
+  const font = opts.fontFamily ?? "Inter";
+  const mini = !!opts.mini;
+  ctx.save();
+  paintBackground(ctx, w, h, ink);
   const { lonI, latI } = resolveLonLat(columns, xField, yField);
-  if (lonI < 0 || latI < 0) return;
+  if (lonI < 0 || latI < 0) {
+    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini);
+    ctx.restore();
+    return;
+  }
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const pts = collectPoints(rows, lonI, latI, colorI, -1);
-  const bg = opts.themeBg ?? "#0a0a0c";
-  const border = opts.themeBorder ?? "#2a2a30";
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
   const atlas = getWorldAtlas();
-  ctx.save();
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, w, h);
-  const projection = fitProjection(geoEqualEarth(), atlas, w, h, pad);
+  const { projection, regional } = fitPointsProjection(pts, atlas, w, h, pad);
   const path = geoPath(projection, undefined);
-  drawLandOutline(ctx, path, atlas, border, withAlpha(border, 0.1));
+  drawBasemap(ctx, path, atlas, ink, !mini && !regional);
+  if (regional) drawRegionalDetail(ctx, path, regional, ink);
+  if (pts.length === 0) {
+    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini);
+    ctx.restore();
+    return;
+  }
+  const alpha = opts.opacity ?? 0.8;
 
-  // Connect consecutive points (or same-category chains) as great-circle approximations.
-  const byCat = new Map<number, typeof pts>();
+  // Consecutive rows within a color group become great-circle arcs.
+  const byCat = new Map<number, GeoPoint[]>();
   for (const p of pts) {
     const list = byCat.get(p.category) ?? [];
     list.push(p);
     byCat.set(p.category, list);
   }
+  ctx.lineCap = "round";
   for (const [cat, list] of byCat) {
     if (list.length < 2) continue;
-    for (let i = 1; i < Math.min(list.length, 80); i++) {
+    const col = colors[cat % colors.length] ?? colors[0]!;
+    for (let i = 1; i < Math.min(list.length, 120); i++) {
       const a = list[i - 1]!;
       const b = list[i]!;
-      const line = {
-        type: "LineString" as const,
-        coordinates: [
-          [a.lon, a.lat],
-          [b.lon, b.lat],
-        ],
-      };
-      const p = path(line);
+      const p = path({ type: "LineString", coordinates: [[a.lon, a.lat], [b.lon, b.lat]] });
       if (!p) continue;
-      ctx.strokeStyle = withAlpha(colors[cat % colors.length] ?? "#6c5ce7", (opts.opacity ?? 0.7) * 0.8);
-      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = withAlpha(col, alpha * 0.75);
+      ctx.lineWidth = mini ? 1 : 1.6;
       ctx.stroke(new Path2D(p));
     }
   }
-  for (const p of pts.slice(0, 400)) {
+  const r = Math.max(mini ? 1.6 : 2.4, radiusFromPointSize(opts.pointSize, 2.8));
+  for (const p of pts.slice(0, 600)) {
     const xy = projection([p.lon, p.lat]);
     if (!xy) continue;
-    ctx.fillStyle = withAlpha(colors[p.category % colors.length] ?? "#6c5ce7", opts.opacity ?? 0.85);
-    ctx.beginPath();
-    ctx.arc(xy[0], xy[1], opts.pointSize ?? 2.5, 0, Math.PI * 2);
-    ctx.fill();
+    drawDot(ctx, xy[0], xy[1], r, pointColor(colors, p), Math.min(1, alpha + 0.1), ink.halo, 0.75);
   }
   ctx.restore();
 }

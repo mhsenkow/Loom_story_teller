@@ -85,7 +85,88 @@ export type Canvas2DHitContext = {
   /** Set when bar uses Color as subcategory (grouped / stacked / percent). */
   barFacet?: BarFacetHitPayload;
   yAggregate?: YAggregateOption;
+  /** Marks registered by the renderer during the last paint (preferred over re-derived geometry). */
+  targets?: HitTarget[];
 };
+
+/**
+ * A drawn mark the pointer can hover. Renderers register these while painting
+ * so tooltips match exactly what's on screen (no re-derived geometry).
+ * `match` lists [columnIndex, value] pairs that identify the mark's rows;
+ * `summary` is the aggregated readout (e.g. bar label + count) shown instead
+ * of a single raw row.
+ */
+export type HitTarget = (
+  | { shape: "rect"; x: number; y: number; w: number; h: number }
+  | { shape: "circle"; cx: number; cy: number; r: number }
+  | { shape: "arc"; cx: number; cy: number; r0: number; r1: number; a0: number; a1: number }
+) & {
+  match: [number, string][];
+  /** Representative row when the mark isn't identified by exact values (bins, "Other"). */
+  rowIndex?: number;
+  summary?: { columns: string[]; row: (string | number | null)[] };
+};
+
+function hitDistance(t: HitTarget, x: number, y: number): number | null {
+  if (t.shape === "rect") {
+    // Thin marks (1–2px bars, hairline segments) get a few px of slop
+    const sx = Math.max(0, 3 - t.w / 2);
+    const sy = Math.max(0, 3 - t.h / 2);
+    if (x < t.x - sx || x > t.x + t.w + sx || y < t.y - sy || y > t.y + t.h + sy) return null;
+    return Math.hypot(x - (t.x + t.w / 2), y - (t.y + t.h / 2)) * 0.01;
+  }
+  if (t.shape === "circle") {
+    const d = Math.hypot(x - t.cx, y - t.cy);
+    return d <= Math.max(t.r, 6) ? d : null;
+  }
+  const d = Math.hypot(x - t.cx, y - t.cy);
+  if (d < t.r0 || d > t.r1) return null;
+  let a = Math.atan2(y - t.cy, x - t.cx);
+  // Normalize into [a0, a0 + 2π)
+  while (a < t.a0) a += Math.PI * 2;
+  while (a >= t.a0 + Math.PI * 2) a -= Math.PI * 2;
+  return a <= t.a1 ? 0 : null;
+}
+
+/** Topmost / closest registered mark under the pointer. */
+export function pickHitTarget(targets: HitTarget[] | undefined, x: number, y: number): HitTarget | null {
+  if (!targets?.length) return null;
+  let best: HitTarget | null = null;
+  let bestD = Infinity;
+  for (let i = targets.length - 1; i >= 0; i--) {
+    const d = hitDistance(targets[i]!, x, y);
+    if (d != null && d < bestD) {
+      bestD = d;
+      best = targets[i]!;
+    }
+  }
+  return best;
+}
+
+/** First row satisfying every [column, value] pair of a hit target. */
+export function rowForHitTarget(
+  target: HitTarget,
+  rows: (string | number | boolean | null)[][],
+  allowed: Set<number> | null = null,
+): number | null {
+  if (target.match.length === 0) {
+    return target.rowIndex != null && inAllowed(target.rowIndex, allowed) ? target.rowIndex : null;
+  }
+  for (let i = 0; i < rows.length; i++) {
+    if (!inAllowed(i, allowed)) continue;
+    const r = rows[i]!;
+    if (target.match.every(([ci, v]) => String(r[ci]) === v)) return i;
+  }
+  return null;
+}
+
+/** Number for tooltips: grouped thousands, ≤2 decimals. */
+export function formatTooltipNumber(v: number): string {
+  if (!Number.isFinite(v)) return "";
+  const abs = Math.abs(v);
+  const digits = abs >= 100 ? 0 : abs >= 1 ? 2 : 4;
+  return v.toLocaleString(undefined, { maximumFractionDigits: digits });
+}
 
 export type TooltipLink = { field: string; value: string };
 
@@ -478,6 +559,11 @@ export function pickCanvasTooltipRowIndex(
   const chartHeight = h - 2 * pad;
   if (chartX < pad || chartX > w - pad || chartY < pad || chartY > h - pad) return null;
   if (chartWidth <= 0 || chartHeight <= 0) return null;
+
+  if (hit.targets?.length) {
+    const t = pickHitTarget(hit.targets, chartX, chartY);
+    return t ? rowForHitTarget(t, rows, allowed) : null;
+  }
 
   switch (kind) {
     case "bar": {

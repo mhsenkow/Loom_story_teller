@@ -7,10 +7,18 @@
 
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useMemo } from "react";
 import type { ChartRecommendation } from "@/lib/recommendations";
 import type { QueryResult } from "@/lib/store";
-import { discreteSeriesColors, getThemeUiColors, resolveChartColors, sampleContinuous } from "@/lib/chartPalettes";
+import {
+  contrastingInk,
+  discreteSeriesColors,
+  getThemeUiColors,
+  resolveChartColors,
+  sampleContinuous,
+  VIZ_SEMANTIC,
+  type ThemeUiColors,
+} from "@/lib/chartPalettes";
 import { buildBarFacetGrid } from "@/lib/chartTooltip";
 import type { YAggregateOption } from "@/lib/recommendations";
 import { useLoomStore } from "@/lib/store";
@@ -71,16 +79,30 @@ export function ChartCard({
 }) {
   const theme = useLoomStore((s) => s.appSettings.theme);
   const colorblind = useLoomStore((s) => s.appSettings.colorblindCharts);
-  const resolved = resolveChartColors({
-    paletteId: "auto",
-    theme,
-    colorblind: !!colorblind,
-    chartKind: rec.kind,
-  });
-  const colors = resolved.continuous
-    ? resolved.colors
-    : discreteSeriesColors(resolved, 8);
-  const COLORS = colors.length >= 4 ? colors : FALLBACK_COLORS;
+  const { COLORS, SEQ, ui } = useMemo(() => {
+    const resolved = resolveChartColors({
+      paletteId: "auto",
+      theme,
+      colorblind: !!colorblind,
+      chartKind: rec.kind,
+    });
+    const colors = resolved.continuous
+      ? resolved.colors
+      : discreteSeriesColors(resolved, 8);
+    const themeUi = getThemeUiColors(theme);
+    // Magnitude ramp (heatmap / hexbin / density maps). Oriented so the
+    // densest cells carry the most contrast against the card background:
+    // dark→light on dark themes, light→dark on light themes.
+    const seqBase = resolved.continuous
+      ? resolved.colors
+      : resolveChartColors({ paletteId: "auto", theme, colorblind: !!colorblind, chartKind: "heatmap" }).colors;
+    const bgIsLight = contrastingInk(themeUi.bg) !== "#ffffff";
+    return {
+      COLORS: colors.length >= 4 ? colors : FALLBACK_COLORS,
+      SEQ: bgIsLight ? [...seqBase].reverse() : seqBase,
+      ui: themeUi,
+    };
+  }, [theme, colorblind, rec.kind]);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -126,11 +148,11 @@ export function ChartCard({
     } else if (rec.kind === "line" && yIdx >= 0) {
       drawLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
     } else if (rec.kind === "heatmap" && yIdx >= 0) {
-      drawHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+      drawHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
     } else if (rec.kind === "strip" && yIdx >= 0) {
       drawStrip(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
     } else if (rec.kind === "box" && yIdx >= 0) {
-      drawBox(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+      drawBox(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, ui);
     } else if (rec.kind === "area" && yIdx >= 0) {
       drawArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
     } else if (rec.kind === "pie") {
@@ -141,7 +163,7 @@ export function ChartCard({
     } else if (rec.kind === "violin" && yIdx >= 0) {
       drawViolin(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
     } else if (rec.kind === "radar") {
-      drawRadar(ctx, rows, data.columns, xIdx, yIdx, cIdx, w, h, pad, COLORS);
+      drawRadar(ctx, rows, data.columns, xIdx, yIdx, cIdx, w, h, pad, COLORS, ui);
     } else if (rec.kind === "waterfall") {
       drawWaterfall(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
     } else if (rec.kind === "lollipop") {
@@ -152,15 +174,15 @@ export function ChartCard({
     } else if (rec.kind === "ridgeline" && yIdx >= 0) {
       drawRidgeline(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
     } else if (rec.kind === "hexbin" && yIdx >= 0) {
-      drawHexbin(ctx, rows, xIdx, yIdx, w, h, pad);
+      drawHexbin(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
     } else if (rec.kind === "funnel") {
       drawFunnel(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
     } else if (rec.kind === "parallel") {
-      drawParallel(ctx, rows, data.columns, cIdx, w, h, pad, COLORS);
+      drawParallel(ctx, rows, data.columns, cIdx, w, h, pad, COLORS, ui);
     } else if (rec.kind === "treemap") {
       drawTreemap(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
     } else if (rec.kind === "sunburst") {
-      drawSunburst(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
+      drawSunburst(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, ui);
     } else if (rec.kind === "forceBubble") {
       drawForceBubble(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
     } else if (rec.kind === "sankey") {
@@ -182,7 +204,20 @@ export function ChartCard({
           w,
           h,
           pad,
-          { colors: COLORS, opacity: 0.85, pointSize: 2.2, mini: true },
+          {
+            colors: COLORS,
+            opacity: 0.85,
+            // Thumbnail scale: bigger marks so a handful of points still reads
+            pointSize: 3.2,
+            mini: true,
+            // Let the card's themed background show through (the renderer
+            // otherwise paints a hard-coded near-black fill).
+            themeBg: "rgba(0,0,0,0)",
+            themeText: ui.text,
+            themeBorder: ui.border,
+            themeMuted: ui.muted,
+            continuousStops: SEQ,
+          },
         );
       }
     } else if (rec.kind === "dataCube") {
@@ -221,7 +256,13 @@ export function ChartCard({
         renderGpuSceneCanvas(rec.kind, ctx, packed, w, h, pad, {
           colors: COLORS,
           opacity: 0.85,
-          pointSize: 2.2,
+          pointSize: 2.6,
+          // Transparent so the card's themed background shows (renderer
+          // default is a hard-coded near-black fill).
+          themeBg: "rgba(0,0,0,0)",
+          themeText: ui.text,
+          themeMuted: ui.muted,
+          themeBorder: ui.border,
         });
       }
     } else if (isOddChartKind(rec.kind)) {
@@ -238,11 +279,19 @@ export function ChartCard({
         w,
         h,
         pad,
-        { colors: COLORS, opacity: 0.85, pointSize: 2.5 },
+        {
+          colors: COLORS,
+          opacity: 0.85,
+          pointSize: 2.5,
+          axisLabelColor: ui.muted,
+          themeText: ui.text,
+          themeMuted: ui.muted,
+          themeBorder: ui.border,
+        },
         true,
       );
     }
-  }, [rec, data, theme, colorblind, hero]);
+  }, [rec, data, theme, hero, COLORS, SEQ, ui]);
 
   useEffect(() => {
     draw();
@@ -264,12 +313,15 @@ export function ChartCard({
       onClick={onClick}
       tabIndex={hero ? -1 : undefined}
       aria-hidden={hero || undefined}
+      aria-pressed={hero ? undefined : isActive}
+      title={hero ? undefined : rec.subtitle ? `${rec.title} — ${rec.subtitle}` : rec.title}
       className={`
-        group flex flex-col overflow-hidden text-left
+        group flex flex-col overflow-hidden text-left min-w-0
         border bg-loom-elevated
         transition-[border-color,box-shadow,transform] duration-150
-        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-xl hover:border-transparent" : "rounded-lg hover:border-loom-accent/60 hover:shadow-loom"}
-        ${!hero && isActive ? "border-loom-accent ring-1 ring-loom-accent/35 shadow-loom" : !hero ? "border-loom-border" : ""}
+        focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent
+        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-xl hover:border-transparent" : "rounded-lg hover:shadow-loom"}
+        ${!hero && isActive ? "border-loom-accent ring-2 ring-loom-accent/40 shadow-loom" : !hero ? "border-loom-border hover:border-loom-accent/50" : ""}
         ${compact ? "w-[152px] shrink-0 snap-start rounded-md" : "w-full"}
       `}
     >
@@ -290,17 +342,20 @@ export function ChartCard({
       </div>
       <div className={`flex flex-col gap-0.5 text-left ${hero ? "px-4 py-3" : compact ? "px-2 py-1.5" : "px-2.5 py-2"}`}>
         {(!compact || hero) && (
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 min-w-0">
             <span className={`
-              inline-block px-1.5 py-0.5 text-2xs font-mono font-semibold rounded
+              inline-block max-w-full truncate px-1.5 py-0.5 text-2xs font-mono font-semibold rounded
               ${kindColor(rec.kind)}
             `}>
               {KIND_LABELS[rec.kind] ?? rec.kind}
             </span>
+            {!hero && isActive && (
+              <span className="ml-auto shrink-0 text-2xs font-medium text-loom-accent">Showing</span>
+            )}
           </div>
         )}
-        <p className={`font-medium text-loom-text truncate leading-tight ${hero ? "text-sm" : compact ? "text-2xs" : "text-xs"}`}>{rec.title}</p>
-        {(!compact || hero) && <p className={`text-loom-muted ${hero ? "text-xs line-clamp-2" : "text-2xs truncate"}`}>{rec.subtitle}</p>}
+        <p className={`font-medium text-loom-text leading-tight ${hero ? "text-sm line-clamp-2" : compact ? "text-2xs line-clamp-2" : "text-xs line-clamp-2"}`}>{rec.title}</p>
+        {(!compact || hero) && rec.subtitle && <p className={`text-loom-muted ${hero ? "text-xs line-clamp-2" : "text-2xs truncate"}`}>{rec.subtitle}</p>}
       </div>
     </button>
   );
@@ -316,7 +371,7 @@ function kindColor(kind: string): string {
     : kind === "heatmap" || kind === "treemap" ? 5
     : kind === "strip" || kind === "box" || kind === "violin" || kind === "ridgeline" ? 6
     : kind === "pie" || kind === "sunburst" || kind === "radar" ? 7
-    : kind === "choropleth" || kind === "sankey" ? 8
+    : kind === "choropleth" || kind === "sankey" || isGeoFamilyKind(kind) ? 8
     : 0;
   if (!n) return "bg-loom-muted/20 text-loom-muted";
   return `loom-kind-${n}`;
@@ -332,6 +387,52 @@ function numericRange(rows: unknown[][], idx: number): [number, number] {
   }
   if (min === max) { min -= 1; max += 1; }
   return [min, max];
+}
+
+/** Order x keys like the axis would: numerically when both parse, else natural text order (ISO dates sort correctly). */
+function compareXKeys(a: string, b: string): number {
+  const na = Number(a), nb = Number(b);
+  if (a !== "" && b !== "" && Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+  return a.localeCompare(b, undefined, { numeric: true });
+}
+
+/** Mean of y per distinct x (or row count when there is no y), sorted along x — mirrors the full line/area renderers. */
+function seriesByX(rows: unknown[][], xi: number, yi: number): number[] {
+  const byX = new Map<string, { sum: number; n: number }>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    const v = yi >= 0 ? Number(r[yi]) : 1;
+    if (yi >= 0 && isNaN(v)) continue;
+    const g = byX.get(k) ?? { sum: 0, n: 0 };
+    g.sum += v;
+    g.n += 1;
+    byX.set(k, g);
+  }
+  return [...byX.entries()]
+    .sort((a, b) => compareXKeys(a[0], b[0]))
+    .map(([, g]) => (yi >= 0 ? g.sum / g.n : g.n));
+}
+
+function groupRows(rows: unknown[][], ci: number, limit: number): unknown[][][] {
+  const groups = new Map<string, unknown[][]>();
+  for (const r of rows) {
+    const k = String(r[ci]);
+    const list = groups.get(k);
+    if (list) list.push(r);
+    else groups.set(k, [r]);
+  }
+  return [...groups.values()].sort((a, b) => b.length - a.length).slice(0, limit);
+}
+
+function strokeSeries(ctx: CanvasRenderingContext2D, ys: number[], yMin: number, yMax: number, w: number, h: number, pad: number) {
+  const range = yMax - yMin || 1;
+  ctx.beginPath();
+  ys.forEach((y, i) => {
+    const sx = pad + (i / Math.max(ys.length - 1, 1)) * (w - 2 * pad);
+    const sy = h - pad - ((y - yMin) / range) * (h - 2 * pad);
+    if (i === 0) ctx.moveTo(sx, sy);
+    else ctx.lineTo(sx, sy);
+  });
 }
 
 function drawScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
@@ -450,31 +551,31 @@ function drawHistogram(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
 
   counts.forEach((c, i) => {
     const barH = (c / maxC) * (h - 2 * pad);
-    ctx.fillStyle = COL[1];
+    ctx.fillStyle = COL[0];
     ctx.globalAlpha = 0.8;
-    ctx.fillRect(pad + i * barW, h - pad - barH, barW - 1, barH);
+    ctx.fillRect(pad + i * barW, h - pad - barH, Math.max(1, barW - 1), barH);
   });
   ctx.globalAlpha = 1;
 }
 
 function drawLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
-  const [yMin, yMax] = numericRange(rows, yi);
-  const sorted = [...rows].sort((a, b) => String(a[xi]).localeCompare(String(b[xi])));
-  const n = sorted.length;
-
-  ctx.lineWidth = 1.2;
-  ctx.globalAlpha = 0.8;
-  ctx.strokeStyle = COL[3];
-  ctx.beginPath();
-  for (let i = 0; i < n; i++) {
-    const y = Number(sorted[i][yi]);
-    if (isNaN(y)) continue;
-    const sx = pad + (i / Math.max(n - 1, 1)) * (w - 2 * pad);
-    const sy = h - pad - ((y - yMin) / (yMax - yMin)) * (h - 2 * pad);
-    i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
-  }
-  ctx.stroke();
+  const series = ci >= 0 && ci !== xi
+    ? groupRows(rows, ci, 6).map((g) => seriesByX(g, xi, yi))
+    : [seriesByX(rows, xi, yi)];
+  const all = series.flat();
+  if (all.length === 0) return;
+  const yMin = Math.min(...all);
+  const yMax = Math.max(...all);
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = "round";
+  ctx.globalAlpha = 0.9;
+  series.forEach((ys, i) => {
+    if (ys.length === 0) return;
+    ctx.strokeStyle = COL[i % COL.length];
+    strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
+    ctx.stroke();
+  });
   ctx.globalAlpha = 1;
 }
 
@@ -496,9 +597,9 @@ function drawHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numbe
       const c = counts.get(`${xL}|${yL}`) ?? 0;
       if (c <= 0) return;
       const intensity = c / maxC;
-      ctx.globalAlpha = 0.15 + intensity * 0.85;
-      ctx.fillStyle = sampleContinuous(stops, intensity);
-      ctx.fillRect(pad + xi2 * cellW, pad + yi2 * cellH, cellW - 1, cellH - 1);
+      ctx.globalAlpha = 0.3 + intensity * 0.7;
+      ctx.fillStyle = sampleContinuous(stops, 0.2 + intensity * 0.8);
+      ctx.fillRect(pad + xi2 * cellW, pad + yi2 * cellH, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
     });
   });
   ctx.globalAlpha = 1;
@@ -518,13 +619,13 @@ function drawStrip(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number,
     if (yIdx < 0) continue;
     const sx = pad + ((x - xMin) / (xMax - xMin)) * (w - 2 * pad);
     const sy = pad + yIdx * bandH + bandH / 2;
-    const colorIdx = ciLabels && ci >= 0 ? (ciLabels.indexOf(String(r[ci])) ?? 0) : yIdx;
+    const colorIdx = ciLabels && ci >= 0 ? Math.max(0, ciLabels.indexOf(String(r[ci]))) : 0;
     ctx.beginPath();
     ctx.moveTo(sx, sy - bandH * 0.3);
     ctx.lineTo(sx, sy + bandH * 0.3);
     ctx.strokeStyle = COL[colorIdx % COL.length];
-    ctx.globalAlpha = 0.5;
-    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 1.25;
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
@@ -541,7 +642,7 @@ function quartiles(sorted: number[]): { q1: number; q2: number; q3: number } {
   return { q1, q2, q3 };
 }
 
-function drawBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
+function drawBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[], ui: ThemeUiColors) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, number[]>();
   for (const r of rows) {
@@ -566,15 +667,18 @@ function drawBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, y
   entries.forEach((box, i) => {
     const cx = pad + (i + 0.5) * ((w - 2 * pad) / entries.length);
     const toY = (v: number) => h - pad - ((v - min) / range) * plotH;
-    ctx.fillStyle = COL[2];
+    ctx.fillStyle = COL[0];
     ctx.globalAlpha = 0.6;
     ctx.fillRect(cx - boxW / 2, toY(box.q3), boxW, toY(box.q1) - toY(box.q3));
-    ctx.strokeStyle = "#6b6b78";
-    ctx.lineWidth = 0.5;
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = ui.muted;
+    ctx.lineWidth = 1;
     ctx.strokeRect(cx - boxW / 2, toY(box.q3), boxW, toY(box.q1) - toY(box.q3));
     ctx.beginPath();
     ctx.moveTo(cx, toY(box.min)); ctx.lineTo(cx, toY(box.q1));
     ctx.moveTo(cx, toY(box.q3)); ctx.lineTo(cx, toY(box.max));
+    // Median tick
+    ctx.moveTo(cx - boxW / 2, toY(box.q2)); ctx.lineTo(cx + boxW / 2, toY(box.q2));
     ctx.stroke();
   });
   ctx.globalAlpha = 1;
@@ -582,51 +686,30 @@ function drawBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, y
 
 function drawArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
-  const [yMin, yMax] = numericRange(rows, yi);
-  const sorted = [...rows].sort((a, b) => String(a[xi]).localeCompare(String(b[xi])));
-  const range = yMax - yMin || 1;
-
-  if (ci >= 0) {
-    const groups = new Map<string, typeof sorted>();
-    for (const r of sorted) {
-      const k = String(r[ci]);
-      if (!groups.has(k)) groups.set(k, []);
-      groups.get(k)!.push(r);
-    }
-    let stackBase = 0;
-    [...groups.entries()].slice(0, 4).forEach(([, gRows], j) => {
-      ctx.fillStyle = COL[j % COL.length];
-      ctx.globalAlpha = 0.6;
-      ctx.beginPath();
-      gRows.forEach((r, i) => {
-        const y = Number(r[yi]);
-        if (isNaN(y)) return;
-        const sx = pad + (i / Math.max(gRows.length - 1, 1)) * (w - 2 * pad);
-        const sy = h - pad - ((stackBase + y - yMin) / range) * (h - 2 * pad);
-        i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
-      });
-      stackBase += gRows.reduce((s, r) => s + (Number(r[yi]) || 0), 0) / Math.max(gRows.length, 1);
-      ctx.lineTo(w - pad, h - pad);
-      ctx.lineTo(pad, h - pad);
-      ctx.closePath();
-      ctx.fill();
-    });
-  } else {
-    ctx.fillStyle = COL[0];
-    ctx.globalAlpha = 0.7;
-    ctx.beginPath();
-    sorted.forEach((r, i) => {
-      const y = Number(r[yi]);
-      if (isNaN(y)) return;
-      const sx = pad + (i / Math.max(sorted.length - 1, 1)) * (w - 2 * pad);
-      const sy = h - pad - ((y - yMin) / range) * (h - 2 * pad);
-      i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
-    });
+  const series = ci >= 0 && ci !== xi
+    ? groupRows(rows, ci, 4).map((g) => seriesByX(g, xi, yi))
+    : [seriesByX(rows, xi, yi)];
+  const all = series.flat();
+  if (all.length === 0) return;
+  // Area marks are anchored at zero like the full chart (or the min when all-negative).
+  const yMin = Math.min(0, ...all);
+  const yMax = Math.max(0, ...all);
+  series.forEach((ys, j) => {
+    if (ys.length === 0) return;
+    const color = COL[j % COL.length];
+    strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
     ctx.lineTo(w - pad, h - pad);
     ctx.lineTo(pad, h - pad);
     ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = series.length > 1 ? 0.35 : 0.45;
     ctx.fill();
-  }
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.95;
+    ctx.lineWidth = 1.25;
+    strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
+    ctx.stroke();
+  });
   ctx.globalAlpha = 1;
 }
 
@@ -747,8 +830,8 @@ function drawViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
     const maxC = Math.max(...counts, 1);
     const cx = pad + (gi + 0.5) * bandW;
     const halfW = bandW * 0.35;
-    ctx.fillStyle = COL[gi % COL.length];
-    ctx.globalAlpha = 0.6;
+    ctx.fillStyle = COL[0];
+    ctx.globalAlpha = 0.65;
     ctx.beginPath();
     for (let b = 0; b < bins; b++) {
       const y = h - pad - (b / bins) * (h - 2 * pad);
@@ -765,7 +848,7 @@ function drawViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
   ctx.globalAlpha = 1;
 }
 
-function drawRadar(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames: string[], _xi: number, _yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
+function drawRadar(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames: string[], _xi: number, _yi: number, ci: number, w: number, h: number, pad: number, colors: string[], ui: ThemeUiColors) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   if (!rows.length || !columnNames.length) return;
 
@@ -784,9 +867,9 @@ function drawRadar(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames
   const cx = w / 2, cy = h / 2;
   const radius = Math.min(w, h) / 2 - pad - 4;
 
-  ctx.strokeStyle = "#3a3a40";
-  ctx.lineWidth = 0.3;
-  ctx.globalAlpha = 0.2;
+  ctx.strokeStyle = ui.muted;
+  ctx.lineWidth = 0.5;
+  ctx.globalAlpha = 0.35;
   for (let ring = 1; ring <= 3; ring++) {
     const r = radius * (ring / 3);
     ctx.beginPath();
@@ -881,7 +964,7 @@ function drawWaterfall(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
     const x = pad + i * ((w - 2 * pad) / bars.length);
     const top = Math.min(toY(bar.start), toY(bar.end));
     const bottom = Math.max(toY(bar.start), toY(bar.end));
-    ctx.fillStyle = bar.value >= 0 ? "#00d68f" : "#ff6b6b";
+    ctx.fillStyle = bar.value >= 0 ? VIZ_SEMANTIC.positive : VIZ_SEMANTIC.negative;
     ctx.globalAlpha = 0.8;
     ctx.fillRect(x, top, barW, Math.max(1, bottom - top));
   });
@@ -903,17 +986,17 @@ function drawLollipop(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numb
   entries.forEach(([, val], i) => {
     const cy = pad + (i + 0.5) * bandH;
     const endX = pad + (val / maxVal) * (w - 2 * pad);
-    ctx.strokeStyle = COL[i % COL.length];
+    ctx.strokeStyle = COL[0];
     ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.5;
+    ctx.globalAlpha = 0.55;
     ctx.beginPath();
     ctx.moveTo(pad, cy);
     ctx.lineTo(endX, cy);
     ctx.stroke();
-    ctx.fillStyle = COL[i % COL.length];
-    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = COL[0];
+    ctx.globalAlpha = 0.9;
     ctx.beginPath();
-    ctx.arc(endX, cy, 3, 0, Math.PI * 2);
+    ctx.arc(endX, cy, Math.max(2, Math.min(3, bandH * 0.35)), 0, Math.PI * 2);
     ctx.fill();
   });
   ctx.globalAlpha = 1;
@@ -944,7 +1027,7 @@ function drawTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numbe
   ctx.globalAlpha = 1;
 }
 
-function drawSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, _ci: number, w: number, h: number, pad: number, colors: string[]) {
+function drawSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, _ci: number, w: number, h: number, pad: number, colors: string[], ui: ThemeUiColors) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, number>();
   for (const r of rows) { const k = String(r[xi]); const v = yi >= 0 ? Number(r[yi]) : 1; groups.set(k, (groups.get(k) ?? 0) + (isNaN(v) ? 0 : Math.abs(v))); }
@@ -959,7 +1042,14 @@ function drawSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numb
     ctx.beginPath(); ctx.arc(cx, cy, outerR, angle, angle + sweep); ctx.arc(cx, cy, innerR, angle + sweep, angle, true); ctx.closePath(); ctx.fill();
     angle += sweep;
   });
-  ctx.fillStyle = "#0e0e12"; ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(cx, cy, innerR * 0.5, 0, Math.PI * 2); ctx.fill();
+  ctx.globalAlpha = 1;
+  // Thin separators between segments in the card background colour
+  ctx.strokeStyle = ui.bg; ctx.lineWidth = 1;
+  angle = -Math.PI / 2;
+  for (const [, val] of entries) {
+    ctx.beginPath(); ctx.moveTo(cx + Math.cos(angle) * innerR, cy + Math.sin(angle) * innerR); ctx.lineTo(cx + Math.cos(angle) * outerR, cy + Math.sin(angle) * outerR); ctx.stroke();
+    angle += (val / total) * Math.PI * 2;
+  }
 }
 
 function drawForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
@@ -988,7 +1078,7 @@ function drawForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: n
     }
   }
   for (const c of circles) {
-    const idx = ci >= 0 ? catLabels.indexOf(c.cat) : circles.indexOf(c);
+    const idx = ci >= 0 ? catLabels.indexOf(c.cat) : 0;
     ctx.fillStyle = COL[Math.max(0, idx) % COL.length]; ctx.globalAlpha = 0.65;
     ctx.beginPath(); ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2); ctx.fill();
   }
@@ -1059,10 +1149,13 @@ function drawDumbbell(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numb
     const cy = pad + (i + 0.5) * bandH;
     const x0 = pad + ((e.a - minV) / range) * (w - 2 * pad);
     const x1 = pad + ((e.b - minV) / range) * (w - 2 * pad);
-    ctx.strokeStyle = COL[i % COL.length]; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.5;
+    // Connector in a neutral, endpoints in the two series colours (start / end)
+    ctx.strokeStyle = COL[0]; ctx.lineWidth = 1.5; ctx.globalAlpha = 0.35;
     ctx.beginPath(); ctx.moveTo(x0, cy); ctx.lineTo(x1, cy); ctx.stroke();
-    ctx.fillStyle = COL[i % COL.length]; ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = 0.9;
+    ctx.fillStyle = COL[0];
     ctx.beginPath(); ctx.arc(x0, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = COL[1 % COL.length];
     ctx.beginPath(); ctx.arc(x1, cy, 2.5, 0, Math.PI * 2); ctx.fill();
   });
   ctx.globalAlpha = 1;
@@ -1094,12 +1187,13 @@ function drawRidgeline(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
       ctx.lineTo(x, baseline - (counts[b] / maxC) * bandH * 0.8);
     }
     ctx.lineTo(w - pad, baseline); ctx.closePath();
-    ctx.fillStyle = COL[gi % COL.length]; ctx.globalAlpha = 0.45; ctx.fill();
+    ctx.fillStyle = COL[0]; ctx.globalAlpha = 0.5; ctx.fill();
+    ctx.strokeStyle = COL[0]; ctx.globalAlpha = 0.9; ctx.lineWidth = 1; ctx.stroke();
   });
   ctx.globalAlpha = 1;
 }
 
-function drawHexbin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number) {
+function drawHexbin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, stops: string[]) {
   const [xMin, xMax] = numericRange(rows, xi);
   const [yMin, yMax] = numericRange(rows, yi);
   const hexR = Math.min(w, h) / 18;
@@ -1122,8 +1216,8 @@ function drawHexbin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
     const cx = pad + col * hexW + (row % 2 ? hexW / 2 : 0);
     const cy = pad + row * hexH;
     const t = count / maxC;
-    ctx.fillStyle = `hsl(${200 - t * 160}, ${45 + t * 35}%, ${18 + t * 42}%)`;
-    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = sampleContinuous(stops, 0.2 + t * 0.8);
+    ctx.globalAlpha = 0.45 + t * 0.5;
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
       const ang = (Math.PI / 180) * (60 * i - 30);
@@ -1156,12 +1250,12 @@ function drawFunnel(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
     ctx.moveTo(cx - topW / 2, y0); ctx.lineTo(cx + topW / 2, y0);
     ctx.lineTo(cx + botW / 2, y1); ctx.lineTo(cx - botW / 2, y1);
     ctx.closePath();
-    ctx.fillStyle = COL[i % COL.length]; ctx.globalAlpha = 0.75; ctx.fill();
+    ctx.fillStyle = COL[0]; ctx.globalAlpha = 0.9 - (i / Math.max(entries.length, 1)) * 0.45; ctx.fill();
   });
   ctx.globalAlpha = 1;
 }
 
-function drawParallel(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames: string[], ci: number, w: number, h: number, pad: number, colors: string[]) {
+function drawParallel(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames: string[], ci: number, w: number, h: number, pad: number, colors: string[], ui: ThemeUiColors) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const axes: { idx: number; min: number; max: number }[] = [];
   for (let c = 0; c < columnNames.length; c++) {
@@ -1174,12 +1268,18 @@ function drawParallel(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNa
   }
   if (axes.length < 3) return;
   const xs = axes.map((_, i) => pad + (i / (axes.length - 1)) * (w - 2 * pad));
-  ctx.strokeStyle = "#2a2a30"; ctx.lineWidth = 1; ctx.globalAlpha = 0.7;
+  ctx.strokeStyle = ui.muted; ctx.lineWidth = 1; ctx.globalAlpha = 0.5;
   for (const x of xs) { ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, h - pad); ctx.stroke(); }
   const stride = Math.max(1, Math.floor(rows.length / 80));
+  const catIdx = new Map<string, number>();
   for (let ri = 0; ri < rows.length; ri += stride) {
     const r = rows[ri]!;
-    const colorIdx = ci >= 0 ? Math.abs(String(r[ci]).length) % COL.length : 0;
+    let colorIdx = 0;
+    if (ci >= 0) {
+      const k = String(r[ci]);
+      if (!catIdx.has(k)) catIdx.set(k, catIdx.size);
+      colorIdx = catIdx.get(k)! % COL.length;
+    }
     ctx.strokeStyle = COL[colorIdx]; ctx.lineWidth = 1; ctx.globalAlpha = 0.35;
     ctx.beginPath();
     axes.forEach((ax, i) => {
