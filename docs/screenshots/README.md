@@ -1,18 +1,22 @@
 # Screenshots
 
-Add app screenshots here for the main README. Suggested filenames:
+Images used by the main [README](../../README.md). All are captured from the live site, [loom.ibm.io](https://loom.ibm.io), so they show what people actually get.
 
-- **`loom-explorer.png`** — Explorer view: sidebar (file list), data table with columns (sort/filter), compact header and toolbar. Optional: column profiling card open, or a saved view selected.
-- **`loom-main-view.png`** — Chart view: sidebar, main chart (e.g. scatter or bar), right panel (Stats/Chart/Export/Smart). Optional: a suggestion or encoding visible, or Smart overlay (trend/anomaly).
-- **`loom-query.png`** — Query view: SQL editor, schema browser, results grid (paginated). Optional: a snippet or snapshot/diff visible.
-- **`loom-data-sources.png`** — Data & sources panel: “Choose folder”, “Recent CSV datasets” from Data.gov, Save to folder.
+| File | What it shows | Viewport |
+|------|---------------|----------|
+| `loom-chart.png` | Chart view — `sales_demo.csv`, Sum of revenue by city (horizontal bars, data labels) | 1440×900 |
+| `loom-map.png` | Chart view — USGS past-hour earthquakes, bubble map sized by magnitude, colored by `mag_type` | 1440×900 |
+| `loom-dive.png` | Dive — live Wikipedia edits, count over time grouped by `wiki` | 1440×900 |
+| `loom-explorer.png` | Explorer — `sales_demo.csv` table with sparklines, value bars, filters | 1440×900 |
+| `loom-query.png` | Query — `SELECT * FROM loom_active LIMIT 100` with results | 1440×900 |
+| `loom-phone.png` | Chart view on a phone — Sum of units by product | 390×844 |
 
 ## How to capture
 
-1. Run `make spin` (or `make thread` for web-only) and open a folder (e.g. `.loom-data` after `make spool`).
-2. **Explorer**: In Explorer view, pick a file so the table loads. Optionally right-click a column for profiling, or use filters/saved views. Capture full window or main area → save as `loom-explorer.png`.
-3. **Chart**: Switch to Chart, select a file, pick a chart suggestion. Optionally enable Smart overlay or interaction (crosshair, lasso). Capture → `loom-main-view.png`.
-4. **Query**: Switch to Query, run a query, optionally save a snippet or snapshot. Capture → `loom-query.png`.
-5. **Data & sources**: Open Data & sources in the sidebar; wait for Data.gov list if in Tauri. Capture → `loom-data-sources.png`.
+Every chart setup lives in the URL, so screenshots are reproducible: build a `#chart=…` link with `encodeChartLink` (`src/lib/chartLink.ts`) or a `#dive=…` link with `encodeDiveLink` (`src/lib/dive.ts`) — or just set the chart up in the app and copy the address bar. Opening the link in a fresh browser profile loads the dataset (demo files and live feeds reopen on their own), skips first-run onboarding, and lands on that exact chart.
 
-Use PNG for clarity. The main [README](../../README.md) references these paths in the Screenshots section.
+1. Open each link at the viewport above with a device pixel ratio of 2 (desktop) and a clean profile. A headless Chrome driven by `playwright-core` works well; give live feeds ~10 s to load.
+2. For Explorer and Query, open the chart link, then press `1` (Explorer) or `3` (Query) and click **Execute**.
+3. Downscale desktop captures to 1600 px wide (`sips -Z 1600 in.png --out out.png` on macOS) to keep the repo light. Keep the phone capture at full size.
+
+Use PNG. Live-feed shots change every time — that's expected.

@@ -1,6 +1,12 @@
 # Loom — Data Storyteller
 
-**Local-first data storytelling for macOS.** Mount a folder, query millions of rows via DuckDB, and build charts with Vega-Lite and WebGPU. Discover data with heuristic and AI suggestions, tweak encodings in the panel, and export as PNG or SVG.
+**Find interesting data, turn it into a readable chart, and share it — in your browser, on your phone, or as a macOS app.**
+
+**▶ Try it: [loom.ibm.io](https://loom.ibm.io)** — no install. Live earthquakes, flights, Wikipedia edits, crypto, and weather are one click away, or load your own CSVs.
+
+![Loom chart view: revenue by city as labeled horizontal bars](docs/screenshots/loom-chart.png)
+
+The desktop app (Tauri + DuckDB) adds folder mounting, millions of rows, SQL over CSV/Parquet, and WebGPU scatter. Charts are Vega-Lite specs drawn on Canvas / WebGPU; export PNG, SVG, or a link that reopens the exact chart.
 
 **Contributors & AI agents:** See [DOCS.md](DOCS.md) for architecture and [AGENTS.md](AGENTS.md) for a concise repo map and conventions.
 
@@ -22,6 +28,7 @@
 
 ### Chart
 - **Chart view** — Pick a file, get instant chart suggestions (bar, line, scatter, area, pie, heatmap, strip, box). Click a suggestion or use **Suggest with AI** (Ollama).
+- **Readable by default** — Axes tick at round numbers with gridlines on the same values; dates read as months and years. Category names are never chopped: bars turn sideways when names won’t fit, crowded axes angle or thin their labels. Hover any bar, slice, bin, or cell for its actual value. One color unless Color encodes a field — then a legend appears in the emptiest corner. Heatmap, hexbin, and map ramps work in light and dark themes.
 - **Encode your way** — X, Y, Color, Size, Row; plus **Glow by**, **Outline by**, **Opacity by**. Bar stacking: grouped, stacked, or 100% stacked. Scatter: connect points (trail), marginal distributions.
 - **Visual controls** — Typography (font, title weight, tick rotation), marks (shape, outline, jitter, bar radius, line style, smooth curve), axes and grid, layout (padding, legend, data labels), atmosphere (background, blend, glow, entrance animation). **Responsive** — compact padding and smaller type when the panel is narrow.
 - **Interactivity** — **Pan** (drag) and **zoom** (wheel) on scatter. **Brush** (Shift+drag) or **Lasso** (freeform polygon) to select points and sync to table selection. **Crosshair** mode shows live (x, y) and ruler pins for Δx/Δy. **Tooltip pinning** — click a point to pin its tooltip. **Mini-map** when zoomed. **Custom reference lines** from the Chart panel.
@@ -56,17 +63,19 @@
 
 ## Screenshots
 
-Place screenshots in `docs/screenshots/` and reference them below. See [docs/screenshots/README.md](docs/screenshots/README.md) for how to capture.
+All captured from [loom.ibm.io](https://loom.ibm.io) — each chart opens from a shareable `#chart=` / `#dive=` link.
 
-| Explorer (table) | Chart view |
-|------------------|------------|
-| ![Explorer](docs/screenshots/loom-explorer.png) | ![Chart](docs/screenshots/loom-main-view.png) |
+| Live earthquakes on a map | Dive: Wikipedia edits by wiki |
+|---|---|
+| ![Bubble map of the past hour's earthquakes, sized by magnitude with a color key](docs/screenshots/loom-map.png) | ![Dive time series of live Wikipedia edits grouped by wiki](docs/screenshots/loom-dive.png) |
 
-| Query + results | Data & sources |
-|-----------------|----------------|
-| ![Query](docs/screenshots/loom-query.png) | ![Data sources](docs/screenshots/loom-data-sources.png) |
+| Explorer | Query |
+|---|---|
+| ![Explorer table with sparklines, value bars, and per-column filters](docs/screenshots/loom-explorer.png) | ![Query view with SQL editor, schema, and paginated results](docs/screenshots/loom-query.png) |
 
-*If the image files are missing, run the app, capture screenshots as described in `docs/screenshots/README.md`, and add them to the repo.*
+<p align="center"><img src="docs/screenshots/loom-phone.png" alt="Loom on a phone: units sold by product as horizontal bars" width="300"></p>
+
+How these were captured (and how to refresh them): [docs/screenshots/README.md](docs/screenshots/README.md).
 
 ---
 
@@ -140,7 +149,7 @@ Run `make` (or `make help`) to list all commands. Every target uses a weaving me
 | `make loft-dry` | Same build, dry-run deploy (no upload) |
 | `make thread-mcp` | Local MCP Worker on :8787 |
 
-Hosted surface is the **browser web UI** — catalog discovery (Data.gov / UK) works via a Cloudflare Worker proxy; CSV **Load** is in-memory and size-capped. Full DuckDB folder workflows and live streams still need the desktop app.
+Hosted at **[loom.ibm.io](https://loom.ibm.io)** — the browser web UI. Live feeds (USGS, Wikipedia, NWS, weather, flights, crypto, Hacker News…), catalog discovery (Data.gov / UK), and published story links run through the Cloudflare Worker (`workers/catalog-proxy.ts`); CSV **Load** is in-memory and size-capped. Full DuckDB folder workflows need the desktop app.
 
 ```bash
 npx wrangler login    # once
