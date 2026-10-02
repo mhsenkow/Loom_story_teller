@@ -14,7 +14,7 @@ import { formatNumber } from "@/lib/format";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { isDateColumn, formatDateCell } from "@/lib/dateFormat";
 import { TableSkeleton } from "@/components/Skeleton";
-import { requestDiscoverScan } from "@/lib/discoverStories";
+import { StartHere } from "@/components/StartHere";
 import { useIsMobile } from "@/lib/useMediaQuery";
 
 const ROW_HEIGHT = 28;
@@ -169,6 +169,8 @@ export function ExplorerView() {
   const [showColumnFilters, setShowColumnFilters] = useState(false);
   const [profilingCol, setProfilingCol] = useState<string | null>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressFiredRef = useRef(false);
   const selectedSet = useMemo(() => new Set(selectedRowIndices), [selectedRowIndices]);
   const allColumns = sampleRows?.columns ?? [];
   const types = sampleRows?.types;
@@ -847,9 +849,30 @@ export function ExplorerView() {
                       onDrop={(e) => handleColumnDrop(e, col)}
                       onDragEnd={handleColumnDragEnd}
                       className={`px-2 py-1 text-left text-2xs font-semibold text-loom-muted whitespace-nowrap sticky top-0 bg-loom-bg border-b border-loom-border cursor-pointer hover:bg-loom-elevated/60 select-none ${draggedCol === col ? "opacity-50" : ""}`}
-                      onClick={() => handleSort(ci)}
+                      onClick={() => {
+                        // A long-press already opened the profile — don't also sort.
+                        if (longPressFiredRef.current) {
+                          longPressFiredRef.current = false;
+                          return;
+                        }
+                        handleSort(ci);
+                      }}
                       onContextMenu={(e) => { e.preventDefault(); setProfilingCol(profilingCol === col ? null : col); }}
-                      title="Click to sort, right-click to profile, drag to reorder"
+                      onTouchStart={() => {
+                        longPressFiredRef.current = false;
+                        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                        longPressTimerRef.current = setTimeout(() => {
+                          longPressFiredRef.current = true;
+                          setProfilingCol(profilingCol === col ? null : col);
+                        }, 500);
+                      }}
+                      onTouchMove={() => {
+                        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                      }}
+                      onTouchEnd={() => {
+                        if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+                      }}
+                      title="Click to sort, right-click or long-press to profile, drag to reorder"
                     >
                       <div className="flex flex-col gap-0.5">
                         <span className="inline-flex items-center gap-1">
@@ -995,32 +1018,5 @@ export function ExplorerView() {
 }
 
 function EmptyState() {
-  const setToast = useLoomStore((s) => s.setToast);
-  return (
-    <div className="relative flex flex-col items-center justify-center h-full gap-5 px-6 animate-fade-in">
-      <div className="w-16 h-16 rounded-2xl bg-loom-elevated border border-loom-border shadow-loom flex items-center justify-center">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-loom-muted">
-          <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-6l-2-2H5a2 2 0 0 0-2 2z" />
-        </svg>
-      </div>
-      <div className="text-center space-y-1.5">
-        <p className="text-sm font-semibold text-loom-text tracking-tight">Mount a data folder</p>
-        <p className="text-xs text-loom-label max-w-[280px] mx-auto leading-relaxed">
-          Select a folder containing .csv or .parquet files to begin exploring
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={() => {
-          requestDiscoverScan();
-          setToast("Scanning live feeds…");
-        }}
-        className="absolute bottom-[max(0.75rem,var(--safe-bottom))] right-3 text-2xs text-loom-muted/60 hover:text-loom-accent transition-colors px-2 py-1.5 rounded-md hover:bg-loom-elevated"
-        title="Scan live feeds for something chartable"
-        aria-label="What’s interesting right now"
-      >
-        ✦ ideas
-      </button>
-    </div>
-  );
+  return <StartHere />;
 }

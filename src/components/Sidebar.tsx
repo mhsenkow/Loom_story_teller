@@ -18,6 +18,8 @@ import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
 import { firstCsvResource } from "@/lib/openDataCatalog";
 import { useIsMobile } from "@/lib/useMediaQuery";
+import { requestDiscoverScan } from "@/lib/discoverStories";
+import { requestWhatsNew } from "@/lib/changelog";
 const SIDEBAR_WIDTH = 260;
 const DATA_REGION_WIDTH = 340;
 
@@ -398,6 +400,12 @@ export function Sidebar() {
   if (!sidebarOpen) return null;
 
   const width = dataSourcesExpanded ? undefined : (dataRegionOpen ? DATA_REGION_WIDTH : SIDEBAR_WIDTH);
+  // Closing the phone drawer must also leave the full-screen sources mode —
+  // otherwise <main> stays collapsed to width 0 behind a closed drawer.
+  const closeDrawer = () => {
+    if (dataSourcesExpanded) setDataSourcesExpanded(false);
+    toggleSidebar();
+  };
   const folderName = mountedFolder?.split("/").pop() ?? null;
 
   return (
@@ -407,7 +415,7 @@ export function Sidebar() {
           type="button"
           className="fixed inset-0 z-[35] loom-overlay animate-fade-in md:hidden"
           aria-label="Close sidebar"
-          onClick={toggleSidebar}
+          onClick={closeDrawer}
         />
       )}
       <aside
@@ -419,6 +427,7 @@ export function Sidebar() {
           ...(width !== undefined && !(isMobile && !dataSourcesExpanded) ? { width: `${width}px` } : {}),
           paddingBottom: "var(--safe-bottom)",
           paddingLeft: isMobile ? "var(--safe-left)" : undefined,
+          paddingTop: isMobile ? "var(--safe-top)" : undefined,
         }}
       >
       {/* Header */}
@@ -427,8 +436,16 @@ export function Sidebar() {
         <span className="text-sm font-semibold text-loom-text tracking-tight flex-1">Loom</span>
         <button
           type="button"
-          className="md:hidden loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted rounded-md"
-          onClick={toggleSidebar}
+          onClick={requestWhatsNew}
+          className="text-2xs text-loom-muted hover:text-loom-accent px-2 min-h-9 rounded-md"
+          title="Recent features and fixes"
+        >
+          What’s new
+        </button>
+        <button
+          type="button"
+          className="md:hidden loom-btn-ghost min-h-10 min-w-10 flex items-center justify-center text-loom-muted text-lg rounded-md"
+          onClick={closeDrawer}
           aria-label="Close sidebar"
         >
           ×
@@ -688,7 +705,7 @@ function WikiStreamSection() {
               type="button"
               onClick={handleConnect}
               disabled={connecting}
-              className="text-2xs py-1 px-2.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50 shrink-0"
+              className="text-2xs py-1 px-2.5 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50 shrink-0"
             >
               {connecting ? "Connecting…" : "Connect"}
             </button>
@@ -696,7 +713,7 @@ function WikiStreamSection() {
             <button
               type="button"
               onClick={handleDisconnect}
-              className="text-2xs py-1 px-2.5 rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium shrink-0"
+              className="text-2xs py-1 px-2.5 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium shrink-0"
             >
               Stop
             </button>
@@ -724,11 +741,11 @@ function WikiStreamSection() {
           <div className="flex items-center justify-between gap-2">
             <span className="text-2xs text-loom-muted">{formatUptime(streamUptimeSecs)} · {streamTotalEvents.toLocaleString()} total</span>
             <div className="flex gap-1.5">
-              <button type="button" onClick={handleClear} className="text-2xs py-0.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">
+              <button type="button" onClick={handleClear} className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">
                 Clear
               </button>
               <button type="button" onClick={handleLoadSnapshot} disabled={streamBufferRows === 0}
-                className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
+                className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
                 Explore
               </button>
             </div>
@@ -739,7 +756,7 @@ function WikiStreamSection() {
           <div className="flex items-center justify-between">
             <span className="text-2xs text-loom-muted">{streamBufferRows.toLocaleString()} rows ready</span>
             <button type="button" onClick={handleLoadSnapshot}
-              className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium">
+              className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium">
               Explore
             </button>
           </div>
@@ -1086,12 +1103,12 @@ function SourceCard({ def }: { def: SourceCardDef }) {
         </div>
         {!running ? (
           <button type="button" onClick={handleConnect} disabled={connecting}
-            className="text-2xs py-1 px-2.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50 shrink-0">
+            className="text-2xs py-1 px-2.5 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50 shrink-0">
             {connecting ? "Loading…" : "Connect"}
           </button>
         ) : (
           <button type="button" onClick={handleDisconnect}
-            className="text-2xs py-1 px-2.5 rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium shrink-0">
+            className="text-2xs py-1 px-2.5 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium shrink-0">
             Stop
           </button>
         )}
@@ -1100,9 +1117,9 @@ function SourceCard({ def }: { def: SourceCardDef }) {
         <div className="flex items-center justify-between pl-4">
           <span className="text-2xs text-loom-muted tabular-nums">{(status?.total_events ?? 0).toLocaleString()} rows</span>
           <div className="flex gap-1.5">
-            <button type="button" onClick={handleClear} className="text-2xs py-0.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">Clear</button>
+            <button type="button" onClick={handleClear} className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">Clear</button>
             <button type="button" onClick={() => void handleExplore()} disabled={bufferRows === 0}
-              className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
+              className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
               Explore
             </button>
           </div>
@@ -1112,7 +1129,7 @@ function SourceCard({ def }: { def: SourceCardDef }) {
         <div className="flex items-center justify-between pl-4">
           <span className="text-2xs text-loom-muted tabular-nums">{bufferRows.toLocaleString()} rows ready</span>
           <button type="button" onClick={() => void handleExplore()}
-            className="text-2xs py-0.5 px-2 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium">
+            className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium">
             Explore
           </button>
         </div>
@@ -1520,9 +1537,22 @@ function DataRegionView({
         </button>
       </div>
 
-      <div className={`flex-1 overflow-y-auto py-4 px-3 ${expanded ? "min-h-0" : ""} space-y-7`}>
+      <div className={`flex-1 overflow-y-auto py-4 px-3 ${expanded ? "min-h-0" : ""} flex flex-col gap-7`}>
+        {/* Web leads with one-tap fun data (discover, live feeds, curated packs);
+            desktop leads with the local folder. Order is set per section below. */}
+        <section style={{ order: isWeb ? 0 : -1 }}>
+          <button
+            type="button"
+            onClick={() => requestDiscoverScan()}
+            className="loom-btn-primary w-full min-h-11 text-sm font-semibold rounded-lg"
+          >
+            ✦ What’s interesting right now
+          </button>
+          <p className="text-2xs text-loom-muted mt-1.5 text-center">Scans every live feed and opens the best one as a chart.</p>
+        </section>
+
         {/* Get data in — web: upload / explore; desktop: folder */}
-        <section>
+        <section style={{ order: isWeb ? 3 : 0 }}>
           <SectionHeading
             title={isWeb ? "Open files" : "Local folder"}
             lede={isWeb ? "Drop CSVs here, or Explore a catalog dataset below." : "Mount a folder of CSV / Parquet files."}
@@ -1583,7 +1613,7 @@ function DataRegionView({
         </section>
 
         {/* Data.gov: discover recent CSVs — list or grid when expanded */}
-        <section className={expanded ? "flex-1 min-h-0 flex flex-col" : ""}>
+        <section className={expanded ? "flex-1 min-h-0 flex flex-col" : ""} style={{ order: 4 }}>
           <SectionHeading
             title="Data.gov"
             lede={isWeb ? "US open data — Explore loads CSV and opens Chart." : "Search and save CSVs into your folder."}
@@ -1647,7 +1677,7 @@ function DataRegionView({
         </section>
 
         {/* data.gov.uk — same card UI + preview modal */}
-        <section>
+        <section style={{ order: 5 }}>
           <SectionHeading
             title="data.gov.uk"
             lede={isWeb ? "UK open data — same Explore flow as Data.gov." : "Same search and save controls as Data.gov."}
@@ -1707,7 +1737,7 @@ function DataRegionView({
         </section>
 
         {/* Live feeds */}
-        <section className="space-y-2.5">
+        <section className="space-y-2.5" style={{ order: isWeb ? 1 : 6 }}>
           <SectionHeading
             title="Live feeds"
             lede="Connect a feed, let it fill, then Explore into Chart."
@@ -1719,7 +1749,7 @@ function DataRegionView({
         </section>
 
         {/* Curated CSV packs — one-click Explore */}
-        <section className="space-y-2.5">
+        <section className="space-y-2.5" style={{ order: isWeb ? 2 : 7 }}>
           <SectionHeading
             title="Curated open packs"
             lede="Famous public CSVs — Explore loads them straight into Chart."
@@ -1743,7 +1773,7 @@ function DataRegionView({
                       type="button"
                       disabled={loadingId === pack.id || isScanning}
                       onClick={() => void handleLoadCsv(pack.url, `${pack.id}.csv`, pack.id)}
-                      className="text-2xs px-2 py-1 rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50"
+                      className="text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50"
                     >
                       {loadingId === pack.id ? "Loading…" : "Explore CSV"}
                     </button>
@@ -1753,7 +1783,7 @@ function DataRegionView({
                       type="button"
                       disabled={savingId === pack.id}
                       onClick={() => void handleSaveToFolder(pack.url, `${pack.id}.csv`, pack.id)}
-                      className="text-2xs px-2 py-1 rounded border border-loom-border text-loom-muted hover:text-loom-text disabled:opacity-50"
+                      className="text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text disabled:opacity-50"
                     >
                       {savingId === pack.id ? "Saving…" : "Save to folder"}
                     </button>
@@ -1773,7 +1803,7 @@ function DataRegionView({
         </section>
 
         {/* More portals */}
-        <section>
+        <section style={{ order: 8 }}>
           <SectionHeading title="More portals" lede="Browse catalogs in a tab, then bring CSVs back here." />
           <ul className="space-y-2.5 px-1">
             <li>
@@ -1878,10 +1908,20 @@ function FilesView({
   return (
     <>
       <div className="px-3 py-3 border-b border-loom-border flex-shrink-0">
+        {isWeb && (
+          <button
+            type="button"
+            onClick={() => requestDiscoverScan()}
+            className="loom-btn-primary w-full text-xs mb-2"
+            title="Scan live feeds for something chartable"
+          >
+            ✦ What’s interesting right now
+          </button>
+        )}
         <button
           type="button"
           onClick={onOpenDataRegion}
-          className="loom-btn-ghost w-full text-xs flex items-center justify-center gap-1.5"
+          className="loom-btn-ghost w-full text-xs flex items-center justify-center gap-1.5 border border-loom-border"
           title="Data & sources — discover and add data"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -1905,13 +1945,10 @@ function FilesView({
               />
               <label
                 htmlFor="loom-web-csv-files"
-                className={`loom-btn-primary w-full text-xs flex items-center justify-center cursor-pointer ${isScanning ? "pointer-events-none opacity-60" : ""}`}
+                className={`loom-btn-ghost w-full text-xs flex items-center justify-center cursor-pointer ${isScanning ? "pointer-events-none opacity-60" : ""}`}
               >
-                {isScanning ? "Loading…" : "Load files"}
+                {isScanning ? "Loading…" : "Load your own CSVs"}
               </label>
-              <p className="text-2xs text-loom-muted mt-1.5 px-0.5">
-                Pick CSV files from your device.
-              </p>
               {onUseDemoData && (
                 <button
                   type="button"
@@ -2012,9 +2049,10 @@ function FilesView({
       <div className="flex-1 overflow-y-auto py-1 min-h-0">
         {files.length === 0 && !isScanning && (
           <div className="px-4 py-8 text-center">
-            <p className="text-sm text-loom-muted">No data files found</p>
+            <p className="text-sm text-loom-muted">{isWeb ? "Nothing open yet" : "No data files found"}</p>
             <p className="text-xs text-loom-muted mt-1">
-              Mount a folder or open <button type="button" onClick={onOpenDataRegion} className="text-loom-accent hover:underline">Data & sources</button>
+              {isWeb ? "Try a live feed or curated pack in " : "Mount a folder or open "}
+              <button type="button" onClick={onOpenDataRegion} className="text-loom-accent hover:underline">Data & sources</button>
             </p>
           </div>
         )}
@@ -2029,7 +2067,7 @@ function FilesView({
         ))}
       </div>
 
-      <div className="flex items-center justify-between px-3 h-[var(--statusbar-height)] border-t border-loom-border text-2xs text-loom-muted font-mono flex-shrink-0">
+      <div className="max-md:hidden flex items-center justify-between px-3 h-[var(--statusbar-height)] border-t border-loom-border text-2xs text-loom-muted font-mono flex-shrink-0">
         <span>
           {files.length > 0
             ? `${formatNumber(files.reduce((a, f) => a + f.row_count, 0))} total rows`

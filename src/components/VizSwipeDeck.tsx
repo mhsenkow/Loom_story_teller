@@ -333,7 +333,10 @@ export function VizSwipeDeck() {
       </div>
 
       {status === "ready" && current && (
-        <footer className="shrink-0 flex items-center justify-center gap-4 sm:gap-6 px-4 py-4 border-t border-loom-border">
+        <footer
+          className="shrink-0 flex items-center justify-center gap-4 sm:gap-6 px-4 pt-4 border-t border-loom-border"
+          style={{ paddingBottom: "max(1rem, var(--safe-bottom))" }}
+        >
           <button
             type="button"
             onClick={() => commit("left")}

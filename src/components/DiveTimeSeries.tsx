@@ -163,8 +163,13 @@ export function DiveTimeSeries({
           width={size.w}
           height={size.h}
           className="absolute inset-0"
-          onMouseMove={onMove}
-          onMouseLeave={() => setHover(null)}
+          onPointerMove={onMove}
+          onPointerDown={onMove}
+          onPointerLeave={(e) => {
+            if (e.pointerType !== "touch") setHover(null);
+          }}
+          // Horizontal finger drags scrub the series; vertical drags still scroll the page.
+          style={{ touchAction: "pan-y" }}
           role="img"
           aria-label={`${metricLabel} over time`}
         >

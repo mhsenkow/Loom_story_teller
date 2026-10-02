@@ -409,6 +409,10 @@ interface LoomState {
   exportSupersample: 1 | 2;
   /** Selected platform preset id (Export tab). */
   socialPresetId: SocialPresetId;
+  /** One-tap share sheet (preview + native share / save / link) over the chart. */
+  shareSheetOpen: boolean;
+  /** What's new (changelog) modal is showing — the discover sheet waits behind it. */
+  whatsNewOpen: boolean;
 
   /** Global prompt dialog state for replacing window.prompt. */
   promptDialog: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null;
@@ -569,6 +573,8 @@ interface LoomState {
   ) => void;
   setExportSupersample: (v: 1 | 2) => void;
   setSocialPresetId: (v: SocialPresetId) => void;
+  setShareSheetOpen: (v: boolean) => void;
+  setWhatsNewOpen: (v: boolean) => void;
   applyQuerySnapshot: (id: string) => void;
   setPromptDialog: (config: { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null) => void;
   // Live stream actions
@@ -662,6 +668,8 @@ const initialState = {
   exportBurnIn: { ...DEFAULT_BURN_IN },
   exportSupersample: 1 as 1 | 2,
   socialPresetId: "ig-square" as SocialPresetId,
+  shareSheetOpen: false,
+  whatsNewOpen: false,
   promptDialog: null as { title: string; defaultValue: string; onConfirm: (val: string | null) => void | Promise<void> } | null,
   streamRunning: false,
   streamTotalEvents: 0,
@@ -1140,6 +1148,8 @@ export const useLoomStore = create<LoomState>((set, get) => ({
     })),
   setExportSupersample: (v) => set({ exportSupersample: v }),
   setSocialPresetId: (id) => set({ socialPresetId: id }),
+  setShareSheetOpen: (v) => set({ shareSheetOpen: v }),
+  setWhatsNewOpen: (v) => set({ whatsNewOpen: v }),
   applyQuerySnapshot: (id) =>
     set((s) => {
       const snap = s.querySnapshots.find((x) => x.id === id);

@@ -80,6 +80,8 @@ export type Canvas2DHitContext = {
   cIdx: number;
   sizeIdx: number;
   barEntries?: [string, number][];
+  /** Simple bars drawn as horizontal bands (portrait stages) — pick by Y. */
+  barHorizontal?: boolean;
   /** Set when bar uses Color as subcategory (grouped / stacked / percent). */
   barFacet?: BarFacetHitPayload;
   yAggregate?: YAggregateOption;
@@ -484,7 +486,7 @@ export function pickCanvasTooltipRowIndex(
         return pickBarFacetRow(barFacet, rows, xIdx, cIdx, chartX, chartY, pad, w, h, allowed);
       }
       if (!barEntries?.length) return null;
-      const t = (chartX - pad) / chartWidth;
+      const t = hit.barHorizontal ? (chartY - pad) / chartHeight : (chartX - pad) / chartWidth;
       const barIndex = Math.floor(t * barEntries.length);
       const idx = Math.max(0, Math.min(barIndex, barEntries.length - 1));
       const [label] = barEntries[idx]!;

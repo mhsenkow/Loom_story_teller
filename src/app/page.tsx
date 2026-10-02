@@ -26,8 +26,12 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toast } from "@/components/Toast";
 import { PromptDialog } from "@/components/PromptDialog";
 import { Onboarding } from "@/components/Onboarding";
+import { WhatsNew } from "@/components/WhatsNew";
+import { requestWhatsNew } from "@/lib/changelog";
 import { FeedbackNotes } from "@/components/FeedbackNotes";
 import { VizSwipeDeck } from "@/components/VizSwipeDeck";
+import { ShareSheet } from "@/components/ShareSheet";
+import { useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
 import { WebSessionResume } from "@/components/WebSessionResume";
 import { useEffect, useCallback } from "react";
 import { createGitHubIssue, getGitHubNewIssueUrl, isTauri, openExternalUrl } from "@/lib/tauri";
@@ -377,12 +381,15 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
 }
 
 export default function Home() {
-  const { viewMode, setViewMode, dataSourcesExpanded, dashboardsExpanded, previewCapture, socialExportReady } = useLoomStore();
+  const { viewMode, setViewMode, dataSourcesExpanded: sourcesFlag, sidebarOpen, dashboardsExpanded, previewCapture, socialExportReady } = useLoomStore();
+  // Sources only take over the canvas while the sidebar showing them is open.
+  const dataSourcesExpanded = sourcesFlag && sidebarOpen;
   return (
     <>
       <ThemeApplicator />
       <HydrateStore />
       <WebSessionResume />
+      <WhatsNew />
       <Onboarding />
       <ErrorBoundary>
         <HomeContent
@@ -397,6 +404,7 @@ export default function Home() {
       <PromptDialog />
       <FeedbackNotes />
       <VizSwipeDeck />
+      <ShareSheet />
       <Toast />
     </>
   );
@@ -475,6 +483,7 @@ function HomeContent({
   socialExportReady: boolean;
 }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const liveEdit = useMobileLiveEdit();
   const [helpTab, setHelpTab] = useState<"shortcuts" | "feedback">("shortcuts");
   const [feedbackTitle, setFeedbackTitle] = useState("");
   const [feedbackBody, setFeedbackBody] = useState("");
@@ -688,6 +697,18 @@ function HomeContent({
                 <li><kbd className="loom-kbd">V</kbd> Pan · <kbd className="loom-kbd">C</kbd> Crosshair · <kbd className="loom-kbd">G</kbd> Lasso</li>
                 <li><kbd className="loom-kbd">Shift</kbd>+drag brush select · <kbd className="loom-kbd">L</kbd> Link tooltip · <kbd className="loom-kbd">Esc</kbd> Clear</li>
                 <li className="pt-1"><kbd className="loom-kbd">⌘</kbd><kbd className="loom-kbd ml-1">Enter</kbd> Run query · <kbd className="loom-kbd">?</kbd> This help</li>
+                <li className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShortcutsOpen(false);
+                      requestWhatsNew();
+                    }}
+                    className="text-loom-accent hover:underline"
+                  >
+                    See what’s new in Loom →
+                  </button>
+                </li>
               </ul>
             )}
 
@@ -759,7 +780,10 @@ function HomeContent({
           {!socialExportReady && <Sidebar />}
 
           {/* Canvas Area — hidden when Data & sources is expanded; shows dashboard when dashboards expanded */}
-          <main className={`relative bg-loom-bg overflow-hidden transition-[flex] duration-200 flex flex-col ${dataSourcesExpanded && !socialExportReady ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}>
+          <main
+            className={`relative bg-loom-bg overflow-hidden transition-[flex] duration-200 flex flex-col ${dataSourcesExpanded && !socialExportReady ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}
+            style={liveEdit && !socialExportReady ? { paddingBottom: MOBILE_LIVE_EDIT_SHEET } : undefined}
+          >
             {dashboardsExpanded && !socialExportReady ? (
               <DashboardCanvas onCollapse={() => useLoomStore.getState().setDashboardsExpanded(false)} />
             ) : (

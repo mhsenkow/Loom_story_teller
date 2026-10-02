@@ -1,6 +1,21 @@
+// Dev only: `LOOM_DEV_API=http://localhost:8787 next dev` proxies the Worker
+// routes (`/api/*`, `/s/*`) to a local `wrangler dev` so live feeds, catalog
+// search, and share links work without deploying. Static export ignores this.
+const devApi = process.env.NODE_ENV === "development" ? process.env.LOOM_DEV_API : undefined;
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "export",
+  ...(devApi
+    ? {
+        async rewrites() {
+          return [
+            { source: "/api/:path*", destination: `${devApi}/api/:path*` },
+            { source: "/s/:path*", destination: `${devApi}/s/:path*` },
+          ];
+        },
+      }
+    : {}),
   images: {
     unoptimized: true,
   },

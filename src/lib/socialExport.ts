@@ -98,8 +98,8 @@ export function getSocialPreset(id: SocialPresetId): SocialPreset {
 export interface SocialExportTarget {
   width: number;
   height: number;
-  /** Device pixel ratio override during capture (1 = exact, 2 = supersample). */
-  pixelRatio: 1 | 2;
+  /** Backing-store scale during capture (layout scale × supersample). */
+  pixelRatio: number;
   presetId: SocialPresetId;
 }
 

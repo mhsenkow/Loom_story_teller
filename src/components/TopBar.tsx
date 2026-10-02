@@ -77,7 +77,8 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
     columnStats,
     sampleRows,
     queryResult,
-    startDeepScan,
+    activeChart,
+    setShareSheetOpen,
   } = useLoomStore();
   const viewportW = useViewportWidth();
   const aspect = appSettings.chartAspect ?? "free";
@@ -220,29 +221,19 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       )}
 
       {viewMode === "chart" && (
-        <>
-          <button
-            type="button"
-            onClick={() => startDeepScan()}
-            disabled={!hasData}
-            className="md:hidden min-h-10 px-3 text-2xs font-semibold rounded-md bg-loom-accent text-white disabled:opacity-40 shadow-sm"
-            aria-label="Deep scan visualizations"
-            title="Deep scan · swipe Keep / Skip"
-          >
-            Scan
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setPanelTab("chart");
-              if (!panelOpen) togglePanel();
-            }}
-            className="md:hidden loom-btn-ghost min-h-10 px-3 text-2xs font-medium text-loom-accent border border-loom-accent/35 rounded-md"
-            aria-label="Edit chart encoding"
-          >
-            Edit
-          </button>
-        </>
+        <button
+          type="button"
+          onClick={() => setShareSheetOpen(true)}
+          disabled={!activeChart || !hasData}
+          className="min-h-10 px-3 sm:px-3.5 text-xs font-semibold rounded-md bg-loom-accent text-white disabled:opacity-40 shadow-sm flex items-center gap-1.5 shrink-0"
+          aria-label="Share chart"
+          title="Share this chart as an image or link"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
+          </svg>
+          <span>Share</span>
+        </button>
       )}
 
       {onOpenShortcuts && (
@@ -259,7 +250,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       <button
         type="button"
         onClick={openSettings}
-        className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2 rounded-md"
+        className="loom-btn-ghost hidden md:flex min-h-10 min-w-10 md:min-h-0 md:min-w-0 items-center justify-center text-xs px-2 rounded-md"
         title="Settings"
         aria-label="Settings"
       >
@@ -272,7 +263,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       <button
         type="button"
         onClick={openPanel}
-        className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2 rounded-md"
+        className={`loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 items-center justify-center text-xs px-2 rounded-md ${viewMode === "chart" ? "hidden md:flex" : "flex"}`}
         title={viewMode === "chart" ? "Chart encoding & visual" : "Toggle Detail Panel"}
         aria-label={viewMode === "chart" ? "Open chart panel" : "Toggle detail panel"}
         aria-pressed={panelOpen}

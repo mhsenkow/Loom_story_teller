@@ -8,12 +8,17 @@
 
 ## What it does
 
+### On your phone (web)
+- **Find something fun** — first open (and every empty view) leads with **✦ What’s interesting right now**: Loom scans the live feeds (quakes, flights, Hacker News, Wikipedia, crypto, weather…) and opens the best one as a chart with its headline already set. **Data & sources** puts live feeds and curated packs first.
+- **Make it yours** — **Edit** opens a half-height sheet so the chart stays visible while you change encoding or look; **✦ Swipe ideas** deals more charts to Keep / Skip. Bars flip horizontal on tall screens so long labels stay readable; taps show tooltips and finger-drags scrub them.
+- **Share** — the **Share** button renders the chart at Square / Portrait / Story / Wide sizes with feed-sized type, then opens the phone’s share sheet (or saves the image). **Get link** publishes a chart page that unfurls with a preview image in iMessage, Slack, X, etc. (kept 7 days).
+
 ### Explorer
 - **Mount a folder** — Point at a directory of CSV/Parquet files; Loom scans and exposes them in the sidebar. Search files by name.
 - **Data table** — Virtualized table with sort, column reorder (drag headers), show/hide columns, per-column text and range filters. Sparklines, value bars, heat tint, trend cues, and null % in headers. Date columns auto-formatted.
 - **Row selection** — Checkboxes, keyboard (↑/↓ + Space). Export selected rows to CSV. **Saved views** store column visibility, order, and filters; **Undo/Redo** for table layout.
 - **Linked highlighting** — Hover a row in the table to highlight the corresponding point on the chart (and vice versa via scatter hover).
-- **Column profiling** — Right-click a column header for a quick profile: null %, unique count, min/max/median, distribution histogram, top values.
+- **Column profiling** — Right-click (or long-press) a column header for a quick profile: null %, unique count, min/max/median, distribution histogram, top values.
 
 ### Chart
 - **Chart view** — Pick a file, get instant chart suggestions (bar, line, scatter, area, pie, heatmap, strip, box). Click a suggestion or use **Suggest with AI** (Ollama).
@@ -94,6 +99,7 @@ Run `make` (or `make help`) to list all commands. Every target uses a weaving me
 |--------|-------------|
 | `make spin` | Full dev: Tauri + Next.js hot reload; starts Ollama in background if available |
 | `make thread` | Frontend-only dev (no Rust) — good for UI work and web-only testing |
+| `npx wrangler dev --port 8787` + `LOOM_DEV_API=http://localhost:8787 npm run dev` | Web dev with the Worker’s `/api/*` + `/s/*` (live feeds, catalog search, share links) proxied locally |
 | `make warp` | Rust backend type-check only (`cargo check`) |
 | `make setup` | First-time: install npm deps and fetch Rust deps |
 

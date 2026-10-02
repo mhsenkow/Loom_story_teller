@@ -8,6 +8,7 @@
 "use client";
 
 import { useState, useCallback, useMemo, type ReactNode, type DragEvent } from "react";
+import { useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
 import { ChartKindPicker } from "@/components/ChartKindPicker";
@@ -39,6 +40,7 @@ import {
   type FacesSource,
 } from "@/lib/lookSystem";
 import { requestDiscoverScan } from "@/lib/discoverStories";
+import { CHANGELOG, requestWhatsNew } from "@/lib/changelog";
 import {
   createChartRec,
   Y_AGGREGATE_OPTIONS,
@@ -90,15 +92,16 @@ const TABS: { key: PanelTab; label: string }[] = [
 
 export function DetailPanel() {
   const { panelOpen, panelTab, setPanelTab, selectedFile, togglePanel } = useLoomStore();
+  const liveEdit = useMobileLiveEdit();
 
   if (!panelOpen) return null;
 
   return (
     <>
-      {/* Mobile backdrop */}
+      {/* Mobile backdrop — undimmed while live-editing so the chart above stays readable */}
       <button
         type="button"
-        className="md:hidden fixed inset-0 z-[35] loom-overlay animate-fade-in"
+        className={`md:hidden fixed inset-0 z-[35] ${liveEdit ? "bg-transparent" : "loom-overlay animate-fade-in"}`}
         aria-label="Close detail panel"
         onClick={togglePanel}
       />
@@ -109,12 +112,12 @@ export function DetailPanel() {
           fixed inset-x-0 bottom-0 z-40 w-full
           border-t border-loom-border rounded-t-2xl shadow-loom-lg
           md:max-h-none md:rounded-none md:shadow-none md:inset-auto
-          ${panelTab === "chart" ? "max-h-[min(90dvh,44rem)]" : "max-h-[min(82dvh,36rem)]"}
+          ${liveEdit ? "" : panelTab === "chart" ? "max-h-[min(90dvh,44rem)]" : "max-h-[min(82dvh,36rem)]"}
         `}
-        style={{ paddingBottom: "var(--safe-bottom)" }}
+        style={{ paddingBottom: "var(--safe-bottom)", ...(liveEdit ? { height: MOBILE_LIVE_EDIT_SHEET } : {}) }}
       >
         {/* Mobile sheet chrome */}
-        <div className="md:hidden relative flex items-center justify-between px-4 pt-3.5 pb-1.5 shrink-0">
+        <div className={`md:hidden relative flex items-center justify-between px-4 shrink-0 ${liveEdit ? "pt-2.5 pb-0" : "pt-3.5 pb-1.5"}`}>
           <div className="pointer-events-none absolute left-1/2 top-2 h-1 w-10 -translate-x-1/2 rounded-full bg-loom-border/80" />
           <span className="text-sm font-semibold text-loom-text tracking-tight">
             {TABS.find((t) => t.key === panelTab)?.label ?? "Details"}
@@ -790,6 +793,13 @@ function SettingsView() {
           }}
         >
           What’s interesting right now
+        </button>
+      </div>
+      <div>
+        <h3 className="text-sm font-semibold text-loom-text mb-1">What’s new</h3>
+        <p className="text-2xs text-loom-muted mb-2">Recent features and fixes{CHANGELOG[0] ? ` · latest ${CHANGELOG[0].date}` : ""}.</p>
+        <button type="button" className="loom-btn-ghost text-xs py-1.5 px-3 border border-loom-border" onClick={requestWhatsNew}>
+          See what’s new
         </button>
       </div>
       <div>
@@ -1859,8 +1869,17 @@ function ExportView() {
 
   return (
     <div className="p-3 space-y-4">
+      {hasChartExport && (
+        <button
+          type="button"
+          onClick={() => useLoomStore.getState().setShareSheetOpen(true)}
+          className="loom-btn-primary w-full min-h-10 text-sm font-semibold rounded-lg"
+        >
+          Share chart…
+        </button>
+      )}
       <p className="text-2xs text-loom-muted">
-        Export post-ready images for social, story carousels, or data (CSV).
+        Or fine-tune post-ready images, story carousels, video, and data (CSV) below.
       </p>
       {copyError && (
         <p className="text-2xs text-amber-500/90 bg-amber-500/10 rounded px-2 py-1.5 flex items-center justify-between gap-2">

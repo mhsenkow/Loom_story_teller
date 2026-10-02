@@ -5,6 +5,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useLoomStore } from "./store";
 
 export function useMediaQuery(query: string): boolean {
   const [matches, setMatches] = useState(false);
@@ -37,4 +38,19 @@ export function useViewportWidth(): number {
     return () => window.removeEventListener("resize", apply);
   }, []);
   return w;
+}
+
+/** Phone sheet height while editing a chart live (chart re-fits above it). */
+export const MOBILE_LIVE_EDIT_SHEET = "56dvh";
+
+/**
+ * Phone + Chart view + Chart/Smart panel open: the panel becomes a shorter,
+ * undimmed sheet and the chart stage shrinks above it so edits are visible.
+ */
+export function useMobileLiveEdit(): boolean {
+  const isMobile = useIsMobile();
+  const live = useLoomStore(
+    (s) => s.panelOpen && s.viewMode === "chart" && (s.panelTab === "chart" || s.panelTab === "smart"),
+  );
+  return isMobile && live;
 }

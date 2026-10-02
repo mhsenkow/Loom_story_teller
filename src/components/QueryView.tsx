@@ -14,7 +14,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { QueryResultsSkeleton } from "@/components/Skeleton";
 import { validateQuery } from "@/lib/queryValidate";
-import { requestDiscoverScan } from "@/lib/discoverStories";
+import { StartHere } from "@/components/StartHere";
 
 export function QueryView() {
   const {
@@ -164,27 +164,9 @@ export function QueryView() {
 
   if (!selectedFile) {
     return (
-      <div className="relative flex flex-col items-center justify-center h-full gap-4 px-6">
-        <div className="w-16 h-16 rounded-xl bg-loom-elevated border border-loom-border flex items-center justify-center text-loom-muted">
-          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-            <path d="M4 4h16v4l-6 6 4 4-2 2-4-4-6-6v-4z" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <p className="text-sm font-medium text-loom-text">No file selected</p>
-        <p className="text-xs text-loom-muted text-center max-w-sm">Select a file from the sidebar, then run SQL against <code className="text-loom-accent">loom_active</code>.</p>
-        <button
-          type="button"
-          onClick={() => {
-            requestDiscoverScan();
-            setToast("Scanning live feeds…");
-          }}
-          className="absolute bottom-3 right-3 text-2xs text-loom-muted/50 hover:text-loom-accent transition-colors px-1.5 py-1 rounded"
-          title="Scan live feeds for something chartable"
-          aria-label="What’s interesting right now"
-        >
-          ✦ ideas
-        </button>
-      </div>
+      <StartHere
+        detail={<>Once something is open, run SQL against <code className="text-loom-accent">loom_active</code>.</>}
+      />
     );
   }
 
@@ -449,16 +431,16 @@ export function QueryView() {
           <QueryResultsSkeleton rows={8} cols={queryResult?.columns.length ?? 4} />
         ) : queryResult && queryResult.rows.length > 0 ? (
           <>
-            <div className="sticky top-0 z-10 flex items-center gap-2 px-3 py-1 bg-loom-bg border-b border-loom-border flex-wrap">
+            <div className="sticky max-md:static top-0 z-10 flex items-center gap-2 px-3 py-1 bg-loom-bg border-b border-loom-border flex-wrap">
               <span className="text-2xs text-loom-muted font-mono">
                 {queryResult.total_rows} rows &middot; {queryResult.columns.length} cols
               </span>
               {queryResult.rows.length > queryResultPageSize && (
                 <span className="text-2xs text-loom-muted font-mono flex items-center gap-1">
                   Page
-                  <button type="button" onClick={() => setQueryResultPage(queryResultPage - 1)} disabled={queryResultPage <= 0} className="loom-btn-ghost px-1 py-0 disabled:opacity-50">←</button>
+                  <button type="button" onClick={() => setQueryResultPage(queryResultPage - 1)} disabled={queryResultPage <= 0} className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">←</button>
                   <span>{queryResultPage + 1} of {Math.ceil(queryResult.rows.length / queryResultPageSize)}</span>
-                  <button type="button" onClick={() => setQueryResultPage(queryResultPage + 1)} disabled={queryResultPage >= Math.ceil(queryResult.rows.length / queryResultPageSize) - 1} className="loom-btn-ghost px-1 py-0 disabled:opacity-50">→</button>
+                  <button type="button" onClick={() => setQueryResultPage(queryResultPage + 1)} disabled={queryResultPage >= Math.ceil(queryResult.rows.length / queryResultPageSize) - 1} className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">→</button>
                 </span>
               )}
               <button
@@ -467,9 +449,17 @@ export function QueryView() {
                   const csv = queryResultToCsv(queryResult);
                   downloadCsv(csv, selectedFile ? `query-${selectedFile.name.replace(/\.[^.]+$/, "")}` : "query-results");
                 }}
-                className="loom-btn-ghost text-2xs px-2 py-0.5 border border-loom-border rounded ml-2"
+                className="loom-btn-ghost text-2xs px-2 py-0.5 max-md:min-h-9 max-md:px-3 border border-loom-border rounded ml-2"
               >
                 Export CSV
+              </button>
+              {/* Running a query already re-recommends charts from these rows — jump to them. */}
+              <button
+                type="button"
+                onClick={() => useLoomStore.getState().setViewMode("chart")}
+                className="text-2xs px-2 py-0.5 max-md:min-h-9 max-md:px-3 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium"
+              >
+                Chart this →
               </button>
               {diffSnapshotId && (() => {
                 const snap = querySnapshots.find((s) => s.id === diffSnapshotId);
@@ -493,7 +483,7 @@ export function QueryView() {
                   {queryResult.columns.map((col) => (
                     <th
                       key={col}
-                      className="px-3 py-2 text-left text-2xs font-semibold text-loom-muted uppercase tracking-wider whitespace-nowrap sticky top-7 bg-loom-bg border-b border-loom-border"
+                      className="px-3 py-2 text-left text-2xs font-semibold text-loom-muted uppercase tracking-wider whitespace-nowrap sticky top-7 max-md:top-0 bg-loom-bg border-b border-loom-border"
                     >
                       {col}
                     </th>

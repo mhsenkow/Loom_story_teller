@@ -22,7 +22,7 @@ import {
   resolveChartColors,
   sampleContinuous,
 } from "@/lib/chartPalettes";
-import { useIsMobile, useViewportWidth } from "@/lib/useMediaQuery";
+import { useIsMobile, useMobileLiveEdit, useViewportWidth } from "@/lib/useMediaQuery";
 import { fitChartFrame, resolveDevice, aspectLabel } from "@/lib/chartViewport";
 import {
   getBestSuggestion,
@@ -68,6 +68,7 @@ import {
   isCartesianKind,
   densityAwarePointMarks,
   subsampleRowsForDensity,
+  fitTextEllipsis,
 } from "@/lib/chartLayout";
 import {
   drawChartBackground,
@@ -78,7 +79,7 @@ import {
   drawChartTitleBlock,
 } from "@/lib/chartLooks";
 import { VISUAL_PRESETS } from "@/lib/lookSystem";
-import { requestDiscoverScan } from "@/lib/discoverStories";
+import { StartHere } from "@/components/StartHere";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
 import { suggestChartFromOllama } from "@/lib/ollama";
 import {
@@ -111,6 +112,16 @@ function isNumericType(dt: string): boolean {
   return ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL", "HUGEINT", "TINYINT", "SMALLINT", "UBIGINT", "UINTEGER", "USMALLINT", "UTINYINT"].some(n => t.includes(n));
 }
 
+/**
+ * Backing-store scale for the chart stage. Platform captures pin it (so a
+ * 1080px export lays out identically on every device); otherwise screen DPR.
+ * Canvas sizing and every draw pass must agree on this value.
+ */
+function stageDpr(): number {
+  const target = useLoomStore.getState().socialExportTarget;
+  return target?.pixelRatio ?? (typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1);
+}
+
 export function ChartView() {
   const {
     selectedFile, sampleRows, chartRecs, activeChart, setActiveChart, setPanelTab, columnStats,
@@ -132,6 +143,7 @@ export function ChartView() {
   } = useLoomStore();
 
   const isMobile = useIsMobile();
+  const liveEdit = useMobileLiveEdit();
   const viewportW = useViewportWidth();
   // Framing uses the chart host width when Auto — window width would say
   // "desktop" while side panels leave a phone-sized stage.
@@ -808,7 +820,7 @@ export function ChartView() {
     if (container && canvas && canvas2D && axesOverlay) {
       const { width, height } = container.getBoundingClientRect();
       if (width > 0 && height > 0) {
-        const dpr = window.devicePixelRatio || 1;
+        const dpr = stageDpr();
         const w = Math.round(width * dpr);
         const h = Math.round(height * dpr);
         [canvas, canvas2D, axesOverlay].forEach((c) => {
@@ -1038,8 +1050,7 @@ export function ChartView() {
       for (const entry of entries) {
         const { width, height } = entry.contentRect;
         if (width === 0 || height === 0) continue;
-        const target = useLoomStore.getState().socialExportTarget;
-        const dpr = target?.pixelRatio ?? (window.devicePixelRatio || 1);
+        const dpr = stageDpr();
         const w = Math.round(width * dpr);
         const h = Math.round(height * dpr);
         [canvas, canvas2D, axesOverlay].forEach(c => {
@@ -1319,6 +1330,8 @@ export function ChartView() {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [isPanning, setIsPanning] = useState(false);
   const pinchRef = useRef<{ dist: number; scale: number; midX: number; midY: number } | null>(null);
+  /** Last pointer type on the scatter overlay — a finger tap shows a tooltip but never pins one. */
+  const lastPointerTypeRef = useRef<string>("mouse");
 
   const touchDistance = (a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }) =>
     Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -1639,7 +1652,7 @@ export function ChartView() {
       const ctx = canvas2D?.getContext("2d");
       const octx = overlay?.getContext("2d");
       if (!canvas2D || !ctx) return;
-      const dpr = window.devicePixelRatio || 1;
+      const dpr = stageDpr();
       const w = canvas2D.width / dpr;
       const h = canvas2D.height / dpr;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1716,7 +1729,7 @@ export function ChartView() {
       if (canvas2D) {
         const ctx = canvas2D.getContext("2d");
         if (ctx) {
-          const dpr = window.devicePixelRatio || 1;
+          const dpr = stageDpr();
           const w = canvas2D.width / dpr;
           const h = canvas2D.height / dpr;
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1741,7 +1754,7 @@ export function ChartView() {
       );
       if (packed) {
         const canvas = canvasRef.current;
-        const dpr = window.devicePixelRatio || 1;
+        const dpr = stageDpr();
         const w = canvas ? canvas.width / dpr : 800;
         const h = canvas ? canvas.height / dpr : 600;
         const mode = isWebGpuGlobeKind(activeChart.kind)
@@ -1774,7 +1787,7 @@ export function ChartView() {
       if (canvas2D) {
         const ctx = canvas2D.getContext("2d");
         if (ctx) {
-          const dpr = window.devicePixelRatio || 1;
+          const dpr = stageDpr();
           const w = canvas2D.width / dpr;
           const h = canvas2D.height / dpr;
           ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1787,7 +1800,7 @@ export function ChartView() {
       const sd = extractScatterData();
       if (sd && rendererRef.current) {
         const canvas = canvasRef.current;
-        const dpr = window.devicePixelRatio || 1;
+        const dpr = stageDpr();
         const w = canvas ? canvas.width / dpr : 800;
         const h = canvas ? canvas.height / dpr : 600;
         const pad = resolveChartPad({
@@ -1847,7 +1860,7 @@ export function ChartView() {
     const ctx = canvas2D.getContext("2d");
     if (!ctx) return;
 
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = stageDpr();
     const cw = (canvas2D as HTMLCanvasElement).width;
     const ch = (canvas2D as HTMLCanvasElement).height;
     if (typeof cw !== "number" || typeof ch !== "number" || cw <= 0 || ch <= 0) return;
@@ -1907,23 +1920,33 @@ export function ChartView() {
         ctx.globalCompositeOperation = (opts.blendMode as GlobalCompositeOperation) ?? "source-over";
 
         const isCartesian = isCartesianKind(activeChart.kind);
+        const barHorizontal = isHorizontalBar(activeChart.kind, cIdx, xIdx, w, h);
 
         if (isCartesian) {
           drawAxisFrame(ctx, w, h, pad, opts);
-          drawAxisFieldLabels(ctx, w, h, pad, activeChart.xField, activeChart.yField, opts);
+          if (barHorizontal) {
+            drawAxisFieldLabels(ctx, w, h, pad, activeChart.yField ?? "count", activeChart.xField, opts);
+          } else {
+            drawAxisFieldLabels(ctx, w, h, pad, activeChart.xField, activeChart.yField, opts);
+          }
         }
 
         const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
-        drawChartTitleBlock(ctx, w, h, pad, titleText, activeChart.subtitle, {
-          titleLayout: opts.titleLayout,
-          fontFamily,
-          titleFontWeight: opts.titleFontWeight,
-          titleItalic: opts.titleItalic,
-          themeText: opts.themeText,
-          themeMuted: opts.themeMuted,
-          themeBorder: opts.themeBorder,
-          axisLabelColor: opts.axisLabelColor,
-        });
+        const drawTitle = () =>
+          drawChartTitleBlock(ctx, w, h, pad, titleText, activeChart.subtitle, {
+            titleLayout: opts.titleLayout,
+            fontFamily,
+            titleFontWeight: opts.titleFontWeight,
+            titleItalic: opts.titleItalic,
+            themeText: opts.themeText,
+            themeMuted: opts.themeMuted,
+            themeBorder: opts.themeBorder,
+            axisLabelColor: opts.axisLabelColor,
+          });
+        // Map and scene renderers fill the whole canvas first — title goes on top of them.
+        const paintsOwnBackground =
+          activeChart.kind === "choropleth" || isGeoMapKind(activeChart.kind) || isGpuSceneKind(activeChart.kind);
+        if (!paintsOwnBackground) drawTitle();
 
         let scatterViewBounds: { xMin: number; xMax: number; yMin: number; yMax: number } | undefined;
         if (activeChart.kind === "scatter") {
@@ -1969,7 +1992,7 @@ export function ChartView() {
               opacityIdx,
             }, smartResults?.clusters?.rowToCluster ?? undefined, scatterViewBounds);
             break;
-          case "bar": renderFullBar(ctx, rows, xIdx, yIdx, barColorIdx, w, h, pad, opts, barFacetPayload); break;
+          case "bar": renderFullBar(ctx, rows, xIdx, yIdx, barColorIdx, w, h, pad, opts, barFacetPayload, barHorizontal); break;
           case "histogram": renderFullHistogram(ctx, rows, xIdx, w, h, pad, opts); break;
           case "line": renderFullLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, opts); break;
           case "heatmap": renderFullHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, opts); break;
@@ -2117,6 +2140,7 @@ export function ChartView() {
             }
             break;
         }
+        if (paintsOwnBackground) drawTitle();
 
         const baseHit: Canvas2DHitContext = {
           kind: activeChart.kind,
@@ -2131,7 +2155,7 @@ export function ChartView() {
           sizeIdx: sizeIdx >= 0 ? sizeIdx : -1,
           yAggregate: opts.yAggregate ?? undefined,
           ...(activeChart.kind === "bar" && barFacetPayload ? { barFacet: barFacetPayload } : {}),
-          ...(activeChart.kind === "bar" && !barFacetPayload && barEntries?.length ? { barEntries } : {}),
+          ...(activeChart.kind === "bar" && !barFacetPayload && barEntries?.length ? { barEntries, barHorizontal } : {}),
         };
         canvas2DHitRef.current = baseHit;
 
@@ -2211,7 +2235,7 @@ export function ChartView() {
     if (activeChart?.kind === "dataCube") return;
     const ctx = overlay.getContext("2d");
     if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = stageDpr();
     const w = overlay.width / dpr;
     const h = overlay.height / dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -2287,44 +2311,7 @@ export function ChartView() {
   // --- Empty states ---
   if (!selectedFile) {
     return (
-      <div className="relative flex flex-col items-center justify-center h-full gap-5 px-6 animate-fade-in">
-        <div className="w-16 h-16 rounded-2xl bg-loom-elevated border border-loom-border shadow-loom flex items-center justify-center text-loom-muted">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
-            <path d="M3 3v18h18M7 16l4-8 4 4 4-8" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </div>
-        <div className="text-center max-w-sm space-y-1.5">
-          <p className="text-sm font-semibold text-loom-text tracking-tight">Nothing loaded yet</p>
-          <p className="text-xs text-loom-muted leading-relaxed">
-            Open Data &amp; sources and tap Connect on a feed (Hacker News, quakes, crypto…) — it jumps straight into a chart.
-          </p>
-          <button
-            type="button"
-            className="loom-btn-primary text-xs px-3 py-2 mt-3"
-            onClick={() => {
-              const s = useLoomStore.getState();
-              if (!s.sidebarOpen) s.toggleSidebar();
-              s.setDataRegionOpen(true);
-              s.setDataSourcesExpanded(true);
-            }}
-          >
-            Open data sources
-          </button>
-        </div>
-        {/* Quiet re-entry for the live-feed discover modal */}
-        <button
-          type="button"
-          onClick={() => {
-            requestDiscoverScan();
-            setToast("Scanning live feeds…");
-          }}
-          className="absolute bottom-[max(0.75rem,var(--safe-bottom))] right-3 text-2xs text-loom-muted/60 hover:text-loom-accent transition-colors px-2 py-1.5 rounded-md hover:bg-loom-elevated"
-          title="Scan live feeds for something chartable"
-          aria-label="What’s interesting right now"
-        >
-          ✦ ideas
-        </button>
-      </div>
+      <StartHere />
     );
   }
 
@@ -2344,20 +2331,31 @@ export function ChartView() {
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
-          {isMobile && (
-            <button
-              type="button"
-              onClick={openChartEditor}
-              className="text-2xs py-1.5 px-2.5 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium min-h-9"
-            >
-              Edit
-            </button>
+          {isMobile && !suggestionsExpanded && (
+            <>
+              <button
+                type="button"
+                onClick={() => startDeepScan()}
+                disabled={columnStats.length === 0 || !sampleRows}
+                className="text-xs px-3 rounded-md border border-loom-border text-loom-text font-medium min-h-10 disabled:opacity-45"
+                title="Swipe through more chart ideas · Keep / Skip"
+              >
+                ✦ Swipe ideas
+              </button>
+              <button
+                type="button"
+                onClick={openChartEditor}
+                className="text-xs px-3 rounded-md border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium min-h-10"
+              >
+                Edit
+              </button>
+            </>
           )}
           <button
             type="button"
             onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
             className={`
-              loom-btn-ghost p-1.5 rounded border transition-colors min-h-9 min-w-9 flex items-center justify-center
+              loom-btn-ghost p-1.5 rounded border transition-colors min-h-10 min-w-10 md:min-h-9 md:min-w-9 flex items-center justify-center
               ${suggestionsExpanded
                 ? "border-loom-accent bg-loom-accent/10 text-loom-accent"
                 : "border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-accent hover:bg-loom-accent/10"}
@@ -2484,7 +2482,7 @@ export function ChartView() {
   return (
     <div className={`flex h-full animate-fade-in ${suggestionsExpanded || isMobile ? "flex-col" : ""}`}>
       {/* Recommendation panel — desktop sidebar, mobile bottom rail, or full browse grid */}
-      {!socialExportReady && (
+      {!socialExportReady && !liveEdit && (
       <div
         className={`
           bg-loom-surface overflow-hidden transition-[width,height] duration-200 ease-out
@@ -2566,15 +2564,17 @@ export function ChartView() {
                   <span
                     className="text-xs font-medium text-loom-text truncate cursor-text select-text"
                     onDoubleClick={activeChart ? handleTitleStartEdit : undefined}
+                    // Phones can't hover or double-click comfortably — a tap edits.
+                    onClick={activeChart && isMobile ? handleTitleStartEdit : undefined}
                     title={activeChart ? "Double-click or hover for edit" : undefined}
                   >
                     {displayTitle}
                   </span>
-                  {activeChart && showTitleEditButton && (
+                  {activeChart && (showTitleEditButton || isMobile) && (
                     <button
                       type="button"
                       onClick={handleTitleStartEdit}
-                      className="shrink-0 p-1 rounded text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors"
+                      className="shrink-0 p-1 max-md:p-2 max-md:-my-1.5 rounded text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors"
                       title="Edit title"
                       aria-label="Edit chart title"
                     >
@@ -2921,7 +2921,11 @@ export function ChartView() {
                 e.preventDefault();
                 setScatterView({ scale: 1, panX: 0, panY: 0 });
               }}
-              onClick={(e) => {
+              onPointerDown={(e) => {
+                lastPointerTypeRef.current = e.pointerType;
+              }}
+              onClick={() => {
+                if (lastPointerTypeRef.current === "touch") return;
                 if (chartInteractionMode === "pan" && scatterTooltip && activeChart) {
                   addPinnedTooltip({ chartId: activeChart.id, x: scatterTooltip.clientX, y: scatterTooltip.clientY, rowIndex: scatterTooltip.rowIndex, row: scatterTooltip.row, columns: scatterTooltip.columns });
                 }
@@ -2931,9 +2935,14 @@ export function ChartView() {
           {activeChart && activeChart.kind !== "scatter" && (
             <div
               className="absolute inset-0 w-full h-full"
-              style={{ zIndex: 2, cursor: activeChart.kind === "dataCube" ? "grab" : "crosshair" }}
-              onMouseMove={handleCanvas2DPointerMove}
-              onMouseLeave={handleCanvas2DPointerLeave}
+              // Pointer events + touch-action:none let a finger drag scrub the tooltip
+              // (and orbit 3D scenes) instead of the browser claiming the gesture.
+              style={{ zIndex: 2, cursor: activeChart.kind === "dataCube" ? "grab" : "crosshair", touchAction: "none" }}
+              onPointerMove={handleCanvas2DPointerMove}
+              onPointerDown={handleCanvas2DPointerMove}
+              onPointerLeave={(e) => {
+                if (e.pointerType !== "touch") handleCanvas2DPointerLeave();
+              }}
               aria-hidden
             />
           )}
@@ -3685,6 +3694,11 @@ function aggregateValues(values: number[], agg: YAggregateOption): number {
   return values.reduce((a, b) => a + b, 0);
 }
 
+/** Simple (unfaceted) bars flip to horizontal on portrait stages so long labels stay legible. */
+function isHorizontalBar(kind: string, cIdx: number, xIdx: number, w: number, h: number): boolean {
+  return kind === "bar" && (cIdx < 0 || cIdx === xIdx) && h > w * 1.05;
+}
+
 function renderFullBar(
   ctx: CanvasRenderingContext2D,
   rows: unknown[][],
@@ -3696,6 +3710,7 @@ function renderFullBar(
   pad: number,
   opts?: ChartRenderOpts,
   facet?: BarFacetHitPayload | null,
+  horizontal = false,
 ) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.85;
@@ -3808,6 +3823,43 @@ function renderFullBar(
     .slice(0, 20);
   if (entries.length === 0) return;
   const maxVal = Math.max(...entries.map(e => e[1]), 1);
+
+  if (horizontal) {
+    // Portrait stages (phones, Stories): category labels read left-to-right
+    // instead of colliding as rotated ticks under skinny columns.
+    const n = entries.length;
+    const band = (h - 2 * pad) / n;
+    const labelFont = Math.max(9, Math.min(12, band * 0.42));
+    ctx.font = `${labelFont}px '${fontFamily}', sans-serif`;
+    const widest = Math.max(...entries.map(([label]) => ctx.measureText(label).width));
+    const labelW = Math.min(chartW * 0.42, widest + 8);
+    const x0 = pad + labelW;
+    const valueRoom = 34;
+    const plotW = Math.max(8, w - pad - x0 - valueRoom);
+    const barT = Math.max(2, band * 0.7);
+    entries.forEach(([label, val], i) => {
+      const yMid = pad + band * (i + 0.5);
+      const len = (val / maxVal) * plotW;
+      ctx.fillStyle = cols[i % cols.length];
+      ctx.globalAlpha = alpha;
+      ctx.beginPath();
+      roundedRect(ctx, x0, yMid - barT / 2, Math.max(1, len), barT, Math.min(cornerR, barT / 2));
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = axisLabelColor;
+      ctx.font = `${labelFont}px '${fontFamily}', sans-serif`;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(fitTextEllipsis(ctx, label, labelW - 8), x0 - 6, yMid);
+      ctx.textAlign = "left";
+      const lbl = val >= 10000 ? `${Math.round(val / 100) / 10}k` : String(Math.round(val * 10) / 10);
+      ctx.fillText(lbl, x0 + len + 4, yMid);
+    });
+    ctx.textBaseline = "alphabetic";
+    ctx.globalAlpha = 1;
+    return;
+  }
+
   const barW = Math.max(4, (w - 2 * pad) / entries.length - 4);
 
   entries.forEach(([label, val], i) => {

@@ -95,7 +95,27 @@ export async function looksLikeFailedCapture(blob: Blob): Promise<boolean> {
  * Capture the current chart at a social platform size.
  * Temporarily forces stage geometry + Canvas path, then restores.
  */
-export async function capturePlatformPng(
+// Captures mutate shared stage state and restore it afterwards; overlapping runs
+// would "restore" each other's forced size and leave the stage stuck. Serialize.
+let captureChain: Promise<unknown> = Promise.resolve();
+
+export function capturePlatformPng(
+  presetId: SocialPresetId,
+  options?: {
+    supersample?: 1 | 2;
+    attempts?: number;
+    /** Checked once this capture's turn comes; return false to skip (superseded). */
+    shouldRun?: () => boolean;
+  },
+): Promise<Blob | null> {
+  const run = captureChain.then(() =>
+    options?.shouldRun && !options.shouldRun() ? null : captureNow(presetId, options),
+  );
+  captureChain = run.catch(() => undefined);
+  return run;
+}
+
+async function captureNow(
   presetId: SocialPresetId,
   options?: { supersample?: 1 | 2; attempts?: number },
 ): Promise<Blob | null> {
@@ -118,10 +138,14 @@ export async function capturePlatformPng(
       if (preset.aspectId) {
         getState().setAppSettings((s) => ({ ...s, chartAspect: preset.aspectId! }));
       }
+      // Lay the chart out near phone width and render at ~2.4× so titles, labels,
+      // and marks read at feed size (17px type on a 1080px post looks tiny).
+      // Stay ≥400 CSS px wide so ChartView never drops into its compact layout.
+      const layoutScale = Math.min(2.4, Math.max(1, preset.width / 450));
       getState().setSocialExportTarget({
-        width: preset.width,
-        height: preset.height,
-        pixelRatio: supersample,
+        width: Math.round(preset.width / layoutScale),
+        height: Math.round(preset.height / layoutScale),
+        pixelRatio: layoutScale * supersample,
         presetId,
       });
     } else {
@@ -146,9 +170,12 @@ export async function capturePlatformPng(
         if (!blob) continue;
         if (await looksLikeFailedCapture(blob)) continue;
 
-        // If supersampled, downscale to exact preset pixels
-        if (supersample === 2 && preset.width && preset.height) {
-          blob = (await downscaleBlob(blob, preset.width, preset.height)) ?? blob;
+        // Supersampling / layout rounding can miss the preset by a pixel — resample to exact size.
+        if (preset.width && preset.height) {
+          const bmp = await createImageBitmap(blob);
+          const exact = bmp.width === preset.width && bmp.height === preset.height;
+          bmp.close();
+          if (!exact) blob = (await downscaleBlob(blob, preset.width, preset.height)) ?? blob;
         }
         // Current-frame path: burn-in isn't applied in the handler (no target) — post-process.
         if (!preset.width || !preset.height) {

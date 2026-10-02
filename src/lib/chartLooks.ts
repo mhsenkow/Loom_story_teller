@@ -461,8 +461,9 @@ export function drawAxisFieldLabels(
 
   if (yLabel) {
     ctx.save();
-    // Vertically center on the plot; horizontally mid-left gutter
-    const gx = Math.max(11, Math.min(pad * 0.38, pad - 10));
+    // Vertically center on the plot; horizontally mid-left gutter, but always
+    // left of ~7-char tick labels (narrow phone / capture layouts have slim pads).
+    const gx = Math.max(fontSize * 0.75 + 2, Math.min(pad * 0.38, pad - 10, pad - 46));
     const gy = pad + (h - 2 * pad) / 2;
     ctx.translate(gx, gy);
     ctx.rotate(-Math.PI / 2);

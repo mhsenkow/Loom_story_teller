@@ -68,6 +68,7 @@ make loft       # Deploy static web UI to Cloudflare Workers (wrangler.jsonc)
 2. **Types + invoke:** Mirror types and wrappers in `tauri.ts`; add browser mocks in `mock-data.ts` if needed.
 3. **UI state:** Add minimal fields/actions in `store.ts`; wire in the smallest set of components.
 4. **Docs:** Update `DOCS.md` (internal) and, if user-visible, `README.md`.
+5. **What's new:** If people will notice it, add an item to the top release in `src/lib/changelog.ts` — or a new release with a newer `id` (e.g. `2026-10-05`) when shipping a new batch. Returning visitors see unseen releases once in the What's new modal. Write for users, not developers.
 
 ---
 

@@ -1001,6 +1001,23 @@ html {
   }
 }
 
+/* Touch screens can't hover — reveal hover-only controls (remove ×, etc.). */
+@media (hover: none) {
+  .group-hover\:opacity-100 {
+    opacity: 1 !important;
+  }
+}
+
+/* iOS Safari zooms the page when a focused field is under 16px. On touch
+   phones every text field gets 16px so focusing never zooms the shell. */
+@media (max-width: 767px) and (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
 /* Prefer less motion when requested */
 @media (prefers-reduced-motion: reduce) {
   html:not(.reduced-motion) *,

@@ -300,10 +300,14 @@ function fitProjection(
   h: number,
   pad: number,
 ): GeoProjection {
+  // `pad` is sized for the title band; a ~2:1 world map is width-bound on
+  // square / portrait / phone stages, so keep the full pad only on top.
+  const side = Math.max(8, Math.round(pad * 0.25));
+  const bottom = Math.max(12, Math.round(pad * 0.5));
   return projection.fitExtent(
     [
-      [pad, pad],
-      [w - pad, h - pad],
+      [side, pad],
+      [w - side, h - bottom],
     ],
     { type: "FeatureCollection", features: atlas.features },
   );

@@ -486,7 +486,7 @@ async function handlePublishStory(request: Request): Promise<Response> {
   } catch {
     return json({ error: "Invalid JSON" }, 400);
   }
-  const html = payload.html?.trim() ?? "";
+  let html = payload.html?.trim() ?? "";
   if (!html || html.length > MAX_STORY_HTML_BYTES) {
     return json({ error: "HTML missing or too large (4MB max)" }, 400);
   }
@@ -497,6 +497,23 @@ async function handlePublishStory(request: Request): Promise<Response> {
   const id = storyId();
   const cache = caches.default;
   const cacheUrl = new URL(`https://loom-story.internal/s/${id}`);
+  const origin = new URL(request.url).origin;
+
+  // Link unfurlers (iMessage, Slack, X…) ignore data: URLs — host the preview
+  // image beside the page and point og:image / twitter:image at it.
+  const og = payload.ogImage?.match(/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/);
+  if (og && og[2]!.length < MAX_STORY_HTML_BYTES) {
+    const bytes = Uint8Array.from(atob(og[2]!), (c) => c.charCodeAt(0));
+    await cache.put(
+      `https://loom-story.internal/s/${id}.img`,
+      new Response(bytes, {
+        headers: { "Content-Type": og[1]!, "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}` },
+      }),
+    );
+    const hosted = `${origin}/s/${id}.img`;
+    html = html.split(`content="${payload.ogImage}"`).join(`content="${hosted}"`);
+  }
+
   const res = new Response(html, {
     status: 200,
     headers: {
@@ -507,12 +524,11 @@ async function handlePublishStory(request: Request): Promise<Response> {
   });
   await cache.put(cacheUrl.toString(), res.clone());
 
-  const origin = new URL(request.url).origin;
   return json({ id, url: `${origin}/s/${id}` });
 }
 
 async function handleGetStory(id: string): Promise<Response> {
-  if (!/^[a-z0-9]{8,16}$/i.test(id)) {
+  if (!/^[a-z0-9]{8,16}(\.img)?$/i.test(id)) {
     return json({ error: "Invalid story id" }, 400);
   }
   const cache = caches.default;

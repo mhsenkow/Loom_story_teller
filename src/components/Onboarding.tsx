@@ -11,6 +11,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLoomStore } from "@/lib/store";
+import { openDataSources } from "@/components/StartHere";
 import {
   scanDiscoverStories,
   DISCOVER_SEEN_KEY,
@@ -75,6 +76,7 @@ export function Onboarding() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [chartFilter, setChartFilter] = useState<string>("all");
   const [sortMode, setSortMode] = useState<SortMode>("score");
+  const whatsNewOpen = useLoomStore((s) => s.whatsNewOpen);
 
   const {
     setSelectedFile,
@@ -257,6 +259,10 @@ export function Onboarding() {
         charts[0]!;
       setChartRecs(charts);
       setActiveChart(preferred);
+      // The hook ("M5.8 quake — …") is the headline people came for; keep it on the chart.
+      if (story.hook && story.hook !== preferred.title) {
+        useLoomStore.getState().setChartTitleOverride(preferred.id, story.hook);
+      }
       setVegaSpec(null);
       setViewMode("chart");
       setPanelTab("chart");
@@ -277,8 +283,7 @@ export function Onboarding() {
   };
 
   const browseSources = () => {
-    setDataRegionOpen(true);
-    setDataSourcesExpanded(true);
+    openDataSources();
     dismiss();
   };
 
@@ -301,7 +306,9 @@ export function Onboarding() {
     return `${visible.length} ${visible.length === 1 ? "story" : "stories"} · ${parts.join(" · ")}`;
   }, [categoryFilter, chartFilter, phase, stories.length, scannedHint, visible.length]);
 
-  if (show !== true) return null;
+  // The scan keeps streaming in the background while What's new is up, so
+  // stories are ready the moment it closes.
+  if (show !== true || whatsNewOpen) return null;
 
   return (
     <div
@@ -494,29 +501,29 @@ export function Onboarding() {
                     onClick={() => void openStory(s)}
                     className={`
                       group w-full h-full text-left border border-loom-border rounded-lg p-2
-                      bg-loom-elevated/40 hover:border-loom-accent/50 hover:bg-loom-accent/5
-                      transition-colors disabled:opacity-60 flex flex-col gap-1 min-h-[5.25rem]
+                      bg-loom-elevated/40 hover:border-loom-accent/50 hover:bg-loom-accent/5 active:bg-loom-accent/10
+                      transition-colors disabled:opacity-60 flex flex-col gap-1 min-h-[6.5rem] sm:min-h-[5.25rem]
                       ${openingId === s.id ? "border-loom-accent ring-1 ring-loom-accent/30" : ""}
                     `}
                   >
                     <div className="flex items-start justify-between gap-1">
-                      <span className="text-[9px] uppercase tracking-wider font-medium text-loom-muted truncate leading-tight">
+                      <span className="text-[10px] sm:text-[9px] uppercase tracking-wider font-medium text-loom-muted truncate leading-tight">
                         {s.category}
                         <span className="text-loom-muted/50 mx-0.5">·</span>
                         <span className="normal-case tracking-normal font-normal">{s.fileName}</span>
                       </span>
                       <span
-                        className="shrink-0 text-[9px] px-1 py-px rounded bg-loom-bg/70 border border-loom-border/70 text-loom-accent leading-tight"
+                        className="shrink-0 text-[10px] sm:text-[9px] px-1 py-px rounded bg-loom-bg/70 border border-loom-border/70 text-loom-accent leading-tight"
                         title={s.chartKind}
                       >
                         {chartKindLabel(s.chartKind)}
                       </span>
                     </div>
-                    <p className="text-xs font-semibold text-loom-text leading-snug line-clamp-2 group-hover:text-loom-accent transition-colors">
+                    <p className="text-sm sm:text-xs font-semibold text-loom-text leading-snug line-clamp-3 sm:line-clamp-2 group-hover:text-loom-accent transition-colors">
                       {s.hook}
                     </p>
-                    <p className="text-[10px] text-loom-muted leading-snug line-clamp-1 mt-auto">{s.blurb}</p>
-                    <div className="flex items-center justify-between gap-1">
+                    <p className="text-[11px] sm:text-[10px] text-loom-muted leading-snug line-clamp-2 sm:line-clamp-1 mt-auto">{s.blurb}</p>
+                    <div className="hidden sm:flex items-center justify-between gap-1">
                       <span
                         className="text-[9px] font-mono text-loom-muted/70 tabular-nums"
                         title={`Match score ${Math.round(s.score)}`}
@@ -535,10 +542,10 @@ export function Onboarding() {
         </div>
 
         <div className="flex items-center justify-between gap-2 shrink-0 pt-1 border-t border-loom-border/60">
-          <button type="button" onClick={browseSources} className="text-2xs text-loom-muted hover:text-loom-accent">
+          <button type="button" onClick={browseSources} className="text-xs sm:text-2xs text-loom-muted hover:text-loom-accent min-h-10 sm:min-h-0 px-1">
             Browse all sources
           </button>
-          <button type="button" onClick={dismiss} className="loom-btn-ghost text-xs px-2.5 py-1.5">
+          <button type="button" onClick={dismiss} className="loom-btn-ghost text-xs px-2.5 py-1.5 min-h-10 sm:min-h-0">
             Skip for now
           </button>
         </div>
@@ -562,7 +569,7 @@ function FilterChip({
       aria-pressed={pressed}
       onClick={onClick}
       className={`
-        min-h-7 px-2.5 text-[11px] rounded-full border transition-colors whitespace-nowrap
+        min-h-9 sm:min-h-7 px-3 sm:px-2.5 text-xs sm:text-[11px] rounded-full border transition-colors whitespace-nowrap
         ${pressed
           ? "bg-loom-text text-loom-bg border-loom-text font-medium"
           : "bg-transparent text-loom-muted border-transparent hover:text-loom-text hover:bg-loom-elevated/80"}
@@ -588,7 +595,7 @@ function ChartLink({
       aria-pressed={pressed}
       onClick={onClick}
       className={`
-        whitespace-nowrap transition-colors underline-offset-4
+        whitespace-nowrap transition-colors underline-offset-4 py-2 sm:py-0
         ${pressed
           ? "text-loom-text font-medium underline decoration-loom-accent/70"
           : "text-loom-muted hover:text-loom-text"}

@@ -11,6 +11,7 @@
 // =================================================================
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { StartHere } from "@/components/StartHere";
 import { useLoomStore } from "@/lib/store";
 import { createChartRec, type YAggregateOption } from "@/lib/recommendations";
 import { isTauri } from "@/lib/tauri";
@@ -78,7 +79,8 @@ export function DiveView() {
   sampleRef.current = sampleRows;
   // Layout follows Dive's own width (side panels can squeeze it on any screen).
   const rootRef = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(true);
+  // Start narrow on phones so the first paint doesn't flash the side-by-side layout.
+  const [wide, setWide] = useState(() => typeof window === "undefined" || window.innerWidth >= 720);
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -224,15 +226,17 @@ export function DiveView() {
   // ── Empty / loading states ─────────────────────────────────────
   if (!selectedFile) {
     return (
-      <div className="h-full flex items-center justify-center p-6">
-        <div className="max-w-md space-y-3 text-center">
-          <p className="text-sm font-semibold text-loom-text">Dive into a dataset</p>
-          <p className="text-xs text-loom-muted leading-relaxed">
-            Slice and dice rows Scuba-style: pick a time window, filter, group by, and compare metrics like p90 against last
-            week — then click any value to drill in. Works best on event data with a timestamp, like the{" "}
-            <span className="text-loom-text">Wikipedia Live</span> stream, USGS quakes, or NWS alerts in the sidebar.
-          </p>
-          {diveLink && <LinkBanner src={diveLink.src} onDismiss={() => setDiveLink(null)} />}
+      <div className="h-full flex flex-col">
+        {diveLink && (
+          <div className="p-3 shrink-0">
+            <LinkBanner src={diveLink.src} onDismiss={() => setDiveLink(null)} />
+          </div>
+        )}
+        <div className="flex-1 min-h-0">
+          <StartHere
+            title="Dive into a dataset"
+            detail="Dive slices event data Scuba-style — time window, filters, group-by, p90 vs last week. Live feeds with timestamps work best."
+          />
         </div>
       </div>
     );

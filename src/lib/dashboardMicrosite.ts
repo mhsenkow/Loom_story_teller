@@ -271,3 +271,97 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
 </body>
 </html>`;
 }
+
+export interface ChartSharePageInput {
+  title: string;
+  /** Post caption / blurb shown under the image and used for link previews. */
+  caption?: string | null;
+  imageDataUrl: string;
+  sourceLabel?: string | null;
+  /** Absolute URL of the Loom app, for the "make your own" link. */
+  appUrl?: string | null;
+}
+
+/**
+ * Single-chart share page: one big image, headline, caption, source.
+ * The Worker swaps the og:image data URL for a hosted PNG so links unfurl.
+ */
+export function buildChartSharePageHtml(input: ChartSharePageInput): string {
+  const LOOM = snapshotThemeTokens();
+  const title = escapeHtml(input.title || "Loom chart");
+  const captionText = (input.caption || "").trim();
+  const desc = escapeHtml((captionText || `${input.title} — made with Loom`).slice(0, 280));
+  const img = escapeHtml(input.imageDataUrl);
+  const captionHtml = captionText
+    ? `<p class="cs-caption">${escapeHtml(captionText).replace(/\n/g, "<br />")}</p>`
+    : "";
+  const source = input.sourceLabel
+    ? `<p class="cs-meta">Data: ${escapeHtml(input.sourceLabel)} · ${escapeHtml(new Date().toLocaleString())}</p>`
+    : `<p class="cs-meta">${escapeHtml(new Date().toLocaleString())}</p>`;
+  const cta = input.appUrl
+    ? `<a class="cs-cta" href="${escapeHtml(input.appUrl)}">Make your own with Loom →</a>`
+    : `<span class="cs-cta">Made with Loom</span>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>${title}</title>
+  <meta name="description" content="${desc}" />
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${desc}" />
+  <meta property="og:image" content="${img}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${title}" />
+  <meta name="twitter:description" content="${desc}" />
+  <meta name="twitter:image" content="${img}" />
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Inter", "SF Pro Display", system-ui, sans-serif;
+      background: ${LOOM.bg};
+      color: ${LOOM.text};
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    }
+    main { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 14px; }
+    h1 { font-size: clamp(1.15rem, 4.5vw, 1.6rem); line-height: 1.25; margin: 4px 0 0; letter-spacing: -0.01em; }
+    .cs-figure {
+      margin: 0;
+      border: 1px solid ${LOOM.border};
+      border-radius: 14px;
+      overflow: hidden;
+      background: ${LOOM.surface};
+    }
+    .cs-figure img { display: block; width: 100%; height: auto; }
+    .cs-caption { margin: 0; font-size: 0.95rem; line-height: 1.55; color: ${LOOM.text}; opacity: 0.88; }
+    .cs-meta { margin: 0; font-size: 0.75rem; color: ${LOOM.muted}; }
+    .cs-cta {
+      align-self: flex-start;
+      margin-top: 6px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: ${LOOM.accent};
+      text-decoration: none;
+      padding: 10px 14px;
+      border: 1px solid ${LOOM.accent};
+      border-radius: 10px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>${title}</h1>
+    <figure class="cs-figure"><img src="${img}" alt="${title}" /></figure>
+    ${captionHtml}
+    ${source}
+    ${cta}
+  </main>
+</body>
+</html>`;
+}
