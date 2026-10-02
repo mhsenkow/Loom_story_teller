@@ -9,7 +9,7 @@ import type { ChartKind, ChartRecommendation } from "./recommendations";
 import type { ColumnInfo, QueryResult } from "./store";
 import { ODD_NON_CARTESIAN, isOddChartKind } from "./oddCharts";
 import { GPU_SCENE_NON_CARTESIAN, isGpuSceneKind } from "./gpuScenes";
-import { GEO_MAP_NON_CARTESIAN } from "./geoMaps";
+import { GEO_MAP_NON_CARTESIAN, isGeoMapKind } from "./geoMaps";
 
 export interface ChartRenderIssue {
   title: string;
@@ -304,7 +304,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     barMarks: kind === "bar" || kind === "histogram" || kind === "waterfall" || kind === "lollipop" || kind === "funnel" || kind === "isoBars",
     lineMarks: kind === "line" || kind === "area" || kind === "parallel" || kind === "bump" || kind === "slope" || kind === "stream" || kind === "trailRibbon",
     dataLabels: ["bar", "pie", "treemap", "forceBubble", "lollipop", "funnel", "dumbbell", "radialBar", "waffle"].includes(kind),
-    legend: (cartesian && !["histogram", "heatmap", "hexbin"].includes(kind)) || kind === "radar" || kind === "pie" || kind === "sankey" || kind === "parallel" || kind === "funnel" || isOddChartKind(kind) || isGpuSceneKind(kind),
+    legend: (cartesian && !["histogram", "heatmap", "hexbin"].includes(kind)) || (isGeoMapKind(kind) && kind !== "geoHex") || kind === "radar" || kind === "pie" || kind === "sankey" || kind === "parallel" || kind === "funnel" || isOddChartKind(kind) || isGpuSceneKind(kind),
     referenceLines: cartesian && !["heatmap", "hexbin", "box", "violin", "ridgeline", "contour", "voronoi"].includes(kind) && !isGpuSceneKind(kind),
     scatterExtras: pointMarks || kind === "bucketField" || kind === "beeswarm" || kind === "scatter3d" || kind === "firefly",
     emphasis: false,
