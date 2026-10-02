@@ -11,6 +11,7 @@
 // =================================================================
 
 import type { DiveLink, DiveQuery } from "./dive";
+import type { ChartLink } from "./chartLink";
 import { create } from "zustand";
 import type { ChartRecommendation } from "./recommendations";
 import type {
@@ -374,6 +375,8 @@ interface LoomState {
   diveQuery: { src: string; query: DiveQuery } | null;
   /** Dive opened from a shared #dive= link, waiting for its dataset to be open. */
   diveLink: DiveLink | null;
+  /** Chart opened from a shared #chart= link, waiting for its dataset to be open. */
+  chartLink: ChartLink | null;
   /** NL-to-SQL input. */
   nlQueryInput: string;
   /** Toast message (shown briefly; null = hidden). */
@@ -460,6 +463,7 @@ interface LoomState {
   setViewMode: (mode: ViewMode) => void;
   setDiveQuery: (v: { src: string; query: DiveQuery } | null) => void;
   setDiveLink: (v: DiveLink | null) => void;
+  setChartLink: (v: ChartLink | null) => void;
   setPanelTab: (tab: PanelTab) => void;
   toggleSidebar: () => void;
   togglePanel: () => void;
@@ -655,6 +659,7 @@ const initialState = {
   querySnapshots: [] as { id: string; name: string; columns: string[]; rows: (string | number | boolean | null)[][]; at: number }[],
   diveQuery: null as { src: string; query: DiveQuery } | null,
   diveLink: null as DiveLink | null,
+  chartLink: null as ChartLink | null,
   nlQueryInput: "",
   toastMessage: null as string | null,
   chartViews: [] as ChartViewItem[],
@@ -704,6 +709,7 @@ export const useLoomStore = create<LoomState>((set, get) => ({
   setViewMode: (mode) => set({ viewMode: mode }),
   setDiveQuery: (v) => set({ diveQuery: v }),
   setDiveLink: (v) => set({ diveLink: v }),
+  setChartLink: (v) => set({ chartLink: v }),
   setPanelTab: (tab) => set({ panelTab: tab }),
   toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),

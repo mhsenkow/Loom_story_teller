@@ -25,6 +25,8 @@ import {
 import { downloadBlob } from "@/lib/zipStore";
 import { buildChartSharePageHtml } from "@/lib/dashboardMicrosite";
 import { isTauri } from "@/lib/tauri";
+import { chartLinkSrc, isPortableChartLink } from "@/lib/chartLink";
+import { currentChartShareUrl } from "./ChartLinkSync";
 
 const FORMATS: { id: SocialPresetId; label: string; hint: string }[] = [
   { id: "ig-square", label: "Square", hint: "Feed posts" },
@@ -95,7 +97,7 @@ function ShareSheetBody() {
   const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState<null | "share" | "link">(null);
   const [link, setLink] = useState<string | null>(null);
-  const [copied, setCopied] = useState<null | "caption" | "link">(null);
+  const [copied, setCopied] = useState<null | "caption" | "link" | "loom">(null);
   const captureSeq = useRef(0);
   const nativeShare = useMemo(canShareFiles, []);
   const desktop = useMemo(isTauri, []);
@@ -218,6 +220,7 @@ function ShareSheetBody() {
         imageDataUrl: image,
         sourceLabel: selectedFile?.name,
         appUrl: typeof window !== "undefined" && !desktop ? window.location.origin : null,
+        openUrl: desktop ? null : currentChartShareUrl(),
       });
       const published = await publishStoryToWorker({ html, title: chartTitle, ogImageDataUrl: image });
       if (!published) {
@@ -227,6 +230,21 @@ function ShareSheetBody() {
       setLink(published.url);
     } finally {
       setBusy(null);
+    }
+  };
+
+  // Loom link (#chart=…): built synchronously from the store so the clipboard
+  // write stays inside the tap on iOS.
+  const handleCopyLoomLink = async () => {
+    const url = currentChartShareUrl();
+    if (!url) return;
+    if (await copyTextToClipboard(url)) {
+      setCopied("loom");
+      window.setTimeout(() => setCopied(null), 1800);
+      const portable = selectedFile ? isPortableChartLink({ src: chartLinkSrc(selectedFile), url: selectedFile.sourceUrl }) : false;
+      setToast(portable ? "Chart link copied — it reopens this exact chart" : "Link copied — recipients need the same file open");
+    } else {
+      setToast("Couldn’t reach the clipboard");
     }
   };
 
@@ -404,6 +422,16 @@ function ShareSheetBody() {
               {copied === "caption" ? "Copied" : "Caption"}
             </button>
           </div>
+          {!desktop && (
+            <button
+              type="button"
+              onClick={handleCopyLoomLink}
+              className="w-full min-h-10 text-xs text-loom-text rounded-lg border border-loom-border loom-btn-ghost"
+              title="Copies a Loom link that reopens this chart — same data, settings, and look"
+            >
+              {copied === "loom" ? "Link copied" : "🔗 Copy chart link"}
+            </button>
+          )}
           {nativeShare && !desktop && (
             <button type="button" onClick={openMoreExports} className="w-full text-2xs text-loom-muted hover:text-loom-accent py-1.5">
               More export options (SVG, video, story pack…)

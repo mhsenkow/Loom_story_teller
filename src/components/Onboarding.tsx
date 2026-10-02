@@ -138,6 +138,12 @@ export function Onboarding() {
     };
 
     const id = window.setTimeout(() => {
+      // Opened from a shared #chart= / #dive= link — show that, not discover
+      // (don't mark discover seen; it greets them next time).
+      if (/(?:^#|&)(?:chart|dive)=/.test(window.location.hash)) {
+        setShow(false);
+        return;
+      }
       try {
         if (window.localStorage.getItem(DISCOVER_SEEN_KEY)) {
           setShow(false);

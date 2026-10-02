@@ -280,6 +280,8 @@ export interface ChartSharePageInput {
   sourceLabel?: string | null;
   /** Absolute URL of the Loom app, for the "make your own" link. */
   appUrl?: string | null;
+  /** Absolute Loom URL with `#chart=…` that reopens this exact chart (replaces the "make your own" link). */
+  openUrl?: string | null;
 }
 
 /**
@@ -298,9 +300,11 @@ export function buildChartSharePageHtml(input: ChartSharePageInput): string {
   const source = input.sourceLabel
     ? `<p class="cs-meta">Data: ${escapeHtml(input.sourceLabel)} · ${escapeHtml(new Date().toLocaleString())}</p>`
     : `<p class="cs-meta">${escapeHtml(new Date().toLocaleString())}</p>`;
-  const cta = input.appUrl
-    ? `<a class="cs-cta" href="${escapeHtml(input.appUrl)}">Make your own with Loom →</a>`
-    : `<span class="cs-cta">Made with Loom</span>`;
+  const cta = input.openUrl
+    ? `<a class="cs-cta" href="${escapeHtml(input.openUrl)}">Open this chart in Loom →</a>`
+    : input.appUrl
+      ? `<a class="cs-cta" href="${escapeHtml(input.appUrl)}">Make your own with Loom →</a>`
+      : `<span class="cs-cta">Made with Loom</span>`;
 
   return `<!DOCTYPE html>
 <html lang="en">
