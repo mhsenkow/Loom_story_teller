@@ -11,7 +11,7 @@
 ### On your phone (web)
 - **Find something fun** — first open (and every empty view) leads with **✦ What’s interesting right now**: Loom scans the live feeds (quakes, flights, Hacker News, Wikipedia, crypto, weather…) and opens the best one as a chart with its headline already set. **Data & sources** puts live feeds and curated packs first.
 - **Make it yours** — **Edit** opens a half-height sheet so the chart stays visible while you change encoding or look; **✦ Swipe ideas** deals more charts to Keep / Skip. Bars flip horizontal on tall screens so long labels stay readable; taps show tooltips and finger-drags scrub them.
-- **Share** — the **Share** button renders the chart at Square / Portrait / Story / Wide sizes with feed-sized type, then opens the phone’s share sheet (or saves the image). **Get link** publishes a chart page that unfurls with a preview image in iMessage, Slack, X, etc. (kept 7 days).
+- **Share** — the **Share** button renders the chart at Square / Portrait / Story / Wide sizes with feed-sized type, then opens the phone’s share sheet (or saves the image). **Get link** publishes a chart page that unfurls with a preview image in iMessage, Slack, X, etc. (kept 7 days). **Copy chart link** (and the address bar in Chart view, `#chart=…`) reopens the exact chart — dataset, chart type, encodings, headline, look, and framing; live feeds, demo files, and open-data CSVs reopen on load, local files wait for the recipient to open a file with the same name.
 
 ### Explorer
 - **Mount a folder** — Point at a directory of CSV/Parquet files; Loom scans and exposes them in the sidebar. Search files by name.
@@ -31,10 +31,13 @@
 - **Export** — Copy or download PNG/SVG; copy chart config as JSON. Annotations and custom ref lines are per chart.
 
 ### Dive (Scuba-style slice and dice)
-- **Ask questions by clicking** — pick a **time window** (last 15 min → last year, ending at the newest row), **filters**, **group by** (nested), and **metrics** (count, count distinct, sum, avg, min, max, **p50 / p90 / p99**). Results update instantly.
-- **Three views of one query** — **Time series** (auto or fixed buckets, one line per top group), **Table** (ranked groups with totals), **Samples** (newest matching raw rows).
+- **Ask questions by clicking** — pick a **time window** (last 15 min → last year, ending at the newest row, or **Custom** with absolute or relative bounds like `-3 hours` / `yesterday`), **filters**, **group by** (nested), and **metrics** (count, count distinct, sum, avg, min, max, **p5 … p99.9**; min / max / avg also work on time columns as first / last seen). Results update instantly.
+- **Filters** — multi-value chips with suggestions from the data (= ORs them, ≠ excludes them all), contains, LIKE, and regex.
+- **Derived columns** — define a column with a DuckDB-style expression (`hour(ts)`, `lower(country)`, `CASE WHEN … END`, `regexp_extract(…)`) and filter / group / aggregate on it. Evaluated in the browser; the same text goes into the SQL preview.
+- **Three views of one query** — **Time series** (auto, fine, or fixed buckets from 1 s to 30 days; one line per top group; one panel per metric; empty buckets as 0, gaps, or connected), **Table** (ranked groups with totals, hits + share, highest- or lowest-first), **Samples** (newest matching raw rows, pick columns, sort by any header).
 - **Compare** with the previous period, 1 day, 1 week, or 4 weeks earlier — dashed ghost lines and green/red % deltas.
-- **Drill in** — click any value to filter to it (and stop grouping by it); ⌥-click to exclude it.
+- **Drill in** — click any value to filter to it (and stop grouping by it); ⌥-click to exclude it. On the chart: **Break down by** / **Drill up**, hover highlights the nearest line, click pins the crosshair, **drag to zoom** (double-click to zoom out).
+- **History** — each change is a browser history step, so Back / Forward walk through your queries.
 - **Live** — on Wikipedia / USGS / NWS and other feeds the dive auto-refreshes.
 - **Share** — the whole query lives in the URL (`#dive=…`); links to live feeds and demo files reopen the dataset on load. **SQL** shows the equivalent DuckDB query (open it in Query on desktop). **Open as cube** sends the filtered rows to the Data cube.
 - Works on web and desktop: the engine runs in the browser over the loaded rows (desktop pulls a 30k-row DuckDB sample first; web streams use their 8k-row buffer; uploaded CSVs on web use the 500-row sample).
@@ -272,6 +275,7 @@ Loom_story_teller/
 │   │   ├── webgpu.ts            # WebGPU pipeline (scatter)
 │   │   ├── dive.ts              # Dive engine: filters, group by, metrics/percentiles, buckets, compare, SQL, links
 │   │   ├── diveSource.ts        # Dive row loading (DuckDB sample on desktop, JS buffers on web)
+│   │   ├── diveExpr.ts          # Dive derived columns: DuckDB-style expression parser + evaluator
 │   │   ├── dataCube.ts          # Data cube binning, aggregation, camera, Canvas renderer, hover pick
 │   │   ├── webgpuCube.ts        # WebGPU instanced-voxel renderer for the data cube (cube.wgsl)
 │   │   ├── recommendations.ts  # Heuristics + recommendStreamStory / recommendSourceStory + SQL snippets

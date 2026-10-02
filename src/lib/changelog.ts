@@ -25,6 +25,77 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-02c",
+    date: "2026-10-02",
+    title: "Every chart, easier to read",
+    summary: "A pass over every chart type so the numbers, labels, and colors say what they mean.",
+    items: [
+      {
+        title: "Links that reopen your chart",
+        detail:
+          "Copy chart link (in Share) or the address bar now reopens the exact chart — same data, chart type, fields, headline, colors, and look. Works for live feeds, demo data, and open-data files; for your own files, the other person opens the same file and the chart appears.",
+      },
+      {
+        title: "Round numbers on every axis",
+        detail:
+          "Axes tick at 0, 20, 40 — not 3.7k and 7.4k — and gridlines sit right on those values. Dates read as Jan, Feb, Mar instead of 0.2, 0.4.",
+      },
+      {
+        title: "Labels you can actually read",
+        detail:
+          "Category names are no longer cut off after nine letters. Bar charts with long names turn sideways automatically, and crowded axes angle or thin their labels instead of overlapping.",
+      },
+      {
+        title: "Tooltips show the number",
+        detail:
+          "Hover a bar, slice, bin, or cell to see its total, average, or share — not just one row that happened to be underneath.",
+      },
+      {
+        title: "Color only when it means something",
+        detail:
+          "Single-series charts use one color. When color encodes a field, a legend appears on its own, tucked into the emptiest corner.",
+      },
+      {
+        title: "Sharper chart types",
+        detail:
+          "Box plots mark outliers, pies roll small slices into Other with percentages, treemaps use squarer tiles, waterfalls end with a total, and heatmaps and hexbins come with a color key that works in light and dark themes.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-02b",
+    date: "2026-10-02",
+    title: "Deeper dives",
+    summary: "Dive picks up the rest of Scuba’s toolkit — and a few things Scuba never had.",
+    items: [
+      {
+        title: "Make your own columns",
+        detail:
+          "Add a derived column like hour(ts), lower(country), or CASE WHEN delta > 0 THEN 'add' ELSE 'cut' END, then filter and group by it like any other column. It shows up in the SQL too.",
+      },
+      {
+        title: "Drag to zoom, Back to undo",
+        detail:
+          "Drag across the time series to zoom in; double-click to zoom out. Or type any window, like “-3 hours” or “yesterday”. Every change is a step in your browser history, so Back takes you to your previous question.",
+      },
+      {
+        title: "Smarter filters",
+        detail:
+          "Pick several values at once from suggestions drawn from your data, or match with contains, LIKE, or a regex.",
+      },
+      {
+        title: "More ways to measure",
+        detail:
+          "p5 through p99.9, first and last seen on time columns, a hits column with each group’s share, and lowest-first ranking. With several metrics, each gets its own chart panel.",
+      },
+      {
+        title: "Easier to read",
+        detail:
+          "Hover a crowded chart to highlight the nearest line, click to pin the readout, and choose how empty buckets look. Axis labels line up with real dates, and you can pick which columns Samples shows and sort by any of them.",
+      },
+    ],
+  },
+  {
     id: "2026-10-02",
     date: "2026-10-02",
     title: "Made for your phone",
