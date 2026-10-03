@@ -25,6 +25,38 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-02d",
+    date: "2026-10-02",
+    title: "More live data, and every feed fixed up",
+    summary: "Six new feeds, nine new open datasets, and a tune-up of every connection in Data & sources.",
+    items: [
+      {
+        title: "Six new live feeds",
+        detail:
+          "NASA's tracked wildfires, storms, and volcanoes on a map; every Citi Bike dock in New York right now; NOAA space weather (when to expect auroras); Britain's grid carbon every half hour; yesterday's most-read Wikipedia articles; and global temperature since 1880, with a climate spiral.",
+      },
+      {
+        title: "Feeds that work again",
+        detail:
+          "Weather alerts, crypto prices, live aircraft, SpaceX history, and world countries had stopped loading — they're back, with backups when an upstream service is busy. Earthquakes now show the past day instead of the past hour.",
+      },
+      {
+        title: "Richer data in every feed",
+        detail:
+          "Weather and air quality cover 12 cities, exchange rates show 90 days of history, and World Bank data now charts GDP per person against life expectancy (CO₂ per person is back too). Opening a feed loads all of it, not just the newest 500 rows.",
+      },
+      {
+        title: "Whole datasets, not the first page",
+        detail:
+          "Curated packs and your own CSVs load completely (up to about 1.5 million cells), and charts total every row — no more sums from a small preview. New packs: CO₂ per person, life expectancy, GDP, renewables, long-run population, the Keeling curve, every confirmed exoplanet, 35,000 power plants, and US cities.",
+      },
+      {
+        title: "Easier to browse",
+        detail: "Live feeds are grouped — Earth & climate, Cities & transport, Space, Web & markets, Countries & history — and each card links to where its data comes from.",
+      },
+    ],
+  },
+  {
     id: "2026-10-02c",
     date: "2026-10-02",
     title: "Every chart, easier to read",

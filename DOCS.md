@@ -23,7 +23,8 @@ For contributors and AI: where things live and how they connect. For a shorter a
 4. **Rendering** — `ChartView` uses `vegaSpec` + `sampleRows`: WebGPU for point marks, Canvas 2D or Vega for bar/line/area/arc. Export handlers (PNG/SVG) read from a ref that’s updated with the current spec and canvas.
 5. **Open data catalogs** — Data & sources searches Data.gov / data.gov.uk (Tauri IPC or browser via Worker `/api/catalog/*` + `/api/fetch-csv`). Web Explore parses CSV in `mock-data.ts` (`parseCsvToInspectResult`: quoted newlines, thousands separators, trim incomplete trailing records, reject xlsx). Recommendations prefer mean for rate/% fields and boost lat×lon scatters.
 6. **Wikipedia live stream** — `stream_start` / `stream_stop` / `stream_snapshot` / `stream_query` (Rust `stream.rs`) append to DuckDB `wiki_stream`. Sidebar starts the stream; chart stories use `recommendStreamStory`; Query view uses `STREAM_SQL_SNIPPETS` and routes SQL for `stream://wiki`.
-7. **Poll-based sources** — `source_start` / `source_stop` / `source_snapshot` / `source_query` (Rust `sources.rs`) fill `usgs_quakes`, `meteo_weather`, `nws_alerts`, `world_bank`. Sidebar cards per kind; `recommendSourceStory` + `SOURCE_SQL_SNIPPETS`; Query routes `stream://usgs`, `stream://meteo`, `stream://nws`, `stream://world_bank`.
+7. **Poll-based sources** — 22 feeds registered in `src/lib/sourceRegistry.ts` (USGS quakes, NASA EONET events, NWS alerts, weather + air quality for 12 cities, UK grid carbon, NOAA global temperature since 1880, live aircraft, Citi Bike docks, NYC 311, ISS, launches, SpaceX, NOAA space weather, Hacker News, Wikipedia most-read, crypto, FX history, FEMA, COVID, countries, World Bank). Desktop: `source_start` / `source_stop` / `source_snapshot` / `source_query` (Rust `sources.rs`) fill one DuckDB table per kind. Web: the Worker's `/api/source/<kind>` proxies + caches each upstream (Cache API, per-kind TTL, stale-on-error, fetch timeouts; fallbacks: CoinGecko → CoinPaprika, OpenSky → ADSB.lol) and `webStreams.ts` parses into in-memory buffers (≤8k rows). Explore loads the whole buffer (`SOURCE_EXPLORE_ROWS`). Sidebar cards are grouped by `SourceDef.group`; `recommendSourceStory` + `SOURCE_SQL_SNIPPETS` give each feed its opening charts and SQL; `discoverStories.ts` writes the headline hook.
+8. **Curated packs + web CSV** — Sidebar `CURATED_OPEN_PACKS` are complete CSVs (OWID per-indicator grapher files, Keeling curve, NASA exoplanets, WRI power plants, US cities) fetched via `/api/fetch-csv`. `parseCsvToInspectResult` keeps rows up to a cell budget (`WEB_CSV_CELL_BUDGET` 1.5M cells, ≤60k rows) and charts every kept row; demo files chart all rows.
 
 ---
 
@@ -192,7 +193,8 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 | `src/lib/queryValidate.ts` | Basic SQL validation (parentheses, SELECT/WITH). |
 | `src/lib/persist.ts` | Persist `tableViews` (and optional state) to storage. |
 | `src-tauri/src/stream.rs` | Wikimedia SSE → `wiki_stream` table; stream IPC helpers. |
-| `src-tauri/src/sources.rs` | USGS, Open-Meteo, NWS, World Bank → DuckDB tables; source IPC helpers. |
+| `src-tauri/src/sources.rs` | Every poll source → DuckDB tables (same tables/columns as `sourceRegistry.ts`); source IPC helpers. |
+| `src/lib/sourceRegistry.ts` | Single definition of every live/poll source: copy, table + schema, cadence, ordering, sidebar group. |
 | `src/lib/lookSystem.ts` | Theme / chrome / font catalog + Visual presets + ibm.tools.shared sync. |
 | `src/lib/dashboardMicrosite.ts` | Single-file HTML export for dashboard layouts. |
 | `src/lib/captureStoryPreviews.ts` | PNG thumbnails for story-dashboard chart slots. |

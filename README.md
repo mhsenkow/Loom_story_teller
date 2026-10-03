@@ -57,7 +57,7 @@ The desktop app (Tauri + DuckDB) adds folder mounting, millions of rows, SQL ove
 ### App
 - **Theming** — Dark, light, high-contrast, colorblind; font scale; reduced motion. Tokens in `globals.css`.
 - **Onboarding** — First-run modal: add data, then explore.
-- **Data & sources** — Data.gov / data.gov.uk **catalog search**, **sort**, **larger result sets** (up to 200), and a quick **page filter** (Tauri); save CSV to folder; **Wikipedia live stream** (SSE → `wiki_stream`); **poll-based feeds** (USGS earthquakes, Open-Meteo weather, NWS alerts, World Bank indicators) with sidebar cards and Query-view SQL against virtual `stream://…` sources.
+- **Data & sources** — Data.gov / data.gov.uk **catalog search**, **sort**, **larger result sets** (up to 200), and a quick **page filter** (Tauri); save CSV to folder; **Wikipedia live stream** (SSE → `wiki_stream`); **22 live and poll feeds** in five groups — *Earth & climate* (USGS quakes, NASA natural events, NWS alerts, weather and air quality for 12 cities, UK grid carbon, global temperature since 1880), *Cities & transport* (live aircraft, Citi Bike docks, NYC 311), *Space* (ISS, upcoming launches, SpaceX history, NOAA space weather), *Web & markets* (Hacker News, Wikipedia most-read, crypto, 90 days of FX), *Countries & history* (FEMA, COVID, countries, World Bank) — each opens with charts picked for it and has Query-view SQL against virtual `stream://…` sources. **Curated packs** load whole public CSVs: OWID CO₂, life expectancy, GDP, renewables, and population; the Keeling curve; every confirmed exoplanet; 35k power plants; US cities.
 
 ---
 
@@ -261,7 +261,7 @@ Loom_story_teller/
 │       ├── main.rs              # Binary entry
 │       ├── db.rs                # DuckDB: scan, query, column stats
 │       ├── stream.rs            # Wikipedia SSE → wiki_stream
-│       ├── sources.rs           # USGS, Open-Meteo, NWS, World Bank → DuckDB tables
+│       ├── sources.rs           # 22 poll sources → DuckDB tables (schema from sourceRegistry.ts)
 │       └── commands.rs          # All #[tauri::command] handlers (see tauri.ts)
 │
 ├── src/                         # Next.js frontend
