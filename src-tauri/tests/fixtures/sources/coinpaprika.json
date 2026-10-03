@@ -1,0 +1,30 @@
+[
+  {
+    "id": "btc-bitcoin",
+    "name": "Bitcoin",
+    "symbol": "BTC",
+    "rank": 1,
+    "quotes": {
+      "USD": {
+        "price": 84238.70063693251,
+        "volume_24h": 34586488724.414856,
+        "market_cap": 1692573758269,
+        "percent_change_24h": -0.25
+      }
+    }
+  },
+  {
+    "id": "eth-ethereum",
+    "name": "Ethereum",
+    "symbol": "ETH",
+    "rank": 2,
+    "quotes": {
+      "USD": {
+        "price": 2663.640990721565,
+        "volume_24h": 14314368157.536556,
+        "market_cap": 325227075597,
+        "percent_change_24h": -0.9599999785423279
+      }
+    }
+  }
+]

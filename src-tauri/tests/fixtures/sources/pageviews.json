@@ -1,0 +1,73 @@
+{
+  "items": [
+    {
+      "project": "en.wikipedia",
+      "access": "all-access",
+      "year": "2026",
+      "month": "10",
+      "day": "01",
+      "articles": [
+        {
+          "article": "Main_Page",
+          "views": 6672618,
+          "rank": 1
+        },
+        {
+          "article": "Christa_Pike",
+          "views": 4309025,
+          "rank": 2
+        },
+        {
+          "article": "Special:Search",
+          "views": 897019,
+          "rank": 3
+        },
+        {
+          "article": "Wikipedia:Featured_pictures",
+          "views": 600233,
+          "rank": 4
+        },
+        {
+          "article": "USS_Theodore_Roosevelt_(CVN-71)",
+          "views": 495200,
+          "rank": 5
+        },
+        {
+          "article": "2026_Asian_Games_medal_table",
+          "views": 291675,
+          "rank": 6
+        },
+        {
+          "article": "India_at_the_2026_Asian_Games",
+          "views": 260558,
+          "rank": 7
+        },
+        {
+          "article": "Cornell_7",
+          "views": 229476,
+          "rank": 8
+        },
+        {
+          "article": "Sebastian_Croft",
+          "views": 220265,
+          "rank": 9
+        },
+        {
+          "article": "2026_Asian_Games",
+          "views": 209287,
+          "rank": 10
+        },
+        {
+          "article": "Bella_Ramsey",
+          "views": 198968,
+          "rank": 11
+        },
+        {
+          "article": "Lizzie_Borden",
+          "views": 195000,
+          "rank": 12
+        }
+      ]
+    }
+  ]
+}

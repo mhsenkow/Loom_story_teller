@@ -1,0 +1,26 @@
+[
+  {
+    "time_tag": "2026-09-25T00:00:00",
+    "Kp": 3.67,
+    "a_running": 22,
+    "station_count": 8
+  },
+  {
+    "time_tag": "2026-09-25T03:00:00",
+    "Kp": 3.67,
+    "a_running": 22,
+    "station_count": 8
+  },
+  {
+    "time_tag": "2026-09-25T06:00:00",
+    "Kp": 4.00,
+    "a_running": 27,
+    "station_count": 8
+  },
+  {
+    "time_tag": "2026-09-25T09:00:00",
+    "Kp": 7.33,
+    "a_running": 27,
+    "station_count": 8
+  }
+]

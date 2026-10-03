@@ -1,0 +1,32 @@
+{
+  "last_updated": 1790974028,
+  "ttl": 60,
+  "data": {
+    "stations": [
+      {
+        "station_id": "1822663031356509142",
+        "name": "Matthews Ct & Coney Island Ave",
+        "lat": 40.64235,
+        "lon": -73.96951,
+        "capacity": 0,
+        "short_name": "3034.02"
+      },
+      {
+        "station_id": "7a6fc75f-a605-4dd6-b567-b2bbbfb862f3",
+        "name": "65 Pl & 53 Ave",
+        "lat": 40.73145,
+        "lon": -73.90022,
+        "capacity": 19,
+        "short_name": "5764.02"
+      },
+      {
+        "station_id": "06439006-11b6-44f0-8545-c9d39035f32a",
+        "name": "Vesey St & Church St",
+        "lat": 40.71221958009051,
+        "lon": -74.01047229766846,
+        "capacity": 78,
+        "short_name": "5216.06"
+      }
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+[
+  {
+    "name": {
+      "common": "Aruba",
+      "official": "Aruba"
+    },
+    "cca3": "ABW",
+    "region": "Americas",
+    "subregion": "Caribbean",
+    "area": 180,
+    "capital": [
+      "Oranjestad"
+    ],
+    "independent": false
+  },
+  {
+    "name": {
+      "common": "Antarctica",
+      "official": "Antarctica"
+    },
+    "cca3": "ATA",
+    "region": "Antarctic",
+    "subregion": "",
+    "area": 14000000,
+    "capital": [],
+    "independent": false
+  },
+  {
+    "name": {
+      "common": "Kosovo",
+      "official": "Republic of Kosovo"
+    },
+    "cca3": "UNK",
+    "region": "Europe",
+    "subregion": "Southeast Europe",
+    "area": 10908,
+    "capital": [
+      "Pristina"
+    ],
+    "independent": null
+  },
+  {
+    "name": {
+      "common": "United States",
+      "official": "United States of America"
+    },
+    "cca3": "USA",
+    "region": "Americas",
+    "subregion": "North America",
+    "area": 9372610,
+    "capital": [
+      "Washington D.C."
+    ],
+    "independent": true
+  }
+]

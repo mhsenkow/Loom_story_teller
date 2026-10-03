@@ -1,0 +1,108 @@
+[
+  {
+    "page": 1,
+    "pages": 1,
+    "per_page": 20000,
+    "total": 6360,
+    "sourceid": "2",
+    "lastupdated": "2026-07-13"
+  },
+  [
+    {
+      "indicator": {
+        "id": "EN.GHG.CO2.PC.CE.AR5",
+        "value": "Carbon dioxide (CO2) emissions excluding LULUCF per capita (t CO2e/capita)"
+      },
+      "country": {
+        "id": "ZH",
+        "value": "Africa Eastern and Southern"
+      },
+      "countryiso3code": "AFE",
+      "date": "2023",
+      "value": 0.838104192853686,
+      "unit": "",
+      "obs_status": "",
+      "decimal": 1
+    },
+    {
+      "indicator": {
+        "id": "EN.GHG.CO2.PC.CE.AR5",
+        "value": "Carbon dioxide (CO2) emissions excluding LULUCF per capita (t CO2e/capita)"
+      },
+      "country": {
+        "id": "ZH",
+        "value": "Africa Eastern and Southern"
+      },
+      "countryiso3code": "AFE",
+      "date": "2022",
+      "value": 0.858131540848484,
+      "unit": "",
+      "obs_status": "",
+      "decimal": 1
+    },
+    {
+      "indicator": {
+        "id": "EN.GHG.CO2.PC.CE.AR5",
+        "value": "Carbon dioxide (CO2) emissions excluding LULUCF per capita (t CO2e/capita)"
+      },
+      "country": {
+        "id": "AW",
+        "value": "Aruba"
+      },
+      "countryiso3code": "ABW",
+      "date": "2023",
+      "value": 5.00284093555268,
+      "unit": "",
+      "obs_status": "",
+      "decimal": 1
+    },
+    {
+      "indicator": {
+        "id": "EN.GHG.CO2.PC.CE.AR5",
+        "value": "Carbon dioxide (CO2) emissions excluding LULUCF per capita (t CO2e/capita)"
+      },
+      "country": {
+        "id": "AW",
+        "value": "Aruba"
+      },
+      "countryiso3code": "ABW",
+      "date": "2022",
+      "value": 4.99021526418787,
+      "unit": "",
+      "obs_status": "",
+      "decimal": 1
+    },
+    {
+      "indicator": {
+        "id": "EN.GHG.CO2.PC.CE.AR5",
+        "value": "Carbon dioxide (CO2) emissions excluding LULUCF per capita (t CO2e/capita)"
+      },
+      "country": {
+        "id": "US",
+        "value": "United States"
+      },
+      "countryiso3code": "USA",
+      "date": "2023",
+      "value": 13.7140258849034,
+      "unit": "",
+      "obs_status": "",
+      "decimal": 1
+    },
+    {
+      "indicator": {
+        "id": "EN.GHG.CO2.PC.CE.AR5",
+        "value": "Carbon dioxide (CO2) emissions excluding LULUCF per capita (t CO2e/capita)"
+      },
+      "country": {
+        "id": "US",
+        "value": "United States"
+      },
+      "countryiso3code": "USA",
+      "date": "2022",
+      "value": 14.4186221294233,
+      "unit": "",
+      "obs_status": "",
+      "decimal": 1
+    }
+  ]
+]

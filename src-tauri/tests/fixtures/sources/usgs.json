@@ -1,0 +1,57 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "generated": 1790974020000,
+    "count": 2
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "id": "hv75048562",
+      "properties": {
+        "mag": 1.83,
+        "place": "5 km WSW of Volcano, Hawaii",
+        "time": 1790972619450,
+        "updated": 1790972826480,
+        "tsunami": 0,
+        "sig": 52,
+        "net": "hv",
+        "ids": ",hv75048562,",
+        "magType": "ml",
+        "status": "automatic"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -155.281997680664,
+          19.4148330688477,
+          -0.389999985694885
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "tx2026tknhdk",
+      "properties": {
+        "mag": 1.7,
+        "place": "57 km S of Whites City, New Mexico",
+        "time": 1790972179694,
+        "updated": 1790972660552,
+        "tsunami": 0,
+        "sig": 44,
+        "net": "tx",
+        "ids": ",tx2026tknhdk,",
+        "magType": "ml",
+        "status": "reviewed"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -104.364,
+          31.658,
+          6.9714
+        ]
+      }
+    }
+  ]
+}

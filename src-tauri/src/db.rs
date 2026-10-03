@@ -447,6 +447,27 @@ pub(crate) fn duckdb_value_to_json(val: duckdb::types::Value) -> serde_json::Val
         duckdb::types::Value::Float(f) => serde_json::json!(f),
         duckdb::types::Value::Double(f) => serde_json::json!(f),
         duckdb::types::Value::Text(s) => serde_json::Value::String(s),
+        duckdb::types::Value::HugeInt(i) => serde_json::json!(i as f64),
+        duckdb::types::Value::UTinyInt(i) => serde_json::json!(i),
+        duckdb::types::Value::USmallInt(i) => serde_json::json!(i),
+        duckdb::types::Value::UInt(i) => serde_json::json!(i),
+        duckdb::types::Value::UBigInt(i) => serde_json::json!(i),
+        duckdb::types::Value::Decimal(d) => d
+            .to_string()
+            .parse::<f64>()
+            .map(|f| serde_json::json!(f))
+            .unwrap_or_else(|_| serde_json::Value::String(d.to_string())),
+        // ISO-8601 UTC, like the web buffers (`Date#toISOString`).
+        duckdb::types::Value::Timestamp(unit, v) => {
+            let micros = unit.to_micros(v);
+            let secs = micros.div_euclid(1_000_000);
+            let millis = micros.rem_euclid(1_000_000) / 1000;
+            let ts = crate::sources::fmt_ts(secs).replacen(' ', "T", 1);
+            serde_json::Value::String(format!("{}.{:03}Z", ts, millis))
+        }
+        duckdb::types::Value::Date32(days) => {
+            serde_json::Value::String(crate::sources::fmt_date(days as i64))
+        }
         _ => serde_json::Value::String(format!("{:?}", val)),
     }
 }

@@ -1,0 +1,118 @@
+[
+  {
+    "latitude": 40.710335,
+    "longitude": -73.99308,
+    "utc_offset_seconds": -14400,
+    "timezone": "America/New_York",
+    "hourly_units": {
+      "time": "iso8601",
+      "temperature_2m": "°C",
+      "relative_humidity_2m": "%",
+      "wind_speed_10m": "km/h",
+      "precipitation": "mm",
+      "weather_code": "wmo code",
+      "pressure_msl": "hPa",
+      "cloud_cover": "%"
+    },
+    "hourly": {
+      "time": [
+        "2026-09-30T00:00",
+        "2026-09-30T01:00",
+        "2026-09-30T02:00"
+      ],
+      "temperature_2m": [
+        17.3,
+        17.2,
+        17.4
+      ],
+      "relative_humidity_2m": [
+        79,
+        84,
+        85
+      ],
+      "wind_speed_10m": [
+        6.9,
+        5.6,
+        3.1
+      ],
+      "precipitation": [
+        0.00,
+        0.00,
+        0.00
+      ],
+      "weather_code": [
+        3,
+        3,
+        3
+      ],
+      "pressure_msl": [
+        1017.6,
+        1017.6,
+        1017.7
+      ],
+      "cloud_cover": [
+        100,
+        100,
+        100
+      ]
+    }
+  },
+  {
+    "latitude": 51.51147,
+    "longitude": -0.13078308,
+    "utc_offset_seconds": 3600,
+    "timezone": "Europe/London",
+    "hourly_units": {
+      "time": "iso8601",
+      "temperature_2m": "°C",
+      "relative_humidity_2m": "%",
+      "wind_speed_10m": "km/h",
+      "precipitation": "mm",
+      "weather_code": "wmo code",
+      "pressure_msl": "hPa",
+      "cloud_cover": "%"
+    },
+    "hourly": {
+      "time": [
+        "2026-09-30T00:00",
+        "2026-09-30T01:00",
+        "2026-09-30T02:00"
+      ],
+      "temperature_2m": [
+        22.0,
+        22.1,
+        22.3
+      ],
+      "relative_humidity_2m": [
+        73,
+        69,
+        67
+      ],
+      "wind_speed_10m": [
+        10.4,
+        12.2,
+        13.0
+      ],
+      "precipitation": [
+        0.00,
+        0.00,
+        0.00
+      ],
+      "weather_code": [
+        3,
+        3,
+        3
+      ],
+      "pressure_msl": [
+        1010.0,
+        1009.5,
+        1009.4
+      ],
+      "cloud_cover": [
+        100,
+        100,
+        100
+      ]
+    }
+  }
+]

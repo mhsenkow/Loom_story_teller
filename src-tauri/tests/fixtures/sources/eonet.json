@@ -1,0 +1,197 @@
+{
+  "title": "EONET Events",
+  "events": [
+    {
+      "id": "EONET_24962",
+      "title": "Typhoon Choi-wan",
+      "description": null,
+      "link": "https://eonet.gsfc.nasa.gov/api/v3/events/EONET_24962",
+      "closed": null,
+      "categories": [
+        {
+          "id": "severeStorms",
+          "title": "Severe Storms"
+        }
+      ],
+      "sources": [
+        {
+          "id": "JTWC",
+          "url": "https://www.metoc.navy.mil/jtwc/products/wp2626.tcw"
+        }
+      ],
+      "geometry": [
+        {
+          "magnitudeValue": 35.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-09-30T12:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            150.8,
+            16
+          ]
+        },
+        {
+          "magnitudeValue": 35.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-09-30T18:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            149.5,
+            16.3
+          ]
+        },
+        {
+          "magnitudeValue": 40.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-10-01T00:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            147.9,
+            16.7
+          ]
+        },
+        {
+          "magnitudeValue": 40.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-10-01T06:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            146.8,
+            16.7
+          ]
+        },
+        {
+          "magnitudeValue": 50.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-10-01T12:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            145.8,
+            16.5
+          ]
+        },
+        {
+          "magnitudeValue": 50.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-10-01T18:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            145.1,
+            16.9
+          ]
+        },
+        {
+          "magnitudeValue": 55.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-10-02T00:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            144.7,
+            17
+          ]
+        },
+        {
+          "magnitudeValue": 60.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-10-02T06:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            144.6,
+            16.9
+          ]
+        },
+        {
+          "magnitudeValue": 70.00,
+          "magnitudeUnit": "kts",
+          "date": "2026-10-02T12:00:00Z",
+          "type": "Point",
+          "coordinates": [
+            144.6,
+            17.7
+          ]
+        }
+      ]
+    },
+    {
+      "id": "EONET_24964",
+      "title": "Wildfire SAN FRANCISCO 2, Starr, Texas",
+      "description": "2 Miles S from LA CASITA, TX",
+      "link": "https://eonet.gsfc.nasa.gov/api/v3/events/EONET_24964",
+      "closed": null,
+      "categories": [
+        {
+          "id": "wildfires",
+          "title": "Wildfires"
+        }
+      ],
+      "sources": [
+        {
+          "id": "IRWIN",
+          "url": "https://irwin.doi.gov/observer/incidents/2026-TXRGR-000402"
+        }
+      ],
+      "geometry": [
+        {
+          "magnitudeValue": 510.00,
+          "magnitudeUnit": "acres",
+          "date": "2026-09-30T08:56:00Z",
+          "type": "Point",
+          "coordinates": [
+            -98.692222,
+            26.286667
+          ]
+        }
+      ]
+    },
+    {
+      "id": "EONET_POLY",
+      "title": "Test Wildfire Complex",
+      "description": null,
+      "closed": null,
+      "categories": [
+        {
+          "id": "wildfires",
+          "title": "Wildfires"
+        }
+      ],
+      "sources": [
+        {
+          "id": "IRWIN",
+          "url": "https://example.org"
+        }
+      ],
+      "geometry": [
+        {
+          "magnitudeValue": 1200.0,
+          "magnitudeUnit": "acres",
+          "date": "2026-09-29T00:00:00Z",
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -120,
+                38.0
+              ],
+              [
+                -119,
+                38.0
+              ],
+              [
+                -119,
+                39.0
+              ],
+              [
+                -120,
+                39.0
+              ],
+              [
+                -120,
+                38.0
+              ]
+            ]
+          ]
+        }
+      ]
+    }
+  ]
+}

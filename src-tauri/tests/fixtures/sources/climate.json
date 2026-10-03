@@ -1,0 +1,24 @@
+{
+  "description": {
+    "title": "Global Land and Ocean Average Temperature Departures",
+    "units": "Degrees Celsius",
+    "base_period": "1901-2000"
+  },
+  "data": {
+    "188001": {
+      "departure": -0.4
+    },
+    "188002": {
+      "departure": -0.47
+    },
+    "188003": {
+      "departure": -0.15
+    },
+    "202607": {
+      "departure": 1.2
+    },
+    "202608": {
+      "departure": 1.32
+    }
+  }
+}

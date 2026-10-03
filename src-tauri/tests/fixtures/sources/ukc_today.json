@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "from": "2026-10-02T22:00Z",
+      "to": "2026-10-02T22:30Z",
+      "intensity": {
+        "forecast": 113,
+        "actual": null,
+        "index": "moderate"
+      }
+    },
+    {
+      "from": "2026-10-02T22:30Z",
+      "to": "2026-10-02T23:00Z",
+      "intensity": {
+        "forecast": 114,
+        "actual": null,
+        "index": "moderate"
+      }
+    }
+  ]
+}

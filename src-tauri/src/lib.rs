@@ -26,6 +26,11 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let db = db::LoomDb::new().expect("Failed to initialize DuckDB");
+            // Create source tables up front (and rebuild any whose schema drifted
+            // from the registry) so status / snapshot calls never hit a missing table.
+            if let Err(e) = sources::ensure_tables(&db) {
+                eprintln!("[loom] source tables: {}", e);
+            }
             let db = Arc::new(db);
             let stream_state = Arc::new(stream::StreamState::new());
             let sources_state = Arc::new(sources::SourcesState::new());

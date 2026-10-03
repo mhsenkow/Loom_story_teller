@@ -1,0 +1,72 @@
+[
+  {
+    "page": 1,
+    "pages": 1,
+    "per_page": 400,
+    "total": 264,
+    "sourceid": null,
+    "lastupdated": "2026-07-13"
+  },
+  [
+    {
+      "indicator": {
+        "id": "SP.POP.TOTL",
+        "value": "Population, total"
+      },
+      "country": {
+        "id": "ZH",
+        "value": "Africa Eastern and Southern"
+      },
+      "countryiso3code": "AFE",
+      "date": "2025",
+      "value": 788844284,
+      "obs_status": "",
+      "decimal": 0
+    },
+    {
+      "indicator": {
+        "id": "SP.POP.TOTL",
+        "value": "Population, total"
+      },
+      "country": {
+        "id": "AW",
+        "value": "Aruba"
+      },
+      "countryiso3code": "ABW",
+      "date": "2025",
+      "value": 108785,
+      "obs_status": "",
+      "decimal": 0
+    },
+    {
+      "indicator": {
+        "id": "SP.POP.TOTL",
+        "value": "Population, total"
+      },
+      "country": {
+        "id": "XK",
+        "value": "Kosovo"
+      },
+      "countryiso3code": "XKX",
+      "date": "2025",
+      "value": 1576876,
+      "obs_status": "",
+      "decimal": 0
+    },
+    {
+      "indicator": {
+        "id": "SP.POP.TOTL",
+        "value": "Population, total"
+      },
+      "country": {
+        "id": "US",
+        "value": "United States"
+      },
+      "countryiso3code": "USA",
+      "date": "2025",
+      "value": 341784857,
+      "obs_status": "",
+      "decimal": 0
+    }
+  ]
+]

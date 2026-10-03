@@ -834,7 +834,7 @@ pub async fn stream_clear(
 }
 
 // =================================================================
-// Poll-Based Data Sources (USGS, Open-Meteo, NWS, World Bank)
+// Poll-Based Data Sources (see SOURCE_SPECS in sources.rs)
 // =================================================================
 
 #[tauri::command]
@@ -843,7 +843,7 @@ pub async fn source_start(
     db: State<'_, Arc<LoomDb>>,
     sources: State<'_, Arc<SourcesState>>,
 ) -> Result<(), String> {
-    crate::sources::source_start(&kind, Arc::clone(&*db), Arc::clone(&*sources)).await
+    crate::sources::source_start(&kind, Arc::clone(&db), Arc::clone(&*sources)).await
 }
 
 #[tauri::command]
@@ -861,26 +861,8 @@ pub async fn source_status(
     sources: State<'_, Arc<SourcesState>>,
 ) -> Result<crate::sources::SourceStatus, String> {
     let inst = sources.get(&kind).ok_or("Unknown source kind")?;
-    let table = match kind.as_str() {
-        "usgs" => "usgs_quakes",
-        "meteo" => "meteo_weather",
-        "nws" => "nws_alerts",
-        "world_bank" => "world_bank",
-        "iss" => "iss_track",
-        "hn" => "hn_stories",
-        "crypto" => "crypto_markets",
-        "aq" => "air_quality",
-        "fx" => "fx_rates",
-        "fema" => "fema_disasters",
-        "opensky" => "opensky_aircraft",
-        "countries" => "world_countries",
-        "spacex" => "spacex_launches",
-        "nyc311" => "nyc_311",
-        "covid" => "covid_countries",
-        "launches" => "space_launches",
-        _ => return Err("Unknown source kind".to_string()),
-    };
-    Ok(inst.status(table, &*db).await)
+    let table = crate::sources::table_for_kind(&kind).ok_or("Unknown source kind")?;
+    Ok(inst.status(table, &db).await)
 }
 
 #[tauri::command]
@@ -890,7 +872,7 @@ pub async fn source_query(
     limit: Option<u32>,
     db: State<'_, Arc<LoomDb>>,
 ) -> Result<QueryResult, String> {
-    crate::sources::source_query(&*db, &kind, &sql, limit.unwrap_or(5000))
+    crate::sources::source_query(&db, &kind, &sql, limit.unwrap_or(5000))
 }
 
 #[tauri::command]
@@ -899,47 +881,10 @@ pub async fn source_snapshot(
     limit: Option<u32>,
     db: State<'_, Arc<LoomDb>>,
 ) -> Result<InspectResult, String> {
-    let stats = crate::sources::source_stats(&*db, &kind)?;
-    let table = match kind.as_str() {
-        "usgs" => "usgs_quakes",
-        "meteo" => "meteo_weather",
-        "nws" => "nws_alerts",
-        "world_bank" => "world_bank",
-        "iss" => "iss_track",
-        "hn" => "hn_stories",
-        "crypto" => "crypto_markets",
-        "aq" => "air_quality",
-        "fx" => "fx_rates",
-        "fema" => "fema_disasters",
-        "opensky" => "opensky_aircraft",
-        "countries" => "world_countries",
-        "spacex" => "spacex_launches",
-        "nyc311" => "nyc_311",
-        "covid" => "covid_countries",
-        "launches" => "space_launches",
-        _ => return Err("Unknown source kind".to_string()),
-    };
-    let order = match kind.as_str() {
-        "usgs" => "ORDER BY ts DESC",
-        "meteo" => "ORDER BY ts DESC",
-        "nws" => "ORDER BY effective DESC",
-        "world_bank" => "ORDER BY yr DESC, country_code",
-        "iss" => "ORDER BY ts DESC",
-        "hn" => "ORDER BY points DESC",
-        "crypto" => "ORDER BY rank ASC",
-        "aq" => "ORDER BY pm2_5 DESC",
-        "fx" => "ORDER BY rate DESC",
-        "fema" => "ORDER BY declaration_date DESC",
-        "opensky" => "ORDER BY baro_altitude DESC",
-        "countries" => "ORDER BY population DESC",
-        "spacex" => "ORDER BY date_utc DESC",
-        "nyc311" => "ORDER BY created_date DESC",
-        "covid" => "ORDER BY cases DESC",
-        "launches" => "ORDER BY net ASC",
-        _ => "",
-    };
-    let sql = format!("SELECT * FROM {} {}", table, order);
-    let sample = crate::sources::source_query(&*db, &kind, &sql, limit.unwrap_or(500))?;
+    let stats = crate::sources::source_stats(&db, &kind)?;
+    // Table + ORDER BY come from the registry mirror in sources.rs.
+    let sql = crate::sources::snapshot_sql(&kind).ok_or("Unknown source kind")?;
+    let sample = crate::sources::source_query(&db, &kind, &sql, limit.unwrap_or(500))?;
     Ok(InspectResult { stats, sample })
 }
 
@@ -948,6 +893,6 @@ pub async fn source_clear(
     kind: String,
     db: State<'_, Arc<LoomDb>>,
 ) -> Result<(), String> {
-    crate::sources::source_clear(&*db, &kind)
+    crate::sources::source_clear(&db, &kind)
 }
 

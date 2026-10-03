@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "from": "2026-09-30T23:00Z",
+      "to": "2026-09-30T23:30Z",
+      "intensity": {
+        "forecast": 161,
+        "actual": 181,
+        "index": "high"
+      }
+    },
+    {
+      "from": "2026-09-30T23:30Z",
+      "to": "2026-10-01T00:00Z",
+      "intensity": {
+        "forecast": 157,
+        "actual": 179,
+        "index": "high"
+      }
+    }
+  ]
+}
