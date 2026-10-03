@@ -396,11 +396,13 @@ describe("recommendations", () => {
     it("usgs / iss / opensky / fema / countries prefer geography charts first", () => {
       expect(recommendSourceStory("usgs", emptyStats, null).charts[0]?.kind).toBe("geoPoints");
       expect(recommendSourceStory("iss", emptyStats, null).charts[0]?.kind).toBe("globeTrail");
-      expect(recommendSourceStory("opensky", emptyStats, null).charts[0]?.kind).toBe("globeTrail");
+      expect(recommendSourceStory("opensky", emptyStats, null).charts[0]?.kind).toBe("geoPoints");
       expect(recommendSourceStory("fema", emptyStats, null).charts[0]?.kind).toBe("choropleth");
       expect(recommendSourceStory("countries", emptyStats, null).charts[0]?.kind).toBe("choropleth");
       expect(recommendSourceStory("covid", emptyStats, null).charts[0]?.kind).toBe("choropleth");
       expect(recommendSourceStory("world_bank", emptyStats, null).charts[0]?.kind).toBe("choropleth");
+      expect(recommendSourceStory("eonet", emptyStats, null).charts[0]?.kind).toBe("geoPoints");
+      expect(recommendSourceStory("citibike", emptyStats, null).charts[0]?.kind).toBe("geoPoints");
       expect(recommendSourceStory("nyc311", emptyStats, null).charts[0]?.kind).toBe("geoPoints");
       expect(recommendSourceStory("meteo", emptyStats, null).charts[0]?.kind).toBe("geoBubbles");
       expect(recommendSourceStory("aq", emptyStats, null).charts[0]?.kind).toBe("geoBubbles");

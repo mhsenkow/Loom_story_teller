@@ -11,6 +11,21 @@ import {
   type FetchDataGovOptions,
   type DataGovSortKey,
 } from "../src/lib/openDataCatalog";
+import {
+  ADSB_POINTS,
+  WB_WIDE_INDICATORS,
+  WORLD_CITIES,
+  adsbToOpensky,
+  joinCitibike,
+  ll2ToSpacex,
+  mergeCountries,
+  mergeUkCarbon,
+  openMeteoCities,
+  paprikaToGecko,
+  trimNwsAlerts,
+  utcDay,
+  worldBankWide,
+} from "./sourceTransforms";
 
 export interface Env {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
@@ -29,21 +44,6 @@ const CORS = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Accept",
 };
-
-const METEO_CITIES = [
-  { name: "New York", lat: 40.71, lon: -74.01 },
-  { name: "London", lat: 51.51, lon: -0.13 },
-  { name: "Tokyo", lat: 35.68, lon: 139.69 },
-  { name: "Sydney", lat: -33.87, lon: 151.21 },
-  { name: "São Paulo", lat: -23.55, lon: -46.63 },
-] as const;
-
-const WB_INDICATORS = [
-  { id: "NY.GDP.MKTP.CD", name: "GDP (current US$)" },
-  { id: "SP.POP.TOTL", name: "Population" },
-  { id: "SP.DYN.LE00.IN", name: "Life expectancy at birth" },
-  { id: "EN.ATM.CO2E.PC", name: "CO2 emissions (metric tons per capita)" },
-] as const;
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -163,238 +163,355 @@ async function handleFetchCsv(requestUrl: URL): Promise<Response> {
   });
 }
 
-async function handleSource(kind: string): Promise<Response> {
-  const headers = { "User-Agent": UA, Accept: "application/geo+json,application/json,*/*" };
+// ---- Live poll sources (`/api/source/<kind>`) ----
+//
+// Every kind is one fetcher that returns JSON text in the shape the browser
+// parser in src/lib/webStreams.ts reads. `handleSource` wraps it in
+// caches.default (per-kind TTL + a stale window served when the upstream
+// fails) and every upstream call has a timeout so one hung API can't stall
+// the request. Note: the Cache API is a no-op on *.workers.dev — caching
+// only takes effect on the custom domain (loom.ibm.io) and in wrangler dev.
 
-  if (kind === "usgs") {
-    const r = await fetch(
-      "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
-      { headers },
+interface WaitUntil {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+const DEFAULT_TIMEOUT_MS = 10_000;
+
+class UpstreamError extends Error {}
+
+/** fetch with a hard timeout; throws `UpstreamError` on timeout / network error / non-2xx. */
+async function upstream(
+  label: string,
+  url: string,
+  opts: { timeoutMs?: number; accept?: string } = {},
+): Promise<Response> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "User-Agent": UA, Accept: opts.accept ?? "application/json,application/geo+json,*/*" },
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    const name = e instanceof Error ? e.name : "";
+    if (name === "TimeoutError" || name === "AbortError") {
+      throw new UpstreamError(`${label} timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw new UpstreamError(`${label} unreachable: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  if (!res.ok) {
+    res.body?.cancel().catch(() => {});
+    throw new UpstreamError(`${label} ${res.status}`);
+  }
+  return res;
+}
+
+async function upstreamText(label: string, url: string, timeoutMs?: number): Promise<string> {
+  return (await upstream(label, url, { timeoutMs })).text();
+}
+
+async function upstreamJson<T = unknown>(label: string, url: string, timeoutMs?: number): Promise<T> {
+  return (await upstream(label, url, { timeoutMs })).json() as Promise<T>;
+}
+
+const SUBCACHE_ORIGIN = "https://loom-source.internal/upstream/";
+
+/** JSON from a slow-changing upstream, cached separately (e.g. GBFS station list, WB country list). */
+async function cachedUpstreamJson<T = unknown>(
+  label: string,
+  url: string,
+  ttlSecs: number,
+  ctx: WaitUntil,
+  timeoutMs?: number,
+): Promise<T> {
+  const key = SUBCACHE_ORIGIN + encodeURIComponent(url);
+  const cache = caches.default;
+  const hit = await cache.match(key).catch(() => undefined);
+  if (hit) return (await hit.json()) as T;
+  const text = await upstreamText(label, url, timeoutMs);
+  ctx.waitUntil(
+    cache
+      .put(key, new Response(text, {
+        headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${ttlSecs}` },
+      }))
+      .catch(() => {}),
+  );
+  return JSON.parse(text) as T;
+}
+
+type SourceFetcher = (ctx: WaitUntil) => Promise<string>;
+
+const OPEN_METEO_LATS = WORLD_CITIES.map((c) => c.lat).join(",");
+const OPEN_METEO_LONS = WORLD_CITIES.map((c) => c.lon).join(",");
+
+const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
+  usgs: () =>
+    upstreamText("USGS", "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"),
+
+  eonet: () =>
+    upstreamText("NASA EONET", "https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=300", 15_000),
+
+  nws: async () => {
+    // `limit` is no longer accepted; the full feed is ~1.7 MB — trim to what the parser reads.
+    const body = await upstreamJson("NWS", "https://api.weather.gov/alerts/active?status=actual", 15_000);
+    return JSON.stringify(trimNwsAlerts(body, 150));
+  },
+
+  meteo: async () => {
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${OPEN_METEO_LATS}&longitude=${OPEN_METEO_LONS}` +
+      `&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code,pressure_msl,cloud_cover` +
+      `&past_days=2&forecast_days=1&timezone=GMT`; // UTC so every city shares one time axis
+    return JSON.stringify(openMeteoCities(await upstreamJson("Open-Meteo", url), "hourly"));
+  },
+
+  aq: async () => {
+    const url =
+      `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${OPEN_METEO_LATS}&longitude=${OPEN_METEO_LONS}` +
+      `&current=pm2_5,pm10,ozone,nitrogen_dioxide,european_aqi`;
+    return JSON.stringify(openMeteoCities(await upstreamJson("Open-Meteo AQ", url), "current"));
+  },
+
+  ukcarbon: async () => {
+    const [yesterday, today] = await Promise.all([
+      upstreamJson("Carbon Intensity", `https://api.carbonintensity.org.uk/intensity/date/${utcDay(1)}`),
+      upstreamJson("Carbon Intensity", "https://api.carbonintensity.org.uk/intensity/date"),
+    ]);
+    return JSON.stringify(mergeUkCarbon(yesterday, today));
+  },
+
+  climate: async () => {
+    const year = new Date().getUTCFullYear();
+    const url = (y: number) =>
+      `https://www.ncei.noaa.gov/access/monitoring/climate-at-a-glance/global/time-series/globe/land_ocean/1/0/1880-${y}/data.json`;
+    try {
+      return await upstreamText("NOAA NCEI", url(year), 15_000);
+    } catch {
+      return upstreamText("NOAA NCEI", url(year - 1), 15_000);
+    }
+  },
+
+  opensky: async () => {
+    // OpenSky rate-limits Cloudflare's shared IPs (429/522) — try briefly, then ADSB.lol.
+    try {
+      const body = await upstreamJson<{ states?: unknown[] | null }>(
+        "OpenSky",
+        "https://opensky-network.org/api/states/all?lamin=24.5&lomin=-125.0&lamax=49.5&lomax=-66.5",
+        6_000,
+      );
+      if (Array.isArray(body.states) && body.states.length > 0) return JSON.stringify(body);
+    } catch {
+      /* fall through */
+    }
+    const settled = await Promise.allSettled(
+      ADSB_POINTS.map((p) => upstreamJson("ADSB.lol", `https://api.adsb.lol/v2/point/${p.lat}/${p.lon}/250`, 8_000)),
     );
-    if (!r.ok) return json({ error: `USGS ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "nws") {
-    const r = await fetch("https://api.weather.gov/alerts/active?status=actual&limit=50", {
-      headers,
-    });
-    if (!r.ok) return json({ error: `NWS ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "meteo") {
-    const cities = [];
-    for (const city of METEO_CITIES) {
-      const url =
-        `https://api.open-meteo.com/v1/forecast?latitude=${city.lat}&longitude=${city.lon}` +
-        `&hourly=temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,weather_code,pressure_msl,cloud_cover` +
-        `&past_days=2&forecast_days=1&timezone=auto`;
-      const r = await fetch(url, { headers });
-      if (!r.ok) continue;
-      const body = (await r.json()) as { hourly?: Record<string, unknown> };
-      cities.push({
-        name: city.name,
-        lat: city.lat,
-        lon: city.lon,
-        hourly: body.hourly ?? {},
-      });
+    const ok = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (ok.length === 0) {
+      const first = settled.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+      throw new UpstreamError(`OpenSky and ADSB.lol failed (${first?.reason instanceof Error ? first.reason.message : "unknown"})`);
     }
-    return json({ cities });
-  }
+    return JSON.stringify(adsbToOpensky(ok));
+  },
 
-  if (kind === "world_bank") {
-    const rows: Record<string, unknown>[] = [];
-    for (const ind of WB_INDICATORS) {
-      const url =
-        `https://api.worldbank.org/v2/country/all/indicator/${ind.id}` +
-        `?format=json&per_page=1000&date=2015:2023`;
-      const r = await fetch(url, { headers });
-      if (!r.ok) continue;
-      const body = (await r.json()) as unknown[];
-      const data = Array.isArray(body) ? body[1] : null;
-      if (!Array.isArray(data)) continue;
-      for (const entry of data) {
-        const e = entry as {
-          value?: number | null;
-          countryiso3code?: string;
-          country?: { value?: string };
-          date?: string;
-          indicator?: { id?: string };
-        };
-        if (e.value == null) continue;
-        rows.push({
-          country_code: e.countryiso3code ?? "",
-          country_name: e.country?.value ?? "",
-          indicator_id: e.indicator?.id ?? ind.id,
-          indicator_name: ind.name,
-          yr: Number(e.date ?? 0),
-          value: e.value,
-        });
-      }
-    }
-    return json({ rows });
-  }
+  citibike: async (ctx) => {
+    const [info, status] = await Promise.all([
+      cachedUpstreamJson("Citi Bike GBFS", "https://gbfs.citibikenyc.com/gbfs/en/station_information.json", 86_400, ctx),
+      upstreamJson("Citi Bike GBFS", "https://gbfs.citibikenyc.com/gbfs/en/station_status.json"),
+    ]);
+    return JSON.stringify(joinCitibike(info, status));
+  },
 
-  if (kind === "iss") {
-    const tip = await fetch("https://api.wheretheiss.at/v1/satellites/25544", { headers });
-    if (!tip.ok) return json({ error: `ISS ${tip.status}` }, 502);
-    return new Response(await tip.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
+  nyc311: () =>
+    upstreamText(
+      "NYC 311",
+      "https://data.cityofnewyork.us/resource/erm2-nwe9.json?$limit=400&$order=created_date%20DESC",
+      15_000,
+    ),
 
-  if (kind === "iss_trail") {
+  iss: () => upstreamText("ISS", "https://api.wheretheiss.at/v1/satellites/25544", 8_000),
+
+  iss_trail: () => {
     // wheretheiss.at allows ≤10 timestamps per request — one orbit (~90m) of samples.
     const now = Math.floor(Date.now() / 1000);
     const stamps: number[] = [];
     for (let i = 9; i >= 0; i--) stamps.push(now - i * 600);
-    const trailUrl =
-      `https://api.wheretheiss.at/v1/satellites/25544/positions?timestamps=${stamps.join(",")}`;
-    const r = await fetch(trailUrl, { headers });
-    if (!r.ok) return json({ error: `ISS trail ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "hn") {
-    const r = await fetch("https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=50", {
-      headers,
-    });
-    if (!r.ok) return json({ error: `HN ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "crypto") {
-    const r = await fetch(
-      "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false",
-      { headers },
+    return upstreamText(
+      "ISS trail",
+      `https://api.wheretheiss.at/v1/satellites/25544/positions?timestamps=${stamps.join(",")}`,
+      8_000,
     );
-    if (!r.ok) return json({ error: `CoinGecko ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
+  },
 
-  if (kind === "aq") {
-    const cities = [];
-    for (const city of METEO_CITIES) {
-      const url =
-        `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${city.lat}&longitude=${city.lon}` +
-        `&current=pm2_5,pm10,ozone,nitrogen_dioxide,european_aqi`;
-      const r = await fetch(url, { headers });
-      if (!r.ok) continue;
-      const body = (await r.json()) as { current?: Record<string, unknown> };
-      cities.push({
-        name: city.name,
-        lat: city.lat,
-        lon: city.lon,
-        current: body.current ?? {},
-      });
+  // normal mode: pad / agency / rocket / mission.orbit objects (list mode only has strings)
+  launches: () =>
+    upstreamText("Space Devs", "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40&mode=normal", 15_000),
+
+  spacex: async () => {
+    // api.spacexdata.com is gone — Launch Library 2 (normal mode for mission descriptions).
+    const body = await upstreamJson(
+      "Space Devs",
+      "https://ll.thespacedevs.com/2.2.0/launch/previous/?lsp__name=SpaceX&limit=100&mode=normal",
+      15_000,
+    );
+    return JSON.stringify(ll2ToSpacex(body));
+  },
+
+  spaceweather: () =>
+    upstreamText("NOAA SWPC", "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json"),
+
+  hn: () => upstreamText("HN", "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=50"),
+
+  pageviews: async () => {
+    // Yesterday (UTC) lands a few hours after midnight — fall back to the day before.
+    const url = (d: string) =>
+      `https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access/${d.replace(/-/g, "/")}`;
+    try {
+      return await upstreamText("Wikimedia", url(utcDay(1)));
+    } catch {
+      return upstreamText("Wikimedia", url(utcDay(2)));
     }
-    return json({ cities });
-  }
+  },
 
-  if (kind === "fx") {
-    const r = await fetch("https://api.frankfurter.app/latest", { headers });
-    if (!r.ok) return json({ error: `Frankfurter ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
+  crypto: async () => {
+    // CoinGecko 429s Cloudflare's shared IPs often — CoinPaprika mapped into the same shape.
+    try {
+      return await upstreamText(
+        "CoinGecko",
+        "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false",
+        6_000,
+      );
+    } catch {
+      const body = await upstreamJson("CoinPaprika", "https://api.coinpaprika.com/v1/tickers?limit=50");
+      return JSON.stringify(paprikaToGecko(body));
+    }
+  },
 
-  if (kind === "fema") {
-    const r = await fetch(
+  fx: () => upstreamText("Frankfurter", `https://api.frankfurter.dev/v1/${utcDay(90)}..`),
+
+  fema: () =>
+    upstreamText(
+      "FEMA",
       "https://www.fema.gov/api/open/v2/DisasterDeclarationsSummaries?$top=200&$orderby=declarationDate%20desc",
-      { headers },
+      15_000,
+    ),
+
+  covid: () => upstreamText("disease.sh", "https://disease.sh/v3/covid-19/countries"),
+
+  countries: async () => {
+    // restcountries v3.1 is deprecated (v5 needs a key): mledoze/countries + World Bank population.
+    const [list, pop] = await Promise.all([
+      upstreamJson("mledoze/countries", "https://raw.githubusercontent.com/mledoze/countries/master/countries.json", 15_000),
+      upstreamJson(
+        "World Bank",
+        "https://api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL?format=json&per_page=400&mrnev=1",
+      ),
+    ]);
+    return JSON.stringify(mergeCountries(list, pop));
+  },
+
+  world_bank: async (ctx) => {
+    const [countryList, ...bodies] = await Promise.all([
+      cachedUpstreamJson("World Bank", "https://api.worldbank.org/v2/country?format=json&per_page=400", 86_400, ctx),
+      // ≈ 265 entities × 24 years ≈ 6.4k rows per indicator — one page each
+      ...WB_WIDE_INDICATORS.map((ind) =>
+        upstreamJson(
+          "World Bank",
+          `https://api.worldbank.org/v2/country/all/indicator/${ind.id}?format=json&per_page=10000&date=2000:2023`,
+          15_000,
+        ),
+      ),
+    ]);
+    return JSON.stringify(worldBankWide(countryList, bodies));
+  },
+};
+
+/** Fresh-for seconds per kind (roughly the upstream's own update cadence). */
+const SOURCE_TTL_SECS: Record<string, number> = {
+  iss: 5,
+  opensky: 30,
+  usgs: 60,
+  crypto: 60,
+  citibike: 60,
+  hn: 60,
+  iss_trail: 60,
+  nyc311: 300,
+  nws: 300,
+  meteo: 600,
+  aq: 600,
+  eonet: 600,
+  ukcarbon: 900,
+  spaceweather: 900,
+  launches: 3600,
+  spacex: 3600,
+  fx: 3600,
+  fema: 3600,
+  covid: 3600,
+  pageviews: 3600,
+  countries: 86_400,
+  world_bank: 86_400,
+  climate: 86_400,
+};
+
+/** How long past its TTL a cached copy may still be served when the upstream fails. */
+function staleSecs(ttl: number): number {
+  return Math.min(2 * 86_400, Math.max(600, ttl * 4));
+}
+
+const SOURCE_CACHE_ORIGIN = "https://loom-source.internal/source/";
+
+function sourceResponse(body: BodyInit | null, cacheState: string, fetchedAt: number): Response {
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Loom-Cache": cacheState,
+      "X-Loom-Fetched-At": new Date(fetchedAt).toISOString(),
+      ...CORS,
+    },
+  });
+}
+
+async function handleSource(kind: string, ctx: WaitUntil): Promise<Response> {
+  const fetcher = Object.prototype.hasOwnProperty.call(SOURCE_FETCHERS, kind) ? SOURCE_FETCHERS[kind] : undefined;
+  if (!fetcher) return json({ error: "Unknown source" }, 404);
+
+  const ttl = SOURCE_TTL_SECS[kind] ?? 60;
+  const stale = staleSecs(ttl);
+  const cache = caches.default;
+  const key = SOURCE_CACHE_ORIGIN + kind;
+  const now = Date.now();
+
+  const cached = await cache.match(key).catch(() => undefined);
+  const cachedAt = cached ? Number(cached.headers.get("X-Loom-Fetched-Ms") || "0") : 0;
+  if (cached && now - cachedAt <= ttl * 1000) {
+    return sourceResponse(cached.body, "HIT", cachedAt);
+  }
+
+  try {
+    const text = await fetcher(ctx);
+    ctx.waitUntil(
+      cache
+        .put(key, new Response(text, {
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": `public, max-age=${ttl + stale}`,
+            "X-Loom-Fetched-Ms": String(now),
+          },
+        }))
+        .catch(() => {}),
     );
-    if (!r.ok) return json({ error: `FEMA ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
+    cached?.body?.cancel().catch(() => {});
+    return sourceResponse(text, "MISS", now);
+  } catch (e) {
+    if (cached && now - cachedAt <= (ttl + stale) * 1000) {
+      return sourceResponse(cached.body, "STALE", cachedAt);
+    }
+    cached?.body?.cancel().catch(() => {});
+    const msg = e instanceof Error ? e.message : String(e);
+    return json({ error: msg }, 502);
   }
-
-  if (kind === "opensky") {
-    const r = await fetch(
-      "https://opensky-network.org/api/states/all?lamin=24.5&lomin=-125.0&lamax=49.5&lomax=-66.5",
-      { headers },
-    );
-    if (!r.ok) return json({ error: `OpenSky ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "countries") {
-    const r = await fetch(
-      "https://restcountries.com/v3.1/all?fields=name,cca3,region,subregion,population,area,capital,independent",
-      { headers },
-    );
-    if (!r.ok) return json({ error: `REST Countries ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "spacex") {
-    const r = await fetch("https://api.spacexdata.com/v5/launches/past", { headers });
-    if (!r.ok) return json({ error: `SpaceX ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "nyc311") {
-    const r = await fetch(
-      "https://data.cityofnewyork.us/resource/erm2-nwe9.json?$limit=400&$order=created_date%20DESC",
-      { headers },
-    );
-    if (!r.ok) return json({ error: `NYC 311 ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "covid") {
-    const r = await fetch("https://disease.sh/v3/covid-19/countries", { headers });
-    if (!r.ok) return json({ error: `disease.sh ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  if (kind === "launches") {
-    const r = await fetch("https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40&mode=list", {
-      headers,
-    });
-    if (!r.ok) return json({ error: `Space Devs ${r.status}` }, 502);
-    return new Response(await r.text(), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...CORS },
-    });
-  }
-
-  return json({ error: "Unknown source" }, 404);
 }
 
 async function handleFeedback(request: Request, env: Env): Promise<Response> {
@@ -546,7 +663,7 @@ async function handleGetStory(id: string): Promise<Response> {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: WaitUntil): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/"))) {
@@ -567,7 +684,7 @@ export default {
       }
       if (url.pathname.startsWith("/api/source/")) {
         const kind = url.pathname.replace("/api/source/", "").replace(/\/$/, "");
-        return await handleSource(kind);
+        return await handleSource(kind, ctx);
       }
       if (url.pathname === "/api/feedback" && request.method === "POST") {
         return await handleFeedback(request, env);

@@ -15,6 +15,7 @@ import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { QueryResultsSkeleton } from "@/components/Skeleton";
 import { validateQuery } from "@/lib/queryValidate";
 import { StartHere } from "@/components/StartHere";
+import { sourceKindFromPath, sourceTable as sourceTableName } from "@/lib/sourceRegistry";
 
 export function QueryView() {
   const {
@@ -33,25 +34,8 @@ export function QueryView() {
   } = useLoomStore();
 
   const isStream = selectedFile?.path === "stream://wiki";
-  const sourceTableMap: Record<string, string> = {
-    "stream://usgs": "usgs_quakes",
-    "stream://meteo": "meteo_weather",
-    "stream://nws": "nws_alerts",
-    "stream://world_bank": "world_bank",
-    "stream://iss": "iss_track",
-    "stream://hn": "hn_stories",
-    "stream://crypto": "crypto_markets",
-    "stream://aq": "air_quality",
-    "stream://fx": "fx_rates",
-    "stream://fema": "fema_disasters",
-    "stream://opensky": "opensky_aircraft",
-    "stream://countries": "world_countries",
-    "stream://spacex": "spacex_launches",
-    "stream://nyc311": "nyc_311",
-    "stream://covid": "covid_countries",
-    "stream://launches": "space_launches",
-  };
-  const sourceTable = selectedFile?.path ? sourceTableMap[selectedFile.path] : undefined;
+  const pathSourceKind = sourceKindFromPath(selectedFile?.path);
+  const sourceTable = pathSourceKind ? sourceTableName(pathSourceKind) : undefined;
   const defaultSql = isStream
     ? "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT 100"
     : sourceTable
@@ -121,11 +105,11 @@ export function QueryView() {
     setQuerySql(localSql);
     try {
       const isStream = selectedFile.path === "stream://wiki";
-      const sourceKindMatch = selectedFile.path.match(/^stream:\/\/(usgs|meteo|nws|world_bank|iss|hn|crypto|aq|fx|fema|opensky|countries|spacex|nyc311|covid|launches)$/);
+      const sourceKind = sourceKindFromPath(selectedFile.path);
       const result = isStream
         ? await streamQuery(localSql, 10000)
-        : sourceKindMatch
-          ? await sourceQuery(sourceKindMatch[1] as SourceKind, localSql, 10000)
+        : sourceKind
+          ? await sourceQuery(sourceKind, localSql, 10000)
           : await queryFile(selectedFile.path, localSql, 10000);
       setQueryResult(result);
       appendQueryHistory(localSql);
@@ -238,8 +222,7 @@ export function QueryView() {
             </select>
           )}
           {(() => {
-            const m = selectedFile?.path?.match(/^stream:\/\/(usgs|meteo|nws|world_bank|iss|hn|crypto|aq|fx|fema|opensky|countries|spacex|nyc311|covid|launches)$/);
-            const sk = m?.[1] as string | undefined;
+            const sk = sourceKindFromPath(selectedFile?.path) ?? undefined;
             const snippets = sk ? SOURCE_SQL_SNIPPETS[sk] : undefined;
             if (!snippets?.length) return null;
             return (

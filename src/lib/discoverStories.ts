@@ -19,6 +19,7 @@ import {
   streamStatus,
   type SourceKind,
 } from "./tauri";
+import { SOURCE_DEFS } from "./sourceRegistry";
 
 export type DiscoverKind = SourceKind | "wiki";
 
@@ -119,7 +120,7 @@ function hookFor(
       };
     }
     return {
-      hook: `${n} earthquakes in the past hour`,
+      hook: `${n} earthquakes in the past day`,
       blurb: chart.title,
       score: 80 + Math.min(15, n),
       preferKind: "globe",
@@ -236,7 +237,7 @@ function hookFor(
       };
     }
     return {
-      hook: "Five-city weather snapshot",
+      hook: "World weather snapshot",
       blurb: chart.subtitle || chart.title,
       score: 72,
       preferKind: "geoBubbles",
@@ -245,23 +246,25 @@ function hookFor(
   }
 
   if (kind === "world_bank") {
-    let topVal = -Infinity;
-    let topCountry = "";
-    let indicator = "";
+    // Longest-lived country in the most recent year with data
+    let bestYr = -Infinity;
     for (let r = 0; r < sample.rows.length; r++) {
-      const ind = strAt(sample, r, "indicator_id");
-      if (ind !== "NY.GDP.MKTP.CD") continue;
-      const v = numAt(sample, r, "value");
-      if (v > topVal) {
-        topVal = v;
+      const y = numAt(sample, r, "yr");
+      if (Number.isFinite(numAt(sample, r, "life_expectancy")) && y > bestYr) bestYr = y;
+    }
+    let topLe = -Infinity;
+    let topCountry = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      if (numAt(sample, r, "yr") !== bestYr) continue;
+      const le = numAt(sample, r, "life_expectancy");
+      if (le > topLe) {
+        topLe = le;
         topCountry = strAt(sample, r, "country_name");
-        indicator = "GDP";
       }
     }
-    if (topCountry) {
-      const trillions = topVal / 1e12;
+    if (topCountry && Number.isFinite(topLe)) {
       return {
-        hook: `${topCountry} leads ${indicator}${Number.isFinite(trillions) ? ` (~$${trillions.toFixed(1)}T)` : ""}`,
+        hook: `${topCountry} lives longest · ${topLe.toFixed(1)} years (${bestYr})`,
         blurb: chart.subtitle || chart.title,
         score: 84,
         preferKind: "choropleth",
@@ -269,7 +272,7 @@ function hookFor(
       };
     }
     return {
-      hook: "World Bank development indicators",
+      hook: "Wealth, health, and CO₂ by country",
       blurb: chart.title,
       score: 76,
       preferKind: "choropleth",
@@ -307,33 +310,34 @@ function hookFor(
   }
 
   if (kind === "fx") {
+    // Biggest single-day move in the 90-day window
     let bestAbs = 0;
-    let pair = "";
-    let rate = 0;
+    let move = 0;
+    let quote = "";
+    let day = "";
     for (let r = 0; r < sample.rows.length; r++) {
       const chg = numAt(sample, r, "change_pct");
-      if (Math.abs(chg) > bestAbs) {
+      if (Number.isFinite(chg) && Math.abs(chg) > bestAbs) {
         bestAbs = Math.abs(chg);
-        rate = numAt(sample, r, "rate");
-        pair = `${strAt(sample, r, "base")}/${strAt(sample, r, "quote")}`;
+        move = chg;
+        quote = strAt(sample, r, "quote");
+        day = strAt(sample, r, "as_of").slice(0, 10);
       }
     }
-    if (pair) {
-      const sign = (numAt(sample, 0, "change_pct") || 0) >= 0 || bestAbs === 0 ? "" : "";
-      void sign;
+    if (quote) {
       return {
-        hook: bestAbs > 0.05 ? `${pair} moving · ${rate.toFixed(4)}` : `${n} FX rates vs EUR`,
+        hook: `EUR/${quote} ${move > 0 ? "+" : ""}${move.toFixed(2)}% in a day${day ? ` (${day})` : ""}`,
         blurb: chart.subtitle || chart.title,
-        score: 73 + Math.min(18, bestAbs * 40),
-        preferKind: "bar",
+        score: 73 + Math.min(18, bestAbs * 8),
+        preferKind: "box",
         category: "Markets",
       };
     }
     return {
-      hook: "EUR foreign exchange rates",
+      hook: "Euro exchange rates, past 90 days",
       blurb: chart.title,
       score: 70,
-      preferKind: "bar",
+      preferKind: "box",
       category: "Markets",
     };
   }
@@ -475,6 +479,117 @@ function hookFor(
     };
   }
 
+  if (kind === "eonet") {
+    const counts = new Map<string, number>();
+    for (let r = 0; r < sample.rows.length; r++) {
+      const c = strAt(sample, r, "category");
+      if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+    }
+    const [topCat, topN] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+    return {
+      hook: topCat ? `${topN} ${topCat.toLowerCase()} active right now` : `${n} natural events tracked by NASA`,
+      blurb: chart.subtitle || "Wildfires, storms, and volcanoes on the map.",
+      score: 86 + Math.min(8, n / 40),
+      preferKind: "geoPoints",
+      category: "Earth",
+    };
+  }
+
+  if (kind === "citibike") {
+    let bikes = 0;
+    let empty = 0;
+    for (let r = 0; r < sample.rows.length; r++) {
+      const b = numAt(sample, r, "bikes_available");
+      if (Number.isFinite(b)) bikes += b;
+      if (b === 0) empty += 1;
+    }
+    return {
+      hook: `${bikes.toLocaleString()} Citi Bikes free · ${empty} docks empty`,
+      blurb: chart.subtitle || "Every NYC dock right now.",
+      score: 84,
+      preferKind: "geoPoints",
+      category: "Cities",
+    };
+  }
+
+  if (kind === "spaceweather") {
+    let peak = -Infinity;
+    for (let r = 0; r < sample.rows.length; r++) peak = Math.max(peak, numAt(sample, r, "kp"));
+    const storm = peak >= 5 ? `G${Math.min(5, Math.floor(peak) - 4)}` : "";
+    return {
+      hook: storm
+        ? `Geomagnetic storm this week · Kp ${peak.toFixed(1)} (${storm})`
+        : `Quiet sun · Kp peaked at ${Number.isFinite(peak) ? peak.toFixed(1) : "—"}`,
+      blurb: chart.subtitle || "Kp 5+ means auroras farther from the poles.",
+      score: storm ? 92 : 74,
+      preferKind: "line",
+      category: "Space",
+    };
+  }
+
+  if (kind === "ukcarbon") {
+    // Newest half hour with a measurement, else the newest forecast
+    let newestTs = "";
+    let value = NaN;
+    let index = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const ts = strAt(sample, r, "ts");
+      const v = Number.isFinite(numAt(sample, r, "actual")) ? numAt(sample, r, "actual") : numAt(sample, r, "forecast");
+      if (Number.isFinite(v) && ts > newestTs) {
+        newestTs = ts;
+        value = v;
+        index = strAt(sample, r, "intensity_index");
+      }
+    }
+    return {
+      hook: Number.isFinite(value) ? `UK grid at ${Math.round(value)} gCO₂/kWh${index ? ` (${index})` : ""}` : "Britain's grid carbon today",
+      blurb: chart.subtitle || chart.title,
+      score: 78,
+      preferKind: "line",
+      category: "Energy",
+    };
+  }
+
+  if (kind === "pageviews") {
+    let best = -Infinity;
+    let title = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const v = numAt(sample, r, "views");
+      if (v > best) {
+        best = v;
+        title = strAt(sample, r, "article");
+      }
+    }
+    return {
+      hook: title ? `#1 on Wikipedia yesterday: ${title}` : "What the world read yesterday",
+      blurb: Number.isFinite(best) ? `${Math.round(best).toLocaleString()} views · ${chart.subtitle || chart.title}` : chart.title,
+      score: 88,
+      preferKind: "bar",
+      category: "Culture",
+    };
+  }
+
+  if (kind === "climate") {
+    // Average anomaly for the latest complete year
+    const byYear = new Map<number, number[]>();
+    for (let r = 0; r < sample.rows.length; r++) {
+      const y = numAt(sample, r, "year");
+      const a = numAt(sample, r, "anomaly_c");
+      if (!Number.isFinite(y) || !Number.isFinite(a)) continue;
+      if (!byYear.has(y)) byYear.set(y, []);
+      byYear.get(y)!.push(a);
+    }
+    const full = [...byYear.entries()].filter(([, v]) => v.length === 12).sort((a, b) => b[0] - a[0])[0];
+    const avg = full ? full[1].reduce((s, v) => s + v, 0) / 12 : NaN;
+    return {
+      hook: full ? `${full[0]} ran ${avg >= 0 ? "+" : ""}${avg.toFixed(2)}°C vs the 20th century` : "Global temperature since 1880",
+      blurb: chart.subtitle || chart.title,
+      score: 87,
+      preferKind: "line",
+      category: "Climate",
+    };
+  }
+
   if (kind === "wiki") {
     return {
       hook: `${n} recent Wikipedia edits`,
@@ -494,22 +609,7 @@ function hookFor(
 }
 
 const FILE_NAMES: Record<DiscoverKind, string> = {
-  usgs: "USGS Quakes",
-  meteo: "World Weather",
-  nws: "NWS Alerts",
-  world_bank: "World Bank",
-  iss: "ISS Track",
-  hn: "HN Front Page",
-  crypto: "Crypto Markets",
-  aq: "Air Quality",
-  fx: "FX Rates",
-  fema: "FEMA Disasters",
-  opensky: "OpenSky Aircraft",
-  countries: "World Countries",
-  spacex: "SpaceX Launches",
-  nyc311: "NYC 311",
-  covid: "COVID Countries",
-  launches: "Space Launches",
+  ...(Object.fromEntries(SOURCE_DEFS.map((d) => [d.kind, d.fileName])) as Record<SourceKind, string>),
   wiki: "Wikipedia Live",
 };
 

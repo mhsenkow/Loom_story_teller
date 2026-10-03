@@ -216,46 +216,14 @@ export async function streamClear(): Promise<void> {
 }
 
 // =================================================================
-// Poll-Based Data Sources (USGS, Open-Meteo, NWS, World Bank)
+// Poll-Based Data Sources (see sourceRegistry.ts)
 // =================================================================
 
-export type SourceKind =
-  | "usgs"
-  | "meteo"
-  | "nws"
-  | "world_bank"
-  | "iss"
-  | "hn"
-  | "crypto"
-  | "aq"
-  | "fx"
-  | "fema"
-  | "opensky"
-  | "countries"
-  | "spacex"
-  | "nyc311"
-  | "covid"
-  | "launches";
+export type { SourceKind } from "./sourceRegistry";
+import { SOURCE_KINDS, type SourceKind } from "./sourceRegistry";
 
-/** Canonical live poll sources — keep discover scan + sidebar in sync with this list. */
-export const ALL_SOURCE_KINDS: readonly SourceKind[] = [
-  "usgs",
-  "nws",
-  "opensky",
-  "nyc311",
-  "hn",
-  "covid",
-  "crypto",
-  "launches",
-  "spacex",
-  "fx",
-  "iss",
-  "aq",
-  "fema",
-  "countries",
-  "meteo",
-  "world_bank",
-] as const;
+/** Canonical live poll sources (registry order) — discover scan + sidebar read this. */
+export const ALL_SOURCE_KINDS: readonly SourceKind[] = SOURCE_KINDS;
 
 export interface SourceStatus {
   running: boolean;

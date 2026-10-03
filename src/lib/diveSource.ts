@@ -10,29 +10,15 @@
 import { isTauri, queryFile, sourceQuery, sourceSnapshot, streamQuery, streamSnapshot, type SourceKind } from "./tauri";
 import type { QueryResult } from "./store";
 import type { DiveData } from "./dive";
+import { SOURCE_DEFS } from "./sourceRegistry";
 
 export const DIVE_DESKTOP_ROWS = 30_000;
 export const DIVE_WEB_STREAM_ROWS = 8_000;
 
 /** Poll-source table names in DuckDB (desktop). */
-export const SOURCE_TABLES: Record<string, string> = {
-  usgs: "usgs_quakes",
-  meteo: "meteo_weather",
-  nws: "nws_alerts",
-  world_bank: "world_bank",
-  iss: "iss_track",
-  hn: "hn_stories",
-  crypto: "crypto_markets",
-  aq: "air_quality",
-  fx: "fx_rates",
-  fema: "fema_disasters",
-  opensky: "opensky_aircraft",
-  countries: "world_countries",
-  spacex: "spacex_launches",
-  nyc311: "nyc_311",
-  covid: "covid_countries",
-  launches: "space_launches",
-};
+export const SOURCE_TABLES: Record<string, string> = Object.fromEntries(
+  SOURCE_DEFS.map((d) => [d.kind, d.table]),
+);
 
 export interface DiveDataset {
   data: DiveData;

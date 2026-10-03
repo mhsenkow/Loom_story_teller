@@ -30,25 +30,11 @@ import {
 } from "@/lib/tauri";
 import { recommend, recommendSourceStory, recommendStreamStory } from "@/lib/recommendations";
 import { ChartLinkSync } from "./ChartLinkSync";
+import { SOURCE_DEFS, SOURCE_EXPLORE_ROWS } from "@/lib/sourceRegistry";
 
 const STREAM_NAMES: Record<string, string> = {
   wiki: "Wikipedia Live",
-  usgs: "USGS Quakes",
-  meteo: "World Weather",
-  nws: "NWS Alerts",
-  world_bank: "World Bank",
-  iss: "ISS Track",
-  hn: "HN Front Page",
-  crypto: "Crypto Markets",
-  aq: "Air Quality",
-  fx: "FX Rates",
-  fema: "FEMA Disasters",
-  opensky: "OpenSky Aircraft",
-  countries: "World Countries",
-  spacex: "SpaceX Launches",
-  nyc311: "NYC 311",
-  covid: "COVID Countries",
-  launches: "Space Launches",
+  ...Object.fromEntries(SOURCE_DEFS.map((d) => [d.kind, d.fileName])),
 };
 
 export function WebSessionResume() {
@@ -163,7 +149,7 @@ export function WebSessionResume() {
           }
 
           await sourceStart(kind as SourceKind);
-          const snap = await sourceSnapshot(kind as SourceKind, 500);
+          const snap = await sourceSnapshot(kind as SourceKind, SOURCE_EXPLORE_ROWS);
           if (!snap.sample.rows.length) return;
           const file = {
             path,

@@ -2297,7 +2297,7 @@ export function recommendSourceStory(
         mk("globe", "Quake globe", "Spin the planet — quakes as points", 95, "longitude", "latitude", "mag_type", null, "magnitude"),
         mk("scatter3d", "Orbit depth cloud", "Lat · lon · depth — drag to orbit", 94, "longitude", "latitude", "mag_type", null, "magnitude", { zField: "depth" }),
         mk("quakeTerrain", "Magnitude terrain", "Heightfield where energy piles up", 92, "longitude", "latitude", "mag_type", null, "magnitude", { zField: "magnitude" }),
-        mk("firefly", "Firefly aftershocks", "Soft glow by magnitude", 88, "longitude", "latitude", "mag_type", null, "magnitude", { timeField: "time" }),
+        mk("firefly", "Firefly aftershocks", "Soft glow by magnitude", 88, "longitude", "latitude", "mag_type", null, "magnitude", { timeField: "ts" }),
       ].slice(0, 6),
     };
   }
@@ -2306,7 +2306,7 @@ export function recommendSourceStory(
     return {
       title: "World Weather Comparison",
       charts: [
-        mk("geoBubbles", "City climate map", "Five cities as bubbles on coastlines", 96, "longitude", "latitude", "city", null, "temperature"),
+        mk("geoBubbles", "City climate map", "Twelve cities sized by temperature", 96, "longitude", "latitude", "city", null, "temperature"),
         mk("line", "Temperature over time", "How does temperature vary across cities?", 95, "ts", "temperature", "city"),
         mk("stream", "Temp streams by city", "Organic stacked climate flow", 92, "ts", "temperature", "city"),
         mk("beeswarm", "Temp swarm by city", "Every reading as a dot", 88, "city", "temperature", null),
@@ -2331,14 +2331,15 @@ export function recommendSourceStory(
 
   if (kind === "world_bank") {
     return {
-      title: "Global Development Indicators",
+      title: "Global development",
       charts: [
-        mk("choropleth", "World by indicator", "ISO3 countries filled by latest value", 98, "country_code", "value", null, "max"),
-        mk("bar", "GDP by country (latest)", "Economic output across nations", 95, "country_name", "value", null, "max"),
-        mk("line", "Indicators over time", "How do key metrics change globally?", 90, "yr", "value", "indicator_name", "mean"),
-        mk("bar", "Top 10 by population", "Most populous nations", 85, "country_name", "value", null, "max"),
-        mk("scatter", "Year vs indicator value", "How values evolve over time (per country)", 82, "yr", "value", "country_code"),
-      ].slice(0, 5),
+        mk("choropleth", "Life expectancy map", "Average years of life by country", 96, "country_code", "life_expectancy", null, "mean"),
+        mk("bubble", "Wealth vs health", "GDP per person against life expectancy, sized by population", 98, "gdp_per_capita", "life_expectancy", null, null, "population"),
+        mk("line", "Life expectancy over time", "Average across countries, 2000–2023", 92, "yr", "life_expectancy", null, "mean"),
+        mk("bar", "Most populous countries", "Peak population, 2000–2023", 90, "country_name", "population", null, "max"),
+        mk("scatter", "CO₂ vs wealth", "Emissions per person against GDP per person", 88, "gdp_per_capita", "co2_per_capita", null),
+        mk("choropleth", "GDP per person map", "Highest GDP per person reached", 84, "country_code", "gdp_per_capita", null, "max"),
+      ].slice(0, 6),
     };
   }
 
@@ -2371,11 +2372,11 @@ export function recommendSourceStory(
     return {
       title: "Crypto markets",
       charts: [
-        mk("bar", "Market cap leaders", "Top coins by size", 95, "symbol", "market_cap", null, "max"),
-        mk("bump", "Rank drama (proxy)", "Order by market moves", 90, "symbol", "change_24h_pct", "symbol"),
-        mk("spiral", "Price spiral", "Market cap curling outward", 88, "symbol", "market_cap", null),
-        mk("beeswarm", "Change swarm", "24h % as bees", 85, "symbol", "change_24h_pct", null),
-        mk("isoScatter", "Price · change · volume", "Pseudo-3D market space", 82, "price_usd", "change_24h_pct", "symbol", null, "volume_24h"),
+        mk("bar", "Market cap leaders", "The biggest coins by value", 95, "symbol", "market_cap", null, "max"),
+        mk("bar", "24h movers", "Who gained and lost the most today", 92, "symbol", "change_24h_pct", null, "max"),
+        mk("treemap", "Market share", "Each coin's slice of the top 50", 90, "symbol", "market_cap", null, "max"),
+        mk("beeswarm", "Daily moves", "Every coin's 24h % change as a dot", 85, "symbol", "change_24h_pct", null),
+        mk("isoScatter", "Price · change · volume", "Pseudo-3D market space", 80, "price_usd", "change_24h_pct", "symbol", null, "volume_24h"),
       ].slice(0, 5),
     };
   }
@@ -2395,11 +2396,12 @@ export function recommendSourceStory(
 
   if (kind === "fx") {
     return {
-      title: "FX rates (EUR base)",
+      title: "Euro exchange rates",
       charts: [
-        mk("bar", "Rates vs EUR", "How many units per euro?", 95, "quote", "rate", null, "max"),
-        mk("histogram", "Rate distribution", "Spread of EUR crosses", 85, "rate", null, null),
-        mk("bar", "Top quotes", "Strongest currencies against EUR", 80, "quote", "rate", null, "max"),
+        mk("box", "Volatility by currency", "Spread of daily % moves over 90 days", 92, "quote", "change_pct", null),
+        mk("line", "Daily moves by currency", "% change vs the euro, day to day", 95, "as_of", "change_pct", "quote", "mean"),
+        mk("bar", "Average rate vs EUR", "Units per euro, 90-day average", 85, "quote", "rate", null, "mean"),
+        mk("beeswarm", "Every daily move", "Each currency-day as a dot", 80, "quote", "change_pct", null),
       ].slice(0, 5),
     };
   }
@@ -2421,8 +2423,8 @@ export function recommendSourceStory(
     return {
       title: "Aircraft over the US",
       charts: [
-        mk("globeTrail", "Flight globe", "Craft paths wrapped on the sphere", 98, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
         mk("geoPoints", "Sky map", "Projected positions on coastlines", 96, "longitude", "latitude", "origin_country", null, "baro_altitude"),
+        mk("globeTrail", "Flight globe", "Craft paths wrapped on the sphere", 98, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
         mk("geoBubbles", "Altitude bubbles", "Sized by barometric altitude", 94, "longitude", "latitude", "origin_country", null, "baro_altitude"),
         mk("trailRibbon", "Flight ribbons", "Each craft leaves a fading trail", 92, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
         mk("scatter3d", "Altitude orbit cloud", "Lon · lat · altitude — drag to orbit", 88, "longitude", "latitude", "origin_country", null, "velocity", { zField: "baro_altitude" }),
@@ -2448,10 +2450,9 @@ export function recommendSourceStory(
     return {
       title: "SpaceX launch history",
       charts: [
-        mk("bar", "Success vs failure", "How often do missions succeed?", 95, "success", null, null, "count"),
-        mk("line", "Flights over time", "Launch cadence", 90, "date_utc", null, null, "count"),
-        mk("bar", "By rocket", "Which vehicles flew most?", 85, "rocket", null, null, "count"),
-        mk("histogram", "Flight numbers", "Mission sequence spread", 78, "flight_number", null, null),
+        mk("bar", "Launches by rocket", "Which vehicles flew — colored by outcome", 95, "rocket", null, "success", "count"),
+        mk("pie", "Success rate", "Share of missions that reached orbit", 90, "success", null, null, "count"),
+        mk("strip", "Launch timeline", "Every launch as a tick, by rocket", 85, "date_utc", "rocket", "success"),
       ].slice(0, 5),
     };
   }
@@ -2495,6 +2496,78 @@ export function recommendSourceStory(
     };
   }
 
+  if (kind === "eonet") {
+    return {
+      title: "Natural events on Earth",
+      charts: [
+        mk("geoPoints", "Active events map", "Wildfires, storms, and volcanoes NASA is tracking", 98, "longitude", "latitude", "category"),
+        mk("bar", "Events by type", "What is burning, blowing, or erupting right now?", 94, "category", null, null, "count"),
+        mk("globe", "Events on the globe", "Spin to see where nature is active", 92, "longitude", "latitude", "category"),
+        mk("geoBubbles", "Events by size", "Bubble size from reported magnitude", 88, "longitude", "latitude", "category", null, "magnitude"),
+        mk("bar", "Reporting sources", "Who reports these events?", 80, "source", null, null, "count"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "citibike") {
+    return {
+      title: "Citi Bike right now",
+      charts: [
+        mk("geoPoints", "Bikes on the map", "Every dock, sized by bikes available", 98, "longitude", "latitude", null, null, "bikes_available"),
+        mk("histogram", "How full are docks?", "Share of each dock filled with bikes", 94, "pct_full", null, null),
+        mk("scatter", "Capacity vs bikes", "Big docks running empty or full", 90, "capacity", "bikes_available", null),
+        mk("geoHex", "Dock density", "Where Citi Bike stations cluster", 86, "longitude", "latitude", null),
+        mk("bar", "Most bikes now", "Docks with the most bikes available", 82, "name", "bikes_available", null, "max"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "spaceweather") {
+    return {
+      title: "Geomagnetic activity",
+      charts: [
+        mk("line", "Kp index this week", "Kp 5+ is a geomagnetic storm — auroras farther from the poles", 98, "ts", "kp", null, "max"),
+        mk("bar", "Storm levels", "How many 3-hour periods hit each G level", 90, "storm_level", null, null, "count"),
+        mk("area", "Kp over time", "Filled view of geomagnetic activity", 86, "ts", "kp", null, "max"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "ukcarbon") {
+    return {
+      title: "Britain's grid carbon",
+      charts: [
+        mk("line", "Carbon intensity today", "Grams of CO₂ per kWh, every half hour (forecast)", 98, "ts", "forecast", null, "mean"),
+        mk("line", "Measured intensity", "Actual readings so far", 92, "ts", "actual", null, "mean"),
+        mk("scatter", "Forecast vs actual", "How good is the forecast?", 88, "forecast", "actual", null),
+        mk("bar", "Intensity bands", "Half hours by carbon index", 84, "intensity_index", null, null, "count"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "pageviews") {
+    return {
+      title: "What the world read yesterday",
+      charts: [
+        mk("bar", "Most-read articles", "Yesterday's top English Wikipedia pages", 98, "article", "views", null, "max"),
+        mk("treemap", "Attention map", "Each article sized by views", 92, "article", "views", null, "max"),
+        mk("lollipop", "Top reads", "Views per article", 86, "article", "views", null, "max"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "climate") {
+    return {
+      title: "Global warming since 1880",
+      charts: [
+        mk("line", "Warming by year", "Average land + ocean anomaly vs the 20th-century mean (°C)", 99, "year", "anomaly_c", null, "mean"),
+        mk("spiral", "Climate spiral", "Each turn is a year — watch it widen", 95, "ts", "anomaly_c", null),
+        mk("line", "Every month since 1880", "Monthly anomaly (°C)", 90, "ts", "anomaly_c", null, "mean"),
+        mk("box", "Spread by month", "Which months run warmest?", 82, "month", "anomaly_c", null),
+      ].slice(0, 5),
+    };
+  }
+
   return { title: `${kind} data`, charts: [] };
 }
 
@@ -2519,10 +2592,10 @@ export const SOURCE_SQL_SNIPPETS: Record<string, { name: string; sql: string }[]
     { name: "Extreme alerts", sql: "SELECT * FROM nws_alerts WHERE severity = 'Extreme' OR severity = 'Severe' ORDER BY effective DESC" },
   ],
   world_bank: [
-    { name: "GDP rankings (2023)", sql: "SELECT country_name, value FROM world_bank WHERE indicator_id = 'NY.GDP.MKTP.CD' AND yr = 2023 ORDER BY value DESC LIMIT 20" },
-    { name: "Population (2023)", sql: "SELECT country_name, value FROM world_bank WHERE indicator_id = 'SP.POP.TOTL' AND yr = 2023 ORDER BY value DESC LIMIT 20" },
-    { name: "Life expectancy trend", sql: "SELECT yr, AVG(value) AS avg_le FROM world_bank WHERE indicator_id = 'SP.DYN.LE00.IN' GROUP BY yr ORDER BY yr" },
-    { name: "CO₂ top emitters", sql: "SELECT country_name, value FROM world_bank WHERE indicator_id = 'EN.ATM.CO2E.PC' AND yr = 2022 ORDER BY value DESC LIMIT 15" },
+    { name: "Richest per person (latest)", sql: "SELECT country_name, yr, gdp_per_capita FROM world_bank WHERE yr = (SELECT MAX(yr) FROM world_bank WHERE gdp_per_capita IS NOT NULL) AND gdp_per_capita IS NOT NULL ORDER BY gdp_per_capita DESC LIMIT 20" },
+    { name: "Most populous (latest)", sql: "SELECT country_name, population FROM world_bank WHERE yr = (SELECT MAX(yr) FROM world_bank WHERE population IS NOT NULL) ORDER BY population DESC LIMIT 20" },
+    { name: "Life expectancy trend", sql: "SELECT yr, ROUND(AVG(life_expectancy), 1) AS avg_life_expectancy FROM world_bank GROUP BY yr ORDER BY yr" },
+    { name: "CO₂ per person (top)", sql: "SELECT country_name, yr, co2_per_capita FROM world_bank WHERE co2_per_capita IS NOT NULL QUALIFY ROW_NUMBER() OVER (PARTITION BY country_code ORDER BY yr DESC) = 1 ORDER BY co2_per_capita DESC LIMIT 15" },
   ],
   iss: [
     { name: "Latest position", sql: "SELECT * FROM iss_track ORDER BY ts DESC LIMIT 20" },
@@ -2541,8 +2614,9 @@ export const SOURCE_SQL_SNIPPETS: Record<string, { name: string; sql: string }[]
     { name: "AQI comparison", sql: "SELECT city, european_aqi, ozone, nitrogen_dioxide FROM air_quality ORDER BY european_aqi DESC" },
   ],
   fx: [
-    { name: "All rates", sql: "SELECT quote, rate, as_of FROM fx_rates ORDER BY rate DESC" },
-    { name: "Major pairs", sql: "SELECT quote, rate FROM fx_rates WHERE quote IN ('USD','GBP','JPY','CHF','CAD') ORDER BY quote" },
+    { name: "Latest rates", sql: "SELECT quote, rate, change_pct FROM fx_rates WHERE as_of = (SELECT MAX(as_of) FROM fx_rates) ORDER BY quote" },
+    { name: "Most volatile", sql: "SELECT quote, ROUND(STDDEV(change_pct), 3) AS daily_volatility_pct FROM fx_rates GROUP BY quote ORDER BY daily_volatility_pct DESC" },
+    { name: "Dollar over time", sql: "SELECT as_of, rate FROM fx_rates WHERE quote = 'USD' ORDER BY as_of" },
   ],
   fema: [
     { name: "Recent declarations", sql: "SELECT state, incident_type, declaration_title, declaration_date FROM fema_disasters ORDER BY declaration_date DESC LIMIT 30" },
@@ -2558,8 +2632,9 @@ export const SOURCE_SQL_SNIPPETS: Record<string, { name: string; sql: string }[]
     { name: "By region", sql: "SELECT region, COUNT(*) AS countries, SUM(population) AS pop FROM world_countries GROUP BY region ORDER BY pop DESC" },
   ],
   spacex: [
-    { name: "Recent flights", sql: "SELECT name, date_utc, success, flight_number FROM spacex_launches ORDER BY date_utc DESC LIMIT 30" },
+    { name: "Recent flights", sql: "SELECT name, date_utc, rocket, success FROM spacex_launches ORDER BY date_utc DESC LIMIT 30" },
     { name: "Success rate", sql: "SELECT success, COUNT(*) AS cnt FROM spacex_launches GROUP BY success" },
+    { name: "Launches per month", sql: "SELECT date_trunc('month', date_utc) AS month, COUNT(*) AS launches FROM spacex_launches GROUP BY 1 ORDER BY 1" },
   ],
   nyc311: [
     { name: "Top complaints", sql: "SELECT complaint_type, COUNT(*) AS cnt FROM nyc_311 GROUP BY complaint_type ORDER BY cnt DESC LIMIT 20" },
@@ -2572,6 +2647,30 @@ export const SOURCE_SQL_SNIPPETS: Record<string, { name: string; sql: string }[]
   launches: [
     { name: "Upcoming", sql: "SELECT name, net, agency, location, rocket, status FROM space_launches ORDER BY net ASC LIMIT 40" },
     { name: "By agency", sql: "SELECT agency, COUNT(*) AS cnt FROM space_launches GROUP BY agency ORDER BY cnt DESC" },
+  ],
+  eonet: [
+    { name: "Open events", sql: "SELECT title, category, ts, latitude, longitude FROM natural_events ORDER BY ts DESC LIMIT 50" },
+    { name: "By category", sql: "SELECT category, COUNT(*) AS events FROM natural_events GROUP BY category ORDER BY events DESC" },
+  ],
+  citibike: [
+    { name: "Emptiest docks", sql: "SELECT name, capacity, bikes_available, docks_available FROM citibike_stations WHERE is_renting AND capacity > 0 ORDER BY pct_full ASC LIMIT 25" },
+    { name: "System totals", sql: "SELECT COUNT(*) AS stations, SUM(bikes_available) AS bikes, SUM(ebikes_available) AS ebikes, SUM(docks_available) AS open_docks FROM citibike_stations" },
+  ],
+  spaceweather: [
+    { name: "Storm periods", sql: "SELECT ts, kp, storm_level FROM space_weather WHERE kp >= 5 ORDER BY ts DESC" },
+    { name: "Daily peak Kp", sql: "SELECT CAST(ts AS DATE) AS day, MAX(kp) AS peak_kp FROM space_weather GROUP BY 1 ORDER BY 1" },
+  ],
+  ukcarbon: [
+    { name: "Greenest half hours", sql: "SELECT ts, forecast, actual, intensity_index FROM uk_carbon ORDER BY forecast ASC LIMIT 10" },
+    { name: "Forecast error", sql: "SELECT ts, forecast, actual, actual - forecast AS error FROM uk_carbon WHERE actual IS NOT NULL ORDER BY ts" },
+  ],
+  pageviews: [
+    { name: "Top 25", sql: "SELECT rank, article, views FROM wiki_top_articles ORDER BY rank LIMIT 25" },
+    { name: "Share of top 100", sql: "SELECT article, views, ROUND(100.0 * views / SUM(views) OVER (), 1) AS pct FROM wiki_top_articles ORDER BY views DESC LIMIT 25" },
+  ],
+  climate: [
+    { name: "Warmest years", sql: "SELECT year, ROUND(AVG(anomaly_c), 2) AS anomaly_c FROM global_temperature GROUP BY year ORDER BY anomaly_c DESC LIMIT 15" },
+    { name: "By decade", sql: "SELECT (year // 10) * 10 AS decade, ROUND(AVG(anomaly_c), 2) AS anomaly_c FROM global_temperature GROUP BY 1 ORDER BY 1" },
   ],
 };
 

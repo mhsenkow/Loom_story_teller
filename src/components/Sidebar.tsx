@@ -20,6 +20,7 @@ import { firstCsvResource } from "@/lib/openDataCatalog";
 import { useIsMobile } from "@/lib/useMediaQuery";
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import { requestWhatsNew } from "@/lib/changelog";
+import { SOURCE_DEFS, SOURCE_GROUP_LABELS, sourceStreamPath, type SourceDef, type SourceGroup, SOURCE_EXPLORE_ROWS } from "@/lib/sourceRegistry";
 const SIDEBAR_WIDTH = 260;
 const DATA_REGION_WIDTH = 340;
 
@@ -157,7 +158,7 @@ export function Sidebar() {
           return;
         }
         await sourceStart(kind);
-        const snap = await sourceSnapshot(kind, 500);
+        const snap = await sourceSnapshot(kind, SOURCE_EXPLORE_ROWS);
         if (!snap.sample.rows.length) {
           setToast(`${file.name} is connecting — tap Explore when rows appear`);
           setDataRegionOpen(true);
@@ -385,9 +386,10 @@ export function Sidebar() {
       setActiveChart(recs.length > 0 ? recs[0] : null);
       setViewMode("chart");
       leaveSourcesShowChart();
+      const kept = inspect.sample.rows.length;
       setToast(
-        truncated
-          ? `Exploring ${name} (first rows — file was large)`
+        truncated || kept < rowCount
+          ? `Exploring ${name} — first ${kept.toLocaleString()} rows${kept < rowCount ? ` of ${rowCount.toLocaleString()}` : " (file was large)"}`
           : `Exploring ${name} — ${rowCount.toLocaleString()} rows`,
       );
     } catch (e) {
@@ -767,164 +769,7 @@ function WikiStreamSection() {
 
 // --- Data & Sources (slide-in region) ---
 
-// --- Generic Source Card (USGS, Open-Meteo, NWS, World Bank) ---
-
-interface SourceCardDef {
-  kind: SourceKind;
-  label: string;
-  description: string;
-  attribution?: string;
-  streamPath: string;
-  fileName: string;
-  color: string;
-}
-
-const SOURCE_DEFS: SourceCardDef[] = [
-  {
-    kind: "usgs",
-    label: "USGS Earthquakes",
-    description: "Global quakes from the past hour. Refreshes every minute.",
-    attribution: "USGS · public domain",
-    streamPath: "stream://usgs",
-    fileName: "USGS Quakes",
-    color: "loom-warning",
-  },
-  {
-    kind: "iss",
-    label: "ISS Tracker",
-    description: "Where the International Space Station is right now — builds a lat/lon trail.",
-    attribution: "Where The ISS At · free",
-    streamPath: "stream://iss",
-    fileName: "ISS Track",
-    color: "loom-accent",
-  },
-  {
-    kind: "hn",
-    label: "Hacker News",
-    description: "Front-page stories with points and comment counts. Refreshes every 2 min.",
-    attribution: "HN Search (Algolia) · free",
-    streamPath: "stream://hn",
-    fileName: "HN Front Page",
-    color: "loom-warning",
-  },
-  {
-    kind: "crypto",
-    label: "Crypto markets",
-    description: "Top 50 coins by market cap — price, volume, 24h change.",
-    attribution: "CoinGecko · free tier",
-    streamPath: "stream://crypto",
-    fileName: "Crypto Markets",
-    color: "loom-success",
-  },
-  {
-    kind: "meteo",
-    label: "World weather",
-    description: "Hourly temps for NYC, London, Tokyo, Sydney, São Paulo.",
-    attribution: "Open-Meteo · free",
-    streamPath: "stream://meteo",
-    fileName: "World Weather",
-    color: "loom-accent",
-  },
-  {
-    kind: "nws",
-    label: "NWS Alerts",
-    description: "Active US weather warnings and watches.",
-    attribution: "api.weather.gov · public",
-    streamPath: "stream://nws",
-    fileName: "NWS Alerts",
-    color: "loom-error",
-  },
-  {
-    kind: "world_bank",
-    label: "World Bank",
-    description: "GDP, population, life expectancy, CO₂ (2015–2023). Loads once.",
-    attribution: "World Bank Open Data · free",
-    streamPath: "stream://world_bank",
-    fileName: "World Bank",
-    color: "loom-success",
-  },
-  {
-    kind: "aq",
-    label: "Air quality",
-    description: "PM2.5, ozone, and AQI for NYC, London, Tokyo, Sydney, São Paulo.",
-    attribution: "Open-Meteo Air Quality · free",
-    streamPath: "stream://aq",
-    fileName: "Air Quality",
-    color: "loom-accent",
-  },
-  {
-    kind: "fx",
-    label: "FX rates",
-    description: "Daily EUR foreign-exchange rates (Frankfurter / ECB).",
-    attribution: "Frankfurter.app · free",
-    streamPath: "stream://fx",
-    fileName: "FX Rates",
-    color: "loom-success",
-  },
-  {
-    kind: "fema",
-    label: "FEMA disasters",
-    description: "Recent US disaster declarations by state and incident type.",
-    attribution: "OpenFEMA · public domain",
-    streamPath: "stream://fema",
-    fileName: "FEMA Disasters",
-    color: "loom-error",
-  },
-  {
-    kind: "opensky",
-    label: "OpenSky aircraft",
-    description: "Live aircraft positions over the contiguous US — great scatter maps.",
-    attribution: "OpenSky Network · free (rate-limited)",
-    streamPath: "stream://opensky",
-    fileName: "OpenSky Aircraft",
-    color: "loom-accent",
-  },
-  {
-    kind: "countries",
-    label: "World countries",
-    description: "Population, area, and region for every country (REST Countries).",
-    attribution: "restcountries.com · free",
-    streamPath: "stream://countries",
-    fileName: "World Countries",
-    color: "loom-success",
-  },
-  {
-    kind: "spacex",
-    label: "SpaceX history",
-    description: "Past SpaceX launches — success, cadence, flight numbers.",
-    attribution: "api.spacexdata.com · free",
-    streamPath: "stream://spacex",
-    fileName: "SpaceX Launches",
-    color: "loom-accent",
-  },
-  {
-    kind: "nyc311",
-    label: "NYC 311",
-    description: "Latest service requests — complaint type, borough, map points.",
-    attribution: "NYC Open Data · public",
-    streamPath: "stream://nyc311",
-    fileName: "NYC 311",
-    color: "loom-warning",
-  },
-  {
-    kind: "covid",
-    label: "COVID by country",
-    description: "Cumulative and daily cases/deaths worldwide (disease.sh).",
-    attribution: "disease.sh · free",
-    streamPath: "stream://covid",
-    fileName: "COVID Countries",
-    color: "loom-error",
-  },
-  {
-    kind: "launches",
-    label: "Upcoming launches",
-    description: "Next global orbital/suborbital launches by agency and pad.",
-    attribution: "The Space Devs · free",
-    streamPath: "stream://launches",
-    fileName: "Space Launches",
-    color: "loom-accent",
-  },
-];
+// --- Generic Source Card — every poll source in sourceRegistry.ts ---
 
 /** One-click public CSV packs (web Explore / desktop save). */
 const CURATED_OPEN_PACKS: {
@@ -935,46 +780,67 @@ const CURATED_OPEN_PACKS: {
   source: string;
 }[] = [
   {
-    id: "owid-co2",
-    title: "OWID CO₂ and greenhouse gases",
-    blurb: "Country-level emissions history — classic storytelling CSV.",
-    url: "https://raw.githubusercontent.com/owid/co2-data/master/owid-co2-data.csv",
-    source: "Our World in Data",
+    id: "owid-co2-per-capita",
+    title: "CO₂ emissions per person",
+    blurb: "Every country since 1750 — the classic climate-inequality chart.",
+    url: "https://ourworldindata.org/grapher/co-emissions-per-capita.csv?v=1&csvType=full&useColumnShortNames=true",
+    source: "Our World in Data / Global Carbon Project",
   },
   {
-    id: "owid-covid",
-    title: "OWID COVID-19",
-    blurb: "Cases, deaths, vaccinations by country and date.",
-    url: "https://covid.ourworldindata.org/data/owid-covid-data.csv",
-    source: "Our World in Data",
+    id: "owid-life-expectancy",
+    title: "Life expectancy",
+    blurb: "Two centuries of longer lives, country by country.",
+    url: "https://ourworldindata.org/grapher/life-expectancy.csv?v=1&csvType=full&useColumnShortNames=true",
+    source: "Our World in Data / UN WPP",
+  },
+  {
+    id: "owid-gdp-per-capita",
+    title: "GDP per person",
+    blurb: "Income by country since 1990, with world regions for color.",
+    url: "https://ourworldindata.org/grapher/gdp-per-capita-worldbank.csv?v=1&csvType=full&useColumnShortNames=true",
+    source: "Our World in Data / World Bank",
+  },
+  {
+    id: "owid-renewables",
+    title: "Renewable electricity share",
+    blurb: "How fast each country's grid is going green.",
+    url: "https://ourworldindata.org/grapher/share-electricity-renewables.csv?v=1&csvType=full&useColumnShortNames=true",
+    source: "Our World in Data / Ember",
+  },
+  {
+    id: "owid-population",
+    title: "Population since 10,000 BCE",
+    blurb: "Country and world population over the long run.",
+    url: "https://ourworldindata.org/grapher/population.csv?v=1&csvType=full&useColumnShortNames=true",
+    source: "Our World in Data / HYDE / UN",
+  },
+  {
+    id: "keeling-curve",
+    title: "Keeling curve (Mauna Loa CO₂)",
+    blurb: "Monthly atmospheric CO₂ since 1958 — the sawtooth that keeps climbing.",
+    url: "https://raw.githubusercontent.com/datasets/co2-ppm/main/data/co2-mm-mlo.csv",
+    source: "NOAA GML via datahub",
   },
   {
     id: "nasa-exoplanets",
-    title: "NASA exoplanet archive (sample)",
-    blurb: "Confirmed planets — radius, mass, discovery year.",
-    url: "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+top+500+pl_name,hostname,disc_year,pl_rade,pl_bmasse,sy_dist+from+pscomppars&format=csv",
+    title: "Every confirmed exoplanet",
+    blurb: "~6,000 planets — size, mass, orbit, distance, and how they were found.",
+    url: "https://exoplanetarchive.ipac.caltech.edu/TAP/sync?query=select+pl_name,hostname,disc_year,discoverymethod,pl_rade,pl_bmasse,pl_orbper,sy_dist+from+pscomppars&format=csv",
     source: "NASA Exoplanet Archive",
   },
   {
-    id: "gdp-countries",
-    title: "Country GDP (datahub)",
-    blurb: "Long-run GDP by country — classic scatter vs population stories.",
-    url: "https://raw.githubusercontent.com/datasets/gdp/master/data/gdp.csv",
-    source: "datahub.io / World Bank",
+    id: "power-plants",
+    title: "Global power plants",
+    blurb: "35,000 plants on a map — capacity and fuel for every country.",
+    url: "https://raw.githubusercontent.com/wri/global-power-plant-database/master/output_database/global_power_plant_database.csv",
+    source: "World Resources Institute",
   },
   {
-    id: "population-un",
-    title: "UN population estimates",
-    blurb: "Population by country and year.",
-    url: "https://raw.githubusercontent.com/datasets/population/master/data/population.csv",
-    source: "datahub.io / UN",
-  },
-  {
-    id: "owid-energy",
-    title: "OWID energy mix",
-    blurb: "Electricity and energy by source and country.",
-    url: "https://raw.githubusercontent.com/owid/energy-data/master/owid-energy-data.csv",
-    source: "Our World in Data",
+    id: "us-cities",
+    title: "US cities by population",
+    blurb: "Largest US cities with coordinates — instant bubble map.",
+    url: "https://raw.githubusercontent.com/plotly/datasets/master/2014_us_cities.csv",
+    source: "US Census via plotly/datasets",
   },
 ];
 
@@ -997,7 +863,7 @@ function SectionHeading({
     </div>
   );
 }
-function SourceCard({ def }: { def: SourceCardDef }) {
+function SourceCard({ def }: { def: SourceDef }) {
   const {
     sourceStatuses, setSourceStatus,
     setSelectedFile, setColumnStats, setSampleRows,
@@ -1026,13 +892,13 @@ function SourceCard({ def }: { def: SourceCardDef }) {
 
   const handleExplore = async (opts?: { quiet?: boolean }) => {
     try {
-      const snap = await sourceSnapshot(def.kind, 500);
+      const snap = await sourceSnapshot(def.kind, SOURCE_EXPLORE_ROWS);
       if (!snap.sample.rows.length) {
         if (!opts?.quiet) setToast(`${def.label} has no rows yet — wait a moment`);
         return false;
       }
       const file = {
-        path: def.streamPath,
+        path: sourceStreamPath(def.kind),
         name: def.fileName,
         extension: "stream",
         row_count: snap.sample.total_rows,
@@ -1040,7 +906,7 @@ function SourceCard({ def }: { def: SourceCardDef }) {
       };
       setSelectedFile(file);
       addRecentFile(file);
-      setLastSession({ folderPath: "web://", filePath: def.streamPath, viewMode: "chart" });
+      setLastSession({ folderPath: "web://", filePath: sourceStreamPath(def.kind), viewMode: "chart" });
       setColumnStats(snap.stats);
       setSampleRows(snap.sample);
       setStreamActive(true);
@@ -1135,7 +1001,14 @@ function SourceCard({ def }: { def: SourceCardDef }) {
         </div>
       )}
       {def.attribution && (
-        <p className="text-2xs text-loom-muted/60 pl-4">{def.attribution}</p>
+        <a
+          href={def.homepage}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="block text-2xs text-loom-muted/70 hover:text-loom-accent pl-4 w-fit"
+        >
+          {def.attribution}
+        </a>
       )}
     </div>
   );
@@ -1743,8 +1616,15 @@ function DataRegionView({
             lede="Connect a feed, let it fill, then Explore into Chart."
           />
           <WikiStreamSection />
-          {SOURCE_DEFS.map((def) => (
-            <SourceCard key={def.kind} def={def} />
+          {(Object.keys(SOURCE_GROUP_LABELS) as SourceGroup[]).map((group) => (
+            <div key={group} className="space-y-2.5">
+              <h4 className="text-2xs font-medium uppercase tracking-wide text-loom-muted pt-1">
+                {SOURCE_GROUP_LABELS[group]}
+              </h4>
+              {SOURCE_DEFS.filter((d) => d.group === group).map((def) => (
+                <SourceCard key={def.kind} def={def} />
+              ))}
+            </div>
           ))}
         </section>
 
