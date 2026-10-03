@@ -63,6 +63,11 @@ export const CHANGELOG: ChangelogRelease[] = [
         title: "Sharper 3D and maps",
         detail: "3D scatter and firefly fill the frame instead of a tiny speck, and maps no longer color countries from unrelated numbers.",
       },
+      {
+        title: "Steadier panels",
+        detail:
+          "“What’s interesting right now” keeps one screen-fitted size while you filter, instead of shrinking and jumping. On phones the detail sheet no longer resizes between tabs, and rows that scroll sideways fade at the edge so you can tell there’s more.",
+      },
     ],
   },
   {

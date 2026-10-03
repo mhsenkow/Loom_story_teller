@@ -112,7 +112,7 @@ export function DetailPanel() {
           fixed inset-x-0 bottom-0 z-40 w-full
           border-t border-loom-border rounded-t-2xl shadow-loom-lg
           md:max-h-none md:rounded-none md:shadow-none md:inset-auto
-          ${liveEdit ? "" : panelTab === "chart" ? "max-h-[min(90dvh,44rem)]" : "max-h-[min(82dvh,36rem)]"}
+          ${liveEdit ? "" : "h-[min(88dvh,44rem)]"}
         `}
         style={{ paddingBottom: "var(--safe-bottom)", ...(liveEdit ? { height: MOBILE_LIVE_EDIT_SHEET } : {}) }}
       >

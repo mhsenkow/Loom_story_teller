@@ -220,7 +220,7 @@ export function ChartKindPicker({
             </div>
           </div>
 
-          <div ref={listRef} id={listId} role="listbox" aria-label="Chart types" className="overflow-y-auto py-1" style={{ maxHeight: pos ? Math.min(360, pos.maxH) : 288 }}>
+          <div ref={listRef} id={listId} role="listbox" aria-label="Chart types" className="overflow-y-auto py-1" style={{ height: pos ? Math.min(360, pos.maxH) : 288 }}>
             {ordered.length === 0 && (
               <p className="px-3 py-4 text-2xs text-loom-muted text-center">No chart types match “{query}”.</p>
             )}

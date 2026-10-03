@@ -9,7 +9,7 @@
 
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useLoomStore } from "@/lib/store";
 import { openDataSources } from "@/components/StartHere";
 import {
@@ -24,6 +24,13 @@ import { ODD_CHART_KIND_OPTIONS } from "@/lib/oddCharts";
 import { GEO_MAP_KIND_OPTIONS, isGeoFamilyKind } from "@/lib/geoMaps";
 
 type SortMode = "score" | "category" | "chart" | "source" | "name";
+const SORT_LABELS: Record<SortMode, string> = {
+  score: "Best match",
+  category: "Category",
+  source: "Source",
+  chart: "Chart type",
+  name: "Name A–Z",
+};
 
 const CHART_KIND_LABELS: Record<string, string> = Object.fromEntries([
   ...ODD_CHART_KIND_OPTIONS.map((o) => [o.value, o.label] as const),
@@ -299,6 +306,9 @@ export function Onboarding() {
     setSortMode("score");
   };
 
+  const topicFade = useEdgeFade<HTMLDivElement>();
+  const kindFade = useEdgeFade<HTMLDivElement>();
+
   const filtersActive = categoryFilter !== "all" || chartFilter !== "all" || sortMode !== "score";
 
   const exploreSummary = useMemo(() => {
@@ -324,7 +334,7 @@ export function Onboarding() {
       aria-labelledby="onboarding-title"
       aria-describedby="onboarding-desc"
     >
-      <div className="loom-card max-w-5xl w-full p-3 sm:p-5 space-y-0 bg-loom-surface border border-loom-border shadow-loom-lg max-h-[min(94dvh,900px)] flex flex-col rounded-t-2xl sm:rounded-xl animate-slide-up mb-[var(--safe-bottom)] sm:mb-0">
+      <div className="loom-card max-w-5xl w-full p-3 sm:p-5 space-y-0 bg-loom-surface border border-loom-border shadow-loom-lg h-[min(92dvh,900px)] sm:h-[min(88dvh,860px)] flex flex-col rounded-t-2xl sm:rounded-xl animate-slide-up mb-[var(--safe-bottom)] sm:mb-0">
         {/* Title → explore strip: one continuous header, controls read as part of the sentence */}
         <header className="shrink-0 pb-3 mb-3 border-b border-loom-border/50 space-y-3">
           <div className="flex items-start gap-3">
@@ -367,6 +377,8 @@ export function Onboarding() {
                 </span>
                 <div
                   className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5"
+                  ref={topicFade.ref}
+                  style={topicFade.style}
                   role="group"
                   aria-label="Topic"
                 >
@@ -390,25 +402,27 @@ export function Onboarding() {
                   <label htmlFor="discover-sort" className="sr-only">
                     Sort stories
                   </label>
-                  <select
-                    id="discover-sort"
-                    value={sortMode}
-                    onChange={(e) => setSortMode(e.target.value as SortMode)}
-                    className="appearance-none bg-transparent border-0 text-2xs text-loom-muted hover:text-loom-text focus:outline-none focus:text-loom-text cursor-pointer pr-4 max-w-[7.5rem]"
-                    style={{
-                      backgroundImage:
-                        "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%23888' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E\")",
-                      backgroundRepeat: "no-repeat",
-                      backgroundPosition: "right 0.15rem center",
-                    }}
-                    title="Sort"
-                  >
-                    <option value="score">Best match</option>
-                    <option value="category">Category</option>
-                    <option value="source">Source</option>
-                    <option value="chart">Chart type</option>
-                    <option value="name">Name A–Z</option>
-                  </select>
+                  {/* Small visible label; the native select sits invisibly on top so phones keep their 16px
+                      no-zoom font without the control crowding the topic chips. */}
+                  <span className="relative inline-flex items-center gap-1 text-2xs text-loom-muted hover:text-loom-text focus-within:text-loom-text focus-within:ring-1 focus-within:ring-loom-accent/50 rounded px-0.5">
+                    {SORT_LABELS[sortMode]}
+                    <svg width="8" height="5" viewBox="0 0 10 6" aria-hidden className="fill-current opacity-70">
+                      <path d="M0 0l5 6 5-6z" />
+                    </svg>
+                    <select
+                      id="discover-sort"
+                      value={sortMode}
+                      onChange={(e) => setSortMode(e.target.value as SortMode)}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer appearance-none"
+                      title="Sort"
+                    >
+                      {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
+                        <option key={m} value={m}>
+                          {SORT_LABELS[m]}
+                        </option>
+                      ))}
+                    </select>
+                  </span>
                   {filtersActive && (
                     <button
                       type="button"
@@ -430,7 +444,7 @@ export function Onboarding() {
                   <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
                     As
                   </span>
-                  <div className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                  <div className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" ref={kindFade.ref} style={kindFade.style}>
                     <div className="flex items-center gap-x-1.5 w-max text-2xs text-loom-muted">
                       <ChartLink
                         label="Any"
@@ -467,9 +481,9 @@ export function Onboarding() {
           )}
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1">
+        <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1 flex flex-col">
           {phase === "scan" && stories.length === 0 && (
-            <div className="py-10 text-center space-y-2">
+            <div className="my-auto py-10 text-center space-y-2">
               <p className="text-sm text-loom-text">Scanning open data…</p>
               <p className="text-2xs text-loom-muted">{scannedHint}</p>
               <div className="mx-auto mt-3 h-1 w-32 rounded-full bg-loom-elevated overflow-hidden">
@@ -479,7 +493,7 @@ export function Onboarding() {
           )}
 
           {phase === "error" && stories.length === 0 && (
-            <div className="py-8 text-center space-y-3">
+            <div className="my-auto py-8 text-center space-y-3">
               <p className="text-sm text-loom-text">Couldn’t reach live feeds just now.</p>
               <p className="text-2xs text-loom-muted">Open Data &amp; sources to browse catalogs and connect manually.</p>
               <button type="button" onClick={browseSources} className="loom-btn-primary text-xs px-3 py-1.5">
@@ -489,7 +503,7 @@ export function Onboarding() {
           )}
 
           {(phase === "ready" || stories.length > 0) && visible.length === 0 && (
-            <div className="py-10 text-center space-y-2">
+            <div className="my-auto py-10 text-center space-y-2">
               <p className="text-sm text-loom-text">No stories match these filters.</p>
               <button type="button" onClick={clearFilters} className="text-2xs text-loom-accent hover:underline">
                 Clear filters
@@ -498,7 +512,7 @@ export function Onboarding() {
           )}
 
           {(phase === "ready" || stories.length > 0) && visible.length > 0 && (
-            <ul className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-1.5 list-none m-0 p-0">
+            <ul className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 content-start gap-1.5 list-none m-0 p-0">
               {visible.map((s) => (
                 <li key={s.id} className="min-w-0">
                   <button
@@ -558,6 +572,32 @@ export function Onboarding() {
       </div>
     </div>
   );
+}
+
+/** Fades whichever edge of a horizontal scroller still has content past it, so a cut-off row reads as scrollable. */
+function useEdgeFade<T extends HTMLElement>() {
+  const [el, setEl] = useState<T | null>(null);
+  const [edges, setEdges] = useState({ left: false, right: false });
+  useEffect(() => {
+    if (!el) return;
+    const update = () => {
+      const left = el.scrollLeft > 2;
+      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
+      setEdges((e) => (e.left === left && e.right === right ? e : { left, right }));
+    };
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [el]);
+  const mask = `linear-gradient(to right, ${edges.left ? "transparent, black 1.5rem" : "black"}, ${edges.right ? "black calc(100% - 2rem), transparent" : "black"})`;
+  const style: CSSProperties = edges.left || edges.right ? { maskImage: mask, WebkitMaskImage: mask } : {};
+  return { ref: setEl, style };
 }
 
 function FilterChip({
