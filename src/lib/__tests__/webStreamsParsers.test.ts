@@ -238,8 +238,14 @@ describe("web source buffers replace snapshot feeds instead of appending", () =>
   });
 
   async function pollTwice(kind: "citibike" | "meteo" | "mbta" | "debt", bodies: unknown[]) {
-    const fetchMock = vi.fn();
-    for (const b of bodies) fetchMock.mockResolvedValueOnce({ ok: true, json: async () => b });
+    // Worker responses are queued in order; direct-to-upstream fetches (e.g. debt → Treasury)
+    // fail here so the Worker fallback path is what's exercised.
+    const queue = [...bodies];
+    const fetchMock = vi.fn(async (url: string) =>
+      String(url).startsWith("/api/source/")
+        ? { ok: true, json: async () => queue.shift() }
+        : { ok: false, json: async () => ({}) },
+    );
     vi.stubGlobal("fetch", fetchMock);
     await webSourceClear(kind);
     for (let i = 0; i < bodies.length; i++) {

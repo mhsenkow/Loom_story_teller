@@ -9,6 +9,7 @@
 import type { ColumnInfo } from "./store";
 import type { InspectResult, SourceKind, SourceStatus, StreamStatus } from "./tauri";
 import { SOURCE_DEFS } from "./sourceRegistry";
+import { treasuryDebt } from "../../workers/sourceTransforms";
 
 const MAX_ROWS = 8_000;
 const WIKI_SSE = "https://stream.wikimedia.org/v2/stream/recentchange";
@@ -149,7 +150,33 @@ function statusFromBuffer(buf: BufferState, extra?: { wikis_seen?: number }): St
   };
 }
 
+/**
+ * Upstreams that fail from Cloudflare's edge but allow browser CORS: fetch them from the
+ * visitor's own connection first (Worker as fallback). US Treasury's TLS handshake fails
+ * from Workers (HTTP 525) while browsers connect fine.
+ */
+const DIRECT_SOURCES: Partial<Record<SourceKind, { url: string; transform: (body: unknown) => unknown }>> = {
+  debt: {
+    url:
+      "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny" +
+      "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt&sort=-record_date&page[size]=10000",
+    transform: treasuryDebt,
+  },
+};
+
 async function fetchSourceJson(kind: SourceKind): Promise<unknown> {
+  const direct = DIRECT_SOURCES[kind];
+  if (direct) {
+    try {
+      const res = await fetch(direct.url, { signal: AbortSignal.timeout(20_000) });
+      if (res.ok) {
+        const out = direct.transform(await res.json()) as { rows?: unknown[] };
+        if (out.rows?.length) return out;
+      }
+    } catch {
+      /* fall back to the Worker */
+    }
+  }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12_000);
   try {

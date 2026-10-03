@@ -506,7 +506,7 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   bitcoin: async () => {
     // Newest 15 blocks, then 3 older pages one at a time (~60 blocks). A later page
     // failing just means fewer blocks, not an error.
-    const first = await upstreamJson("mempool.space", "https://mempool.space/api/v1/blocks");
+    const first = await upstreamJson("mempool.space", "https://mempool.space/api/v1/blocks", 15_000);
     const pages: unknown[] = [first];
     let low = mempoolLowestHeight(first);
     for (let i = 0; i < 3 && low != null && low > 0; i++) {
