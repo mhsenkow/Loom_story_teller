@@ -936,7 +936,11 @@ function SourceCard({ def }: { def: SourceDef }) {
         const opened = await handleExplore({ quiet: true });
         if (opened) return;
       }
-      setToast(`Connected to ${def.label} — tap Explore when rows appear`);
+      setToast(
+        s.last_error
+          ? `${def.label} is unavailable right now — Loom will keep retrying`
+          : `Connected to ${def.label} — tap Explore when rows appear`,
+      );
     } catch (e) {
       setToast(`${def.label} failed: ${e instanceof Error ? e.message : e}`);
     } finally { setConnecting(false); }
@@ -990,6 +994,13 @@ function SourceCard({ def }: { def: SourceDef }) {
             </button>
           </div>
         </div>
+      )}
+      {running && status?.last_error && (
+        <p className="text-2xs text-loom-warning pl-4 leading-snug" role="status">
+          {bufferRows > 0 ? "Showing the last good data — " : "Source unavailable right now — "}
+          retrying automatically.
+          <span className="block text-loom-muted/80 truncate" title={status.last_error}>{status.last_error}</span>
+        </p>
       )}
       {!running && bufferRows > 0 && (
         <div className="flex items-center justify-between pl-4">

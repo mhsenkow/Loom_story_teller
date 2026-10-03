@@ -26,6 +26,8 @@ interface BufferState {
   eventSource: EventSource | null;
   seenIds: Set<string>;
   lastCountAt: { count: number; t: number };
+  /** Last upstream failure (cleared by the next good poll) — shown on the source card. */
+  lastError: string | null;
 }
 
 function emptyBuffer(columns: string[], types: string[]): BufferState {
@@ -40,6 +42,7 @@ function emptyBuffer(columns: string[], types: string[]): BufferState {
     eventSource: null,
     seenIds: new Set(),
     lastCountAt: { count: 0, t: Date.now() },
+    lastError: null,
   };
 }
 
@@ -134,6 +137,7 @@ function statusFromBuffer(buf: BufferState, extra?: { wikis_seen?: number }): St
     wikis_seen: extra?.wikis_seen ?? 0,
     started_at: buf.startedAt,
     uptime_secs: uptime,
+    last_error: buf.lastError,
   };
 }
 
@@ -940,11 +944,26 @@ export async function webSourceStart(kind: SourceKind): Promise<void> {
   if (buf.running) return;
   buf.running = true;
   buf.startedAt = Math.floor(Date.now() / 1000);
-  await pollSourceOnce(kind);
-  const ms = SOURCE_POLL_MS[kind];
+  // A failed poll must not strand the feed: record the error, keep the schedule, and let
+  // the next poll recover (load-once feeds retry every minute until they have data).
+  const poll = async () => {
+    try {
+      await pollSourceOnce(kind);
+      buf.lastError = null;
+    } catch (e) {
+      buf.lastError = e instanceof Error ? e.message : String(e);
+    }
+  };
+  await poll();
+  const ms = SOURCE_POLL_MS[kind] || (buf.rows.length === 0 ? 60_000 : 0);
   if (ms > 0) {
     buf.pollTimer = setInterval(() => {
-      pollSourceOnce(kind).catch(() => {});
+      if (SOURCE_POLL_MS[kind] === 0 && buf.rows.length > 0 && buf.pollTimer) {
+        clearInterval(buf.pollTimer);
+        buf.pollTimer = null;
+        return;
+      }
+      void poll();
     }, ms);
   }
 }

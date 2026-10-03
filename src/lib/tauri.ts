@@ -232,6 +232,8 @@ export interface SourceStatus {
   buffer_rows: number;
   started_at: number | null;
   uptime_secs: number;
+  /** Web: last upstream failure while polling (null once a poll succeeds). */
+  last_error?: string | null;
 }
 
 export async function sourceStart(kind: SourceKind): Promise<void> {
