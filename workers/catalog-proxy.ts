@@ -504,20 +504,16 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   },
 
   bitcoin: async () => {
-    // Newest 15 blocks, then 3 older pages one at a time (~60 blocks). A later page
-    // failing just means fewer blocks, not an error.
+    // Newest 15 blocks, then 3 older pages (~60 blocks). Heights are consecutive, so the
+    // older pages' start heights are known up front — fetch them in parallel so a cold
+    // cache answers well inside the browser's wait. A failed page just means fewer blocks.
     const first = await upstreamJson("mempool.space", "https://mempool.space/api/v1/blocks", 15_000);
-    const pages: unknown[] = [first];
-    let low = mempoolLowestHeight(first);
-    for (let i = 0; i < 3 && low != null && low > 0; i++) {
-      try {
-        const page = await upstreamJson("mempool.space", `https://mempool.space/api/v1/blocks/${low - 1}`, 8_000);
-        pages.push(page);
-        low = mempoolLowestHeight(page);
-      } catch {
-        break;
-      }
-    }
+    const low = mempoolLowestHeight(first);
+    const starts = low != null ? [1, 2, 3].map((k) => low - 1 - 15 * (k - 1)).filter((h) => h > 0) : [];
+    const older = await Promise.allSettled(
+      starts.map((h) => upstreamJson("mempool.space", `https://mempool.space/api/v1/blocks/${h}`, 8_000)),
+    );
+    const pages: unknown[] = [first, ...older.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []))];
     return JSON.stringify(mempoolBlocks(pages));
   },
 
