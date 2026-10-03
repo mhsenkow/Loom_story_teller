@@ -671,6 +671,285 @@ fn climate_monthly_anomalies() {
 }
 
 // ---------------------------------------------------------------
+// Feeds added with the GDACS … debt batch
+// ---------------------------------------------------------------
+
+fn fixture_text(name: &str) -> String {
+    let path = format!("{}/tests/fixtures/sources/{}", env!("CARGO_MANIFEST_DIR"), name);
+    std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {}", path, e))
+}
+
+fn approx(c: &Cell, want: f64) {
+    match c {
+        Cell::F64(v) => assert!((v - want).abs() < 1e-6 * want.abs().max(1.0), "{} != {}", v, want),
+        other => panic!("expected {}, got {:?}", want, other),
+    }
+}
+
+#[test]
+fn gdacs_events_typed_and_deduped() {
+    let rows = gdacs_rows(&fixture("gdacs.json")).unwrap();
+    assert_eq!(rows.len(), 5);
+    let tc = &rows[0];
+    assert_eq!(tc[0], s("TC1001321"));
+    assert_eq!(tc[1], s("Tropical cyclone"));
+    assert_eq!(tc[2], s("Tropical Cyclone NOLO-26"));
+    assert_eq!(tc[3], s("Green"));
+    assert_eq!(tc[4], Cell::F64(1.0));
+    assert_eq!(tc[5], s("United States"));
+    assert_eq!((tc[6].clone(), tc[7].clone()), (Cell::F64(23.3), Cell::F64(-167.8)));
+    assert_eq!(tc[8], s("2026-09-13 21:00:00"));
+    assert_eq!(tc[9], s("2026-10-02 21:00:00"));
+    assert_eq!(tc[10], Cell::F64(249.9984));
+    assert_eq!(tc[11], s("km/h"));
+    let types: Vec<Cell> = rows.iter().map(|r| r[1].clone()).collect();
+    assert_eq!(types, vec![s("Tropical cyclone"), s("Earthquake"), s("Drought"), s("Flood"), s("Wildfire")]);
+    let dr = rows.iter().find(|r| r[0] == s("DR1018332")).unwrap();
+    assert_eq!(dr[3], s("Orange"));
+    assert_eq!(dr[11], s("km2"));
+    // Empty severity unit → NULL.
+    assert_eq!(rows.iter().find(|r| r[0] == s("FL1103888")).unwrap()[11], Cell::Null);
+    assert_eq!(gdacs_event_type("VO"), "Volcano");
+
+    // Same event twice: the later episode wins, first-seen order kept;
+    // no name → description; no Point → bbox centre.
+    let dup = serde_json::json!({"features": [
+        {"geometry": {"type": "Point", "coordinates": [10.0, 20.0]},
+         "properties": {"eventtype": "VO", "eventid": 7, "episodeid": 1, "name": "Old", "alertlevel": "Green", "todate": "2026-10-01T00:00:00"}},
+        {"bbox": [0.0, 0.0, 4.0, 2.0], "geometry": {"type": "Polygon", "coordinates": [[[0, 0], [4, 0], [4, 2], [0, 0]]]},
+         "properties": {"eventtype": "FL", "eventid": 8, "description": "Flood somewhere", "todate": "2026-10-01T00:00:00"}},
+        {"geometry": {"type": "Point", "coordinates": [11.0, 21.0]},
+         "properties": {"eventtype": "VO", "eventid": 7, "episodeid": 2, "name": "New", "alertlevel": "Red", "todate": "2026-10-02T00:00:00"}},
+        {"geometry": {"type": "Point", "coordinates": [12.0, 22.0]},
+         "properties": {"eventtype": "VO", "eventid": 7, "episodeid": 0, "name": "Stale", "todate": "2026-09-01T00:00:00"}}
+    ]});
+    let d = gdacs_rows(&dup).unwrap();
+    assert_eq!(d.len(), 2);
+    assert_eq!(d[0][0], s("VO7"));
+    assert_eq!(d[0][2], s("New"));
+    assert_eq!(d[0][3], s("Red"));
+    assert_eq!(d[0][6], Cell::F64(21.0));
+    assert_eq!(d[1][2], s("Flood somewhere"));
+    assert_eq!((d[1][6].clone(), d[1][7].clone()), (Cell::F64(1.0), Cell::F64(2.0)));
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("gdacs"), &rows).unwrap(), 5);
+    assert_eq!(
+        one(&db, "SELECT id FROM disaster_alerts ORDER BY start_ts DESC LIMIT 1").as_deref(),
+        Some("EQ1569163")
+    );
+}
+
+#[test]
+fn buoys_fixed_width_with_missing_values() {
+    let rows = buoys_rows(&fixture_text("buoys.txt")).unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(
+        rows[0],
+        vec![
+            s("22101"), Cell::F64(37.24), Cell::F64(126.02), s("2026-10-02 23:00:00"),
+            Cell::F64(100.0), Cell::F64(4.0), Cell::Null, Cell::F64(0.0), Cell::F64(0.0),
+            Cell::Null, Cell::F64(18.0), Cell::F64(23.4),
+        ]
+    );
+    let monterey = rows.iter().find(|r| r[0] == s("46042")).unwrap();
+    assert_eq!(monterey[2], Cell::F64(-122.408));
+    assert_eq!(monterey[6], Cell::F64(5.0));
+    assert_eq!(monterey[8], Cell::F64(10.0));
+    assert_eq!(monterey[9], Cell::F64(1011.6));
+    assert_eq!(rows[1][4], Cell::Null); // WDIR "MM"
+    let buzz = rows.iter().find(|r| r[0] == s("BUZM3")).unwrap();
+    assert_eq!(buzz[3], s("2026-10-03 00:00:00"));
+    assert_eq!(buzz[7], Cell::Null);
+    assert!(buoys_rows("#STN LAT LON\n#text deg deg\n").is_err());
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("buoys"), &rows).unwrap(), 4);
+    assert_eq!(
+        one(&db, "SELECT station FROM ocean_buoys ORDER BY wave_height_m DESC NULLS LAST LIMIT 1").as_deref(),
+        Some("46042")
+    );
+}
+
+#[test]
+fn mbta_vehicles_join_routes_and_humanize() {
+    let rows = mbta_rows(&fixture("mbta.json")).unwrap();
+    assert_eq!(rows.len(), 7);
+    let bus = &rows[0];
+    assert_eq!(bus[0], s("y3243"));
+    assert_eq!(bus[1], s("3243"));
+    assert_eq!(bus[2], s("57"));
+    assert_eq!(bus[3], s("Bus"));
+    assert_eq!(bus[6], Cell::F64(90.0));
+    assert_eq!(bus[7], Cell::Null); // speed null stays null
+    assert_eq!(bus[8], s("Stopped at"));
+    assert_eq!(bus[9], s("Many seats available"));
+    assert_eq!(bus[10], s("2026-10-03 00:25:24")); // -04:00 → UTC
+    let by = |id: &str| rows.iter().find(|r| r[0] == s(id)).unwrap().clone();
+    // No short_name → long_name.
+    assert_eq!(by("1854")[2], s("Framingham/Worcester Line"));
+    assert_eq!(by("1854")[3], s("Commuter rail"));
+    assert_eq!(by("1854")[8], s("In transit to"));
+    assert_eq!(by("1854")[9], Cell::Null);
+    assert_eq!(by("R-548BFAD1")[2], s("Red Line"));
+    assert_eq!(by("R-548BFAD1")[3], s("Subway"));
+    let green = by("G-10077");
+    assert_eq!(green[2], s("B"));
+    assert_eq!(green[3], s("Light rail"));
+    approx(&green[7], 4.2 * 3600.0 / 1609.344);
+    let ferry = by("JOHN KEITH");
+    assert_eq!(ferry[1], Cell::Null);
+    assert_eq!(ferry[2], s("Quincy Ferry"));
+    assert_eq!(ferry[3], s("Ferry"));
+    assert_eq!(humanize_enum(Some(&serde_json::json!("INCOMING_AT"))), s("Incoming at"));
+    assert_eq!(humanize_enum(Some(&serde_json::json!("FULL"))), s("Full"));
+    // Route missing from `included` → its id, unknown type.
+    let orphan = mbta_rows(&serde_json::json!({"data": [{"id": "v1", "attributes": {"label": "1"},
+        "relationships": {"route": {"data": {"id": "Mattapan", "type": "route"}}}}]})).unwrap();
+    assert_eq!(orphan[0][2], s("Mattapan"));
+    assert_eq!(orphan[0][3], Cell::Null);
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("mbta"), &rows).unwrap(), 7);
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM mbta_vehicles WHERE speed_mph IS NOT NULL").as_deref(),
+        Some("2")
+    );
+}
+
+#[test]
+fn aurora_downsamples_to_two_degree_cells() {
+    let rows = aurora_rows(&fixture("aurora.json")).unwrap();
+    let ts = s("2026-10-03 01:50:00");
+    let cell = |lon: f64, lat: f64, p: i64| vec![Cell::F64(lon), Cell::F64(lat), Cell::I64(p), ts.clone()];
+    assert_eq!(
+        rows,
+        vec![cell(0.0, 64.0, 9), cell(0.0, 66.0, 11), cell(2.0, 64.0, 8), cell(2.0, 66.0, 11), cell(-2.0, 64.0, 9), cell(-2.0, 66.0, 11)]
+    );
+    // Max of the four 1° points; cells under 3 % dropped; 180 stays 180, 182 → −178.
+    let body = serde_json::json!({"Forecast Time": "2026-10-03T01:50:00Z", "coordinates": [
+        [10, -70, 1], [11, -70, 4], [10, -69, 2], [11, -69, 0],
+        [20, 50, 2], [21, 51, 2],
+        [180, 0, 5], [182, 0, 6]
+    ]});
+    let r = aurora_rows(&body).unwrap();
+    assert_eq!(r.len(), 3);
+    assert_eq!(r[0][..3], [Cell::F64(10.0), Cell::F64(-70.0), Cell::I64(4)]);
+    assert_eq!(r[1][0], Cell::F64(180.0));
+    assert_eq!(r[2][0], Cell::F64(-178.0));
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("aurora"), &rows).unwrap(), 6);
+    assert_eq!(one(&db, "SELECT MIN(longitude) FROM aurora_forecast").as_deref(), Some("-2.0"));
+}
+
+#[test]
+fn asteroid_close_approaches() {
+    let rows = asteroids_rows(&fixture("asteroids.json")).unwrap();
+    assert_eq!(rows.len(), 3);
+    let r = &rows[0];
+    assert_eq!(r[0], s("2026 RP39"));
+    assert_eq!(r[1], s("(2026 RP39)"));
+    assert_eq!(r[2], s("2026-10-03 12:01:00"));
+    approx(&r[3], 0.0156288744154242 * 389.17);
+    approx(&r[4], 0.0156288744154242 * 149_597_870.7);
+    approx(&r[5], 6.13940599510947);
+    assert_eq!(r[6], Cell::F64(26.254));
+    approx(&r[7], 1329.0 / 0.14f64.sqrt() * 10f64.powf(-26.254 / 5.0) * 1000.0);
+    match r[7] {
+        Cell::F64(d) => assert!(d > 15.0 && d < 25.0, "{}", d),
+        ref o => panic!("{:?}", o),
+    }
+    assert_eq!(parse_cad_date("2026-Dec-31 23:59").as_deref(), Some("2026-12-31 23:59:00"));
+    assert_eq!(parse_cad_date("2026-Foo-01 00:00"), None);
+    // Empty window: no `data` key.
+    assert!(asteroids_rows(&serde_json::json!({"fields": ["des"], "count": 0})).unwrap().is_empty());
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("asteroids"), &rows).unwrap(), 3);
+    assert_eq!(
+        one(&db, "SELECT designation FROM asteroid_approaches ORDER BY approach_ts ASC LIMIT 1").as_deref(),
+        Some("2026 RP39")
+    );
+}
+
+#[test]
+fn steam_top_games() {
+    let rows = steam_rows(&fixture("steam.json")).unwrap();
+    assert_eq!(rows.len(), 3);
+    let cs = rows.iter().find(|r| r[0] == s("730")).unwrap();
+    assert_eq!(cs[1], s("Counter-Strike: Global Offensive"));
+    assert_eq!(cs[2], s("Valve"));
+    assert_eq!(cs[3], Cell::I64(1_013_936));
+    assert_eq!(cs[4], Cell::I64(7_642_084));
+    assert_eq!(cs[5], Cell::I64(1_173_003));
+    approx(&cs[6], 7_642_084.0 / (7_642_084.0 + 1_173_003.0) * 100.0);
+    assert_eq!(cs[7], Cell::I64(100_000_000));
+    assert_eq!(cs[8], Cell::F64(0.0));
+    assert_eq!(cs[9], Cell::F64(0.0));
+    let paid = steam_rows(&serde_json::json!({"9": {"appid": 9, "name": "G", "developer": "", "positive": 0, "negative": 0,
+        "owners": "50,000,000 .. 100,000,000", "price": "1999", "average_2weeks": 90, "discount": "40", "ccu": 5}})).unwrap();
+    assert_eq!(paid[0][2], Cell::Null);
+    assert_eq!(paid[0][6], Cell::Null); // no reviews
+    assert_eq!(paid[0][7], Cell::I64(50_000_000));
+    assert_eq!(paid[0][8], Cell::F64(19.99));
+    assert_eq!(paid[0][9], Cell::F64(40.0));
+    assert_eq!(owners_lower_bound("0 .. 20,000"), Some(0));
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("steam"), &rows).unwrap(), 3);
+    assert_eq!(
+        one(&db, "SELECT name FROM steam_games ORDER BY peak_players DESC LIMIT 1").as_deref(),
+        Some("Counter-Strike: Global Offensive")
+    );
+}
+
+#[test]
+fn bitcoin_blocks_from_pages() {
+    let page = fixture("mempool_blocks.json");
+    assert_eq!(min_block_height(&page), Some(969_649));
+    // Overlapping pages are deduped by height.
+    let rows = bitcoin_rows(&[page.clone(), page]).unwrap();
+    assert_eq!(rows.len(), 2);
+    let b = &rows[0];
+    assert_eq!(b[0], Cell::I64(969_650));
+    assert_eq!(b[1], s(&fmt_ts(1_790_986_810)));
+    assert_eq!(b[2], Cell::I64(6643));
+    approx(&b[3], 1.513504);
+    approx(&b[4], 0.38669064748201437);
+    approx(&b[5], 0.00541722);
+    approx(&b[6], 3.13041722);
+    assert_eq!(b[7], s("Foundry USA"));
+    assert_eq!(rows[1][7], s("ViaBTC"));
+    assert!(bitcoin_rows(&[serde_json::json!([])]).is_err());
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("bitcoin"), &rows).unwrap(), 2);
+    assert_eq!(one(&db, "SELECT MAX(height) FROM bitcoin_blocks").as_deref(), Some("969650"));
+}
+
+#[test]
+fn treasury_debt_to_the_penny() {
+    let rows = debt_rows(&fixture("debt.json")).unwrap();
+    assert_eq!(rows.len(), 3);
+    assert_eq!(rows[0][0], s("2026-10-01"));
+    assert_eq!(rows[0][1], Cell::F64(40_260_641_972_390.03));
+    assert_eq!(rows[0][2], Cell::F64(32_433_790_394_253.86));
+    assert_eq!(rows[0][3], Cell::F64(7_826_851_578_136.17));
+    // 1993: only the total is published ("null" strings).
+    assert_eq!(rows[2][0], s("1993-04-01"));
+    assert_eq!(rows[2][2], Cell::Null);
+    assert_eq!(rows[2][3], Cell::Null);
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("debt"), &rows).unwrap(), 3);
+    assert_eq!(
+        one(&db, "SELECT CAST(record_date AS VARCHAR) FROM us_debt ORDER BY record_date ASC LIMIT 1").as_deref(),
+        Some("1993-04-01")
+    );
+}
+
+// ---------------------------------------------------------------
 // Write semantics
 // ---------------------------------------------------------------
 
@@ -718,9 +997,13 @@ fn query_json_formats_temporal_and_wide_ints() {
 
 /// Live network smoke test of every kind's real fetch → parse → write path.
 /// Run with: cargo test --lib live_fetch_every_source -- --ignored --nocapture
+/// (set LOOM_LIVE_KINDS=gdacs,buoys,… to limit it to some kinds).
 #[tokio::test]
 #[ignore]
 async fn live_fetch_every_source() {
+    let only: Option<Vec<String>> = std::env::var("LOOM_LIVE_KINDS")
+        .ok()
+        .map(|v| v.split(',').map(|k| k.trim().to_string()).collect());
     let db = test_db();
     let mut ctx = PollCtx {
         client: build_client().unwrap(),
@@ -732,6 +1015,9 @@ async fn live_fetch_every_source() {
     };
     let mut failed = Vec::new();
     for sp in SOURCE_SPECS {
+        if only.as_ref().is_some_and(|o| !o.iter().any(|k| k == sp.kind)) {
+            continue;
+        }
         let t = std::time::Instant::now();
         match fetch_rows(sp, &mut ctx, &db).await {
             Ok(rows) => match write_rows(&db, sp, &rows) {

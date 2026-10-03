@@ -93,6 +93,18 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         mode: WriteMode::Replace,
     },
     SourceSpec {
+        kind: "gdacs",
+        table: "disaster_alerts",
+        columns: &[
+            ("id", V), ("event_type", V), ("title", V), ("alert_level", V), ("alert_score", D),
+            ("country", V), ("latitude", D), ("longitude", D), ("start_ts", TS), ("end_ts", TS),
+            ("severity", D), ("severity_unit", V),
+        ],
+        order_by: "start_ts DESC",
+        poll_secs: 900,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
         kind: "nws",
         table: "nws_alerts",
         columns: &[
@@ -143,6 +155,18 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         mode: WriteMode::Replace,
     },
     SourceSpec {
+        kind: "buoys",
+        table: "ocean_buoys",
+        columns: &[
+            ("station", V), ("latitude", D), ("longitude", D), ("ts", TS), ("wind_dir", D),
+            ("wind_speed_ms", D), ("gust_ms", D), ("wave_height_m", D), ("wave_period_s", D),
+            ("pressure_hpa", D), ("air_temp_c", D), ("water_temp_c", D),
+        ],
+        order_by: "wave_height_m DESC",
+        poll_secs: 1800,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
         kind: "opensky",
         table: "opensky_aircraft",
         columns: &[
@@ -164,6 +188,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         ],
         order_by: "bikes_available DESC",
         poll_secs: 60,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "mbta",
+        table: "mbta_vehicles",
+        columns: &[
+            ("id", V), ("label", V), ("route", V), ("route_type", V), ("latitude", D), ("longitude", D),
+            ("bearing", D), ("speed_mph", D), ("status", V), ("occupancy", V), ("ts", TS),
+        ],
+        order_by: "route, label",
+        poll_secs: 30,
         mode: WriteMode::Replace,
     },
     SourceSpec {
@@ -219,6 +254,25 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         mode: WriteMode::Replace,
     },
     SourceSpec {
+        kind: "aurora",
+        table: "aurora_forecast",
+        columns: &[("longitude", D), ("latitude", D), ("probability", I), ("ts", TS)],
+        order_by: "probability DESC",
+        poll_secs: 900,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "asteroids",
+        table: "asteroid_approaches",
+        columns: &[
+            ("designation", V), ("name", V), ("approach_ts", TS), ("distance_ld", D), ("distance_km", D),
+            ("velocity_kms", D), ("abs_magnitude", D), ("diameter_m", D),
+        ],
+        order_by: "approach_ts ASC",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
         kind: "hn",
         table: "hn_stories",
         columns: &[
@@ -238,6 +292,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         mode: WriteMode::Replace,
     },
     SourceSpec {
+        kind: "steam",
+        table: "steam_games",
+        columns: &[
+            ("appid", V), ("name", V), ("developer", V), ("peak_players", I), ("positive", I),
+            ("negative", I), ("positive_pct", D), ("owners_min", BI), ("price_usd", D), ("discount_pct", D),
+        ],
+        order_by: "peak_players DESC",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
         kind: "crypto",
         table: "crypto_markets",
         columns: &[
@@ -249,11 +314,30 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         mode: WriteMode::Replace,
     },
     SourceSpec {
+        kind: "bitcoin",
+        table: "bitcoin_blocks",
+        columns: &[
+            ("height", I), ("ts", TS), ("tx_count", I), ("size_mb", D), ("median_fee_sat_vb", D),
+            ("total_fees_btc", D), ("reward_btc", D), ("pool", V),
+        ],
+        order_by: "height DESC",
+        poll_secs: 120,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
         kind: "fx",
         table: "fx_rates",
         columns: &[("as_of", DT), ("base", V), ("quote", V), ("rate", D), ("change_pct", D)],
         order_by: "as_of DESC, quote",
         poll_secs: 3600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "debt",
+        table: "us_debt",
+        columns: &[("record_date", DT), ("total_debt", D), ("held_by_public", D), ("intragovernmental", D)],
+        order_by: "record_date ASC",
+        poll_secs: 0,
         mode: WriteMode::Replace,
     },
     SourceSpec {
@@ -861,6 +945,19 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, String> 
         return Err(format!("{}: HTTP {}", url, status));
     }
     res.json::<Value>().await.map_err(|e| format!("{}: {}", url, e))
+}
+
+async fn get_text(client: &reqwest::Client, url: &str) -> Result<String, String> {
+    let res = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| format!("{}: {}", url, e))?;
+    let status = res.status();
+    if !status.is_success() {
+        return Err(format!("{}: HTTP {}", url, status));
+    }
+    res.text().await.map_err(|e| format!("{}: {}", url, e))
 }
 
 // ================================================================
@@ -1934,6 +2031,450 @@ pub(crate) fn wb_wide_rows(countries: &HashMap<String, String>, series: &[(usize
         .collect()
 }
 
+// ---- GDACS disaster alerts ----
+
+const GDACS_URL: &str = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=EQ;TC;FL;VO;WF;DR&alertlevel=Green;Orange;Red";
+
+pub(crate) fn gdacs_event_type(code: &str) -> &str {
+    match code {
+        "EQ" => "Earthquake",
+        "TC" => "Tropical cyclone",
+        "FL" => "Flood",
+        "VO" => "Volcano",
+        "WF" => "Wildfire",
+        "DR" => "Drought",
+        other => other,
+    }
+}
+
+/// Point geometry, else the feature bbox centre, else the geometry centroid.
+fn gdacs_lat_lon(feat: &Value) -> Option<(f64, f64)> {
+    let g = feat.get("geometry");
+    if let Some(g) = g.filter(|g| g.get("type").and_then(Value::as_str) == Some("Point")) {
+        if let Some(p) = g.get("coordinates").and_then(point_of) {
+            return Some(p);
+        }
+    }
+    if let Some(b) = feat.get("bbox").and_then(Value::as_array).filter(|b| b.len() >= 4) {
+        let n: Vec<f64> = b.iter().take(4).filter_map(as_f64_loose).collect();
+        if n.len() == 4 {
+            return Some(((n[1] + n[3]) / 2.0, (n[0] + n[2]) / 2.0));
+        }
+    }
+    g.and_then(geometry_lat_lon)
+}
+
+/// One row per event (`eventtype` + `eventid`); when an event appears more
+/// than once (several episodes), the latest (`todate`, then `episodeid`) wins.
+pub(crate) fn gdacs_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let features = body
+        .get("features")
+        .and_then(Value::as_array)
+        .ok_or("GDACS: no features")?;
+    let mut order: Vec<String> = Vec::new();
+    let mut best: HashMap<String, ((Option<String>, i64), Row)> = HashMap::new();
+    for feat in features {
+        let Some(p) = feat.get("properties") else { continue };
+        let Some(code) = str_of(p, "/eventtype") else { continue };
+        let Cell::Str(eid) = id_string(p.get("eventid")) else { continue };
+        let id = format!("{}{}", code, eid);
+        let (lat, lon) = match gdacs_lat_lon(feat) {
+            Some((lat, lon)) => (Cell::F64(lat), Cell::F64(lon)),
+            None => (Cell::Null, Cell::Null),
+        };
+        let title = str_of(p, "/name")
+            .or_else(|| str_of(p, "/description"))
+            .map(Cell::str)
+            .unwrap_or(Cell::Null);
+        let rank = (
+            p.get("todate").and_then(Value::as_str).and_then(parse_iso_utc),
+            p.get("episodeid").and_then(as_i64_loose).unwrap_or(0),
+        );
+        let row = vec![
+            Cell::str(id.as_str()),
+            Cell::str(gdacs_event_type(code)),
+            title,
+            js(p.get("alertlevel")),
+            jf(p.get("alertscore")),
+            js(p.get("country")),
+            lat,
+            lon,
+            jts(p.get("fromdate")),
+            jts(p.get("todate")),
+            jf(p.pointer("/severitydata/severity")),
+            js(p.pointer("/severitydata/severityunit")),
+        ];
+        match best.get(&id) {
+            Some((r, _)) if *r > rank => {}
+            Some(_) => {
+                best.insert(id, (rank, row));
+            }
+            None => {
+                order.push(id.clone());
+                best.insert(id, (rank, row));
+            }
+        }
+    }
+    Ok(order
+        .into_iter()
+        .filter_map(|id| best.remove(&id).map(|(_, row)| row))
+        .collect())
+}
+
+// ---- NOAA NDBC buoys (latest observation per station, fixed-width text) ----
+
+const BUOYS_URL: &str = "https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt";
+
+const BUOYS_DEFAULT_HEADER: &[&str] = &[
+    "STN", "LAT", "LON", "YYYY", "MM", "DD", "hh", "mm", "WDIR", "WSPD", "GST", "WVHT", "DPD", "APD",
+    "MWD", "PRES", "PTDY", "ATMP", "WTMP", "DEWP", "VIS", "TIDE",
+];
+
+/// `latest_obs.txt` → one row per station. Columns are located by the first
+/// `#` header line (falls back to the documented layout); "MM" → NULL.
+pub(crate) fn buoys_rows(text: &str) -> Result<Vec<Row>, String> {
+    let header: Vec<String> = text
+        .lines()
+        .find(|l| l.starts_with('#'))
+        .map(|l| l.trim_start_matches('#').split_whitespace().map(str::to_string).collect())
+        .filter(|h: &Vec<String>| h.iter().any(|c| c == "WVHT"))
+        .unwrap_or_else(|| BUOYS_DEFAULT_HEADER.iter().map(|s| s.to_string()).collect());
+    let col = |name: &str| header.iter().position(|h| h == name);
+    let (stn, lat, lon) = (col("STN"), col("LAT"), col("LON"));
+    let date_cols = [col("YYYY"), col("MM"), col("DD"), col("hh"), col("mm")];
+    let fields = ["WDIR", "WSPD", "GST", "WVHT", "DPD", "PRES", "ATMP", "WTMP"].map(col);
+    let rows: Vec<Row> = text
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            let get = |i: Option<usize>| i.and_then(|i| parts.get(i)).copied().filter(|v| *v != "MM");
+            let num = |i: Option<usize>| get(i).and_then(|v| v.parse::<f64>().ok());
+            let station = get(stn)?;
+            let (la, lo) = (num(lat)?, num(lon)?);
+            let d: Vec<i64> = date_cols.iter().filter_map(|&i| get(i)?.parse().ok()).collect();
+            let ts = if d.len() == 5 {
+                Cell::Str(format!("{:04}-{:02}-{:02} {:02}:{:02}:00", d[0], d[1], d[2], d[3], d[4]))
+            } else {
+                Cell::Null
+            };
+            let mut row = vec![Cell::str(station), Cell::F64(la), Cell::F64(lo), ts];
+            row.extend(fields.iter().map(|&i| Cell::opt_f64(num(i))));
+            Some(row)
+        })
+        .collect();
+    if rows.is_empty() {
+        return Err("NDBC: no observations".into());
+    }
+    Ok(rows)
+}
+
+// ---- MBTA vehicles (JSON:API) ----
+
+const MBTA_URL: &str = "https://api-v3.mbta.com/vehicles?include=route&page[limit]=1000";
+
+const MS_TO_MPH: f64 = 3600.0 / 1609.344;
+
+fn mbta_route_type(t: i64) -> Option<&'static str> {
+    Some(match t {
+        0 => "Light rail",
+        1 => "Subway",
+        2 => "Commuter rail",
+        3 => "Bus",
+        4 => "Ferry",
+        _ => return None,
+    })
+}
+
+/// "IN_TRANSIT_TO" → "In transit to"; empty / missing → NULL.
+pub(crate) fn humanize_enum(v: Option<&Value>) -> Cell {
+    let Some(s) = v.and_then(Value::as_str).filter(|s| !s.is_empty()) else {
+        return Cell::Null;
+    };
+    let lower = s.replace('_', " ").to_lowercase();
+    let mut chars = lower.chars();
+    match chars.next() {
+        Some(c) => Cell::Str(c.to_uppercase().chain(chars).collect()),
+        None => Cell::Null,
+    }
+}
+
+pub(crate) fn mbta_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let data = body.get("data").and_then(Value::as_array).ok_or("MBTA: no data")?;
+    let routes: HashMap<&str, (Cell, Cell)> = body
+        .get("included")
+        .and_then(Value::as_array)
+        .map(|inc| {
+            inc.iter()
+                .filter(|r| r.get("type").and_then(Value::as_str) == Some("route"))
+                .filter_map(|r| {
+                    let id = r.get("id").and_then(Value::as_str)?;
+                    let name = str_of(r, "/attributes/short_name")
+                        .or_else(|| str_of(r, "/attributes/long_name"))
+                        .unwrap_or(id);
+                    let ty = r
+                        .pointer("/attributes/type")
+                        .and_then(as_i64_loose)
+                        .and_then(mbta_route_type)
+                        .map(Cell::str)
+                        .unwrap_or(Cell::Null);
+                    Some((id, (Cell::str(name), ty)))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(data
+        .iter()
+        .filter_map(|v| {
+            let id = v.get("id").and_then(Value::as_str)?;
+            let a = v.get("attributes")?;
+            let route_id = str_of(v, "/relationships/route/data/id");
+            let (route, route_type) = match route_id {
+                Some(rid) => routes
+                    .get(rid)
+                    .cloned()
+                    .unwrap_or_else(|| (Cell::str(rid), Cell::Null)),
+                None => (Cell::Null, Cell::Null),
+            };
+            Some(vec![
+                Cell::str(id),
+                js(a.get("label")),
+                route,
+                route_type,
+                jf(a.get("latitude")),
+                jf(a.get("longitude")),
+                jf(a.get("bearing")),
+                Cell::opt_f64(a.get("speed").and_then(as_f64_loose).map(|ms| ms * MS_TO_MPH)),
+                humanize_enum(a.get("current_status")),
+                humanize_enum(a.get("occupancy_status")),
+                jts(a.get("updated_at")),
+            ])
+        })
+        .collect())
+}
+
+// ---- NOAA SWPC OVATION aurora ----
+
+const AURORA_URL: &str = "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json";
+/// Cells below this probability (%) are dropped.
+const AURORA_MIN_PROB: i64 = 3;
+
+/// 1° `[lon 0–359, lat, prob]` grid → 2° cells (max probability; cell keyed by
+/// its even south-west corner), prob < 3 dropped, longitude → −180…180.
+pub(crate) fn aurora_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let coords = body
+        .get("coordinates")
+        .and_then(Value::as_array)
+        .ok_or("OVATION: no coordinates")?;
+    let ts = jts(body.get("Forecast Time"));
+    let mut cells: BTreeMap<(i64, i64), i64> = BTreeMap::new();
+    for c in coords {
+        let (Some(lon), Some(lat), Some(p)) = (
+            c.get(0).and_then(as_f64_loose),
+            c.get(1).and_then(as_f64_loose),
+            c.get(2).and_then(as_f64_loose),
+        ) else {
+            continue;
+        };
+        let key = (
+            (lon.floor() as i64).div_euclid(2) * 2,
+            (lat.floor() as i64).div_euclid(2) * 2,
+        );
+        let p = p.round() as i64;
+        let e = cells.entry(key).or_insert(p);
+        *e = (*e).max(p);
+    }
+    Ok(cells
+        .into_iter()
+        .filter(|(_, p)| *p >= AURORA_MIN_PROB)
+        .map(|((lon, lat), p)| {
+            let lon = if lon > 180 { lon - 360 } else { lon };
+            vec![Cell::F64(lon as f64), Cell::F64(lat as f64), Cell::I64(p), ts.clone()]
+        })
+        .collect())
+}
+
+// ---- NASA JPL close approaches ----
+
+const ASTEROIDS_URL: &str =
+    "https://ssd-api.jpl.nasa.gov/cad.api?date-min=now&date-max=%2B60&dist-max=0.05&fullname=true";
+const AU_TO_LD: f64 = 389.17;
+const AU_TO_KM: f64 = 149_597_870.7;
+/// Assumed geometric albedo for the H → diameter estimate.
+const ASTEROID_ALBEDO: f64 = 0.14;
+
+/// "2026-Oct-05 13:42" (UTC) → "2026-10-05 13:42:00".
+pub(crate) fn parse_cad_date(s: &str) -> Option<String> {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let s = s.trim();
+    let y = num(s, 0..4)?;
+    let m = MONTHS.iter().position(|m| Some(*m) == s.get(5..8))? + 1;
+    let d = num(s, 9..11)?;
+    if s.get(4..5)? != "-" || s.get(8..9)? != "-" {
+        return None;
+    }
+    let (hh, mm) = match s.get(11..) {
+        Some(t) if !t.trim().is_empty() => {
+            let t = t.trim();
+            (num(t, 0..2)?, num(t, 3..5)?)
+        }
+        _ => (0, 0),
+    };
+    Some(format!("{:04}-{:02}-{:02} {:02}:{:02}:00", y, m, d, hh, mm))
+}
+
+/// Estimated diameter (m) from absolute magnitude H at albedo 0.14.
+pub(crate) fn asteroid_diameter_m(h: f64) -> f64 {
+    1329.0 / ASTEROID_ALBEDO.sqrt() * 10f64.powf(-h / 5.0) * 1000.0
+}
+
+pub(crate) fn asteroids_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let fields: Vec<&str> = body
+        .get("fields")
+        .and_then(Value::as_array)
+        .ok_or("CAD: no fields")?
+        .iter()
+        .map(|f| f.as_str().unwrap_or(""))
+        .collect();
+    // No close approaches in the window → the API omits `data`.
+    let Some(data) = body.get("data").and_then(Value::as_array) else {
+        return Ok(vec![]);
+    };
+    let idx = |k: &str| fields.iter().position(|f| *f == k);
+    let (des, full, cd, dist, v_rel, h) =
+        (idx("des"), idx("fullname"), idx("cd"), idx("dist"), idx("v_rel"), idx("h"));
+    Ok(data
+        .iter()
+        .filter_map(|r| {
+            let at = |i: Option<usize>| i.and_then(|i| r.get(i));
+            let au = at(dist).and_then(as_f64_loose);
+            let hmag = at(h).and_then(as_f64_loose);
+            Some(vec![
+                js(Some(at(des)?)),
+                trimmed(at(full)),
+                at(cd)
+                    .and_then(Value::as_str)
+                    .and_then(parse_cad_date)
+                    .map(Cell::Str)
+                    .unwrap_or(Cell::Null),
+                Cell::opt_f64(au.map(|a| a * AU_TO_LD)),
+                Cell::opt_f64(au.map(|a| a * AU_TO_KM)),
+                jf(at(v_rel)),
+                Cell::opt_f64(hmag),
+                Cell::opt_f64(hmag.map(asteroid_diameter_m)),
+            ])
+        })
+        .collect())
+}
+
+// ---- SteamSpy top 100 (two weeks) ----
+
+const STEAM_URL: &str = "https://steamspy.com/api.php?request=top100in2weeks";
+
+/// "50,000,000 .. 100,000,000" → 50000000.
+pub(crate) fn owners_lower_bound(s: &str) -> Option<i64> {
+    let lo: String = s.split("..").next()?.chars().filter(char::is_ascii_digit).collect();
+    lo.parse().ok()
+}
+
+pub(crate) fn steam_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let games = body.as_object().ok_or("SteamSpy: expected object")?;
+    Ok(games
+        .iter()
+        .map(|(key, g)| {
+            let pos = g.get("positive").and_then(as_i64_loose);
+            let neg = g.get("negative").and_then(as_i64_loose);
+            let pct = match (pos, neg) {
+                (Some(p), Some(n)) if p + n > 0 => Some(p as f64 / (p + n) as f64 * 100.0),
+                _ => None,
+            };
+            let appid = match id_string(g.get("appid")) {
+                Cell::Null => Cell::str(key.as_str()),
+                c => c,
+            };
+            vec![
+                appid,
+                js(g.get("name")),
+                js(g.get("developer")),
+                ji(g.get("ccu")),
+                Cell::opt_i64(pos),
+                Cell::opt_i64(neg),
+                Cell::opt_f64(pct),
+                Cell::opt_i64(g.get("owners").and_then(Value::as_str).and_then(owners_lower_bound)),
+                Cell::opt_f64(g.get("price").and_then(as_f64_loose).map(|c| c / 100.0)),
+                // average_2weeks is 0 for every top-100 game; the discount varies
+                Cell::opt_f64(g.get("discount").and_then(as_f64_loose)),
+            ]
+        })
+        .collect())
+}
+
+// ---- Bitcoin blocks (mempool.space) ----
+
+const MEMPOOL_BLOCKS_URL: &str = "https://mempool.space/api/v1/blocks";
+/// Extra pages of 15 blocks fetched after the tip page (~60 blocks total).
+const MEMPOOL_EXTRA_PAGES: usize = 3;
+const SATS_PER_BTC: f64 = 1e8;
+
+/// Block pages (`/api/v1/blocks[/{height}]`) → one row per height (deduped).
+pub(crate) fn bitcoin_rows(pages: &[Value]) -> Result<Vec<Row>, String> {
+    let mut seen = HashSet::new();
+    let mut rows = Vec::new();
+    for page in pages {
+        let Some(list) = page.as_array() else { continue };
+        for b in list {
+            let Some(height) = b.get("height").and_then(as_i64_loose) else { continue };
+            if !seen.insert(height) {
+                continue;
+            }
+            let ex = |k: &str| b.get("extras").and_then(|e| e.get(k)).and_then(as_f64_loose);
+            rows.push(vec![
+                Cell::I64(height),
+                b.get("timestamp").and_then(as_i64_loose).map(epoch_secs_cell).unwrap_or(Cell::Null),
+                ji(b.get("tx_count")),
+                Cell::opt_f64(b.get("size").and_then(as_f64_loose).map(|s| s / 1e6)),
+                Cell::opt_f64(ex("medianFee")),
+                Cell::opt_f64(ex("totalFees").map(|s| s / SATS_PER_BTC)),
+                Cell::opt_f64(ex("reward").map(|s| s / SATS_PER_BTC)),
+                js(b.pointer("/extras/pool/name")),
+            ]);
+        }
+    }
+    if rows.is_empty() {
+        return Err("mempool.space: no blocks".into());
+    }
+    Ok(rows)
+}
+
+/// Lowest height on a page (the next page starts one below it).
+pub(crate) fn min_block_height(page: &Value) -> Option<i64> {
+    page.as_array()?
+        .iter()
+        .filter_map(|b| b.get("height").and_then(as_i64_loose))
+        .min()
+}
+
+// ---- US Treasury debt to the penny ----
+
+const DEBT_URL: &str = "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny?sort=-record_date&page[size]=10000";
+
+/// Amounts arrive as strings ("null" when missing → NULL).
+pub(crate) fn debt_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let data = body.get("data").and_then(Value::as_array).ok_or("Treasury: no data")?;
+    Ok(data
+        .iter()
+        .filter(|r| str_of(r, "/record_date").is_some())
+        .map(|r| {
+            vec![
+                js(r.get("record_date")),
+                jf(r.get("tot_pub_debt_out_amt")),
+                jf(r.get("debt_held_public_amt")),
+                jf(r.get("intragov_hold_amt")),
+            ]
+        })
+        .collect())
+}
+
 // ================================================================
 // Fetch + poll
 // ================================================================
@@ -2015,12 +2556,31 @@ async fn fetch_world_bank(client: &reqwest::Client) -> Result<Vec<Row>, String> 
     Ok(wb_wide_rows(&countries, &series))
 }
 
+async fn fetch_bitcoin(client: &reqwest::Client) -> Result<Vec<Row>, String> {
+    let mut pages = vec![get_json(client, MEMPOOL_BLOCKS_URL).await?];
+    for _ in 0..MEMPOOL_EXTRA_PAGES {
+        let Some(next) = pages.last().and_then(min_block_height).map(|h| h - 1) else { break };
+        if next < 0 {
+            break;
+        }
+        match get_json(client, &format!("{}/{}", MEMPOOL_BLOCKS_URL, next)).await {
+            Ok(b) => pages.push(b),
+            Err(e) => {
+                eprintln!("[loom] mempool.space page {}: {}", next, e);
+                break;
+            }
+        }
+    }
+    bitcoin_rows(&pages)
+}
+
 async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result<Vec<Row>, String> {
     let c = ctx.client.clone();
     let today = today_days();
     match spec.kind {
         "usgs" => usgs_rows(&get_json(&c, USGS_URL).await?),
         "eonet" => eonet_rows(&get_json(&c, EONET_URL).await?),
+        "gdacs" => gdacs_rows(&get_json(&c, GDACS_URL).await?),
         "nws" => nws_rows(&get_json(&c, NWS_URL).await?, NWS_MAX_ALERTS),
         "meteo" => meteo_rows(&get_json(&c, &meteo_url()).await?, CITIES),
         "aq" => aq_rows(&get_json(&c, &aq_url()).await?, CITIES),
@@ -2037,6 +2597,7 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
             let (year, _, _) = civil_from_days(today);
             climate_rows(&get_json(&c, &climate_url(year)).await?)
         }
+        "buoys" => buoys_rows(&get_text(&c, BUOYS_URL).await?),
         "opensky" => fetch_aircraft(ctx).await,
         "citibike" => {
             if ctx.citibike_info.is_none() {
@@ -2045,6 +2606,7 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
             let status = get_json(&c, GBFS_STATUS_URL).await?;
             citibike_rows(&status, ctx.citibike_info.as_ref().ok_or("GBFS: no station info")?)
         }
+        "mbta" => mbta_rows(&get_json(&c, MBTA_URL).await?),
         "nyc311" => nyc311_rows(&get_json(&c, NYC311_URL).await?),
         "iss" => {
             let mut rows = Vec::new();
@@ -2068,6 +2630,8 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
         "launches" => launches_rows(&get_json(&c, LAUNCHES_URL).await?),
         "spacex" => spacex_rows(&get_json(&c, SPACEX_URL).await?),
         "spaceweather" => kp_rows(&get_json(&c, KP_URL).await?),
+        "aurora" => aurora_rows(&get_json(&c, AURORA_URL).await?),
+        "asteroids" => asteroids_rows(&get_json(&c, ASTEROIDS_URL).await?),
         "hn" => hn_rows(&get_json(&c, HN_URL).await?),
         "pageviews" => {
             // Yesterday (UTC) is published a few hours after midnight; fall back one more day.
@@ -2077,8 +2641,11 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
             };
             pageviews_rows(&body)
         }
+        "steam" => steam_rows(&get_json(&c, STEAM_URL).await?),
         "crypto" => fetch_crypto(ctx).await,
+        "bitcoin" => fetch_bitcoin(&c).await,
         "fx" => fx_rows(&get_json(&c, &fx_url(today)).await?),
+        "debt" => debt_rows(&get_json(&c, DEBT_URL).await?),
         "fema" => fema_rows(&get_json(&c, FEMA_URL).await?),
         "covid" => covid_rows(&get_json(&c, COVID_URL).await?),
         "countries" => {

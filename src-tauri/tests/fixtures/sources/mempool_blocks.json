@@ -1,0 +1,48 @@
+[
+ {
+  "id": "0000000000000000000104cc8b45b7fcb373fe7b5ccea4d741f62767fea8d21e",
+  "height": 969650,
+  "timestamp": 1790986810,
+  "difficulty": 132757073449487.5,
+  "tx_count": 6643,
+  "size": 1513504,
+  "weight": 3992773,
+  "mediantime": 1790982983,
+  "stale": false,
+  "extras": {
+   "reward": 313041722,
+   "medianFee": 0.38669064748201437,
+   "totalFees": 541722,
+   "avgFee": 81,
+   "pool": {
+    "id": 111,
+    "name": "Foundry USA",
+    "slug": "foundryusa",
+    "minerNames": null
+   }
+  }
+ },
+ {
+  "id": "000000000000000000002d9f9466090bb42f79e3a6744fc0f6d288ba1e0c6742",
+  "height": 969649,
+  "timestamp": 1790986766,
+  "difficulty": 132757073449487.5,
+  "tx_count": 3957,
+  "size": 1669983,
+  "weight": 3993585,
+  "mediantime": 1790982475,
+  "stale": false,
+  "extras": {
+   "reward": 315637839,
+   "medianFee": 2.2959001782531194,
+   "totalFees": 3137839,
+   "avgFee": 793,
+   "pool": {
+    "id": 73,
+    "name": "ViaBTC",
+    "slug": "viabtc",
+    "minerNames": null
+   }
+  }
+ }
+]

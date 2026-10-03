@@ -1,0 +1,338 @@
+{
+ "data": [
+  {
+   "attributes": {
+    "bearing": 90,
+    "current_status": "STOPPED_AT",
+    "current_stop_sequence": 1,
+    "direction_id": 0,
+    "label": "3243",
+    "latitude": 42.348941802978516,
+    "longitude": -71.09539031982422,
+    "occupancy_status": "MANY_SEATS_AVAILABLE",
+    "revenue": "REVENUE",
+    "speed": null,
+    "updated_at": "2026-10-02T20:25:24-04:00"
+   },
+   "id": "y3243",
+   "relationships": {
+    "route": {
+     "data": {
+      "id": "57",
+      "type": "route"
+     }
+    },
+    "stop": {
+     "data": {
+      "id": "899",
+      "type": "stop"
+     }
+    },
+    "trip": {
+     "data": {
+      "id": "78174128",
+      "type": "trip"
+     }
+    }
+   },
+   "type": "vehicle"
+  },
+  {
+   "attributes": {
+    "bearing": null,
+    "current_status": "IN_TRANSIT_TO",
+    "current_stop_sequence": 170,
+    "direction_id": 0,
+    "label": "1854",
+    "latitude": 42.26173400878906,
+    "longitude": -71.79241943359375,
+    "occupancy_status": null,
+    "revenue": "REVENUE",
+    "speed": null,
+    "updated_at": "2026-10-02T20:24:32-04:00"
+   },
+   "id": "1854",
+   "relationships": {
+    "route": {
+     "data": {
+      "id": "CR-Worcester",
+      "type": "route"
+     }
+    },
+    "stop": {
+     "data": {
+      "id": "WML-0442-CS",
+      "type": "stop"
+     }
+    },
+    "trip": {
+     "data": {
+      "id": "FBWMLConstruction-859885-573",
+      "type": "trip"
+     }
+    }
+   },
+   "type": "vehicle"
+  },
+  {
+   "attributes": {
+    "bearing": 190,
+    "current_status": "IN_TRANSIT_TO",
+    "current_stop_sequence": 220,
+    "direction_id": 0,
+    "label": "1871",
+    "latitude": 42.21029,
+    "longitude": -71.00126,
+    "occupancy_status": null,
+    "revenue": "REVENUE",
+    "speed": null,
+    "updated_at": "2026-10-02T20:24:37-04:00"
+   },
+   "id": "R-548BFAD1",
+   "relationships": {
+    "route": {
+     "data": {
+      "id": "Red",
+      "type": "route"
+     }
+    },
+    "stop": {
+     "data": {
+      "id": "70105",
+      "type": "stop"
+     }
+    },
+    "trip": {
+     "data": {
+      "id": "77886165",
+      "type": "trip"
+     }
+    }
+   },
+   "type": "vehicle"
+  },
+  {
+   "attributes": {
+    "bearing": 225,
+    "current_status": "STOPPED_AT",
+    "current_stop_sequence": 230,
+    "direction_id": 0,
+    "label": "3633-3888",
+    "latitude": 42.34901,
+    "longitude": -71.13409,
+    "occupancy_status": null,
+    "revenue": "REVENUE",
+    "speed": 4.2,
+    "updated_at": "2026-10-02T20:25:13-04:00"
+   },
+   "id": "G-10077",
+   "relationships": {
+    "route": {
+     "data": {
+      "id": "Green-B",
+      "type": "route"
+     }
+    },
+    "stop": {
+     "data": {
+      "id": "70129",
+      "type": "stop"
+     }
+    },
+    "trip": {
+     "data": {
+      "id": "ADDED-1584972985",
+      "type": "trip"
+     }
+    }
+   },
+   "type": "vehicle"
+  },
+  {
+   "attributes": {
+    "bearing": null,
+    "current_status": "IN_TRANSIT_TO",
+    "current_stop_sequence": 3,
+    "direction_id": 1,
+    "label": null,
+    "latitude": 42.35871124267578,
+    "longitude": -71.04513549804688,
+    "occupancy_status": null,
+    "revenue": "REVENUE",
+    "speed": null,
+    "updated_at": "2026-10-02T20:25:22-04:00"
+   },
+   "id": "JOHN KEITH",
+   "relationships": {
+    "route": {
+     "data": {
+      "id": "Boat-F7",
+      "type": "route"
+     }
+    },
+    "stop": {
+     "data": {
+      "id": "Boat-Aquarium",
+      "type": "stop"
+     }
+    },
+    "trip": {
+     "data": {
+      "id": "Boat-F7-1940-Quincy-F7-A-Weekday-Summer-26",
+      "type": "trip"
+     }
+    }
+   },
+   "type": "vehicle"
+  },
+  {
+   "attributes": {
+    "bearing": 199,
+    "current_status": "IN_TRANSIT_TO",
+    "current_stop_sequence": 40,
+    "direction_id": 0,
+    "label": "1860",
+    "latitude": 42.23575973510742,
+    "longitude": -71.1348876953125,
+    "occupancy_status": null,
+    "revenue": "REVENUE",
+    "speed": 19.7,
+    "updated_at": "2026-10-02T20:25:20-04:00"
+   },
+   "id": "1860",
+   "relationships": {
+    "route": {
+     "data": {
+      "id": "CR-Providence",
+      "type": "route"
+     }
+    },
+    "stop": {
+     "data": {
+      "id": "NEC-2173-01",
+      "type": "stop"
+     }
+    },
+    "trip": {
+     "data": {
+      "id": "FBWMLConstruction-859964-979",
+      "type": "trip"
+     }
+    }
+   },
+   "type": "vehicle"
+  },
+  {
+   "attributes": {
+    "bearing": 203,
+    "current_status": "IN_TRANSIT_TO",
+    "current_stop_sequence": 7,
+    "direction_id": 0,
+    "label": "LF 0952",
+    "latitude": 42.237972,
+    "longitude": -71.109226,
+    "occupancy_status": null,
+    "revenue": "REVENUE",
+    "speed": null,
+    "updated_at": "2026-10-02T20:25:28-04:00"
+   },
+   "id": "dLF 0952",
+   "relationships": {
+    "route": {
+     "data": {
+      "id": "716",
+      "type": "route"
+     }
+    },
+    "stop": {
+     "data": {
+      "id": "71633",
+      "type": "stop"
+     }
+    },
+    "trip": {
+     "data": {
+      "id": "78035405",
+      "type": "trip"
+     }
+    }
+   },
+   "type": "vehicle"
+  }
+ ],
+ "included": [
+  {
+   "attributes": {
+    "description": "Frequent Bus",
+    "long_name": "Watertown Yard - Kenmore Station",
+    "short_name": "57",
+    "type": 3
+   },
+   "id": "57",
+   "type": "route"
+  },
+  {
+   "attributes": {
+    "description": "Coverage Bus",
+    "long_name": "Canton Village Shoppes - Mattapan Station",
+    "short_name": "716",
+    "type": 3
+   },
+   "id": "716",
+   "type": "route"
+  },
+  {
+   "attributes": {
+    "description": "Seasonal Ferry",
+    "long_name": "Quincy Ferry",
+    "short_name": "",
+    "type": 4
+   },
+   "id": "Boat-F7",
+   "type": "route"
+  },
+  {
+   "attributes": {
+    "description": "Regional Rail",
+    "long_name": "Providence/Stoughton Line",
+    "short_name": "",
+    "type": 2
+   },
+   "id": "CR-Providence",
+   "type": "route"
+  },
+  {
+   "attributes": {
+    "description": "Regional Rail",
+    "long_name": "Framingham/Worcester Line",
+    "short_name": "",
+    "type": 2
+   },
+   "id": "CR-Worcester",
+   "type": "route"
+  },
+  {
+   "attributes": {
+    "description": "Rapid Transit",
+    "long_name": "Green Line B",
+    "short_name": "B",
+    "type": 0
+   },
+   "id": "Green-B",
+   "type": "route"
+  },
+  {
+   "attributes": {
+    "description": "Rapid Transit",
+    "long_name": "Red Line",
+    "short_name": "",
+    "type": 1
+   },
+   "id": "Red",
+   "type": "route"
+  }
+ ],
+ "jsonapi": {
+  "version": "1.0"
+ }
+}
