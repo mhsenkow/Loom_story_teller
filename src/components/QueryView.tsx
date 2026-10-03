@@ -8,7 +8,7 @@
 "use client";
 
 import { useLoomStore } from "@/lib/store";
-import { queryFile, streamQuery, sourceQuery, type SourceKind } from "@/lib/tauri";
+import { queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
 import { recommend, STREAM_SQL_SNIPPETS, SOURCE_SQL_SNIPPETS } from "@/lib/recommendations";
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";

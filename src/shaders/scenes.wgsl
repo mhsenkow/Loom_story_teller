@@ -68,8 +68,11 @@ fn project(nx: f32, ny: f32, nz: f32) -> vec3<f32> {
   let z1 = -nx * sy + nz * cy;
   let y2 = ny * cp - z1 * sp;
   let z2 = ny * sp + z1 * cp;
-  let dist = 2.8;
-  let scale = (min(uniforms.viewport_width, uniforms.viewport_height) * 0.38 * uniforms.zoom) / (dist + z2 + 2.0);
+  // Same projection as the Canvas fallback (gpuScenes.ts orbitFrame / projectUnit): the
+  // unit cube fills the stage without clipping at any orbit angle, with mild perspective.
+  // (It used to be ~3× smaller, so 3D scatter and firefly rendered as a speck.)
+  let persp = 3.2 / (3.2 + z2);
+  let scale = (min(uniforms.viewport_width, uniforms.viewport_height) / 2.0 / 2.1) * uniforms.zoom * persp;
   // Return NDC-ish xy and depth
   let ndc_x = (x1 * scale) / (uniforms.viewport_width * 0.5);
   let ndc_y = (y2 * scale) / (uniforms.viewport_height * 0.5);

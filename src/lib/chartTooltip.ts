@@ -7,6 +7,7 @@
 // =================================================================
 
 import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
+import { classifyKeys } from "./chartAxes";
 
 /** Precomputed facet for bar charts (category × subcategory); used for canvas draw + hit-test. */
 export type BarFacetHitPayload = {
@@ -52,6 +53,12 @@ export function buildBarFacetGrid(
     .sort((a, b) => b[1] - a[1])
     .slice(0, BAR_FACET_MAX_X);
   if (xTotals.length === 0) return null;
+  // Years, hours, sizes… read left-to-right in order, not ranked by total
+  const order = classifyKeys(xTotals.map(([x]) => x));
+  if (order.kind !== "band" && nested.size <= BAR_FACET_MAX_X) {
+    const rank = new Map(order.sorted.map((k, i) => [k, i]));
+    xTotals.sort((a, b) => (rank.get(a[0]) ?? 0) - (rank.get(b[0]) ?? 0));
+  }
   const xLabels = xTotals.map(([x]) => x);
   const subSet = new Set<string>();
   for (const xk of xLabels) {

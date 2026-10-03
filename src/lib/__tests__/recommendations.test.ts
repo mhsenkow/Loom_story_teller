@@ -3,6 +3,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  fitEncodingToKind,
   createChartRec,
   createScatterRec,
   CHART_KIND_OPTIONS,
@@ -407,5 +408,47 @@ describe("recommendations", () => {
       expect(recommendSourceStory("meteo", emptyStats, null).charts[0]?.kind).toBe("geoBubbles");
       expect(recommendSourceStory("aq", emptyStats, null).charts[0]?.kind).toBe("geoBubbles");
     });
+  });
+});
+
+describe("fitEncodingToKind (chart-type switch)", () => {
+  const col = (name: string, data_type: string, distinct_count: number) => ({
+    name, data_type, distinct_count, null_count: 0, min_value: null, max_value: null,
+  });
+  const gap = [
+    col("country", "VARCHAR", 142),
+    col("year", "DOUBLE", 12),
+    col("pop", "DOUBLE", 1704),
+    col("continent", "VARCHAR", 5),
+    col("lifeExp", "DOUBLE", 1626),
+    col("gdpPercap", "DOUBLE", 1704),
+  ];
+  const scatterEnc = { xField: "lifeExp", yField: "gdpPercap", colorField: "continent" };
+
+  it("groups bars by a real category, promoting the color field", () => {
+    expect(fitEncodingToKind("bar", gap, scatterEnc)).toEqual({ xField: "continent", yField: "gdpPercap", colorField: null });
+  });
+
+  it("gives glyph charts an identity column", () => {
+    expect(fitEncodingToKind("chernoff", gap, scatterEnc).xField).toBe("country");
+  });
+
+  it("puts time on the x of ordered charts", () => {
+    expect(fitEncodingToKind("line", gap, scatterEnc).xField).toBe("year");
+    expect(fitEncodingToKind("bump", gap, scatterEnc).xField).toBe("year");
+  });
+
+  it("keeps fields that already fit", () => {
+    const enc = { xField: "continent", yField: "pop", colorField: null };
+    expect(fitEncodingToKind("bar", gap, enc)).toEqual(enc);
+  });
+
+  it("drops a color field with too many groups", () => {
+    expect(fitEncodingToKind("scatter", gap, { xField: "lifeExp", yField: "gdpPercap", colorField: "country" }).colorField).toBeNull();
+  });
+
+  it("requires a second category for flow charts", () => {
+    const fit = fitEncodingToKind("sankey", gap, { xField: "continent", yField: "pop", colorField: null });
+    expect(fit.colorField).toBe("country");
   });
 });

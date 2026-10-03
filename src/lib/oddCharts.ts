@@ -523,7 +523,9 @@ export function buildOddChartRec(
     sizeField:
       sizeField ??
       (kind === "pyramid" || kind === "slope"
-        ? num.find((c) => c.name !== yField)?.name ?? null
+        ? // Compare like with like: a time-ish number (year) makes a meaningless second side
+          (num.find((c) => c.name !== yField && !/^(year|yr|month|day|week|hour)$/i.test(c.name)) ??
+            num.find((c) => c.name !== yField))?.name ?? null
         : undefined),
     yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind)
       ? (!yField ? "count" : (yAggregate ?? "sum"))

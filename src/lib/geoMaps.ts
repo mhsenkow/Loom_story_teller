@@ -482,12 +482,18 @@ export function renderGeoChoropleth(
   }
   const vi = valueField ? columns.indexOf(valueField) : -1;
   const how: YAggregateOption = vi < 0 ? "count" : (opts.yAggregate ?? "sum");
-  const samples = rows.slice(0, 40).map((r) => r[ri]);
+  const codesOk = /(fips|iso|code|_num|numeric)/i.test(regionField);
+  const isNumberish = (v: unknown) => typeof v === "number" || (typeof v === "string" && /^\s*-?\d+(\.\d+)?\s*$/.test(v));
+  const samples = rows.slice(0, 40).map((r) => r[ri]).filter((v) => codesOk || !isNumberish(v));
   const atlasKind = pickAtlasKind(regionField, samples);
   const atlas = getAtlas(atlasKind);
   const groups = new Map<number, number[]>();
+  // Numbers only join as region codes from a code-like column (fips, iso_num, country_code);
+  // otherwise 4 would match Afghanistan and 28.8 Mississippi.
   for (const r of rows) {
-    const idx = findFeatureIndex(atlas, r[ri]);
+    const raw = r[ri];
+    if (!codesOk && isNumberish(raw)) continue;
+    const idx = findFeatureIndex(atlas, raw);
     if (idx < 0) continue;
     const list = groups.get(idx) ?? [];
     list.push(vi >= 0 ? num(r[vi]) : 1);

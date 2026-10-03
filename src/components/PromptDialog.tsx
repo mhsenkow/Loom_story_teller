@@ -23,6 +23,10 @@ function PromptDialogForm({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useLayoutEffect(() => {
+    // Focus right away so the first keystrokes land in the field, not the view hotkeys (1–4);
+    // the delayed retry covers anything that steals focus while the dialog mounts.
+    inputRef.current?.focus();
+    inputRef.current?.select();
     const t = window.setTimeout(() => {
       inputRef.current?.focus();
       inputRef.current?.select();

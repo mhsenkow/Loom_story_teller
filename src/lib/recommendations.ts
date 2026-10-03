@@ -378,6 +378,113 @@ export function createScatterRec(
   };
 }
 
+/** Kinds whose X (or slice / stage / identity) is a category. */
+const CATEGORY_X_KINDS = new Set<string>([
+  "bar", "lollipop", "pie", "treemap", "sunburst", "forceBubble", "funnel", "waterfall", "box", "violin",
+  "beeswarm", "dumbbell", "pyramid", "slope", "radialBar", "waffle", "isotype", "isoBars", "mosaic",
+  "chord", "sankey", "bucketField",
+]);
+/** One glyph per row/entity — an identity column (country, name) rather than a few groups. */
+const IDENTITY_X_KINDS = new Set<string>(["chernoff", "glyphStar", "flower"]);
+/** Kinds whose Y is the group axis. */
+const CATEGORY_Y_KINDS = new Set<string>(["strip", "ridgeline"]);
+/** Kinds whose X is an ordering — time reads best. */
+const ORDERED_X_KINDS = new Set<string>(["line", "area", "bump", "stream", "horizon", "spiral"]);
+/** Kinds where Color is a required second category (target / segment). */
+const CATEGORY_COLOR_KINDS = new Set<string>(["mosaic", "chord", "sankey"]);
+
+/**
+ * Adapt an encoding when switching chart type: keep fields that suit the new kind,
+ * and swap in a fitting column where they don't — so turning a units × revenue
+ * scatter into a bar groups by a real category instead of 500 distinct numbers.
+ */
+export function fitEncodingToKind(
+  kind: ChartKind,
+  columns: ColumnInfo[],
+  enc: { xField: string; yField: string | null; colorField: string | null },
+): { xField: string; yField: string | null; colorField: string | null } {
+  const byName = new Map(columns.map((c) => [c.name, c]));
+  const typeOf = (c: ColumnInfo) => inferType(c.data_type, c.name);
+  /** A column that reads well as discrete groups. */
+  const isCategory = (name: string | null, max = 40): boolean => {
+    const c = name ? byName.get(name) : undefined;
+    if (!c) return false;
+    const t = typeOf(c);
+    if (c.distinct_count < 2) return false;
+    if (t === "quantitative") return c.distinct_count <= Math.min(24, max);
+    return c.distinct_count <= max;
+  };
+  const nominal = columns.filter((c) => typeOf(c) === "nominal" && c.distinct_count >= 2);
+  const bestCategory = (exclude: Set<string | null>, identity = false): string | null => {
+    const pool = nominal.filter((c) => !exclude.has(c.name));
+    if (identity) {
+      // Most distinct values that still fit a glyph grid / list (country, name…)
+      const ids = pool.filter((c) => c.distinct_count <= 400).sort((a, b) => b.distinct_count - a.distinct_count);
+      return ids[0]?.name ?? null;
+    }
+    // A handful of groups reads best: prefer 3–20, then anything up to 40
+    const score = (c: ColumnInfo) => (c.distinct_count >= 3 && c.distinct_count <= 20 ? 0 : 1) * 1000 + Math.abs(c.distinct_count - 8);
+    const fits = pool.filter((c) => c.distinct_count <= 40).sort((a, b) => score(a) - score(b));
+    return fits[0]?.name ?? null;
+  };
+  const isNumeric = (name: string | null) => {
+    const c = name ? byName.get(name) : undefined;
+    return !!c && typeOf(c) === "quantitative";
+  };
+
+  let { xField, yField, colorField } = enc;
+
+  if (kind === "choropleth") {
+    const region = columns.find((c) => isGeoRegionField(c.name) && c.distinct_count >= 3);
+    if (!isGeoRegionField(xField) && region) xField = region.name;
+  } else if (IDENTITY_X_KINDS.has(kind)) {
+    if (!(isCategory(xField, 400) && !isNumeric(xField))) xField = bestCategory(new Set([yField, colorField]), true) ?? xField;
+  } else if (CATEGORY_X_KINDS.has(kind)) {
+    if (!isCategory(xField)) {
+      // The color field is often the best grouping — promote it to X rather than give up
+      const alt = bestCategory(new Set([yField, colorField])) ?? (isCategory(colorField) ? colorField : null);
+      if (alt) {
+        if (alt === colorField) colorField = null;
+        xField = alt;
+      }
+    }
+    // The measure must be numeric (or none → count)
+    if (yField && !isNumeric(yField)) yField = null;
+  } else if (CATEGORY_Y_KINDS.has(kind)) {
+    if (!isCategory(yField)) {
+      const alt = bestCategory(new Set([xField, colorField])) ?? (isCategory(colorField) ? colorField : null);
+      if (alt) {
+        if (alt === colorField) colorField = null;
+        yField = alt;
+      }
+    }
+    if (!isNumeric(xField)) xField = columns.find((c) => typeOf(c) === "quantitative" && c.name !== yField)?.name ?? xField;
+  }
+
+  if (ORDERED_X_KINDS.has(kind)) {
+    const isTimeLike = (c: ColumnInfo) => typeOf(c) === "temporal" || /^(year|yr|date|day|month|week|ts|time)$/i.test(c.name);
+    const cur = byName.get(xField);
+    if (!cur || !isTimeLike(cur)) {
+      const time = columns.find((c) => isTimeLike(c) && c.name !== yField && c.distinct_count >= 3);
+      if (time) xField = time.name;
+    }
+  }
+
+  // One mark per category: a color field that isn't the category would color each mark by
+  // whichever row came first — meaningless (e.g. a lollipop per product colored by city)
+  if (["lollipop", "funnel", "waterfall", "pie", "radialBar", "isotype", "waffle", "isoBars"].includes(kind) && colorField !== xField) {
+    colorField = null;
+  }
+
+  // Color must be a small set of groups; required kinds get the next-best category
+  if (colorField && colorField !== xField && !isCategory(colorField, 12)) colorField = null;
+  if (CATEGORY_COLOR_KINDS.has(kind) && (!colorField || colorField === xField)) {
+    // Flows show their top nodes, so a large category (e.g. 142 countries) still works
+    colorField = bestCategory(new Set([xField, yField])) ?? bestCategory(new Set([xField, yField]), true) ?? colorField;
+  }
+  return { xField, yField, colorField };
+}
+
 /** Build a chart recommendation for any kind from chosen columns (for drag-drop encoding in panel). */
 export function createChartRec(
   kind: ChartKind,
@@ -536,7 +643,9 @@ export function createChartRec(
     }
     case "bubble": {
       if (!yField) return null;
+      // Compare like with like: skip time-ish numbers (year) as the "end" measure
       sizeField = sizeField
+        ?? numCols.find(c => c.name !== xField && c.name !== yField && !/^(year|yr|month|day|week|hour)$/i.test(c.name))?.name
         ?? numCols.find(c => c.name !== xField && c.name !== yField)?.name
         ?? null;
       enc.x = { field: xField, type: "quantitative" };
@@ -2050,11 +2159,11 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need a category (3–40 distinct values)" };
     case "choropleth": {
+      // A filled map needs countries / states — any other category matches nothing
       const geo = nomCols.filter(c => isGeoRegionField(c.name) && c.distinct_count >= 3);
-      const any = nomCols.filter(c => c.distinct_count >= 3);
-      return geo.length >= 1 || any.length >= 1
+      return geo.length >= 1
         ? { ok: true, reason: "" }
-        : { ok: false, reason: "Need a region-like or categorical column (≥3 distinct)" };
+        : { ok: false, reason: "Need a country or state column" };
     }
     case "sankey":
       return nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20).length >= 2
@@ -2568,6 +2677,100 @@ export function recommendSourceStory(
     };
   }
 
+  if (kind === "gdacs") {
+    return {
+      title: "Disasters underway",
+      charts: [
+        mk("geoBubbles", "Active disasters", "Sized by expected impact, colored by type", 98, "longitude", "latitude", "event_type", null, "alert_score"),
+        mk("bar", "By disaster type", "What is happening most right now?", 94, "event_type", null, "alert_level", "count"),
+        mk("bar", "By alert level", "Green / orange / red", 90, "alert_level", null, null, "count"),
+        mk("bar", "Countries affected", "Where alerts are concentrated", 84, "country", null, null, "count"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "buoys") {
+    return {
+      title: "The ocean right now",
+      charts: [
+        mk("geoBubbles", "Wave heights at sea", "Every buoy sized by significant wave height", 97, "longitude", "latitude", null, null, "wave_height_m"),
+        mk("scatter", "Wind vs waves", "Do stronger winds mean bigger seas?", 92, "wind_speed_ms", "wave_height_m", null),
+        mk("geoBubbles", "Sea temperature", "Buoys sized by water temperature", 88, "longitude", "latitude", null, null, "water_temp_c"),
+        mk("histogram", "Water temperatures", "Distribution across stations (°C)", 82, "water_temp_c", null, null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "mbta") {
+    return {
+      title: "Boston transit, live",
+      charts: [
+        mk("geoPoints", "Every vehicle now", "Buses, subway, light rail, and commuter rail", 98, "longitude", "latitude", "route_type"),
+        mk("bar", "Busiest routes", "Vehicles running per route", 92, "route", null, "route_type", "count"),
+        mk("bar", "By mode", "How the fleet splits right now", 88, "route_type", null, null, "count"),
+        mk("histogram", "Speeds", "How fast vehicles are moving (mph)", 82, "speed_mph", null, null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "aurora") {
+    return {
+      title: "Aurora forecast",
+      charts: [
+        mk("geoBubbles", "Aurora oval now", "Chance of aurora overhead in the next ~30 minutes", 98, "longitude", "latitude", null, null, "probability"),
+        mk("globe", "Aurora on the globe", "Spin to the poles", 92, "longitude", "latitude", null, null, "probability"),
+        mk("scatter", "Latitude vs chance", "How far from the poles it reaches", 86, "latitude", "probability", null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "asteroids") {
+    return {
+      title: "Asteroids passing Earth",
+      charts: [
+        mk("bubble", "Close passes", "Distance (lunar distances) vs speed, sized by estimated diameter", 97, "distance_ld", "velocity_kms", null, null, "diameter_m"),
+        mk("bar", "Biggest visitors", "Estimated diameter (m)", 92, "name", "diameter_m", null, "max"),
+        mk("histogram", "How close?", "Miss distance in lunar distances", 86, "distance_ld", null, null),
+        mk("scatter", "Size vs distance", "Big ones pass farther out", 80, "diameter_m", "distance_ld", null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "steam") {
+    return {
+      title: "What gamers are playing",
+      charts: [
+        mk("bar", "Most-played games", "Peak concurrent players yesterday", 97, "name", "peak_players", null, "max"),
+        mk("bubble", "Price vs reviews", "Sized by peak players", 92, "price_usd", "positive_pct", null, null, "peak_players"),
+        mk("histogram", "Review scores", "Share of positive reviews (%)", 86, "positive_pct", null, null),
+        mk("bar", "Top developers", "Games in the top 100", 80, "developer", null, null, "count"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "bitcoin") {
+    return {
+      title: "Bitcoin, block by block",
+      charts: [
+        mk("bar", "Who mined the latest blocks", "Blocks per mining pool", 96, "pool", null, null, "count"),
+        mk("line", "Transactions per block", "Over the latest ~60 blocks", 93, "ts", "tx_count", null, "max"),
+        mk("line", "Median fee", "sat/vB paid to get into each block", 90, "ts", "median_fee_sat_vb", null, "max"),
+        mk("scatter", "Transactions vs fees", "Busier blocks pay more?", 84, "tx_count", "total_fees_btc", "pool"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "debt") {
+    return {
+      title: "US national debt",
+      charts: [
+        mk("line", "Total public debt", "Every business day since 1993 (US$)", 98, "record_date", "total_debt", null, "max"),
+        mk("line", "Held by the public", "Debt owned outside the federal government", 92, "record_date", "held_by_public", null, "max"),
+        mk("line", "Intragovernmental", "Debt the government owes itself (trust funds)", 86, "record_date", "intragovernmental", null, "max"),
+      ].slice(0, 5),
+    };
+  }
+
   return { title: `${kind} data`, charts: [] };
 }
 
@@ -2667,6 +2870,38 @@ export const SOURCE_SQL_SNIPPETS: Record<string, { name: string; sql: string }[]
   pageviews: [
     { name: "Top 25", sql: "SELECT rank, article, views FROM wiki_top_articles ORDER BY rank LIMIT 25" },
     { name: "Share of top 100", sql: "SELECT article, views, ROUND(100.0 * views / SUM(views) OVER (), 1) AS pct FROM wiki_top_articles ORDER BY views DESC LIMIT 25" },
+  ],
+  gdacs: [
+    { name: "Red & orange alerts", sql: "SELECT event_type, title, country, alert_level, start_ts FROM disaster_alerts WHERE alert_level IN ('Red', 'Orange') ORDER BY alert_score DESC" },
+    { name: "By type", sql: "SELECT event_type, COUNT(*) AS events FROM disaster_alerts GROUP BY event_type ORDER BY events DESC" },
+  ],
+  buoys: [
+    { name: "Biggest waves", sql: "SELECT station, latitude, longitude, wave_height_m, wind_speed_ms FROM ocean_buoys WHERE wave_height_m IS NOT NULL ORDER BY wave_height_m DESC LIMIT 20" },
+    { name: "Warmest water", sql: "SELECT station, latitude, longitude, water_temp_c FROM ocean_buoys WHERE water_temp_c IS NOT NULL ORDER BY water_temp_c DESC LIMIT 20" },
+  ],
+  mbta: [
+    { name: "Vehicles by mode", sql: "SELECT route_type, COUNT(*) AS vehicles FROM mbta_vehicles GROUP BY route_type ORDER BY vehicles DESC" },
+    { name: "Crowded right now", sql: "SELECT route, label, occupancy, status FROM mbta_vehicles WHERE occupancy IS NOT NULL ORDER BY occupancy" },
+  ],
+  aurora: [
+    { name: "Best chances", sql: "SELECT latitude, longitude, probability FROM aurora_forecast ORDER BY probability DESC LIMIT 25" },
+    { name: "By hemisphere", sql: "SELECT CASE WHEN latitude >= 0 THEN 'North' ELSE 'South' END AS hemisphere, MAX(probability) AS peak, AVG(probability) AS mean FROM aurora_forecast GROUP BY 1" },
+  ],
+  asteroids: [
+    { name: "Closest passes", sql: "SELECT name, approach_ts, distance_ld, velocity_kms, diameter_m FROM asteroid_approaches ORDER BY distance_ld ASC LIMIT 15" },
+    { name: "Biggest", sql: "SELECT name, diameter_m, distance_ld, approach_ts FROM asteroid_approaches ORDER BY diameter_m DESC LIMIT 10" },
+  ],
+  steam: [
+    { name: "Most played", sql: "SELECT name, developer, peak_players, positive_pct, price_usd FROM steam_games ORDER BY peak_players DESC LIMIT 25" },
+    { name: "Best reviewed", sql: "SELECT name, positive_pct, positive + negative AS reviews FROM steam_games WHERE positive + negative > 1000 ORDER BY positive_pct DESC LIMIT 20" },
+  ],
+  bitcoin: [
+    { name: "Latest blocks", sql: "SELECT height, ts, pool, tx_count, median_fee_sat_vb FROM bitcoin_blocks ORDER BY height DESC LIMIT 20" },
+    { name: "Pool share", sql: "SELECT pool, COUNT(*) AS blocks FROM bitcoin_blocks GROUP BY pool ORDER BY blocks DESC" },
+  ],
+  debt: [
+    { name: "Latest", sql: "SELECT record_date, total_debt, held_by_public, intragovernmental FROM us_debt ORDER BY record_date DESC LIMIT 10" },
+    { name: "Yearly growth", sql: "SELECT EXTRACT(year FROM record_date) AS yr, MAX(total_debt) - MIN(total_debt) AS added FROM us_debt GROUP BY 1 ORDER BY 1" },
   ],
   climate: [
     { name: "Warmest years", sql: "SELECT year, ROUND(AVG(anomaly_c), 2) AS anomaly_c FROM global_temperature GROUP BY year ORDER BY anomaly_c DESC LIMIT 15" },

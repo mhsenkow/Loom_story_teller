@@ -24,7 +24,7 @@ import {
   CHART_KIND_OPTIONS,
 } from "../recommendations";
 import { useLoomStore } from "../store";
-import type { AppSettings, ChartVisualOverrides, ColumnInfo, QueryResult } from "../store";
+import type { ChartVisualOverrides, ColumnInfo, QueryResult } from "../store";
 import {
   getPersistedAppSettings,
   setPersistedAppSettings,

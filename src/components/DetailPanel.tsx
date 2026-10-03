@@ -43,13 +43,13 @@ import { requestDiscoverScan } from "@/lib/discoverStories";
 import { CHANGELOG, requestWhatsNew } from "@/lib/changelog";
 import {
   createChartRec,
+  fitEncodingToKind,
   Y_AGGREGATE_OPTIONS,
   getRecommendationReason,
   getRandomEncoding,
   applyEncodingLocks,
   chartKindDataSupport,
   tryBuildRandomChartRec,
-  recommend,
   recommendStorySequence,
   recommendStreamStory,
   type ChartKind,
@@ -2677,15 +2677,8 @@ function ChartPanelView() {
   const applyChartType = useCallback(
     (kind: ChartKind) => {
       if (!activeChart || columnStats.length === 0) return;
-      let rec = createChartRec(
-        kind,
-        columnStats,
-        activeChart.xField,
-        activeChart.yField,
-        activeChart.colorField,
-        tableName,
-        extraFromChart(),
-      );
+      const fit = fitEncodingToKind(kind, columnStats, activeChart);
+      let rec = createChartRec(kind, columnStats, fit.xField, fit.yField, fit.colorField, tableName, extraFromChart());
       if (!rec) {
         for (let i = 0; i < 24; i++) {
           const enc = getRandomEncoding(columnStats, kind);
