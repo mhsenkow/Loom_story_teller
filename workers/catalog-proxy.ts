@@ -319,21 +319,31 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     // ADSB.lol tolerates only 2–3 quick calls per IP: go one point at a time, spaced out,
     // starting at a rotating point so coverage moves across the US between polls, and
     // keep whatever arrived before the first 429.
+    // Same readsb aircraft format from two community networks; adsb.fi names the list
+    // `aircraft` instead of `ac`. Both throttle per IP (~1 req/s), so go one point at a
+    // time from a rotating start and keep whatever arrived before the first refusal.
+    const providers = [
+      { name: "ADSB.lol", url: (p: { lat: number; lon: number }) => `https://api.adsb.lol/v2/point/${p.lat}/${p.lon}/250` },
+      { name: "adsb.fi", url: (p: { lat: number; lon: number }) => `https://opendata.adsb.fi/api/v2/lat/${p.lat}/lon/${p.lon}/dist/250` },
+    ];
     const start = Math.floor(Date.now() / 60_000) % ADSB_POINTS.length;
-    const ok: unknown[] = [];
-    let lastError = "";
-    for (let i = 0; i < ADSB_POINTS.length; i++) {
-      const p = ADSB_POINTS[(start + i) % ADSB_POINTS.length]!;
-      try {
-        ok.push(await upstreamJson("ADSB.lol", `https://api.adsb.lol/v2/point/${p.lat}/${p.lon}/250`, 8_000));
-      } catch (e) {
-        lastError = e instanceof Error ? e.message : String(e);
-        break;
+    const errors: string[] = [];
+    for (const prov of providers) {
+      const ok: unknown[] = [];
+      for (let i = 0; i < ADSB_POINTS.length; i++) {
+        const p = ADSB_POINTS[(start + i) % ADSB_POINTS.length]!;
+        try {
+          const body = await upstreamJson<{ ac?: unknown[]; aircraft?: unknown[] }>(prov.name, prov.url(p), 8_000);
+          ok.push({ ...body, ac: body.ac ?? body.aircraft ?? [] });
+        } catch (e) {
+          errors.push(e instanceof Error ? e.message : String(e));
+          break;
+        }
+        if (i < ADSB_POINTS.length - 1) await new Promise((r) => setTimeout(r, 1_200));
       }
-      if (i < ADSB_POINTS.length - 1) await new Promise((r) => setTimeout(r, 1_200));
+      if (ok.length > 0) return JSON.stringify(adsbToOpensky(ok));
     }
-    if (ok.length === 0) throw new UpstreamError(`OpenSky and ADSB.lol failed (${lastError || "unknown"})`);
-    return JSON.stringify(adsbToOpensky(ok));
+    throw new UpstreamError(`OpenSky and ADS-B fallbacks failed (${errors.join("; ") || "unknown"})`);
   },
 
   citibike: async (ctx) => {
