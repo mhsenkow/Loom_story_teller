@@ -97,7 +97,8 @@ export function mockInspect(filePath: string): { stats: ColumnInfo[]; sample: Qu
   const sample: QueryResult = {
     columns: data.columns,
     types: data.types,
-    rows: data.rows.slice(0, 100),
+    // Demo files are small — chart every row so sums and counts are true totals
+    rows: data.rows,
     total_rows: data.rows.length,
   };
   return { stats, sample };
@@ -223,10 +224,18 @@ export function coerceCsvNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/**
+ * Rows kept in the browser are bounded by cells (rows × columns), not a fixed row
+ * count, so a narrow 4-column series loads whole while a 79-column file still fits
+ * in phone memory. Charts aggregate over every kept row.
+ */
+export const WEB_CSV_CELL_BUDGET = 1_500_000;
+export const WEB_CSV_MAX_ROWS = 60_000;
+
 export function parseCsvToInspectResult(
   _name: string,
   text: string,
-  maxRows = 2000,
+  maxRows?: number,
 ): { stats: ColumnInfo[]; sample: QueryResult } {
   if (looksLikeSpreadsheetBinary(text)) {
     throw new Error(
@@ -242,7 +251,9 @@ export function parseCsvToInspectResult(
   const columns = records[0]!.map((c) => c.trim());
   const dataRows = records.slice(1);
   const totalRows = dataRows.length;
-  const slice = dataRows.slice(0, maxRows);
+  const rowCap =
+    maxRows ?? Math.min(WEB_CSV_MAX_ROWS, Math.max(1000, Math.floor(WEB_CSV_CELL_BUDGET / Math.max(1, columns.length))));
+  const slice = dataRows.slice(0, rowCap);
 
   const rows: (string | number | null)[][] = slice.map((values) => {
     const row: (string | number | null)[] = [];
@@ -289,7 +300,7 @@ export function parseCsvToInspectResult(
   const sample: QueryResult = {
     columns,
     types,
-    rows: rows.slice(0, 500),
+    rows,
     total_rows: totalRows,
   };
   return { stats, sample };

@@ -137,7 +137,9 @@ export function ChartCard({
 
     if (xIdx === -1) return;
 
-    const rows = data.rows.slice(0, 300);
+    // Even sample across the whole table — the first rows of a sorted file (e.g. A–B countries) mislead
+    const stride = Math.max(1, Math.ceil(data.rows.length / 1500));
+    const rows = stride === 1 ? data.rows : data.rows.filter((_, i) => i % stride === 0);
 
     if (rec.kind === "scatter" && yIdx >= 0) {
       drawScatter(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
