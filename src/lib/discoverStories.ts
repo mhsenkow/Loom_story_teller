@@ -59,7 +59,7 @@ export function requestDiscoverScan(): void {
 const SCAN_KINDS: readonly SourceKind[] = ALL_SOURCE_KINDS;
 
 /** Cap on stories shown in the discover grid (primary + alts across every feed). */
-export const DISCOVER_STORY_LIMIT = 48;
+export const DISCOVER_STORY_LIMIT = 64;
 
 /** How many chart variants to keep per live source. */
 const VARIANTS_PER_SOURCE = 3;
@@ -587,6 +587,152 @@ function hookFor(
       score: 87,
       preferKind: "line",
       category: "Climate",
+    };
+  }
+
+  if (kind === "gdacs") {
+    let red = 0;
+    let orange = 0;
+    let worst = "";
+    let worstScore = -Infinity;
+    for (let r = 0; r < sample.rows.length; r++) {
+      const lvl = strAt(sample, r, "alert_level");
+      if (lvl === "Red") red += 1;
+      if (lvl === "Orange") orange += 1;
+      const sc = numAt(sample, r, "alert_score");
+      if (sc > worstScore) {
+        worstScore = sc;
+        worst = strAt(sample, r, "title");
+      }
+    }
+    return {
+      hook: red ? `${red} red disaster alert${red > 1 ? "s" : ""} worldwide` : orange ? `${orange} orange disaster alerts worldwide` : `${n} disasters being tracked`,
+      blurb: worst ? `Most severe: ${worst}` : chart.subtitle || chart.title,
+      score: red ? 95 : orange ? 88 : 78,
+      preferKind: "geoBubbles",
+      category: "Earth",
+    };
+  }
+
+  if (kind === "buoys") {
+    let maxWave = -Infinity;
+    let station = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const h = numAt(sample, r, "wave_height_m");
+      if (h > maxWave) {
+        maxWave = h;
+        station = strAt(sample, r, "station");
+      }
+    }
+    return {
+      hook: Number.isFinite(maxWave) ? `${maxWave.toFixed(1)} m waves at buoy ${station}` : `${n} ocean buoys reporting`,
+      blurb: chart.subtitle || "Waves, wind, and water temperature at sea.",
+      score: 76 + Math.min(14, Math.max(0, maxWave) * 2),
+      preferKind: "geoBubbles",
+      category: "Earth",
+    };
+  }
+
+  if (kind === "mbta") {
+    return {
+      hook: `${n} MBTA vehicles moving in Boston`,
+      blurb: chart.subtitle || "Every bus and train, live.",
+      score: 82,
+      preferKind: "geoPoints",
+      category: "Cities",
+    };
+  }
+
+  if (kind === "aurora") {
+    let peakN = 0;
+    let peakS = 0;
+    for (let r = 0; r < sample.rows.length; r++) {
+      const p = numAt(sample, r, "probability");
+      if (numAt(sample, r, "latitude") >= 0) peakN = Math.max(peakN, p);
+      else peakS = Math.max(peakS, p);
+    }
+    const peak = Math.max(peakN, peakS);
+    return {
+      hook: peak >= 50 ? `Strong aurora: up to ${peak}% chance overhead` : `Aurora chance peaks at ${peak}% right now`,
+      blurb: chart.subtitle || "Where the northern and southern lights are likely.",
+      score: 70 + Math.min(25, peak / 3),
+      preferKind: "geoBubbles",
+      category: "Space",
+    };
+  }
+
+  if (kind === "asteroids") {
+    let closest = Infinity;
+    let name = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const d = numAt(sample, r, "distance_ld");
+      if (d < closest) {
+        closest = d;
+        name = strAt(sample, r, "name");
+      }
+    }
+    return {
+      hook: Number.isFinite(closest)
+        ? `${name || "An asteroid"} passes ${closest < 1 ? "inside the Moon's orbit" : `at ${closest.toFixed(1)}× the Moon's distance`}`
+        : "Asteroids passing Earth soon",
+      blurb: `${n} close approaches in the next 60 days`,
+      score: closest < 1 ? 94 : 84,
+      preferKind: "bubble",
+      category: "Space",
+    };
+  }
+
+  if (kind === "steam") {
+    let best = -Infinity;
+    let name = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const v = numAt(sample, r, "peak_players");
+      if (v > best) {
+        best = v;
+        name = strAt(sample, r, "name");
+      }
+    }
+    return {
+      hook: name ? `${name} · ${Math.round(best).toLocaleString()} players at peak` : "What gamers are playing",
+      blurb: chart.subtitle || chart.title,
+      score: 83,
+      preferKind: "bar",
+      category: "Culture",
+    };
+  }
+
+  if (kind === "bitcoin") {
+    const counts = new Map<string, number>();
+    for (let r = 0; r < sample.rows.length; r++) {
+      const p = strAt(sample, r, "pool");
+      if (p) counts.set(p, (counts.get(p) ?? 0) + 1);
+    }
+    const [pool, blocks] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["", 0];
+    return {
+      hook: pool ? `${pool} mined ${blocks} of the last ${n} Bitcoin blocks` : `The last ${n} Bitcoin blocks`,
+      blurb: chart.subtitle || chart.title,
+      score: 80,
+      preferKind: "bar",
+      category: "Markets",
+    };
+  }
+
+  if (kind === "debt") {
+    let latest = "";
+    let total = NaN;
+    for (let r = 0; r < sample.rows.length; r++) {
+      const d = strAt(sample, r, "record_date");
+      if (d > latest) {
+        latest = d;
+        total = numAt(sample, r, "total_debt");
+      }
+    }
+    return {
+      hook: Number.isFinite(total) ? `US debt: $${(total / 1e12).toFixed(2)} trillion` : "US national debt since 1993",
+      blurb: chart.subtitle || chart.title,
+      score: 81,
+      preferKind: "line",
+      category: "Economy",
     };
   }
 

@@ -28,9 +28,11 @@ interface BufferState {
   lastCountAt: { count: number; t: number };
   /** Last upstream failure (cleared by the next good poll) — shown on the source card. */
   lastError: string | null;
+  /** Row cap (oldest rows dropped past it). */
+  maxRows: number;
 }
 
-function emptyBuffer(columns: string[], types: string[]): BufferState {
+function emptyBuffer(columns: string[], types: string[], maxRows = MAX_ROWS): BufferState {
   return {
     columns,
     types,
@@ -43,6 +45,7 @@ function emptyBuffer(columns: string[], types: string[]): BufferState {
     seenIds: new Set(),
     lastCountAt: { count: 0, t: Date.now() },
     lastError: null,
+    maxRows,
   };
 }
 
@@ -51,16 +54,21 @@ const wikiBuf = emptyBuffer(
   ["BIGINT", "VARCHAR", "VARCHAR", "VARCHAR", "BOOLEAN", "BOOLEAN", "INTEGER", "VARCHAR", "BIGINT", "BIGINT", "BIGINT", "TIMESTAMP", "VARCHAR", "VARCHAR"],
 );
 
+/** Feeds whose full snapshot is larger than the default cap (debt: ~8.4k business days since 1993). */
+const SOURCE_MAX_ROWS: Partial<Record<SourceKind, number>> = {
+  debt: 12_000,
+};
+
 // Columns + types come from the registry so web buffers, desktop tables, and Query stay aligned
 const sourceBufs = Object.fromEntries(
-  SOURCE_DEFS.map((d) => [d.kind, emptyBuffer(d.columns, d.types)]),
+  SOURCE_DEFS.map((d) => [d.kind, emptyBuffer(d.columns, d.types, SOURCE_MAX_ROWS[d.kind])]),
 ) as Record<SourceKind, BufferState>;
 
 const SOURCE_POLL_MS = Object.fromEntries(SOURCE_DEFS.map((d) => [d.kind, d.pollMs])) as Record<SourceKind, number>;
 
 function trim(buf: BufferState) {
-  if (buf.rows.length > MAX_ROWS) {
-    buf.rows = buf.rows.slice(buf.rows.length - MAX_ROWS);
+  if (buf.rows.length > buf.maxRows) {
+    buf.rows = buf.rows.slice(buf.rows.length - buf.maxRows);
   }
 }
 
@@ -754,27 +762,72 @@ function parseClimate(body: unknown): Cell[][] {
   return out;
 }
 
+/**
+ * Worker `{ columns, rows }` bodies (gdacs, buoys, mbta, aurora, asteroids,
+ * steam, bitcoin, debt) → rows in registry column order, matched by column
+ * name and coerced to the registry type. A column the Worker doesn't send
+ * comes through as null; missing numbers stay null (never 0).
+ */
+function parseColumnar(kind: SourceKind): SourceParser {
+  const def = SOURCE_DEFS.find((d) => d.kind === kind)!;
+  return (body) => {
+    const b = body as { columns?: unknown; rows?: unknown };
+    if (!Array.isArray(b?.columns) || !Array.isArray(b.rows)) return [];
+    const from = def.columns.map((c) => (b.columns as unknown[]).indexOf(c));
+    const coerce = def.types.map((t) => CELL_COERCE[t] ?? strCell);
+    const out: Cell[][] = [];
+    for (const r of b.rows) {
+      if (!Array.isArray(r)) continue;
+      out.push(from.map((i, c) => (i < 0 ? null : coerce[c]!(r[i]))));
+    }
+    return out;
+  };
+}
+
+function strCell(v: unknown): string | null {
+  return v == null || v === "" ? null : String(v);
+}
+
+const CELL_COERCE: Record<string, (v: unknown) => Cell> = {
+  DOUBLE: numOrNullVal,
+  FLOAT: numOrNullVal,
+  INTEGER: numOrNullVal,
+  BIGINT: numOrNullVal,
+  BOOLEAN: (v) => (v == null ? null : v === true || v === 1 || v === "true"),
+  TIMESTAMP: isoOrNull,
+  DATE: (v) => (typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : isoOrNull(v)?.slice(0, 10) ?? null),
+  VARCHAR: strCell,
+};
+
 type SourceParser = (body: unknown) => Cell[][];
 
 const SOURCE_PARSERS: Record<SourceKind, SourceParser> = {
   usgs: parseUsgs,
   eonet: parseEonet,
+  gdacs: parseColumnar("gdacs"),
   nws: parseNws,
   meteo: parseMeteo,
   aq: parseAq,
   ukcarbon: parseUkCarbon,
   climate: parseClimate,
+  buoys: parseColumnar("buoys"),
   opensky: parseOpensky,
   citibike: parseCitibike,
+  mbta: parseColumnar("mbta"),
   nyc311: parseNyc311,
   iss: parseIss,
   launches: parseLaunches,
   spacex: parseSpacex,
   spaceweather: parseSpaceWeather,
+  aurora: parseColumnar("aurora"),
+  asteroids: parseColumnar("asteroids"),
   hn: parseHn,
   pageviews: parsePageviews,
+  steam: parseColumnar("steam"),
   crypto: parseCrypto,
+  bitcoin: parseColumnar("bitcoin"),
   fx: parseFx,
+  debt: parseColumnar("debt"),
   fema: parseFema,
   covid: parseCovid,
   countries: parseCountries,
@@ -792,22 +845,30 @@ const SOURCE_PARSERS: Record<SourceKind, SourceParser> = {
 const SOURCE_MERGE: Record<SourceKind, { mode: "replace" | "append"; key?: number }> = {
   usgs: { mode: "append", key: 0 },
   eonet: { mode: "replace", key: 0 },
+  gdacs: { mode: "replace", key: 0 },
   nws: { mode: "append", key: 0 },
   meteo: { mode: "replace" },
   aq: { mode: "replace" },
   ukcarbon: { mode: "replace", key: 0 },
   climate: { mode: "replace", key: 0 },
+  buoys: { mode: "replace", key: 0 },
   opensky: { mode: "append" }, // special-cased: snapshots stitched per icao24|ts
   citibike: { mode: "replace", key: 0 },
+  mbta: { mode: "replace", key: 0 },
   nyc311: { mode: "replace", key: 0 },
   iss: { mode: "append", key: 0 }, // timestamp — keep trail unique across seed + tip polls
   launches: { mode: "replace", key: 0 },
   spacex: { mode: "replace", key: 0 },
   spaceweather: { mode: "replace", key: 0 },
+  aurora: { mode: "replace" }, // one row per 2° cell by construction
+  asteroids: { mode: "replace" }, // one object can make two passes in 60 days
   hn: { mode: "replace", key: 0 },
   pageviews: { mode: "replace", key: 1 },
+  steam: { mode: "replace", key: 0 },
   crypto: { mode: "replace", key: 0 },
+  bitcoin: { mode: "replace", key: 0 },
   fx: { mode: "replace" },
+  debt: { mode: "replace", key: 0 },
   fema: { mode: "replace", key: 0 },
   covid: { mode: "replace" },
   countries: { mode: "replace" },

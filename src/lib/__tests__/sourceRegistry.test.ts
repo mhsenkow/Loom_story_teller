@@ -26,7 +26,8 @@ const SQL_WORDS = new Set(
   (
     "select from where group by order limit desc asc as and or not in is null count sum avg min max round stddev " +
     "cast date over partition row_number qualify true false case when then else end distinct date_trunc month " +
-    "abs between like with having on join left right inner outer union all interval day hour minute"
+    "abs between like with having on join left right inner outer union all interval day hour minute " +
+    "extract year quarter week second epoch"
   ).split(" "),
 );
 

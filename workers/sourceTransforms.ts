@@ -370,3 +370,414 @@ export function mergeUkCarbon(...bodies: unknown[]): { data: Json[] } {
 export function utcDay(daysAgo: number, now = Date.now()): string {
   return new Date(now - daysAgo * 86_400_000).toISOString().slice(0, 10);
 }
+
+// =================================================================
+// Columnar feeds: `{ columns, rows }` with the registry column names in
+// registry order (src/lib/sourceRegistry.ts). The browser parser maps by
+// name, so a column added to the registry before the Worker learns it
+// shows up as nulls instead of shifting every other value.
+// =================================================================
+
+export interface Columnar {
+  columns: string[];
+  rows: unknown[][];
+  /** Optional feed-level metadata (e.g. forecast time). */
+  meta?: Json;
+}
+
+/** Raw string (numbers stringified); empty / missing → null. Matches desktop `js()`. */
+const strOrNull = (v: unknown): string | null => {
+  if (v == null || typeof v === "object" || typeof v === "boolean") return null;
+  const s = String(v);
+  return s ? s : null;
+};
+
+/** ISO UTC for an ISO-ish timestamp; zone-less values (`2026-10-02T21:00:00`) are UTC. */
+export function utcIso(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  const s = String(v).trim();
+  const zoned = /[zZ]$|[+-]\d\d:?\d\d$/.test(s) ? s : `${s.replace(" ", "T")}Z`;
+  const t = Date.parse(zoned);
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
+
+// ---- GDACS disaster alerts ----
+
+export const GDACS_COLUMNS = [
+  "id", "event_type", "title", "alert_level", "alert_score", "country",
+  "latitude", "longitude", "start_ts", "end_ts", "severity", "severity_unit",
+];
+
+const GDACS_TYPES: Record<string, string> = {
+  EQ: "Earthquake",
+  TC: "Tropical cyclone",
+  FL: "Flood",
+  VO: "Volcano",
+  WF: "Wildfire",
+  DR: "Drought",
+};
+
+/** Vertex mean of a ring (closing vertex excluded) → [lon, lat]. */
+function ringCentroid(ring: unknown): [number, number] | null {
+  let pts = asArr(ring)
+    .map((p) => asArr(p).map(numOrNull))
+    .filter((p): p is [number, number] => p.length >= 2 && p[0] != null && p[1] != null);
+  if (pts.length > 1 && pts[0]![0] === pts[pts.length - 1]![0] && pts[0]![1] === pts[pts.length - 1]![1]) {
+    pts = pts.slice(0, -1);
+  }
+  if (pts.length === 0) return null;
+  return [pts.reduce((n, p) => n + p[0], 0) / pts.length, pts.reduce((n, p) => n + p[1], 0) / pts.length];
+}
+
+/** Point → its coordinates; else feature bbox center; else polygon centroid (same order as desktop). */
+function featureLonLat(f: Json): [number, number] | null {
+  const g = asObj(f.geometry);
+  if (g.type === "Point") {
+    const [lon, lat] = asArr(g.coordinates).map(numOrNull);
+    if (lon != null && lat != null) return [lon, lat];
+  }
+  const bbox = asArr(f.bbox).slice(0, 4).map(numOrNull);
+  if (bbox.length === 4 && bbox.every((n) => n != null)) {
+    return [((bbox[0] as number) + (bbox[2] as number)) / 2, ((bbox[1] as number) + (bbox[3] as number)) / 2];
+  }
+  if (g.type === "Polygon") return ringCentroid(asArr(g.coordinates)[0]);
+  if (g.type === "MultiPolygon") return ringCentroid(asArr(asArr(g.coordinates)[0])[0]);
+  return null;
+}
+
+/**
+ * GDACS `geteventlist/SEARCH` GeoJSON → one row per event (`eventtype`+`eventid`).
+ * A repeated event keeps its latest copy (`todate`, then `episodeid`) at its
+ * first-appearance position. Zone-less dates are UTC; features without
+ * coordinates are kept with null lat/lon.
+ */
+export function gdacsEvents(body: unknown): Columnar {
+  const byId = new Map<string, { rank: [number, number]; row: unknown[] }>();
+  for (const feat of asArr(asObj(body).features)) {
+    const f = asObj(feat);
+    const p = asObj(f.properties);
+    const code = strOrNull(p.eventtype);
+    const eventId = strOrNull(p.eventid);
+    if (!code || !eventId) continue;
+    const id = `${code}${eventId}`;
+    const ll = featureLonLat(f);
+    const sev = asObj(p.severitydata);
+    const end = utcIso(p.todate);
+    const rank: [number, number] = [end ? Date.parse(end) : -Infinity, numOrNull(p.episodeid) ?? 0];
+    const prev = byId.get(id);
+    if (prev && (prev.rank[0] > rank[0] || (prev.rank[0] === rank[0] && prev.rank[1] > rank[1]))) continue;
+    byId.set(id, {
+      rank,
+      row: [
+        id,
+        GDACS_TYPES[code] ?? code,
+        strOrNull(p.name) ?? strOrNull(p.description),
+        strOrNull(p.alertlevel),
+        numOrNull(p.alertscore),
+        strOrNull(p.country),
+        ll ? ll[1] : null,
+        ll ? ll[0] : null,
+        utcIso(p.fromdate),
+        end,
+        numOrNull(sev.severity),
+        strOrNull(sev.severityunit),
+      ],
+    });
+  }
+  return { columns: GDACS_COLUMNS, rows: [...byId.values()].map((e) => e.row) };
+}
+
+// ---- NOAA NDBC buoys (latest_obs.txt, whitespace-aligned text) ----
+
+export const BUOY_COLUMNS = [
+  "station", "latitude", "longitude", "ts", "wind_dir", "wind_speed_ms", "gust_ms",
+  "wave_height_m", "wave_period_s", "pressure_hpa", "air_temp_c", "water_temp_c",
+];
+
+/** `MM` = missing. Header row: `#STN LAT LON YYYY MM DD hh mm WDIR WSPD GST WVHT DPD APD MWD PRES …`. */
+export function ndbcLatestObs(text: string): Columnar {
+  const lines = text.split(/\r?\n/);
+  const header = lines.find((l) => l.startsWith("#") && /\bLAT\b/.test(l));
+  const names = (header ?? "#STN LAT LON YYYY MM DD hh mm WDIR WSPD GST WVHT DPD APD MWD PRES PTDY ATMP WTMP DEWP VIS TIDE")
+    .replace(/^#/, "")
+    .trim()
+    .split(/\s+/);
+  const at = (n: string) => names.indexOf(n);
+  const ix = {
+    stn: at("STN"), lat: at("LAT"), lon: at("LON"), yy: at("YYYY"), mo: at("MM"), dd: at("DD"), hh: at("hh"), mi: at("mm"),
+    wdir: at("WDIR"), wspd: at("WSPD"), gst: at("GST"), wvht: at("WVHT"), dpd: at("DPD"), pres: at("PRES"), atmp: at("ATMP"), wtmp: at("WTMP"),
+  };
+  const seen = new Set<string>();
+  const rows: unknown[][] = [];
+  for (const line of lines) {
+    if (!line.trim() || line.startsWith("#")) continue;
+    const f = line.trim().split(/\s+/);
+    const val = (i: number) => (i < 0 || f[i] == null || f[i] === "MM" ? null : numOrNull(f[i]));
+    const station = f[ix.stn];
+    const lat = val(ix.lat);
+    const lon = val(ix.lon);
+    if (!station || lat == null || lon == null || seen.has(station)) continue;
+    seen.add(station);
+    const [y, mo, d, h, mi] = [ix.yy, ix.mo, ix.dd, ix.hh, ix.mi].map(val);
+    const ts =
+      y != null && mo != null && d != null && h != null && mi != null
+        ? new Date(Date.UTC(y, mo - 1, d, h, mi)).toISOString()
+        : null;
+    rows.push([
+      station, lat, lon, ts,
+      val(ix.wdir), val(ix.wspd), val(ix.gst), val(ix.wvht), val(ix.dpd), val(ix.pres), val(ix.atmp), val(ix.wtmp),
+    ]);
+  }
+  return { columns: BUOY_COLUMNS, rows };
+}
+
+// ---- MBTA vehicles (JSON:API with included routes) ----
+
+export const MBTA_COLUMNS = [
+  "id", "label", "route", "route_type", "latitude", "longitude", "bearing", "speed_mph", "status", "occupancy", "ts",
+];
+
+const MBTA_ROUTE_TYPES: Record<number, string> = {
+  0: "Light rail",
+  1: "Subway",
+  2: "Commuter rail",
+  3: "Bus",
+  4: "Ferry",
+};
+
+/** `IN_TRANSIT_TO` → "In transit to"; empty / missing → null (same as desktop). */
+export function humanizeEnum(v: unknown): string | null {
+  const raw = strOrNull(v);
+  if (!raw) return null;
+  const s = raw.replace(/_/g, " ").toLowerCase();
+  return s[0]!.toUpperCase() + s.slice(1);
+}
+
+const MS_TO_MPH = 3600 / 1609.344;
+
+/**
+ * Route = `short_name`, else `long_name`, else the route id (also when the
+ * route is missing from `included`, with route_type null). Speed m/s → mph.
+ */
+export function mbtaVehicles(body: unknown): Columnar {
+  const o = asObj(body);
+  const routes = new Map<string, { name: string; type: string | null }>();
+  for (const inc of asArr(o.included)) {
+    const r = asObj(inc);
+    const id = strOrNull(r.id);
+    if (r.type !== "route" || !id) continue;
+    const a = asObj(r.attributes);
+    const t = numOrNull(a.type);
+    routes.set(id, {
+      name: strOrNull(a.short_name) ?? strOrNull(a.long_name) ?? id,
+      type: t != null ? MBTA_ROUTE_TYPES[t] ?? null : null,
+    });
+  }
+  const rows: unknown[][] = [];
+  for (const v of asArr(o.data)) {
+    const veh = asObj(v);
+    const id = strOrNull(veh.id);
+    if (!id) continue;
+    const a = asObj(veh.attributes);
+    const routeId = strOrNull(asObj(asObj(asObj(veh.relationships).route).data).id);
+    const route = routeId ? routes.get(routeId) ?? { name: routeId, type: null } : null;
+    const speed = numOrNull(a.speed);
+    rows.push([
+      id,
+      strOrNull(a.label),
+      route?.name ?? null,
+      route?.type ?? null,
+      numOrNull(a.latitude),
+      numOrNull(a.longitude),
+      numOrNull(a.bearing),
+      speed == null ? null : speed * MS_TO_MPH,
+      humanizeEnum(a.current_status),
+      humanizeEnum(a.occupancy_status),
+      utcIso(a.updated_at),
+    ]);
+  }
+  return { columns: MBTA_COLUMNS, rows };
+}
+
+// ---- NOAA SWPC OVATION aurora (1° grid → 2° cells) ----
+
+export const AURORA_COLUMNS = ["longitude", "latitude", "probability", "ts"];
+
+/**
+ * `coordinates` = [lon 0–359, lat −90…90, probability] on a 1° grid (65k points).
+ * 2° cells keyed by their even south-west corner (floor(x / 2) × 2 on the raw
+ * grid, then lon > 180 → lon − 360), max rounded probability per cell, cells
+ * < `minProb` dropped — identical to desktop. Quiet nights give ≈3k cells; a
+ * big storm widens the ovals, so the web keeps at most `maxCells` (the most
+ * likely) to stay under the 8k browser buffer.
+ */
+export function auroraCells(body: unknown, minProb = 3, maxCells = 6_000): Columnar {
+  const o = asObj(body);
+  const ts = utcIso(o["Forecast Time"]);
+  const cells = new Map<string, [number, number, number]>();
+  for (const c of asArr(o.coordinates)) {
+    if (!Array.isArray(c) || c.length < 3) continue;
+    const [lon, lat, p0] = c.map(numOrNull);
+    if (lon == null || lat == null || p0 == null) continue;
+    const cx = Math.floor(Math.floor(lon) / 2) * 2;
+    const cy = Math.floor(Math.floor(lat) / 2) * 2;
+    const p = Math.round(p0);
+    const key = `${cx}|${cy}`;
+    const prev = cells.get(key);
+    if (!prev || p > prev[2]) cells.set(key, [cx > 180 ? cx - 360 : cx, cy, p]);
+  }
+  const rows = [...cells.values()]
+    .filter((c) => c[2] >= minProb)
+    .sort((a, b) => b[2] - a[2] || a[1] - b[1] || a[0] - b[0])
+    .slice(0, maxCells)
+    .map(([lon, lat, p]) => [lon, lat, p, ts]);
+  return { columns: AURORA_COLUMNS, rows, meta: { ts } };
+}
+
+// ---- NASA JPL CNEOS close approaches ----
+
+export const ASTEROID_COLUMNS = [
+  "designation", "name", "approach_ts", "distance_ld", "distance_km", "velocity_kms", "abs_magnitude", "diameter_m",
+];
+
+const AU_KM = 149_597_870.7;
+const AU_LD = 389.17;
+const MONTHS: Record<string, string> = {
+  Jan: "01", Feb: "02", Mar: "03", Apr: "04", May: "05", Jun: "06",
+  Jul: "07", Aug: "08", Sep: "09", Oct: "10", Nov: "11", Dec: "12",
+};
+
+/** CAD `cd` ("2026-Oct-05 13:42", TDB ≈ UTC) → ISO UTC. */
+export function cadDate(cd: unknown): string | null {
+  const m = String(cd ?? "").match(/^(\d{4})-([A-Za-z]{3})-(\d{2})\s+(\d{2}):(\d{2})(?::(\d{2}(?:\.\d+)?))?/);
+  if (!m || !MONTHS[m[2]!]) return null;
+  return utcIso(`${m[1]}-${MONTHS[m[2]!]}-${m[3]}T${m[4]}:${m[5]}:${m[6] ? m[6].padStart(2, "0") : "00"}`);
+}
+
+/** Diameter (m) from absolute magnitude H at geometric albedo 0.14. */
+export function diameterFromH(h: number | null, albedo = 0.14): number | null {
+  if (h == null) return null;
+  return (1329 / Math.sqrt(albedo)) * 10 ** (-h / 5) * 1000;
+}
+
+export function cneosApproaches(body: unknown): Columnar {
+  const o = asObj(body);
+  const fields = asArr(o.fields).map(String);
+  const at = (n: string) => fields.indexOf(n);
+  const ix = { des: at("des"), cd: at("cd"), dist: at("dist"), v: at("v_rel"), h: at("h"), name: at("fullname") };
+  const rows: unknown[][] = [];
+  for (const r of asArr(o.data)) {
+    if (!Array.isArray(r)) continue;
+    const get = (i: number) => (i < 0 ? undefined : r[i]);
+    const dist = numOrNull(get(ix.dist));
+    const h = numOrNull(get(ix.h));
+    const des = strOrNull(get(ix.des));
+    if (!des) continue;
+    const name = get(ix.name);
+    rows.push([
+      des,
+      typeof name === "string" && name.trim() ? name.trim() : null,
+      cadDate(get(ix.cd)),
+      dist == null ? null : dist * AU_LD,
+      dist == null ? null : dist * AU_KM,
+      numOrNull(get(ix.v)),
+      h,
+      diameterFromH(h),
+    ]);
+  }
+  return { columns: ASTEROID_COLUMNS, rows };
+}
+
+// ---- SteamSpy top 100 (last two weeks) ----
+
+export const STEAM_COLUMNS = [
+  "appid", "name", "developer", "peak_players", "positive", "negative", "positive_pct", "owners_min", "price_usd", "discount_pct",
+];
+
+/** Object keyed by appid (appid falls back to the key). Values unrounded, like desktop. */
+export function steamTop(body: unknown): Columnar {
+  const rows: unknown[][] = [];
+  for (const [key, v] of Object.entries(asObj(body))) {
+    const g = asObj(v);
+    const pos = numOrNull(g.positive);
+    const neg = numOrNull(g.negative);
+    const owners = String(g.owners ?? "").split("..")[0]!.replace(/[^\d]/g, "");
+    const price = numOrNull(g.price);
+    // top100in2weeks reports average_2weeks as 0 for every game; the discount varies
+    const discount = numOrNull(g.discount);
+    rows.push([
+      strOrNull(g.appid) ?? key,
+      strOrNull(g.name),
+      strOrNull(g.developer),
+      numOrNull(g.ccu),
+      pos,
+      neg,
+      pos != null && neg != null && pos + neg > 0 ? (pos / (pos + neg)) * 100 : null,
+      owners ? Number(owners) : null,
+      price == null ? null : price / 100,
+      discount,
+    ]);
+  }
+  rows.sort((a, b) => (Number(b[3]) || 0) - (Number(a[3]) || 0));
+  return { columns: STEAM_COLUMNS, rows };
+}
+
+// ---- mempool.space blocks ----
+
+export const BITCOIN_COLUMNS = [
+  "height", "ts", "tx_count", "size_mb", "median_fee_sat_vb", "total_fees_btc", "reward_btc", "pool",
+];
+
+/** `/api/v1/blocks[/:height]` pages (15 blocks each, with `extras`) → one row per height, newest first. */
+export function mempoolBlocks(pages: unknown[]): Columnar {
+  const byHeight = new Map<number, unknown[]>();
+  for (const page of pages) {
+    for (const b of asArr(page)) {
+      const blk = asObj(b);
+      const height = numOrNull(blk.height);
+      if (height == null || byHeight.has(height)) continue;
+      const ex = asObj(blk.extras);
+      const t = numOrNull(blk.timestamp);
+      const size = numOrNull(blk.size);
+      const fees = numOrNull(ex.totalFees);
+      const reward = numOrNull(ex.reward);
+      byHeight.set(height, [
+        height,
+        t == null ? null : new Date(t * 1000).toISOString(),
+        numOrNull(blk.tx_count),
+        size == null ? null : size / 1e6,
+        numOrNull(ex.medianFee),
+        fees == null ? null : fees / 1e8,
+        reward == null ? null : reward / 1e8,
+        strOrNull(asObj(ex.pool).name),
+      ]);
+    }
+  }
+  return { columns: BITCOIN_COLUMNS, rows: [...byHeight.entries()].sort((a, b) => b[0] - a[0]).map((e) => e[1]) };
+}
+
+/** Lowest height in a mempool page (for the next `/blocks/:height` request). */
+export function mempoolLowestHeight(page: unknown): number | null {
+  const hs = asArr(page).map((b) => numOrNull(asObj(b).height)).filter((h): h is number => h != null);
+  return hs.length ? Math.min(...hs) : null;
+}
+
+// ---- US Treasury debt to the penny ----
+
+export const DEBT_COLUMNS = ["record_date", "total_debt", "held_by_public", "intragovernmental"];
+
+/** Fiscal Data `debt_to_penny` (amounts are strings; early years say "null") → ascending by date. */
+export function treasuryDebt(body: unknown): Columnar {
+  const byDate = new Map<string, unknown[]>();
+  for (const r of asArr(asObj(body).data)) {
+    const o = asObj(r);
+    const date = String(o.record_date ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const num = (v: unknown) => (v === "null" ? null : numOrNull(v));
+    byDate.set(date, [date, num(o.tot_pub_debt_out_amt), num(o.debt_held_public_amt), num(o.intragov_hold_amt)]);
+  }
+  return {
+    columns: DEBT_COLUMNS,
+    rows: [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).map((e) => e[1]),
+  };
+}

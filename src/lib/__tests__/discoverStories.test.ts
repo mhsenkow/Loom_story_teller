@@ -12,7 +12,7 @@ describe("discoverStories", () => {
   });
 
   it("scans every live SourceKind plus room for wiki variants", () => {
-    expect(ALL_SOURCE_KINDS.length).toBe(22);
+    expect(ALL_SOURCE_KINDS.length).toBe(30);
     expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(ALL_SOURCE_KINDS.length * 2);
   });
 });

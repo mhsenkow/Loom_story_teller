@@ -202,6 +202,11 @@ describe("web source parsers (new feeds)", () => {
       countries: [{ name: { common: "A" } }],
       spacex: [{ id: "x" }],
     };
+    // Columnar feeds: the Worker sends `{ columns, rows }` named after the registry
+    for (const k of ["gdacs", "buoys", "mbta", "aurora", "asteroids", "steam", "bitcoin", "debt"] as const) {
+      const cols = SOURCE_DEFS.find((d) => d.kind === k)!.columns;
+      samples[k] = { columns: cols, rows: [cols.map(() => null)] };
+    }
     for (const d of SOURCE_DEFS) {
       const body = samples[d.kind];
       if (body === undefined) continue;
@@ -210,6 +215,21 @@ describe("web source parsers (new feeds)", () => {
       expect(rows[0]!.length, d.kind).toBe(d.columns.length);
     }
   });
+
+  it("columnar parser maps by name, coerces to registry types, nulls unknown columns", () => {
+    const body = {
+      // Worker order differs and one registry column is missing ("severity_unit")
+      columns: ["title", "id", "event_type", "alert_level", "alert_score", "country", "latitude", "longitude", "start_ts", "end_ts", "severity", "extra"],
+      rows: [["Quake", "EQ1", "Earthquake", "Green", "1", "", "51.5", null, "2026-10-02T20:54:15Z", "nope", "", "x"]],
+    };
+    expect(parseSourceRows("gdacs", body)).toEqual([
+      ["EQ1", "Earthquake", "Quake", "Green", 1, null, 51.5, null, "2026-10-02T20:54:15.000Z", null, null, null],
+    ]);
+    expect(parseSourceRows("debt", { columns: ["record_date", "total_debt"], rows: [["2026-10-01", "1.5"]] })).toEqual([
+      ["2026-10-01", 1.5, null, null],
+    ]);
+    expect(parseSourceRows("mbta", { error: "MBTA 429" })).toEqual([]);
+  });
 });
 
 describe("web source buffers replace snapshot feeds instead of appending", () => {
@@ -217,7 +237,7 @@ describe("web source buffers replace snapshot feeds instead of appending", () =>
     vi.unstubAllGlobals();
   });
 
-  async function pollTwice(kind: "citibike" | "meteo", bodies: unknown[]) {
+  async function pollTwice(kind: "citibike" | "meteo" | "mbta" | "debt", bodies: unknown[]) {
     const fetchMock = vi.fn();
     for (const b of bodies) fetchMock.mockResolvedValueOnce({ ok: true, json: async () => b });
     vi.stubGlobal("fetch", fetchMock);
@@ -240,6 +260,28 @@ describe("web source buffers replace snapshot feeds instead of appending", () =>
     expect(snap.sample.total_rows).toBe(2);
     const s1 = snap.sample.rows.find((r) => r[0] === "s1")!;
     expect(s1[5]).toBe(7);
+  });
+
+  it("mbta (columnar) keeps one row per vehicle across polls", async () => {
+    const cols = SOURCE_DEFS.find((d) => d.kind === "mbta")!.columns;
+    const poll = (lat: number) => ({
+      columns: cols,
+      rows: [
+        ["v1", "1", "Red Line", "Subway", lat, -71, 90, null, "In transit", null, "2026-10-03T00:25:24Z"],
+        ["v2", "2", "57", "Bus", 42.3, -71.1, 0, 10, "Stopped", "Full", "2026-10-03T00:25:24Z"],
+        ["v2", "2", "57", "Bus", 42.3, -71.1, 0, 10, "Stopped", "Full", "2026-10-03T00:25:24Z"],
+      ],
+    });
+    const snap = await pollTwice("mbta", [poll(42.1), poll(42.2)]);
+    expect(snap.sample.total_rows).toBe(2);
+    expect(snap.sample.rows.find((r) => r[0] === "v1")![4]).toBe(42.2);
+  });
+
+  it("debt keeps its whole history (more than the default 8k-row cap)", async () => {
+    const rows: unknown[][] = [];
+    for (let i = 0; i < 8_500; i++) rows.push([new Date(Date.UTC(1993, 3, 1) + i * 86_400_000).toISOString().slice(0, 10), i, null, null]);
+    const snap = await pollTwice("debt", [{ columns: ["record_date", "total_debt", "held_by_public", "intragovernmental"], rows }]);
+    expect(snap.sample.total_rows).toBe(8_500);
   });
 
   it("an empty / failed-shape poll keeps the last good snapshot", async () => {

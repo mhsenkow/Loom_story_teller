@@ -16,12 +16,21 @@ import {
   WB_WIDE_INDICATORS,
   WORLD_CITIES,
   adsbToOpensky,
+  auroraCells,
+  cneosApproaches,
+  gdacsEvents,
   joinCitibike,
   ll2ToSpacex,
   mergeCountries,
+  mbtaVehicles,
+  mempoolBlocks,
+  mempoolLowestHeight,
   mergeUkCarbon,
+  ndbcLatestObs,
   openMeteoCities,
   paprikaToGecko,
+  steamTop,
+  treasuryDebt,
   trimNwsAlerts,
   utcDay,
   worldBankWide,
@@ -451,12 +460,86 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     ]);
     return JSON.stringify(worldBankWide(countryList, bodies));
   },
+
+  // ---- Columnar feeds (`{ columns, rows }` in registry order) ----
+
+  gdacs: async () => {
+    // The `/MAP` variant 400s; SEARCH returns the 100 most recent events as GeoJSON.
+    const body = await upstreamJson(
+      "GDACS",
+      "https://www.gdacs.org/gdacsapi/api/events/geteventlist/SEARCH?eventlist=EQ;TC;FL;VO;WF;DR&alertlevel=Green;Orange;Red",
+      15_000,
+    );
+    return JSON.stringify(gdacsEvents(body));
+  },
+
+  buoys: async () => {
+    const text = await upstreamText("NOAA NDBC", "https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt", 15_000);
+    return JSON.stringify(ndbcLatestObs(text));
+  },
+
+  mbta: async () => {
+    // Keyless limit is ~20 req/min per IP — the 30 s source cache keeps us well under it.
+    const body = await upstreamJson("MBTA", "https://api-v3.mbta.com/vehicles?include=route&page[limit]=1000");
+    return JSON.stringify(mbtaVehicles(body));
+  },
+
+  aurora: async () => {
+    // ~900 KB / 65k points on a 1° grid → ≈3k 2° cells with probability ≥ 3.
+    const body = await upstreamJson("NOAA SWPC", "https://services.swpc.noaa.gov/json/ovation_aurora_latest.json", 15_000);
+    return JSON.stringify(auroraCells(body));
+  },
+
+  asteroids: async () => {
+    const body = await upstreamJson(
+      "NASA JPL",
+      "https://ssd-api.jpl.nasa.gov/cad.api?date-min=now&date-max=%2B60&dist-max=0.05&fullname=true",
+    );
+    return JSON.stringify(cneosApproaches(body));
+  },
+
+  steam: async () => {
+    const body = await upstreamJson("SteamSpy", "https://steamspy.com/api.php?request=top100in2weeks", 15_000);
+    return JSON.stringify(steamTop(body));
+  },
+
+  bitcoin: async () => {
+    // Newest 15 blocks, then 3 older pages one at a time (~60 blocks). A later page
+    // failing just means fewer blocks, not an error.
+    const first = await upstreamJson("mempool.space", "https://mempool.space/api/v1/blocks");
+    const pages: unknown[] = [first];
+    let low = mempoolLowestHeight(first);
+    for (let i = 0; i < 3 && low != null && low > 0; i++) {
+      try {
+        const page = await upstreamJson("mempool.space", `https://mempool.space/api/v1/blocks/${low - 1}`, 8_000);
+        pages.push(page);
+        low = mempoolLowestHeight(page);
+      } catch {
+        break;
+      }
+    }
+    return JSON.stringify(mempoolBlocks(pages));
+  },
+
+  debt: async () => {
+    // ≈ 8.4k business days since 1993 in one page (~2.8 MB upstream, ~0.4 MB out).
+    const body = await upstreamJson(
+      "US Treasury",
+      "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny" +
+        "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt" +
+        "&sort=-record_date&page[size]=10000",
+      20_000,
+    );
+    return JSON.stringify(treasuryDebt(body));
+  },
 };
 
 /** Fresh-for seconds per kind (roughly the upstream's own update cadence). */
 const SOURCE_TTL_SECS: Record<string, number> = {
   iss: 5,
+  mbta: 30,
   opensky: 60,
+  bitcoin: 60,
   usgs: 60,
   crypto: 60,
   citibike: 60,
@@ -469,15 +552,21 @@ const SOURCE_TTL_SECS: Record<string, number> = {
   eonet: 600,
   ukcarbon: 900,
   spaceweather: 900,
+  aurora: 300,
+  gdacs: 600,
+  buoys: 900,
   launches: 3600,
   spacex: 3600,
   fx: 3600,
   fema: 3600,
   covid: 3600,
   pageviews: 3600,
+  asteroids: 21_600,
+  steam: 21_600,
   countries: 86_400,
   world_bank: 86_400,
   climate: 86_400,
+  debt: 86_400,
 };
 
 /** How long past its TTL a cached copy may still be served when the upstream fails. */
