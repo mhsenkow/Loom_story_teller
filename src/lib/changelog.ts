@@ -25,6 +25,47 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-02e",
+    date: "2026-10-02",
+    title: "Thousands more datasets, and charts that switch cleanly",
+    summary: "Two new catalogs, eight new live feeds, four new packs — and every chart type checked against real data.",
+    items: [
+      {
+        title: "City & state open data",
+        detail:
+          "Search NYC, Chicago, San Francisco, Seattle, Austin, state portals, and the CDC from Data & sources — 311 calls, trees, crashes, inspections, permits — and chart any table in a tap.",
+      },
+      {
+        title: "TidyTuesday",
+        detail:
+          "Browse every weekly community dataset since 2018 — over 400 weeks of ready-to-chart data, from Olympics to coffee ratings. Filter by topic and tap a file to chart it.",
+      },
+      {
+        title: "Eight new live feeds",
+        detail:
+          "Every Boston bus and train moving now, the aurora forecast, UN disaster alerts worldwide, asteroids passing Earth, ocean buoys, Bitcoin blocks, Steam's most-played games, and the US national debt since 1993.",
+      },
+      {
+        title: "New packs",
+        detail: "Gapminder's wealth-and-health data, every M7+ earthquake since 1900, every Nobel laureate, and FiveThirtyEight's candy ranking.",
+      },
+      {
+        title: "Switching chart types just works",
+        detail:
+          "Change a scatter into a bar, pie, funnel, or box and Loom picks a sensible category instead of turning every number into its own group. Lines use dates when there are any, and long daily series roll up to weeks or months.",
+      },
+      {
+        title: "Reference lines, trails, and marginals",
+        detail:
+          "“Add reference line”, “Connect points”, and “Marginal distributions” now draw on the chart — reference lines land on the value axis even when bars run sideways.",
+      },
+      {
+        title: "Sharper 3D and maps",
+        detail: "3D scatter and firefly fill the frame instead of a tiny speck, and maps no longer color countries from unrelated numbers.",
+      },
+    ],
+  },
+  {
     id: "2026-10-02d",
     date: "2026-10-02",
     title: "More live data, and every feed fixed up",
