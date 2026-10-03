@@ -86,11 +86,11 @@ export interface SourceDef {
 const def = (d: SourceDef) => d;
 
 /**
- * Rows loaded when a feed opens in Chart / Explore. Covers a full web buffer
- * (8k), so long histories (temperature since 1880, 24 years × every country,
- * every Citi Bike dock) aren't cut to a recent slice.
+ * Rows loaded when a feed opens in Chart / Explore. Covers the largest web buffer
+ * (debt keeps ~8.4k days; others cap at 8k), so long histories — temperature since
+ * 1880, 24 years × every country, US debt since 1993 — aren't cut to a recent slice.
  */
-export const SOURCE_EXPLORE_ROWS = 8_000;
+export const SOURCE_EXPLORE_ROWS = 12_000;
 
 export const SOURCE_DEFS: SourceDef[] = [
   def({
