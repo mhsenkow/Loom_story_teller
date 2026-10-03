@@ -122,11 +122,38 @@ export function looksLikeSpreadsheetBinary(text: string): boolean {
   return s.charCodeAt(0) === 0x50 && s.charCodeAt(1) === 0x4b;
 }
 
+export type CsvDelimiter = "," | "\t" | ";";
+
 /**
- * RFC4180-ish CSV split that keeps commas/newlines inside quotes.
+ * Guess the field delimiter from the header line (outside quotes): tab for TSV
+ * (TidyTuesday ships a few), semicolon for EU-style exports, else comma.
+ */
+export function sniffCsvDelimiter(text: string): CsvDelimiter {
+  const src = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  let commas = 0;
+  let tabs = 0;
+  let semis = 0;
+  let inQuotes = false;
+  const end = Math.min(src.length, 64 * 1024);
+  for (let i = 0; i < end; i++) {
+    const ch = src[i]!;
+    if (ch === '"') inQuotes = !inQuotes;
+    else if (inQuotes) continue;
+    else if (ch === "\n" || ch === "\r") break;
+    else if (ch === ",") commas++;
+    else if (ch === "\t") tabs++;
+    else if (ch === ";") semis++;
+  }
+  if (tabs > 0 && tabs >= commas) return "\t";
+  if (semis > commas) return ";";
+  return ",";
+}
+
+/**
+ * RFC4180-ish CSV split that keeps delimiters/newlines inside quotes.
  * Returns rows of string cells (header included as row 0).
  */
-export function parseCsvRecords(text: string): string[][] {
+export function parseCsvRecords(text: string, delimiter: CsvDelimiter = ","): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cur = "";
@@ -152,7 +179,7 @@ export function parseCsvRecords(text: string): string[][] {
       inQuotes = true;
       continue;
     }
-    if (ch === ",") {
+    if (ch === delimiter) {
       row.push(cur);
       cur = "";
       continue;
@@ -243,7 +270,7 @@ export function parseCsvToInspectResult(
     );
   }
 
-  const records = parseCsvRecords(text);
+  const records = parseCsvRecords(text, sniffCsvDelimiter(text));
   if (records.length === 0) {
     return { stats: [], sample: { columns: [], types: [], rows: [], total_rows: 0 } };
   }

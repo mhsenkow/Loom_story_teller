@@ -17,6 +17,7 @@ import { recommend, recommendStreamStory, recommendSourceStory } from "@/lib/rec
 import { formatBytes, formatNumber, extensionIcon } from "@/lib/format";
 import { parseCsvToInspectResult, mockFiles } from "@/lib/mock-data";
 import { firstCsvResource } from "@/lib/openDataCatalog";
+import { SocrataCatalogSection, TidyTuesdaySection } from "@/components/PublicCatalogSections";
 import { useIsMobile } from "@/lib/useMediaQuery";
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import { requestWhatsNew } from "@/lib/changelog";
@@ -349,8 +350,12 @@ export function Sidebar() {
     }
   }
 
-  /** Web-only: pull a remote CSV through the Worker proxy into the in-browser file cache. */
-  async function handleLoadRemoteCsv(url: string, filename: string) {
+  /**
+   * Web-only: pull a remote CSV through the Worker proxy into the in-browser file cache.
+   * `rowLimit` is the row cap baked into the URL (Socrata `$limit`) so the toast can say
+   * "first N rows" honestly when the portal has more.
+   */
+  async function handleLoadRemoteCsv(url: string, filename: string, opts?: { rowLimit?: number }) {
     const safeName = (filename || "dataset.csv").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
     const name = safeName.toLowerCase().endsWith(".csv") ? safeName : `${safeName}.csv`;
     setIsScanning(true);
@@ -387,10 +392,13 @@ export function Sidebar() {
       setViewMode("chart");
       leaveSourcesShowChart();
       const kept = inspect.sample.rows.length;
+      const hitRowLimit = opts?.rowLimit != null && rowCount >= opts.rowLimit;
       setToast(
         truncated || kept < rowCount
           ? `Exploring ${name} — first ${kept.toLocaleString()} rows${kept < rowCount ? ` of ${rowCount.toLocaleString()}` : " (file was large)"}`
-          : `Exploring ${name} — ${rowCount.toLocaleString()} rows`,
+          : hitRowLimit
+            ? `Exploring ${name} — first ${kept.toLocaleString()} rows (the portal has more)`
+            : `Exploring ${name} — ${rowCount.toLocaleString()} rows`,
       );
     } catch (e) {
       setToast(ipcErrorMessage(e) || "Failed to load CSV in browser");
@@ -836,6 +844,34 @@ const CURATED_OPEN_PACKS: {
     source: "World Resources Institute",
   },
   {
+    id: "gapminder",
+    title: "Gapminder: wealth & health",
+    blurb: "142 countries, 1952–2007 — life expectancy, GDP per person, population, continent. The classic bubble chart.",
+    url: "https://raw.githubusercontent.com/plotly/datasets/master/gapminderDataFiveYear.csv",
+    source: "Gapminder via plotly/datasets",
+  },
+  {
+    id: "quakes-m7",
+    title: "Every M7+ earthquake since 1900",
+    blurb: "1,600 great earthquakes — magnitude, depth, and location on a century-long timeline.",
+    url: "https://earthquake.usgs.gov/fdsnws/event/1/query?format=csv&starttime=1900-01-01&minmagnitude=7&orderby=time-asc",
+    source: "USGS ComCat",
+  },
+  {
+    id: "nobel-laureates",
+    title: "Nobel Prize laureates",
+    blurb: "Every laureate since 1901 — category, year, birthplace, gender, and prize share.",
+    url: "https://api.nobelprize.org/2.1/laureates?limit=1500&format=csv",
+    source: "Nobel Prize API",
+  },
+  {
+    id: "candy-ranking",
+    title: "The ultimate candy ranking",
+    blurb: "85 candies — chocolate? fruity? sugar, price, and how often each won head-to-head.",
+    url: "https://raw.githubusercontent.com/fivethirtyeight/data/master/candy-power-ranking/candy-data.csv",
+    source: "FiveThirtyEight",
+  },
+  {
     id: "us-cities",
     title: "US cities by population",
     blurb: "Largest US cities with coordinates — instant bubble map.",
@@ -1273,7 +1309,7 @@ function DataRegionView({
   onPickFolder: () => void;
   onRescanFolder: () => void;
   isWeb: boolean;
-  onLoadRemoteCsv: (url: string, filename: string) => Promise<void>;
+  onLoadRemoteCsv: (url: string, filename: string, opts?: { rowLimit?: number }) => Promise<void>;
   onLoadFiles?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUseDemoData?: () => void;
   fileInputRef?: React.RefObject<HTMLInputElement | null>;
@@ -1372,10 +1408,10 @@ function DataRegionView({
     }
   }
 
-  async function handleLoadCsv(url: string, filename: string, resourceId: string) {
+  async function handleLoadCsv(url: string, filename: string, resourceId: string, opts?: { rowLimit?: number }) {
     setLoadingId(resourceId);
     try {
-      await onLoadRemoteCsv(url, filename);
+      await onLoadRemoteCsv(url, filename, opts);
     } finally {
       setLoadingId(null);
     }
@@ -1692,6 +1728,33 @@ function DataRegionView({
             ))}
           </ul>
         </section>
+
+        {/* TidyTuesday + Socrata city/state search — same order slot as the
+            curated packs, so they follow them in DOM order. */}
+        <TidyTuesdaySection
+          Heading={SectionHeading}
+          order={isWeb ? 2 : 7}
+          expanded={expanded}
+          canLoadInBrowser={canLoadInBrowser}
+          canSaveToFolder={!!canSaveToFolder}
+          isScanning={isScanning}
+          loadingId={loadingId}
+          savingId={savingId}
+          onExplore={(url, filename, id) => void handleLoadCsv(url, filename, id)}
+          onSave={(url, filename, id) => void handleSaveToFolder(url, filename, id)}
+        />
+        <SocrataCatalogSection
+          Heading={SectionHeading}
+          order={isWeb ? 2 : 7}
+          expanded={expanded}
+          canLoadInBrowser={canLoadInBrowser}
+          canSaveToFolder={!!canSaveToFolder}
+          isScanning={isScanning}
+          loadingId={loadingId}
+          savingId={savingId}
+          onExplore={(url, filename, id, opts) => void handleLoadCsv(url, filename, id, opts)}
+          onSave={(url, filename, id) => void handleSaveToFolder(url, filename, id)}
+        />
 
         {/* More portals */}
         <section style={{ order: 8 }}>
