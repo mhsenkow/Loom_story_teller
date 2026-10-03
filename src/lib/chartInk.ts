@@ -249,6 +249,8 @@ export type RampKeyArgs = {
   panel?: boolean;
   /** Override tick labels (e.g. ["low", "high"]). */
   endLabels?: [string, string];
+  /** Log-scaled ramp (colorAt receives log position); ticks land on powers of ten. */
+  log?: boolean;
 };
 
 /** Height a ramp key occupies (for layout before drawing). */
@@ -299,6 +301,25 @@ export function drawRampKey(ctx: CanvasRenderingContext2D, a: RampKeyArgs): { x:
   } else if (!(a.max > a.min)) {
     ctx.textAlign = "left";
     ctx.fillText(formatDataValue(a.min), bx, ly);
+  } else if (a.log && a.min > 0) {
+    // Powers of ten inside the range, plus both ends when room allows
+    const l0 = Math.log10(a.min);
+    const l1 = Math.log10(a.max);
+    const ticks = [a.min];
+    for (let e = Math.ceil(l0); e <= Math.floor(l1); e++) ticks.push(10 ** e);
+    ticks.push(a.max);
+    let lastRight = -Infinity;
+    for (const v of ticks) {
+      const label = formatDataValue(v);
+      const tw = ctx.measureText(label).width;
+      const px = bx + ((Math.log10(v) - l0) / (l1 - l0 || 1)) * barW;
+      const lx = Math.max(bx + tw / 2, Math.min(bx + barW - tw / 2, px));
+      if (lx - tw / 2 < lastRight + 6) continue;
+      ctx.textAlign = "center";
+      ctx.fillText(label, lx, ly);
+      ctx.fillRect(px - 0.5, cy - 2, 1, 3);
+      lastRight = lx + tw / 2;
+    }
   } else {
     const nt = niceTicks(a.min, a.max, Math.max(2, Math.min(4, Math.floor(barW / 40))), false);
     const ticks = nt.ticks.filter((v) => v >= a.min - 1e-9 && v <= a.max + 1e-9);

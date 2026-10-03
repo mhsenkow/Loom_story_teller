@@ -44,7 +44,7 @@ import {
   renderGpuSceneCanvas,
   type GpuSceneKind,
 } from "@/lib/gpuScenes";
-import { isGeoMapKind, renderGeoMapCanvas, isWebGpuGlobeKind } from "@/lib/geoMaps";
+import { isGeoMapKind, renderGeoMapCanvas, isWebGpuGlobeKind, globeCameraForData } from "@/lib/geoMaps";
 import { LoomSceneRenderer } from "@/lib/webgpuScenes";
 import { LoomCubeRenderer } from "@/lib/webgpuCube";
 import { DataCubePivotBar, DataCubePivotTable, type CubeAxisSlot, type CubeHoverCell } from "@/components/DataCubePivot";
@@ -2371,6 +2371,16 @@ export function ChartView() {
   useEffect(() => {
     if (activeChart?.kind === "scatter") setScatterView({ scale: 1, panX: 0, panY: 0 });
   }, [activeChart?.id]);
+
+  // Globes open facing their data (e.g. US flights), not a fixed meridian over Africa.
+  useEffect(() => {
+    if (activeChart?.kind !== "globe" && activeChart?.kind !== "globeTrail") return;
+    const sr = useLoomStore.getState().sampleRows;
+    if (!sr) return;
+    const cam = globeCameraForData(sr.rows, sr.columns, activeChart.xField, activeChart.yField);
+    if (cam) setSceneOrbit({ yaw: cam.yaw, pitch: cam.pitch, zoom: 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeChart?.id, sampleRows]);
 
   // --- Empty states ---
   if (!selectedFile) {

@@ -62,8 +62,10 @@ fn project_sphere(sx: f32, sy: f32, sz: f32) -> vec3<f32> {
   let syaw = sin(uniforms.yaw);
   let cp = cos(uniforms.pitch);
   let sp = sin(uniforms.pitch);
-  let x1 = sx * cy + sz * syaw;
-  let z1 = -sx * syaw + sz * cy;
+  // Match the Canvas globe (d3 orthographic rotated by -yaw): longitude == yaw faces
+  // the viewer and east is to the right, so captures and the live view agree.
+  let x1 = sz * cy - sx * syaw;
+  let z1 = sx * cy + sz * syaw;
   let y2 = sy * cp - z1 * sp;
   let z2 = sy * sp + z1 * cp;
   let dist = 2.6;

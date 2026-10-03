@@ -6,6 +6,7 @@
 // =================================================================
 
 import {
+  geoAlbersUsa,
   geoEqualEarth,
   geoMercator,
   geoOrthographic,
@@ -342,19 +343,20 @@ function fitProjection(
 /** Lon/lat bounding box of points, or null when they span too much of the globe to zoom in. */
 function regionalBounds(pts: { lon: number; lat: number }[]): [[number, number], [number, number]] | null {
   if (!pts.length) return null;
-  let lo0 = Infinity, lo1 = -Infinity, la0 = Infinity, la1 = -Infinity;
-  for (const p of pts) {
-    if (p.lon < lo0) lo0 = p.lon;
-    if (p.lon > lo1) lo1 = p.lon;
-    if (p.lat < la0) la0 = p.lat;
-    if (p.lat > la1) la1 = p.lat;
-  }
+  // Fit to the 2nd–98th percentile on each axis (when there are enough points) so a
+  // few mis-geocoded rows — a 311 ticket at 0°, 0° — can't zoom a city out to a hemisphere.
+  const lons = pts.map((p) => p.lon).sort((a, b) => a - b);
+  const lats = pts.map((p) => p.lat).sort((a, b) => a - b);
+  const trim = pts.length >= 25 ? Math.floor(pts.length * 0.02) : 0;
+  const lo0 = lons[trim]!, lo1 = lons[lons.length - 1 - trim]!;
+  const la0 = lats[trim]!, la1 = lats[lats.length - 1 - trim]!;
   // Wide spreads (or antimeridian-straddling sets) read best on the whole world.
   if (lo1 - lo0 > 100 || la1 - la0 > 60) return null;
-  // Pad 15% each side with a minimum ~3° window so a single city still shows its coastline.
-  const minSpan = 3;
-  const padLon = Math.max((lo1 - lo0) * 0.15, (minSpan - (lo1 - lo0)) / 2, 0.5);
-  const padLat = Math.max((la1 - la0) * 0.15, (minSpan - (la1 - la0)) / 2, 0.5);
+  // Pad 15% each side with a minimum ~0.4° (~40 km) window: a city's docks fill the frame,
+  // and a single point still shows its surroundings.
+  const minSpan = 0.4;
+  const padLon = Math.max((lo1 - lo0) * 0.15, (minSpan - (lo1 - lo0)) / 2, 0.02);
+  const padLat = Math.max((la1 - la0) * 0.15, (minSpan - (la1 - la0)) / 2, 0.02);
   return [
     [Math.max(-180, lo0 - padLon), Math.max(-85, la0 - padLat)],
     [Math.min(180, lo1 + padLon), Math.min(85, la1 + padLat)],
@@ -504,7 +506,8 @@ export function renderGeoChoropleth(
   }
   const showKey = !mini && values.size > 0;
   const projection = fitProjection(
-    atlasKind === "us" ? geoMercator() : geoEqualEarth(),
+    // Albers USA insets Alaska / Hawaii so the lower 48 fill the frame
+    atlasKind === "us" ? geoAlbersUsa() : geoEqualEarth(),
     atlas,
     w,
     h,
@@ -516,6 +519,11 @@ export function renderGeoChoropleth(
   // Keep the lowest value off the background tone so small regions still read.
   const colorAt = (t: number) => rampColor(stops, 0.12 + 0.88 * t);
   const span = maxV - minV;
+  // Heavily skewed positive values (population, cases) on a linear ramp paint one or two
+  // regions light and everything else the same — use a log ramp instead.
+  const useLog = minV > 0 && maxV / minV > 50;
+  const position = (v: number) =>
+    useLog ? Math.log(v / minV) / Math.log(maxV / minV) : span > 0 ? (v - minV) / span : 1;
 
   for (let i = 0; i < atlas.features.length; i++) {
     const f = atlas.features[i]!;
@@ -527,7 +535,7 @@ export function renderGeoChoropleth(
     if (v == null) {
       ctx.fillStyle = ink.land;
     } else {
-      ctx.fillStyle = colorAt(span > 0 ? (v - minV) / span : 1);
+      ctx.fillStyle = colorAt(position(v));
       ctx.globalAlpha = Math.max(0.6, opts.opacity ?? 0.9);
     }
     ctx.fill(region);
@@ -546,7 +554,8 @@ export function renderGeoChoropleth(
       min: minV,
       max: maxV,
       colorAt,
-      title: valueField && vi >= 0 ? `${AGG_WORD[how]} of ${valueField}` : "Rows",
+      title: (valueField && vi >= 0 ? `${AGG_WORD[how]} of ${valueField}` : "Rows") + (useLog ? " (log scale)" : ""),
+      log: useLog,
       ink,
       fontFamily: font,
     });
@@ -596,6 +605,8 @@ function collectPoints(
     const lat = num(r[latI]);
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
     if (Math.abs(lat) > 90 || Math.abs(lon) > 180) continue;
+    // "Null island": missing coordinates stored as 0, 0 — never a real reading in practice
+    if (lat === 0 && lon === 0) continue;
     const cat = colorI >= 0 ? (catMap.get(String(r[colorI])) ?? 0) : 0;
     const size = sizeI >= 0 ? num(r[sizeI]) : NaN;
     out.push({ lon, lat, category: cat, size });
@@ -792,6 +803,21 @@ function sphericalCentroid(pts: { lon: number; lat: number }[]): [number, number
   const lon = (Math.atan2(y, x) * 180) / Math.PI;
   const lat = (Math.atan2(z, Math.hypot(x, y)) * 180) / Math.PI;
   return [Number.isFinite(lon) ? lon : 0, Number.isFinite(lat) ? lat : 0];
+}
+
+/** Globe camera that faces the data's spherical centroid (radians), or null without lat/lon. */
+export function globeCameraForData(
+  rows: unknown[][],
+  columns: string[],
+  xField: string,
+  yField: string | null,
+): { yaw: number; pitch: number } | null {
+  const { lonI, latI } = resolveLonLat(columns, xField, yField);
+  if (lonI < 0 || latI < 0) return null;
+  const pts = collectPoints(rows, lonI, latI, -1, -1);
+  if (!pts.length) return null;
+  const [lon, lat] = sphericalCentroid(pts);
+  return { yaw: (lon * Math.PI) / 180, pitch: (Math.max(-60, Math.min(60, lat)) * Math.PI) / 180 };
 }
 
 type SphereFrame = { cx: number; cy: number; R: number };
