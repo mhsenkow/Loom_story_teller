@@ -245,6 +245,18 @@ type SourceFetcher = (ctx: WaitUntil) => Promise<string>;
 const OPEN_METEO_LATS = WORLD_CITIES.map((c) => c.lat).join(",");
 const OPEN_METEO_LONS = WORLD_CITIES.map((c) => c.lon).join(",");
 
+/**
+ * Launch Library 2 allows ~15 calls/hour per IP, which Cloudflare's shared egress
+ * exhausts quickly. Fall back to the unthrottled dev mirror (same API, data can lag).
+ */
+async function spaceDevsText(path: string): Promise<string> {
+  try {
+    return await upstreamText("Space Devs", `https://ll.thespacedevs.com${path}`, 15_000);
+  } catch {
+    return upstreamText("Space Devs (dev mirror)", `https://lldev.thespacedevs.com${path}`, 15_000);
+  }
+}
+
 const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   usgs: () =>
     upstreamText("USGS", "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"),
@@ -304,14 +316,23 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     } catch {
       /* fall through */
     }
-    const settled = await Promise.allSettled(
-      ADSB_POINTS.map((p) => upstreamJson("ADSB.lol", `https://api.adsb.lol/v2/point/${p.lat}/${p.lon}/250`, 8_000)),
-    );
-    const ok = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-    if (ok.length === 0) {
-      const first = settled.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
-      throw new UpstreamError(`OpenSky and ADSB.lol failed (${first?.reason instanceof Error ? first.reason.message : "unknown"})`);
+    // ADSB.lol tolerates only 2–3 quick calls per IP: go one point at a time, spaced out,
+    // starting at a rotating point so coverage moves across the US between polls, and
+    // keep whatever arrived before the first 429.
+    const start = Math.floor(Date.now() / 60_000) % ADSB_POINTS.length;
+    const ok: unknown[] = [];
+    let lastError = "";
+    for (let i = 0; i < ADSB_POINTS.length; i++) {
+      const p = ADSB_POINTS[(start + i) % ADSB_POINTS.length]!;
+      try {
+        ok.push(await upstreamJson("ADSB.lol", `https://api.adsb.lol/v2/point/${p.lat}/${p.lon}/250`, 8_000));
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : String(e);
+        break;
+      }
+      if (i < ADSB_POINTS.length - 1) await new Promise((r) => setTimeout(r, 1_200));
     }
+    if (ok.length === 0) throw new UpstreamError(`OpenSky and ADSB.lol failed (${lastError || "unknown"})`);
     return JSON.stringify(adsbToOpensky(ok));
   },
 
@@ -345,16 +366,11 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   },
 
   // normal mode: pad / agency / rocket / mission.orbit objects (list mode only has strings)
-  launches: () =>
-    upstreamText("Space Devs", "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40&mode=normal", 15_000),
+  launches: () => spaceDevsText("/2.2.0/launch/upcoming/?limit=40&mode=normal"),
 
   spacex: async () => {
     // api.spacexdata.com is gone — Launch Library 2 (normal mode for mission descriptions).
-    const body = await upstreamJson(
-      "Space Devs",
-      "https://ll.thespacedevs.com/2.2.0/launch/previous/?lsp__name=SpaceX&limit=100&mode=normal",
-      15_000,
-    );
+    const body = JSON.parse(await spaceDevsText("/2.2.0/launch/previous/?lsp__name=SpaceX&limit=100&mode=normal"));
     return JSON.stringify(ll2ToSpacex(body));
   },
 
@@ -430,7 +446,7 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
 /** Fresh-for seconds per kind (roughly the upstream's own update cadence). */
 const SOURCE_TTL_SECS: Record<string, number> = {
   iss: 5,
-  opensky: 30,
+  opensky: 60,
   usgs: 60,
   crypto: 60,
   citibike: 60,
