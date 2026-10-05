@@ -29,6 +29,7 @@ import { Onboarding } from "@/components/Onboarding";
 import { WhatsNew } from "@/components/WhatsNew";
 import { requestWhatsNew } from "@/lib/changelog";
 import { FeedbackNotes } from "@/components/FeedbackNotes";
+import { SuiteMenu } from "@/components/SuiteMenu";
 import { VizSwipeDeck } from "@/components/VizSwipeDeck";
 import { ShareSheet } from "@/components/ShareSheet";
 import { useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
@@ -840,8 +841,13 @@ function HomeContent({
           {!socialExportReady && <DetailPanel />}
         </div>
 
-        {/* Preview as footer */}
-        {!socialExportReady && <PreviewFooter />}
+        {/* Preview as footer — suite waffle docks just above it (rides expand/collapse) */}
+        {!socialExportReady && (
+          <div className="relative shrink-0">
+            <SuiteMenu />
+            <PreviewFooter />
+          </div>
+        )}
       </div>
     </div>
   );
