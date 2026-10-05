@@ -153,7 +153,7 @@ export interface ChartRecommendation {
   timeField?: string | null;
   /** Optional entity id for trail ribbons. */
   trailId?: string | null;
-  /** Optional row facet (bar, line, area). */
+  /** Optional row facet / small multiples (bar, line, area, scatter). */
   rowField?: string | null;
   /** Optional glow encoding (scatter): column drives glow on/off or intensity. */
   glowField?: string | null;
@@ -163,6 +163,12 @@ export interface ChartRecommendation {
   opacityField?: string | null;
   /** Aggregation for Y (or theta) when chart type uses it: bar, line, area, pie. */
   yAggregate?: YAggregateOption | null;
+  /** Cap categories by value rank (bar and similar). Null = default. */
+  topN?: number | null;
+  /** Second numeric measure drawn as a dashed overlay (line / area). */
+  y2Field?: string | null;
+  /** Overlay the earlier half of a time series as “previous” (line / area). */
+  comparePrevious?: boolean | null;
   /** Explicit tooltip column names; when unset, encoding fields are used. */
   tooltipFields?: string[] | null;
   /** Identity column for cross-chart tooltip link / lock (L key). */
@@ -335,6 +341,7 @@ export function createScatterRec(
     glowField?: string | null;
     outlineField?: string | null;
     opacityField?: string | null;
+    rowField?: string | null;
     tooltipFields?: string[] | null;
     tooltipKeyField?: string | null;
   },
@@ -349,14 +356,23 @@ export function createScatterRec(
   if (sizeField) {
     encoding.size = { field: sizeField, type: "quantitative", scale: { range: [12, 96] } };
   }
+  const rowField = visualEncoding?.rowField ?? null;
+  if (rowField) {
+    encoding.row = { field: rowField, type: "nominal", header: { title: rowField } };
+  }
   const colorCol = colorField ? columns.find(c => c.name === colorField) : null;
   const mark: { type: "circle"; opacity: number; size?: number } = { type: "circle", opacity: 0.65 };
   if (!sizeField) mark.size = 12;
+  const parts = [
+    sizeField ? `size by ${sizeField}` : null,
+    colorCol ? `colored by ${colorCol.name}` : null,
+    rowField ? `facets by ${rowField}` : null,
+  ].filter(Boolean);
   return {
-    id: `scatter-${xField}-${yField}-${colorField ?? "n"}-${sizeField ?? "n"}`,
+    id: `scatter-${xField}-${yField}-${colorField ?? "n"}-${sizeField ?? "n"}${rowField ? `-row:${rowField}` : ""}`,
     kind: "scatter",
     title: `${xField} vs ${yField}`,
-    subtitle: sizeField ? `size by ${sizeField}` : (colorCol ? `colored by ${colorCol.name}` : "numeric relationship"),
+    subtitle: parts.length ? parts.join("; ") : "numeric relationship",
     score: 70,
     spec: {
       $schema: "https://vega.github.io/schema/vega-lite/v5.json",
@@ -370,6 +386,7 @@ export function createScatterRec(
     yField,
     colorField,
     sizeField: sizeField ?? undefined,
+    rowField: rowField ?? undefined,
     glowField: visualEncoding?.glowField ?? undefined,
     outlineField: visualEncoding?.outlineField ?? undefined,
     opacityField: visualEncoding?.opacityField ?? undefined,
@@ -503,6 +520,9 @@ export function createChartRec(
     outlineField?: string | null;
     opacityField?: string | null;
     yAggregate?: YAggregateOption | null;
+    topN?: number | null;
+    y2Field?: string | null;
+    comparePrevious?: boolean | null;
     tooltipFields?: string[] | null;
     tooltipKeyField?: string | null;
     barStackMode?: "grouped" | "stacked" | "percent";
@@ -517,6 +537,9 @@ export function createChartRec(
   const outlineField = extra?.outlineField ?? null;
   const opacityField = extra?.opacityField ?? null;
   const yAggregate = extra?.yAggregate ?? null;
+  const topN = extra?.topN ?? null;
+  const y2Field = extra?.y2Field && numCols.some((c) => c.name === extra.y2Field) ? extra.y2Field : null;
+  const comparePrevious = extra?.comparePrevious ?? null;
   const barStackMode = extra?.barStackMode ?? "grouped";
 
   if (kind === "scatter") {
@@ -525,6 +548,7 @@ export function createChartRec(
       glowField,
       outlineField,
       opacityField,
+      rowField,
       tooltipFields: extra?.tooltipFields,
       tooltipKeyField: extra?.tooltipKeyField ?? undefined,
     });
@@ -591,7 +615,14 @@ export function createChartRec(
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       if (rowField) enc.row = { field: rowField, type: "nominal", header: { title: rowField } };
       title = yField ? `${yField} (${aggLabel(agg)}) over ${xField}` : `Count over ${xField}`;
-      subtitle = rowField ? `by ${rowField}` : (colorField ? `split by ${colorField}` : "time trend");
+      {
+        const bits: string[] = [];
+        if (rowField) bits.push(`by ${rowField}`);
+        else if (colorField) bits.push(`split by ${colorField}`);
+        if (y2Field) bits.push(`vs ${y2Field}`);
+        if (comparePrevious) bits.push("vs earlier half");
+        subtitle = bits.length ? bits.join("; ") : "time trend";
+      }
       break;
     }
     case "heatmap":
@@ -628,7 +659,14 @@ export function createChartRec(
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       if (rowField) enc.row = { field: rowField, type: "nominal", header: { title: rowField } };
       title = yField ? `${yField} (${aggLabel(agg)}) over ${xField}` : `Count over ${xField}`;
-      subtitle = rowField ? `by ${rowField}` : (colorField ? `stacked by ${colorField}` : "area");
+      {
+        const bits: string[] = [];
+        if (rowField) bits.push(`by ${rowField}`);
+        else if (colorField) bits.push(`stacked by ${colorField}`);
+        if (y2Field) bits.push(`vs ${y2Field}`);
+        if (comparePrevious) bits.push("vs earlier half");
+        subtitle = bits.length ? bits.join("; ") : "area";
+      }
       break;
     }
     case "pie": {
@@ -891,6 +929,9 @@ export function createChartRec(
     outlineField: outlineField ?? undefined,
     opacityField: opacityField ?? undefined,
     yAggregate: effectiveYAggregate ?? undefined,
+    topN: topN ?? undefined,
+    y2Field: y2Field ?? undefined,
+    comparePrevious: comparePrevious || undefined,
     tooltipFields: extra?.tooltipFields,
     tooltipKeyField: extra?.tooltipKeyField,
   };
@@ -2771,6 +2812,54 @@ export function recommendSourceStory(
     };
   }
 
+  if (kind === "firms") {
+    return {
+      title: "Active fires (VIIRS)",
+      charts: [
+        mk("geoPoints", "Fire map", "Hotspots sized by fire radiative power", 98, "longitude", "latitude", "confidence", null, "frp"),
+        mk("geoBubbles", "Fire power bubbles", "Bigger = more FRP", 94, "longitude", "latitude", "daynight", null, "frp"),
+        mk("scatter", "Brightness vs power", "TI4 brightness against FRP", 88, "bright_ti4", "frp", "confidence"),
+        mk("bar", "By confidence", "How many high / nominal / low detections?", 80, "confidence", null, null, "count"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "nwis") {
+    return {
+      title: "US river gauges",
+      charts: [
+        mk("line", "Discharge by site", "Cubic feet per second over the past 2 days", 98, "ts", "discharge_cfs", "site_name", "mean"),
+        mk("line", "Gage height", "Stage in feet by river", 92, "ts", "gage_height_ft", "site_name", "mean"),
+        mk("geoBubbles", "Latest flow on the map", "Sites sized by recent discharge", 88, "longitude", "latitude", "site_name", null, "discharge_cfs"),
+        mk("scatter", "Stage vs discharge", "How height tracks flow", 82, "gage_height_ft", "discharge_cfs", "site_name"),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "starlink") {
+    return {
+      title: "Starlink constellation",
+      charts: [
+        mk("scatter", "Inclination vs mean motion", "Orbital families in the fleet", 96, "inclination", "mean_motion", null),
+        mk("histogram", "Inclination spread", "How tightly clustered are the planes?", 90, "inclination", null, null),
+        mk("scatter", "Eccentricity vs mean motion", "Near-circular LEO shell", 86, "eccentricity", "mean_motion", null),
+        mk("beeswarm", "Mean motion swarm", "Every sat as a dot along orbits/day", 80, "object_name", "mean_motion", null),
+      ].slice(0, 5),
+    };
+  }
+
+  if (kind === "lobsters") {
+    return {
+      title: "Lobsters hottest",
+      charts: [
+        mk("bar", "Top by score", "What's hottest right now?", 95, "title", "score", null, "max"),
+        mk("scatter", "Score vs comments", "Discussion intensity", 90, "score", "comment_count", "author"),
+        mk("bar", "Active authors", "Who is posting?", 82, "author", null, null, "count"),
+        mk("histogram", "Score distribution", "How viral is the front page?", 78, "score", null, null),
+      ].slice(0, 5),
+    };
+  }
+
   return { title: `${kind} data`, charts: [] };
 }
 
@@ -2807,6 +2896,22 @@ export const SOURCE_SQL_SNIPPETS: Record<string, { name: string; sql: string }[]
   hn: [
     { name: "Top by points", sql: "SELECT title, points, num_comments, author FROM hn_stories ORDER BY points DESC LIMIT 20" },
     { name: "Discussion intensity", sql: "SELECT title, points, num_comments FROM hn_stories ORDER BY num_comments DESC LIMIT 20" },
+  ],
+  lobsters: [
+    { name: "Top by score", sql: "SELECT title, score, comment_count, author, tags FROM lobsters_stories ORDER BY score DESC LIMIT 20" },
+    { name: "Discussion intensity", sql: "SELECT title, score, comment_count, tags FROM lobsters_stories ORDER BY comment_count DESC LIMIT 20" },
+  ],
+  firms: [
+    { name: "Hottest fires", sql: "SELECT latitude, longitude, frp, bright_ti4, confidence, acq_ts FROM firms_fires ORDER BY frp DESC LIMIT 30" },
+    { name: "By confidence", sql: "SELECT confidence, COUNT(*) AS cnt, AVG(frp) AS avg_frp FROM firms_fires GROUP BY confidence ORDER BY cnt DESC" },
+  ],
+  nwis: [
+    { name: "Latest discharge", sql: "SELECT site_name, ts, discharge_cfs, gage_height_ft FROM nwis_gauges ORDER BY ts DESC LIMIT 40" },
+    { name: "Site averages", sql: "SELECT site_name, AVG(discharge_cfs) AS avg_cfs, AVG(gage_height_ft) AS avg_ft FROM nwis_gauges GROUP BY site_name ORDER BY avg_cfs DESC" },
+  ],
+  starlink: [
+    { name: "Orbital sample", sql: "SELECT object_name, inclination, mean_motion, eccentricity, epoch FROM starlink_sats ORDER BY mean_motion DESC LIMIT 50" },
+    { name: "Inclination bands", sql: "SELECT ROUND(inclination, 0) AS inc_deg, COUNT(*) AS sats FROM starlink_sats GROUP BY 1 ORDER BY sats DESC LIMIT 20" },
   ],
   crypto: [
     { name: "Market leaders", sql: "SELECT symbol, name, price_usd, market_cap, change_24h_pct FROM crypto_markets ORDER BY rank ASC LIMIT 20" },

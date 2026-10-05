@@ -26,9 +26,12 @@ import {
   mempoolBlocks,
   mempoolLowestHeight,
   mergeUkCarbon,
+  firmsViirsCsv,
   ndbcLatestObs,
+  nwisIvWide,
   openMeteoCities,
   paprikaToGecko,
+  starlinkGp,
   steamTop,
   treasuryDebt,
   trimNwsAlerts,
@@ -398,6 +401,8 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
 
   hn: () => upstreamText("HN", "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=50"),
 
+  lobsters: () => upstreamText("Lobsters", "https://lobste.rs/hottest.json"),
+
   pageviews: async () => {
     // Yesterday (UTC) lands a few hours after midnight — fall back to the day before.
     const url = (d: string) =>
@@ -528,6 +533,38 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     );
     return JSON.stringify(treasuryDebt(body));
   },
+
+  firms: async () => {
+    // Keyless USA contiguous + Hawaii 24h VIIRS CSV (~100 KB). Global 24h is multi-MB — skip.
+    const text = await upstreamText(
+      "NASA FIRMS",
+      "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_USA_contiguous_and_Hawaii_24h.csv",
+      20_000,
+    );
+    return JSON.stringify(firmsViirsCsv(text));
+  },
+
+  nwis: async () => {
+    const sites = "01646500,05420500,06934500,07374000,09380000,11427100,14211720,05587455";
+    const url =
+      `https://waterservices.usgs.gov/nwis/iv/?format=json&sites=${sites}` +
+      `&parameterCd=00060,00065&period=P2D`;
+    const body = await upstreamJson("USGS NWIS", url, 20_000);
+    return JSON.stringify(nwisIvWide(body));
+  },
+
+  starlink: async () => {
+    // CelesTrak updates ~every 2h; shorter polls return HTTP 403 text — cache hard.
+    const text = await upstreamText(
+      "CelesTrak",
+      "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json",
+      30_000,
+    );
+    if (text.trimStart().startsWith("GP data has not updated") || text.trimStart().startsWith("<")) {
+      throw new UpstreamError("CelesTrak: GP not updated yet (try again after the 2h refresh)");
+    }
+    return JSON.stringify(starlinkGp(JSON.parse(text)));
+  },
 };
 
 /** Fresh-for seconds per kind (roughly the upstream's own update cadence). */
@@ -540,12 +577,15 @@ const SOURCE_TTL_SECS: Record<string, number> = {
   crypto: 60,
   citibike: 60,
   hn: 60,
+  lobsters: 120,
   iss_trail: 60,
   nyc311: 300,
   nws: 300,
+  nwis: 300,
   meteo: 600,
   aq: 600,
   eonet: 600,
+  firms: 600,
   ukcarbon: 900,
   spaceweather: 900,
   aurora: 300,
@@ -557,6 +597,7 @@ const SOURCE_TTL_SECS: Record<string, number> = {
   fema: 3600,
   covid: 3600,
   pageviews: 3600,
+  starlink: 7200,
   asteroids: 21_600,
   steam: 21_600,
   countries: 86_400,

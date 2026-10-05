@@ -167,6 +167,28 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         mode: WriteMode::Replace,
     },
     SourceSpec {
+        kind: "firms",
+        table: "firms_fires",
+        columns: &[
+            ("id", V), ("latitude", D), ("longitude", D), ("bright_ti4", D), ("bright_ti5", D),
+            ("frp", D), ("confidence", V), ("satellite", V), ("acq_ts", TS), ("daynight", V),
+        ],
+        order_by: "frp DESC",
+        poll_secs: 600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "nwis",
+        table: "nwis_gauges",
+        columns: &[
+            ("site_id", V), ("site_name", V), ("ts", TS), ("latitude", D), ("longitude", D),
+            ("discharge_cfs", D), ("gage_height_ft", D),
+        ],
+        order_by: "ts DESC",
+        poll_secs: 300,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
         kind: "opensky",
         table: "opensky_aircraft",
         columns: &[
@@ -273,6 +295,18 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         mode: WriteMode::Replace,
     },
     SourceSpec {
+        kind: "starlink",
+        table: "starlink_sats",
+        columns: &[
+            ("norad_cat_id", I), ("object_name", V), ("object_id", V), ("epoch", TS),
+            ("inclination", D), ("eccentricity", D), ("mean_motion", D), ("raan", D),
+            ("arg_perigee", D), ("mean_anomaly", D), ("bstar", D),
+        ],
+        order_by: "mean_motion DESC",
+        poll_secs: 7200,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
         kind: "hn",
         table: "hn_stories",
         columns: &[
@@ -280,6 +314,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
             ("created_at", TS),
         ],
         order_by: "points DESC",
+        poll_secs: 120,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "lobsters",
+        table: "lobsters_stories",
+        columns: &[
+            ("id", V), ("title", V), ("author", V), ("score", I), ("comment_count", I), ("url", V),
+            ("tags", V), ("created_at", TS),
+        ],
+        order_by: "score DESC",
         poll_secs: 120,
         mode: WriteMode::Replace,
     },
@@ -1703,6 +1748,264 @@ pub(crate) fn hn_rows(body: &Value) -> Result<Vec<Row>, String> {
         .collect())
 }
 
+// ---- Lobsters hottest ----
+
+const LOBSTERS_URL: &str = "https://lobste.rs/hottest.json";
+
+pub(crate) fn lobsters_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let hits = body.as_array().ok_or("Lobsters: expected array")?;
+    Ok(hits
+        .iter()
+        .map(|h| {
+            let author = h
+                .get("submitter_user")
+                .and_then(|u| {
+                    if let Some(s) = u.as_str() {
+                        Some(s.to_string())
+                    } else {
+                        u.get("username").and_then(Value::as_str).map(str::to_string)
+                    }
+                })
+                .unwrap_or_default();
+            let tags = h
+                .get("tags")
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                })
+                .unwrap_or_default();
+            vec![
+                js(h.get("short_id")),
+                js(h.get("title")),
+                Cell::Str(author),
+                ji(h.get("score")),
+                ji(h.get("comment_count")),
+                js(h.get("url")),
+                Cell::Str(tags),
+                jts(h.get("created_at")),
+            ]
+        })
+        .collect())
+}
+
+// ---- NASA FIRMS VIIRS CSV ----
+
+const FIRMS_URL: &str = "https://firms.modaps.eosdis.nasa.gov/data/active_fire/noaa-20-viirs-c2/csv/J1_VIIRS_C2_USA_contiguous_and_Hawaii_24h.csv";
+
+pub(crate) fn firms_rows(text: &str) -> Result<Vec<Row>, String> {
+    let mut lines = text.lines().filter(|l| !l.trim().is_empty());
+    let header = lines.next().ok_or("FIRMS: empty CSV")?;
+    let names: Vec<&str> = header.split(',').map(str::trim).collect();
+    let at = |n: &str| names.iter().position(|h| h.eq_ignore_ascii_case(n));
+    let lat_i = at("latitude").ok_or("FIRMS: no latitude")?;
+    let lon_i = at("longitude").ok_or("FIRMS: no longitude")?;
+    let b4 = at("bright_ti4");
+    let b5 = at("bright_ti5");
+    let frp = at("frp");
+    let conf = at("confidence");
+    let sat = at("satellite");
+    let date_i = at("acq_date");
+    let time_i = at("acq_time");
+    let dn = at("daynight");
+    let num = |parts: &[&str], i: Option<usize>| {
+        i.and_then(|i| parts.get(i)).and_then(|v| v.parse::<f64>().ok())
+    };
+    let rows: Vec<Row> = lines
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split(',').collect();
+            let lat = num(&parts, Some(lat_i))?;
+            let lon = num(&parts, Some(lon_i))?;
+            let date = date_i.and_then(|i| parts.get(i)).copied().unwrap_or("");
+            let time_raw = time_i
+                .and_then(|i| parts.get(i))
+                .map(|t| format!("{:0>4}", t.trim()))
+                .unwrap_or_default();
+            let acq_ts = if date.len() == 10 && time_raw.len() == 4 {
+                Cell::Str(format!(
+                    "{}T{}:{}:00Z",
+                    date,
+                    &time_raw[..2],
+                    &time_raw[2..]
+                ))
+            } else {
+                Cell::Null
+            };
+            let id = format!("{:.4}_{:.4}_{}_{}", lat, lon, date, time_raw);
+            let s_at = |i: Option<usize>| {
+                i.and_then(|i| parts.get(i))
+                    .map(|s| s.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(|s| Cell::str(s))
+                    .unwrap_or(Cell::Null)
+            };
+            Some(vec![
+                Cell::Str(id),
+                Cell::F64(lat),
+                Cell::F64(lon),
+                Cell::opt_f64(num(&parts, b4)),
+                Cell::opt_f64(num(&parts, b5)),
+                Cell::opt_f64(num(&parts, frp)),
+                s_at(conf),
+                s_at(sat),
+                acq_ts,
+                s_at(dn),
+            ])
+        })
+        .collect();
+    if rows.is_empty() {
+        return Err("FIRMS: no hotspots".into());
+    }
+    Ok(rows)
+}
+
+// ---- USGS NWIS river gauges ----
+
+fn nwis_url() -> String {
+    let sites = "01646500,05420500,06934500,07374000,09380000,11427100,14211720,05587455";
+    format!(
+        "https://waterservices.usgs.gov/nwis/iv/?format=json&sites={}&parameterCd=00060,00065&period=P2D",
+        sites
+    )
+}
+
+pub(crate) fn nwis_rows(body: &Value) -> Result<Vec<Row>, String> {
+    use std::collections::BTreeMap;
+    struct Acc {
+        site_name: String,
+        lat: Option<f64>,
+        lon: Option<f64>,
+        by_ts: BTreeMap<String, (Option<f64>, Option<f64>)>,
+    }
+    let series = body
+        .pointer("/value/timeSeries")
+        .and_then(Value::as_array)
+        .ok_or("NWIS: no timeSeries")?;
+    let mut sites: HashMap<String, Acc> = HashMap::new();
+    for s in series {
+        let info = s.get("sourceInfo").unwrap_or(&Value::Null);
+        let site_id = info
+            .pointer("/siteCode/0/value")
+            .and_then(Value::as_str)
+            .or_else(|| info.get("siteCode").and_then(Value::as_str))
+            .unwrap_or("")
+            .to_string();
+        if site_id.is_empty() {
+            continue;
+        }
+        let site_name = info
+            .get("siteName")
+            .and_then(Value::as_str)
+            .unwrap_or(&site_id)
+            .to_string();
+        let lat = info
+            .pointer("/geoLocation/geogLocation/latitude")
+            .and_then(Value::as_f64);
+        let lon = info
+            .pointer("/geoLocation/geogLocation/longitude")
+            .and_then(Value::as_f64);
+        let var_code = s
+            .pointer("/variable/variableCode/0/value")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let values = s
+            .pointer("/values/0/value")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let acc = sites.entry(site_id).or_insert_with(|| Acc {
+            site_name: site_name.clone(),
+            lat,
+            lon,
+            by_ts: BTreeMap::new(),
+        });
+        for v in values {
+            let ts = v
+                .get("dateTime")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            if ts.is_empty() {
+                continue;
+            }
+            let n = v
+                .get("value")
+                .and_then(|x| x.as_str().and_then(|s| s.parse().ok()).or_else(|| x.as_f64()));
+            let cell = acc.by_ts.entry(ts).or_insert((None, None));
+            if var_code == "00060" {
+                cell.0 = n;
+            } else if var_code == "00065" {
+                cell.1 = n;
+            }
+        }
+    }
+    let mut rows = Vec::new();
+    for (site_id, acc) in sites {
+        for (ts, (q, h)) in acc.by_ts {
+            if q.is_none() && h.is_none() {
+                continue;
+            }
+            rows.push(vec![
+                Cell::Str(site_id.clone()),
+                Cell::Str(acc.site_name.clone()),
+                Cell::Str(ts),
+                Cell::opt_f64(acc.lat),
+                Cell::opt_f64(acc.lon),
+                Cell::opt_f64(q),
+                Cell::opt_f64(h),
+            ]);
+        }
+    }
+    if rows.is_empty() {
+        return Err("NWIS: no gauge readings".into());
+    }
+    rows.sort_by(|a, b| match (&a[2], &b[2]) {
+        (Cell::Str(x), Cell::Str(y)) => y.cmp(x),
+        _ => std::cmp::Ordering::Equal,
+    });
+    Ok(rows)
+}
+
+// ---- CelesTrak Starlink ----
+
+const STARLINK_URL: &str = "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json";
+const STARLINK_CAP: usize = 2500;
+
+pub(crate) fn starlink_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let list = body.as_array().ok_or("Starlink: expected array")?;
+    let mut rows = Vec::new();
+    for item in list {
+        if rows.len() >= STARLINK_CAP {
+            break;
+        }
+        let id = item.get("NORAD_CAT_ID").and_then(as_i64_loose);
+        let Some(id) = id else { continue };
+        let name = item.get("OBJECT_NAME").and_then(Value::as_str).unwrap_or("");
+        if name.to_uppercase().contains("DEB") {
+            continue;
+        }
+        rows.push(vec![
+            Cell::I64(id),
+            js(item.get("OBJECT_NAME")),
+            js(item.get("OBJECT_ID")),
+            jts(item.get("EPOCH")),
+            jf(item.get("INCLINATION")),
+            jf(item.get("ECCENTRICITY")),
+            jf(item.get("MEAN_MOTION")),
+            jf(item.get("RA_OF_ASC_NODE")),
+            jf(item.get("ARG_OF_PERICENTER")),
+            jf(item.get("MEAN_ANOMALY")),
+            jf(item.get("BSTAR")),
+        ]);
+    }
+    if rows.is_empty() {
+        return Err("Starlink: no satellites".into());
+    }
+    Ok(rows)
+}
+
 // ---- Wikipedia most-read ----
 
 fn pageviews_url(days: i64) -> String {
@@ -2632,7 +2935,19 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
         "spaceweather" => kp_rows(&get_json(&c, KP_URL).await?),
         "aurora" => aurora_rows(&get_json(&c, AURORA_URL).await?),
         "asteroids" => asteroids_rows(&get_json(&c, ASTEROIDS_URL).await?),
+        "firms" => firms_rows(&get_text(&c, FIRMS_URL).await?),
+        "nwis" => nwis_rows(&get_json(&c, &nwis_url()).await?),
+        "starlink" => {
+            let text = get_text(&c, STARLINK_URL).await?;
+            if text.trim_start().starts_with("GP data has not updated") {
+                return Err("CelesTrak: GP not updated yet".into());
+            }
+            let body: Value =
+                serde_json::from_str(&text).map_err(|e| format!("Starlink JSON: {}", e))?;
+            starlink_rows(&body)
+        }
         "hn" => hn_rows(&get_json(&c, HN_URL).await?),
+        "lobsters" => lobsters_rows(&get_json(&c, LOBSTERS_URL).await?),
         "pageviews" => {
             // Yesterday (UTC) is published a few hours after midnight; fall back one more day.
             let body = match get_json(&c, &pageviews_url(today - 1)).await {

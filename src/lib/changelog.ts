@@ -25,6 +25,29 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-05",
+    date: "2026-10-05",
+    title: "Facets, compare, and four new live feeds",
+    summary: "Small multiples and Top N on Encoding, compare overlays on lines, plus fires, rivers, Starlink, and Lobsters.",
+    items: [
+      {
+        title: "Facet, Split, and Top N",
+        detail:
+          "Encoding can split a chart into small multiples (Facet), switch Color vs Facet with Split chips, and cap bars to Top 10–50 categories.",
+      },
+      {
+        title: "Compare on line and area",
+        detail:
+          "Map a second measure to Compare Y, or overlay the earlier half of a time series — dashed so you can read change at a glance.",
+      },
+      {
+        title: "Four new live feeds",
+        detail:
+          "NASA VIIRS active fires over the US, USGS river gauges, CelesTrak Starlink orbital elements, and Lobsters hottest stories.",
+      },
+    ],
+  },
+  {
     id: "2026-10-02e",
     date: "2026-10-02",
     title: "Thousands more datasets, and charts that switch cleanly",

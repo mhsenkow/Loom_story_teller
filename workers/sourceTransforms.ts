@@ -781,3 +781,152 @@ export function treasuryDebt(body: unknown): Columnar {
     rows: [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).map((e) => e[1]),
   };
 }
+
+// ---- NASA FIRMS VIIRS (USA 24h CSV) ----
+
+export const FIRMS_COLUMNS = [
+  "id", "latitude", "longitude", "bright_ti4", "bright_ti5", "frp", "confidence", "satellite", "acq_ts", "daynight",
+];
+
+/** NOAA-20 VIIRS active-fire CSV → one hotspot per row. */
+export function firmsViirsCsv(text: string): Columnar {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  if (lines.length < 2) return { columns: FIRMS_COLUMNS, rows: [] };
+  const header = lines[0]!.split(",").map((h) => h.trim().toLowerCase());
+  const at = (n: string) => header.indexOf(n);
+  const ix = {
+    lat: at("latitude"),
+    lon: at("longitude"),
+    b4: at("bright_ti4"),
+    b5: at("bright_ti5"),
+    frp: at("frp"),
+    conf: at("confidence"),
+    sat: at("satellite"),
+    date: at("acq_date"),
+    time: at("acq_time"),
+    dn: at("daynight"),
+  };
+  const rows: unknown[][] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const f = lines[i]!.split(",");
+    const lat = numOrNull(f[ix.lat]);
+    const lon = numOrNull(f[ix.lon]);
+    if (lat == null || lon == null) continue;
+    const date = String(f[ix.date] ?? "").trim();
+    const timeRaw = String(f[ix.time] ?? "").trim().padStart(4, "0");
+    const hh = timeRaw.slice(0, 2);
+    const mm = timeRaw.slice(2, 4);
+    const acqTs = /^\d{4}-\d{2}-\d{2}$/.test(date) && /^\d{4}$/.test(timeRaw)
+      ? `${date}T${hh}:${mm}:00Z`
+      : null;
+    const id = `${lat.toFixed(4)}_${lon.toFixed(4)}_${date}_${timeRaw}`;
+    rows.push([
+      id,
+      lat,
+      lon,
+      numOrNull(f[ix.b4]),
+      numOrNull(f[ix.b5]),
+      numOrNull(f[ix.frp]),
+      strOrNull(f[ix.conf]),
+      strOrNull(f[ix.sat]),
+      acqTs,
+      strOrNull(f[ix.dn]),
+    ]);
+  }
+  return { columns: FIRMS_COLUMNS, rows };
+}
+
+// ---- USGS NWIS instantaneous values (wide by site × time) ----
+
+export const NWIS_COLUMNS = [
+  "site_id", "site_name", "ts", "latitude", "longitude", "discharge_cfs", "gage_height_ft",
+];
+
+/** NWIS IV JSON → one row per site × timestamp with discharge + stage joined. */
+export function nwisIvWide(body: unknown): Columnar {
+  type Acc = {
+    site_name: string;
+    lat: number | null;
+    lon: number | null;
+    byTs: Map<string, { discharge_cfs: number | null; gage_height_ft: number | null }>;
+  };
+  const sites = new Map<string, Acc>();
+  const series = asArr(asObj(asObj(body).value).timeSeries);
+  for (const s of series) {
+    const o = asObj(s);
+    const info = asObj(o.sourceInfo);
+    const siteCode = asArr(info.siteCode)[0];
+    const siteId = strOrNull(asObj(siteCode).value) ?? strOrNull(info.siteCode);
+    if (!siteId) continue;
+    const geo = asObj(asObj(info.geoLocation).geogLocation);
+    const lat = numOrNull(geo.latitude);
+    const lon = numOrNull(geo.longitude);
+    const siteName = strOrNull(info.siteName) ?? siteId;
+    const varCode = strOrNull(asObj(asArr(asObj(o.variable).variableCode)[0]).value);
+    const values = asArr(asObj(asArr(o.values)[0]).value);
+    let acc = sites.get(siteId);
+    if (!acc) {
+      acc = { site_name: siteName, lat, lon, byTs: new Map() };
+      sites.set(siteId, acc);
+    }
+    for (const v of values) {
+      const p = asObj(v);
+      const ts = utcIso(p.dateTime) ?? strOrNull(p.dateTime);
+      if (!ts) continue;
+      let cell = acc.byTs.get(ts);
+      if (!cell) {
+        cell = { discharge_cfs: null, gage_height_ft: null };
+        acc.byTs.set(ts, cell);
+      }
+      const n = numOrNull(p.value);
+      if (varCode === "00060") cell.discharge_cfs = n;
+      else if (varCode === "00065") cell.gage_height_ft = n;
+    }
+  }
+  const rows: unknown[][] = [];
+  for (const [siteId, acc] of sites) {
+    for (const [ts, cell] of acc.byTs) {
+      if (cell.discharge_cfs == null && cell.gage_height_ft == null) continue;
+      rows.push([siteId, acc.site_name, ts, acc.lat, acc.lon, cell.discharge_cfs, cell.gage_height_ft]);
+    }
+  }
+  rows.sort((a, b) => String(b[2]).localeCompare(String(a[2])));
+  return { columns: NWIS_COLUMNS, rows };
+}
+
+// ---- CelesTrak Starlink GP ----
+
+export const STARLINK_COLUMNS = [
+  "norad_cat_id", "object_name", "object_id", "epoch", "inclination", "eccentricity",
+  "mean_motion", "raan", "arg_perigee", "mean_anomaly", "bstar",
+];
+
+const STARLINK_CAP = 2_500;
+
+/** CelesTrak GP JSON → orbital elements (capped). */
+export function starlinkGp(body: unknown): Columnar {
+  const list = asArr(body);
+  const rows: unknown[][] = [];
+  for (const item of list) {
+    if (rows.length >= STARLINK_CAP) break;
+    const o = asObj(item);
+    const id = numOrNull(o.NORAD_CAT_ID);
+    if (id == null) continue;
+    const name = strOrNull(o.OBJECT_NAME) ?? "";
+    if (/\bDEB\b/i.test(name)) continue; // drop named debris
+    rows.push([
+      Math.round(id),
+      name || null,
+      strOrNull(o.OBJECT_ID),
+      utcIso(o.EPOCH) ?? strOrNull(o.EPOCH),
+      numOrNull(o.INCLINATION),
+      numOrNull(o.ECCENTRICITY),
+      numOrNull(o.MEAN_MOTION),
+      numOrNull(o.RA_OF_ASC_NODE),
+      numOrNull(o.ARG_OF_PERICENTER),
+      numOrNull(o.MEAN_ANOMALY),
+      numOrNull(o.BSTAR),
+    ]);
+  }
+  return { columns: STARLINK_COLUMNS, rows };
+}

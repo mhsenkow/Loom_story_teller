@@ -40,6 +40,9 @@ export interface ChartLinkChart {
   outlineField?: string;
   opacityField?: string;
   yAggregate?: YAggregateOption;
+  topN?: number;
+  y2Field?: string;
+  comparePrevious?: boolean;
   tooltipFields?: string[];
   tooltipKeyField?: string;
   /** The recommendation's own title / subtitle (story recs carry hand-written ones). */
@@ -138,6 +141,9 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     outlineField: str(rec.outlineField),
     opacityField: str(rec.opacityField),
     yAggregate: rec.yAggregate ?? undefined,
+    topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
+    y2Field: str(rec.y2Field),
+    comparePrevious: rec.comparePrevious || undefined,
     tooltipFields: rec.tooltipFields?.length ? [...rec.tooltipFields] : undefined,
     tooltipKeyField: str(rec.tooltipKeyField),
     title: str(rec.title),
@@ -177,6 +183,9 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["outlineField", "o"],
   ["opacityField", "op"],
   ["yAggregate", "a"],
+  ["topN", "tn"],
+  ["y2Field", "y2"],
+  ["comparePrevious", "cp"],
   ["tooltipFields", "tf"],
   ["tooltipKeyField", "tk"],
   ["title", "ti"],
@@ -243,11 +252,13 @@ export function decodeChartLink(hash: string): ChartLink | null {
 
   const chart: ChartLinkChart = { kind: kind as ChartKind, xField };
   for (const [f, k] of CHART_KEYS) {
-    if (f === "kind" || f === "xField" || f === "yAggregate" || f === "tooltipFields") continue;
+    if (f === "kind" || f === "xField" || f === "yAggregate" || f === "tooltipFields" || f === "topN" || f === "comparePrevious") continue;
     const v = field(cr[k], f === "title" || f === "subtitle" ? 300 : 200);
     if (v) chart[f] = v;
   }
   if (typeof cr.a === "string" && AGGS.has(cr.a)) chart.yAggregate = cr.a as YAggregateOption;
+  if (typeof cr.tn === "number" && Number.isFinite(cr.tn)) chart.topN = Math.max(3, Math.min(50, Math.round(cr.tn)));
+  if (cr.cp === true) chart.comparePrevious = true;
   if (Array.isArray(cr.tf)) {
     const tf = cr.tf.filter((t): t is string => typeof t === "string" && t.length > 0 && t.length <= 200).slice(0, 40);
     if (tf.length) chart.tooltipFields = tf;
@@ -286,6 +297,7 @@ const ENCODING_FIELDS = [
   "glowField",
   "outlineField",
   "opacityField",
+  "y2Field",
 ] as const;
 
 const norm = (v: unknown) => (v === null || v === undefined || v === "" ? undefined : v);
@@ -325,6 +337,9 @@ export function restoreChartRec(
       outlineField: c.outlineField ?? null,
       opacityField: c.opacityField ?? null,
       yAggregate: c.yAggregate ?? null,
+      topN: c.topN ?? null,
+      y2Field: c.y2Field ?? null,
+      comparePrevious: c.comparePrevious ?? null,
       tooltipFields: c.tooltipFields ?? null,
       tooltipKeyField: c.tooltipKeyField ?? null,
       barStackMode: link.barStackMode ?? "grouped",

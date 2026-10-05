@@ -113,11 +113,25 @@ import {
   rowMatchesTooltipLink,
 } from "@/lib/chartTooltip";
 import { buildBarFacetGrid, type BarFacetHitPayload, type Canvas2DHitContext } from "@/lib/chartTooltip";
+import { partitionRowsByFacet, layoutFacetCells, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 
 const DEFAULT_COLORS = discreteSeriesColors(
   resolveChartColors({ paletteId: "categorical" }),
   8,
 );
+
+/** Shift hit targets after painting a facet cell into a translated clip. */
+function offsetHitTargets(targets: HitTarget[], dx: number, dy: number) {
+  for (const t of targets) {
+    if (t.shape === "rect") {
+      t.x += dx;
+      t.y += dy;
+    } else {
+      t.cx += dx;
+      t.cy += dy;
+    }
+  }
+}
 
 function pointInPolygon(px: number, py: number, poly: { x: number; y: number }[]): boolean {
   let inside = false;
@@ -370,6 +384,9 @@ export function ChartView() {
         return activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum");
       })(),
       barStackMode: activeChart?.kind === "bar" ? barStackMode : undefined,
+      topN: activeChart?.topN ?? undefined,
+      y2Field: activeChart?.y2Field ?? undefined,
+      comparePrevious: activeChart?.comparePrevious ?? undefined,
     };
   }, [colors, continuousStops, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart, barStackMode]);
 
@@ -1994,21 +2011,30 @@ export function ChartView() {
 
         const barColorIdx = cIdx >= 0 && cIdx !== xIdx ? cIdx : -1;
         const barAgg: YAggregateOption = yIdx < 0 ? "count" : (opts.yAggregate ?? "sum");
+        const topN = clampTopN(opts.topN, DEFAULT_TOP_N);
+        const y2Idx = opts.y2Field ? cols.indexOf(opts.y2Field) : -1;
+        const kind = activeChart.kind;
+        const rowIdx = activeChart.rowField ? cols.indexOf(activeChart.rowField) : -1;
+        const facetPanels =
+          rowIdx >= 0 && (kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble")
+            ? partitionRowsByFacet(rows, rowIdx)
+            : [];
+        const useFacets = facetPanels.length >= 2;
+
         let barModel: BarModel | undefined;
         let barFacetPayload: ReturnType<typeof buildBarFacetGrid> | undefined;
-        if (activeChart.kind === "bar") {
+        if (!useFacets && activeChart.kind === "bar") {
           if (barColorIdx >= 0) {
-            barFacetPayload = buildBarFacetGrid(rows, xIdx, yIdx, barColorIdx, barAgg, opts.barStackMode ?? "grouped") ?? undefined;
+            barFacetPayload = buildBarFacetGrid(rows, xIdx, yIdx, barColorIdx, barAgg, opts.barStackMode ?? "grouped", topN) ?? undefined;
           }
-          if (!barFacetPayload) barModel = computeBarModel(rows, xIdx, yIdx, barAgg);
+          if (!barFacetPayload) barModel = computeBarModel(rows, xIdx, yIdx, barAgg, topN);
         }
         const barHorizontal = !!barModel && barsShouldBeHorizontal(ctx, barModel, w, h, pad, opts);
 
         // Only true x/y charts get the shared L-frame; band-gutter charts draw their own
-        const kind = activeChart.kind;
-        const framed = FRAMED_KINDS.has(kind) && !barHorizontal;
+        const framed = !useFacets && FRAMED_KINDS.has(kind) && !barHorizontal;
         if (framed) drawAxisFrame(ctx, w, h, pad, opts);
-        if (FRAMED_KINDS.has(kind) || OWN_FRAME_KINDS.has(kind)) {
+        if (!useFacets && (FRAMED_KINDS.has(kind) || OWN_FRAME_KINDS.has(kind))) {
           const measure = valueTitle(ropts, yIdx, kind === "line" ? "mean" : "sum");
           const yTitle =
             kind === "bar" || kind === "line" || kind === "area" || kind === "waterfall" || kind === "lollipop"
@@ -2045,7 +2071,7 @@ export function ChartView() {
         if (!paintsOwnBackground) drawTitle();
 
         let scatterViewBounds: { xMin: number; xMax: number; yMin: number; yMax: number } | undefined;
-        if (activeChart.kind === "scatter") {
+        if (!useFacets && activeChart.kind === "scatter") {
           const sd = extractScatterData();
           if (sd) {
             scatterViewBounds = getEffectiveScatterBounds(sd, scatterView);
@@ -2053,7 +2079,59 @@ export function ChartView() {
           }
         }
 
-        switch (activeChart.kind) {
+        if (useFacets) {
+          const titleBand = Math.min(56, h * 0.12);
+          const cells = layoutFacetCells(facetPanels, pad * 0.35, titleBand, w - pad * 0.7, h - titleBand - pad * 0.35);
+          const miniPad = Math.max(18, Math.min(36, Math.min(cells[0]?.w ?? 80, cells[0]?.h ?? 80) * 0.18));
+          const labelH = 14;
+          for (let fi = 0; fi < cells.length; fi++) {
+            const cell = cells[fi]!;
+            const panel = facetPanels[fi]!;
+            const cellHits: HitTarget[] = [];
+            const cellOpts: ChartRenderOpts = { ...ropts, hits: cellHits, legend: null, scales: null };
+            const cw = cell.w;
+            const ch = Math.max(40, cell.h - labelH);
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(cell.x, cell.y, cell.w, cell.h);
+            ctx.clip();
+            ctx.translate(cell.x, cell.y);
+            ctx.fillStyle = opts.themeMuted ?? "#6b6b78";
+            ctx.font = `600 10px ${fontFamily}`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "top";
+            const label = panel.key.length > 28 ? `${panel.key.slice(0, 27)}…` : panel.key;
+            ctx.fillText(label, 2, 1);
+            ctx.translate(0, labelH);
+            if (kind === "bar") {
+              let bf: ReturnType<typeof buildBarFacetGrid> | undefined;
+              let bm: BarModel | undefined;
+              if (barColorIdx >= 0) {
+                bf = buildBarFacetGrid(panel.rows, xIdx, yIdx, barColorIdx, barAgg, opts.barStackMode ?? "grouped", topN) ?? undefined;
+              }
+              if (!bf) bm = computeBarModel(panel.rows, xIdx, yIdx, barAgg, topN);
+              const horiz = !!bm && barsShouldBeHorizontal(ctx, bm, cw, ch, miniPad, cellOpts);
+              renderFullBar(ctx, panel.rows, xIdx, yIdx, barColorIdx, cw, ch, miniPad, cellOpts, bf, horiz, bm, cIdx >= 0 && cIdx === xIdx);
+            } else if (kind === "line") {
+              renderFullLine(ctx, panel.rows, xIdx, yIdx, cIdx, cw, ch, miniPad, cellOpts, y2Idx);
+            } else if (kind === "area") {
+              renderFullArea(ctx, panel.rows, xIdx, yIdx, cIdx, cw, ch, miniPad, cellOpts, y2Idx);
+            } else if (kind === "scatter" || kind === "bubble") {
+              renderFullScatter(ctx, panel.rows, xIdx, yIdx, cIdx, sizeIdx, cw, ch, miniPad, cellOpts, {
+                glowIdx,
+                outlineIdx,
+                opacityIdx,
+              });
+            }
+            ctx.restore();
+            offsetHitTargets(cellHits, cell.x, cell.y + labelH);
+            hits.push(...cellHits);
+            if (fi === 0 && cellOpts.legend) ropts.legend = cellOpts.legend;
+            if (fi === 0 && cellOpts.scales) ropts.scales = cellOpts.scales;
+          }
+        }
+
+        if (!useFacets) switch (activeChart.kind) {
           case "scatter":
             renderFullScatter(ctx, rows, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, ropts, {
               glowIdx,
@@ -2063,13 +2141,13 @@ export function ChartView() {
             break;
           case "bar": renderFullBar(ctx, rows, xIdx, yIdx, barColorIdx, w, h, pad, ropts, barFacetPayload, barHorizontal, barModel, cIdx >= 0 && cIdx === xIdx); break;
           case "histogram": renderFullHistogram(ctx, rows, xIdx, w, h, pad, ropts); break;
-          case "line": renderFullLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts); break;
+          case "line": renderFullLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts, y2Idx); break;
           case "heatmap": renderFullHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, ropts); break;
           case "strip":
             renderFullStrip(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts, { opacityIdx });
             break;
           case "box": renderFullBox(ctx, rows, xIdx, yIdx, w, h, pad, ropts); break;
-          case "area": renderFullArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts); break;
+          case "area": renderFullArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts, y2Idx); break;
           case "pie": renderFullPie(ctx, rows, xIdx, yIdx, w, h, pad, ropts); break;
           case "bubble": renderFullBubble(ctx, rows, cols, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, ropts); break;
           case "violin": renderFullViolin(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts); break;
@@ -3305,6 +3383,12 @@ export interface ChartRenderOpts {
   yAggregate?: YAggregateOption | null;
   /** Bar + Color: grouped (dodge), stacked, or 100% stacked — canvas + Vega via createChartRec. */
   barStackMode?: "grouped" | "stacked" | "percent";
+  /** Cap ranked categories (bar). */
+  topN?: number | null;
+  /** Second Y measure (line / area dashed overlay). */
+  y2Field?: string | null;
+  /** Overlay earlier half of the time series (line / area). */
+  comparePrevious?: boolean | null;
   /** Per-paint: renderers push hoverable marks here (tooltips + linked highlight). */
   hits?: HitTarget[];
   /** Per-paint: column names so renderers can title axes / tooltips. */
@@ -4200,8 +4284,9 @@ function timeBuckets(rows: unknown[][], xi: number): {
 
 type BarModel = { entries: [string, number][]; rowCounts: Map<string, number>; ordered: boolean };
 
-/** Aggregate simple bars. Ordered keys (numbers, dates) keep their order; categories rank by value (top 20). */
-function computeBarModel(rows: unknown[][], xi: number, yi: number, agg: YAggregateOption): BarModel {
+/** Aggregate simple bars. Ordered keys (numbers, dates) keep their order; categories rank by value (Top N). */
+function computeBarModel(rows: unknown[][], xi: number, yi: number, agg: YAggregateOption, topN = DEFAULT_TOP_N): BarModel {
+  const limit = clampTopN(topN, DEFAULT_TOP_N);
   const groups = new Map<string, number[]>();
   const rowCounts = new Map<string, number>();
   for (const r of rows) {
@@ -4216,11 +4301,11 @@ function computeBarModel(rows: unknown[][], xi: number, yi: number, agg: YAggreg
   }
   const all = [...groups.entries()].map(([label, vals]) => [label, aggregateValues(vals, agg)] as [string, number]);
   const cls = classifyKeys(all.map((e) => e[0]));
-  if (cls.kind !== "band" && cls.sorted.length >= 3 && cls.sorted.length <= 40) {
+  if (cls.kind !== "band" && cls.sorted.length >= 3 && cls.sorted.length <= Math.max(40, limit)) {
     const byKey = new Map(all);
     return { entries: cls.sorted.map((k) => [k, byKey.get(k) ?? 0] as [string, number]), rowCounts, ordered: true };
   }
-  return { entries: all.sort((a, b) => b[1] - a[1]).slice(0, 20), rowCounts, ordered: false };
+  return { entries: all.sort((a, b) => b[1] - a[1]).slice(0, limit), rowCounts, ordered: false };
 }
 
 /** Horizontal bands when the stage is portrait or category names can't sit flat under their bars. */
@@ -4515,13 +4600,25 @@ function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown[][], x
   drawChartTicks(ctx, bins.lo, bins.hi, ys.min, ys.max, w, h, rect, opts);
 }
 
-function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+function renderFullLine(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+  y2Idx = -1,
+) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = Math.max(0.85, opts?.opacity ?? 0.9);
   const lineW = Math.max(1.5, opts?.lineWidth ?? 2);
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "mean");
   const rect = plotOf(w, h, pad);
   const span = rect.right - rect.left;
+  const comparePrev = !!opts?.comparePrevious;
 
   // Series in first-appearance order; cap at the 10 largest so the legend stays readable
   const seriesRows = new Map<string, unknown[][]>();
@@ -4541,24 +4638,44 @@ function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
   if (model.keys.length === 0) return;
   const posOf = new Map(model.keys.map((k, i) => [k, model.pos[i]!]));
 
-  const data = series.map(([name, gRows]) => {
-    const byX = new Map<string, number[]>();
-    for (const r of gRows) {
-      const k = tb.keyOf(r);
-      if (!posOf.has(k)) continue;
-      if (!byX.has(k)) byX.set(k, []);
-      if (yi < 0) byX.get(k)!.push(1);
-      else {
-        const v = Number(r[yi]);
-        if (!isNaN(v)) byX.get(k)!.push(v);
+  const seriesFrom = (measureIdx: number, nameSuffix = "") =>
+    series.map(([name, gRows]) => {
+      const byX = new Map<string, number[]>();
+      for (const r of gRows) {
+        const k = tb.keyOf(r);
+        if (!posOf.has(k)) continue;
+        if (!byX.has(k)) byX.set(k, []);
+        if (measureIdx < 0) byX.get(k)!.push(1);
+        else {
+          const v = Number(r[measureIdx]);
+          if (!isNaN(v)) byX.get(k)!.push(v);
+        }
       }
-    }
-    const pts = model.keys
-      .filter((k) => byX.has(k) && (yi < 0 || byX.get(k)!.length > 0))
-      .map((k) => ({ key: k, t: posOf.get(k)!, v: aggregateValues(byX.get(k)!, agg) }));
-    return { name, pts };
-  }).filter((s) => s.pts.length > 0);
+      const pts = model.keys
+        .filter((k) => byX.has(k) && (measureIdx < 0 || byX.get(k)!.length > 0))
+        .map((k) => ({ key: k, t: posOf.get(k)!, v: aggregateValues(byX.get(k)!, agg) }));
+      return { name: nameSuffix ? `${name || "series"}${nameSuffix}` : name, pts, compare: !!nameSuffix };
+    }).filter((s) => s.pts.length > 0);
+
+  let data = seriesFrom(yi);
   if (data.length === 0) return;
+
+  // Earlier half of the X domain as a dashed overlay (same series, first 50% of keys)
+  if (comparePrev && model.keys.length >= 4) {
+    const mid = Math.floor(model.keys.length / 2);
+    const earlier = new Set(model.keys.slice(0, mid));
+    const prevOverlay = data.map((s) => ({
+      name: `${s.name || "series"} (earlier)`,
+      pts: s.pts.filter((p) => earlier.has(p.key)),
+      compare: true as const,
+    })).filter((s) => s.pts.length >= 2);
+    data = [...prevOverlay, ...data];
+  }
+
+  if (y2Idx >= 0 && y2Idx !== yi) {
+    const y2 = seriesFrom(y2Idx, ` · ${opts?.fieldNames?.[y2Idx] ?? "Y2"}`).map((s) => ({ ...s, compare: true }));
+    data = [...data, ...y2];
+  }
 
   let yMin = Infinity;
   let yMax = -Infinity;
@@ -4585,14 +4702,16 @@ function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
     const color = cols[si % cols.length]!;
     const pts = s.pts.map((p) => ({ x: X(p.t), y: Y(p.v) }));
     ctx.strokeStyle = color;
-    ctx.lineWidth = lineW;
+    ctx.lineWidth = s.compare ? Math.max(1.25, lineW * 0.9) : lineW;
     ctx.lineJoin = "round";
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = s.compare ? alpha * 0.7 : alpha;
+    if (s.compare) ctx.setLineDash([5, 4]);
+    else applyLineDash(ctx, opts?.lineStrokeStyle);
     ctx.beginPath();
     if (opts?.lineCurveSmooth && pts.length >= 2) drawSmoothLine(ctx, pts);
     else pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
     ctx.stroke();
-    if (pts.length <= 40) {
+    if (!s.compare && pts.length <= 40) {
       ctx.setLineDash([]);
       ctx.fillStyle = color;
       for (const p of pts) {
@@ -4616,7 +4735,10 @@ function renderFullLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
   });
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
-  if (ci >= 0) setLegend(opts, data.map((s, si) => ({ label: s.name, color: cols[si % cols.length]! })));
+  const legendSrc = data.filter((s) => !s.compare || y2Idx >= 0 || comparePrev);
+  if (ci >= 0 || y2Idx >= 0 || comparePrev) {
+    setLegend(opts, legendSrc.map((s, si) => ({ label: s.name || "series", color: cols[si % cols.length]! })));
+  }
   if (ys.min < 0 && ys.max > 0) drawZeroLine(ctx, rect.left, Y(0), rect.right, Y(0), opts);
   drawChartTicks(ctx, 0, 1, ys.min, ys.max, w, h, rect, opts, { x: false });
   drawXModelAxis(ctx, model, w, h, rect, opts);
@@ -4952,7 +5074,18 @@ function renderFullBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
   drawBandAxisX(ctx, boxes.map((b) => b.label), centers, band, w, h, rect, opts, "nominal");
 }
 
-function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+function renderFullArea(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+  y2Idx = -1,
+) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
   const rect = plotOf(w, h, pad);
@@ -4992,6 +5125,32 @@ function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
     for (const v of vals) minVal = Math.min(minVal, v);
   });
   for (const t of tops[tops.length - 1] ?? []) maxStack = Math.max(maxStack, t);
+
+  // Optional Y2 / earlier-half overlays — extend the value scale
+  const overlayPts: { label: string; pts: { ki: number; v: number }[] }[] = [];
+  if (y2Idx >= 0 && y2Idx !== yi) {
+    const byX = model.keys.map(() => [] as number[]);
+    for (const r of rows) {
+      const ki = keyIndex.get(tb.keyOf(r));
+      if (ki == null) continue;
+      const v = Number(r[y2Idx]);
+      if (!isNaN(v)) byX[ki]!.push(v);
+    }
+    const pts = model.keys.map((_, ki) => ({ ki, v: byX[ki]!.length ? aggregateValues(byX[ki]!, agg) : NaN })).filter((p) => !isNaN(p.v));
+    for (const p of pts) {
+      minVal = Math.min(minVal, p.v);
+      maxStack = Math.max(maxStack, p.v);
+    }
+    overlayPts.push({ label: opts?.fieldNames?.[y2Idx] ?? "Compare Y", pts });
+  }
+  if (opts?.comparePrevious && model.keys.length >= 4 && series.length === 1) {
+    const mid = Math.floor(model.keys.length / 2);
+    const pts = values[0]!
+      .map((v, ki) => ({ ki, v }))
+      .filter((p) => p.ki < mid);
+    overlayPts.push({ label: "Earlier half", pts });
+  }
+
   // A single series may dip below zero; stacked series stack their positive parts
   const ys = niceZeroScale(series.length === 1 ? minVal : 0, maxStack, opts?.tickCount ?? 5);
   const Y = linear(ys.min, ys.max, rect.bottom, rect.top);
@@ -5019,6 +5178,19 @@ function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
     model.keys.forEach((_, ki) => (ki === 0 ? ctx.moveTo(X(ki), Y(top[ki]!)) : ctx.lineTo(X(ki), Y(top[ki]!))));
     ctx.stroke();
   });
+
+  overlayPts.forEach((ov, oi) => {
+    if (ov.pts.length < 2) return;
+    const color = cols[(series.length + oi) % cols.length]!;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.75;
+    ctx.globalAlpha = 0.85;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath();
+    ov.pts.forEach((p, i) => (i === 0 ? ctx.moveTo(X(p.ki), Y(p.v)) : ctx.lineTo(X(p.ki), Y(p.v))));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  });
   ctx.globalAlpha = 1;
 
   // One hover column per x key, reporting every layer
@@ -5044,7 +5216,11 @@ function renderFullArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
         },
     });
   });
-  if (ci >= 0) setLegend(opts, series.map((label, si) => ({ label, color: cols[si % cols.length]! })));
+  const legend = [
+    ...series.map((label, si) => ({ label: label || "series", color: cols[si % cols.length]! })),
+    ...overlayPts.map((ov, oi) => ({ label: ov.label, color: cols[(series.length + oi) % cols.length]! })),
+  ];
+  if (legend.length > 1) setLegend(opts, legend);
   if (ys.min < 0) drawZeroLine(ctx, rect.left, Y(0), rect.right, Y(0), opts);
   drawChartTicks(ctx, 0, 1, ys.min, ys.max, w, h, rect, opts, { x: false });
   drawXModelAxis(ctx, model, w, h, rect, opts);

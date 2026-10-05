@@ -57,6 +57,7 @@ import {
   type EncodingShuffleLocks,
 } from "@/lib/recommendations";
 import { computeDataQualityHints, formatChartAggregationSummary, chartCapabilities, encodingChannelLabels } from "@/lib/chartSupport";
+import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 import {
   runAnomaly,
   runForecast,
@@ -2568,6 +2569,9 @@ function ChartPanelView() {
       outlineField: activeChart?.outlineField ?? null,
       opacityField: activeChart?.opacityField ?? null,
       yAggregate: activeChart?.yAggregate ?? null,
+      topN: activeChart?.topN ?? null,
+      y2Field: activeChart?.y2Field ?? null,
+      comparePrevious: activeChart?.comparePrevious ?? null,
       tooltipFields: activeChart?.tooltipFields,
       tooltipKeyField: activeChart?.tooltipKeyField ?? null,
       barStackMode,
@@ -2582,6 +2586,9 @@ function ChartPanelView() {
       activeChart?.outlineField,
       activeChart?.opacityField,
       activeChart?.yAggregate,
+      activeChart?.topN,
+      activeChart?.y2Field,
+      activeChart?.comparePrevious,
       activeChart?.tooltipFields,
       activeChart?.tooltipKeyField,
       barStackMode,
@@ -2640,7 +2647,7 @@ function ChartPanelView() {
   );
 
   const applyEncodingExtra = useCallback(
-    (slot: "size" | "z" | "row" | "glow" | "outline" | "opacity", colName: string) => {
+    (slot: "size" | "z" | "row" | "glow" | "outline" | "opacity" | "y2", colName: string) => {
       if (!activeChart || columnStats.length === 0) return;
       const sizeField = slot === "size" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.sizeField ?? null);
       const zField = slot === "z" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.zField ?? null);
@@ -2648,6 +2655,7 @@ function ChartPanelView() {
       const glowField = slot === "glow" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.glowField ?? null);
       const outlineField = slot === "outline" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.outlineField ?? null);
       const opacityField = slot === "opacity" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.opacityField ?? null);
+      const y2Field = slot === "y2" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.y2Field ?? null);
       const rec = createChartRec(
         activeChart.kind,
         columnStats,
@@ -2656,22 +2664,84 @@ function ChartPanelView() {
         activeChart.colorField,
         tableName,
         {
+          ...extraFromChart(),
           sizeField,
           zField,
-          timeField: activeChart.timeField ?? null,
-          trailId: activeChart.trailId ?? null,
           rowField,
           glowField,
           outlineField,
           opacityField,
-          yAggregate: activeChart.yAggregate ?? null,
-          tooltipFields: activeChart.tooltipFields,
-          tooltipKeyField: activeChart.tooltipKeyField ?? null,
+          y2Field,
         },
       );
       if (rec) setActiveChart(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart],
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+  );
+
+  const applySplitMode = useCallback(
+    (mode: "color" | "facet" | "both") => {
+      if (!activeChart || columnStats.length === 0) return;
+      const splitField = activeChart.colorField ?? activeChart.rowField;
+      if (!splitField) return;
+      let colorField: string | null = activeChart.colorField;
+      let rowField: string | null = activeChart.rowField ?? null;
+      if (mode === "color") {
+        colorField = splitField;
+        rowField = null;
+      } else if (mode === "facet") {
+        colorField = null;
+        rowField = splitField;
+      } else {
+        colorField = splitField;
+        rowField = splitField;
+      }
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        colorField,
+        tableName,
+        { ...extraFromChart(), rowField },
+      );
+      if (rec) setActiveChart(rec);
+    },
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+  );
+
+  const applyTopN = useCallback(
+    (n: number) => {
+      if (!activeChart || columnStats.length === 0) return;
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        activeChart.colorField,
+        tableName,
+        { ...extraFromChart(), topN: clampTopN(n) },
+      );
+      if (rec) setActiveChart(rec);
+    },
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+  );
+
+  const applyComparePrevious = useCallback(
+    (on: boolean) => {
+      if (!activeChart || columnStats.length === 0) return;
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        activeChart.colorField,
+        tableName,
+        { ...extraFromChart(), comparePrevious: on },
+      );
+      if (rec) setActiveChart(rec);
+    },
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
   );
 
   const applyChartType = useCallback(
@@ -2848,9 +2918,19 @@ function ChartPanelView() {
     ? "count"
     : (activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum"));
   const showRow = caps.facetRow;
+  const showTopN = caps.topN;
+  const showCompareY = caps.compareY;
   const showMarkPoints = caps.markPoints;
   const showOpacityEnc = caps.opacityChannel;
   const showGlowOutline = caps.glowOutline;
+  const splitField = activeChart.colorField ?? activeChart.rowField ?? null;
+  const splitMode: "color" | "facet" | "both" | null = !splitField
+    ? null
+    : activeChart.colorField && activeChart.rowField
+      ? "both"
+      : activeChart.rowField
+        ? "facet"
+        : "color";
   const numericCols = columnStats.filter(
     (c) => ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL"].some((t) => (c.data_type ?? "").toUpperCase().includes(t)),
   );
@@ -2877,7 +2957,6 @@ function ChartPanelView() {
   const tooltipSelectedCount = activeChart.tooltipFields?.length ?? 0;
   const extraChannelCount = [
     showMarkPoints && activeChart.sizeField,
-    showRow && activeChart.rowField,
     showGlowOutline && activeChart.glowField,
     showGlowOutline && activeChart.outlineField,
     showOpacityEnc && activeChart.opacityField,
@@ -3130,6 +3209,93 @@ function ChartPanelView() {
                   }
                 />
               )}
+              {showRow && (
+                <EncodingSlot
+                  label="Facet"
+                  value={activeChart.rowField ?? ""}
+                  options={rowOptions}
+                  allowEmpty
+                  emptyLabel="None"
+                  typeHint={activeChart.rowField ? colType(activeChart.rowField) : undefined}
+                  onChange={(v) => applyEncodingExtra("row", v === "" ? "__none__" : v)}
+                />
+              )}
+              {showRow && splitField && (
+                <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
+                  <span className="text-2xs text-loom-muted shrink-0">Split</span>
+                  <div className="flex gap-1 flex-wrap">
+                    {(
+                      [
+                        ["color", "Color"],
+                        ["facet", "Facet"],
+                        ["both", "Both"],
+                      ] as const
+                    ).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => applySplitMode(mode)}
+                        className={`min-h-8 px-2.5 text-2xs rounded-md ${
+                          splitMode === mode
+                            ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                            : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
+                        }`}
+                        title={
+                          mode === "color"
+                            ? "Overlay series by color"
+                            : mode === "facet"
+                              ? "Small multiples (one panel per value)"
+                              : "Color within each facet panel"
+                        }
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {showTopN && (
+                <div className="flex items-center gap-2 pl-0.5">
+                  <label className="text-2xs text-loom-muted shrink-0" htmlFor="loom-top-n">
+                    Top N
+                  </label>
+                  <select
+                    id="loom-top-n"
+                    value={clampTopN(activeChart.topN, DEFAULT_TOP_N)}
+                    onChange={(e) => applyTopN(Number(e.target.value))}
+                    className="loom-input flex-1 text-xs py-1.5 min-h-8"
+                    title="How many categories to keep (ranked by value)"
+                  >
+                    {TOP_N_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {showCompareY && (
+                <>
+                  <EncodingSlot
+                    label="Compare Y"
+                    value={activeChart.y2Field ?? ""}
+                    options={numericOptions.filter((o) => o.value !== activeChart.yField)}
+                    allowEmpty
+                    emptyLabel="None"
+                    typeHint={activeChart.y2Field ? colType(activeChart.y2Field) : undefined}
+                    onChange={(v) => applyEncodingExtra("y2", v === "" ? "__none__" : v)}
+                  />
+                  <label className="flex items-center gap-1.5 text-2xs text-loom-muted cursor-pointer pl-0.5">
+                    <input
+                      type="checkbox"
+                      checked={!!activeChart.comparePrevious}
+                      onChange={(e) => applyComparePrevious(e.target.checked)}
+                      className="rounded border-loom-border accent-loom-accent"
+                    />
+                    Overlay earlier half (compare)
+                  </label>
+                </>
+              )}
               {caps.zChannel && (
                 <EncodingSlot
                   label={isDataCube ? "Depth" : "Z"}
@@ -3177,7 +3343,7 @@ function ChartPanelView() {
               )}
             </div>
 
-            {(showSize || showRow || showGlowOutline || showOpacityEnc) && (
+            {(showSize || showGlowOutline || showOpacityEnc) && (
               <div className="space-y-2">
                 <button
                   type="button"
@@ -3200,16 +3366,6 @@ function ChartPanelView() {
                         allowEmpty
                         typeHint={activeChart.sizeField ? colType(activeChart.sizeField) : undefined}
                         onChange={(v) => applyEncodingExtra("size", v === "" ? "__none__" : v)}
-                      />
-                    )}
-                    {showRow && (
-                      <EncodingSlot
-                        label="Facet"
-                        value={activeChart.rowField ?? ""}
-                        options={rowOptions}
-                        allowEmpty
-                        typeHint={activeChart.rowField ? colType(activeChart.rowField) : undefined}
-                        onChange={(v) => applyEncodingExtra("row", v === "" ? "__none__" : v)}
                       />
                     )}
                     {showGlowOutline && (

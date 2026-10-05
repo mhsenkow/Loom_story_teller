@@ -59,7 +59,7 @@ export function requestDiscoverScan(): void {
 const SCAN_KINDS: readonly SourceKind[] = ALL_SOURCE_KINDS;
 
 /** Cap on stories shown in the discover grid (primary + alts across every feed). */
-export const DISCOVER_STORY_LIMIT = 64;
+export const DISCOVER_STORY_LIMIT = 80;
 
 /** How many chart variants to keep per live source. */
 const VARIANTS_PER_SOURCE = 3;
@@ -145,6 +145,70 @@ function hookFor(
       score: 70 + Math.min(25, best / 20),
       preferKind: "scatter",
       category: "News",
+    };
+  }
+
+  if (kind === "lobsters") {
+    let best = 0;
+    let title = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const p = numAt(sample, r, "score");
+      if (p > best) {
+        best = p;
+        title = strAt(sample, r, "title");
+      }
+    }
+    const short = title.length > 52 ? `${title.slice(0, 50)}…` : title;
+    return {
+      hook: short ? `${best} · ${short}` : `${n} stories on Lobsters`,
+      blurb: chart.subtitle || "Scores vs discussion.",
+      score: 68 + Math.min(25, best / 5),
+      preferKind: "scatter",
+      category: "News",
+    };
+  }
+
+  if (kind === "firms") {
+    let maxFrp = 0;
+    for (let r = 0; r < sample.rows.length; r++) {
+      maxFrp = Math.max(maxFrp, numAt(sample, r, "frp"));
+    }
+    return {
+      hook: `${n.toLocaleString()} US fire hotspots · peak FRP ${maxFrp.toFixed(0)}`,
+      blurb: chart.subtitle || "VIIRS active fires on the map.",
+      score: 75 + Math.min(20, n / 50),
+      preferKind: "geoPoints",
+      category: "Earth",
+    };
+  }
+
+  if (kind === "nwis") {
+    let peak = 0;
+    let site = "";
+    for (let r = 0; r < sample.rows.length; r++) {
+      const q = numAt(sample, r, "discharge_cfs");
+      if (q > peak) {
+        peak = q;
+        site = strAt(sample, r, "site_name");
+      }
+    }
+    const short = site.length > 40 ? `${site.slice(0, 38)}…` : site;
+    return {
+      hook: short ? `${short} · ${Math.round(peak).toLocaleString()} cfs` : `${n} river gauge readings`,
+      blurb: chart.subtitle || "Discharge over the past two days.",
+      score: 72 + Math.min(20, Math.log10(peak + 1) * 4),
+      preferKind: "line",
+      category: "Earth",
+    };
+  }
+
+  if (kind === "starlink") {
+    return {
+      hook: `${n.toLocaleString()} Starlink sats · orbital elements`,
+      blurb: chart.subtitle || "Inclination vs mean motion.",
+      score: 70 + Math.min(20, n / 200),
+      preferKind: "scatter",
+      category: "Space",
     };
   }
 

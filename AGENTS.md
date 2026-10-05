@@ -43,7 +43,7 @@ Use this file plus [DOCS.md](DOCS.md) (architecture) and [README.md](README.md) 
 ## Live and polled data (Tauri)
 
 - **Wikipedia SSE:** `stream_*` commands → DuckDB table `wiki_stream`. Frontend: `Sidebar` live card, `QueryView` `stream://wiki`, `recommendStreamStory`, `STREAM_SQL_SNIPPETS`.
-- **Poll sources (22):** defined once in `src/lib/sourceRegistry.ts` (kind, label, DuckDB/buffer table, columns + types, poll cadence, ORDER BY, sidebar group). Sidebar cards, Query (`stream://<kind>`), Dive, discover, and web buffers all read it. Web fetches `/api/source/<kind>` from the Worker (cached per kind, with upstream fallbacks) and parses in `webStreams.ts`; desktop fetches upstreams in `sources.rs` into the same tables. `src/lib/__tests__/sourceRegistry.test.ts` fails if a default chart or SQL snippet names a column the table doesn't have.
+- **Poll sources (34):** defined once in `src/lib/sourceRegistry.ts` (kind, label, DuckDB/buffer table, columns + types, poll cadence, ORDER BY, sidebar group). Sidebar cards, Query (`stream://<kind>`), Dive, discover, and web buffers all read it. Web fetches `/api/source/<kind>` from the Worker (cached per kind, with upstream fallbacks) and parses in `webStreams.ts`; desktop fetches upstreams in `sources.rs` into the same tables. `src/lib/__tests__/sourceRegistry.test.ts` fails if a default chart or SQL snippet names a column the table doesn't have.
 - **Adding a source:** registry entry → Worker route in `workers/catalog-proxy.ts` → parser in `webStreams.ts` → Rust fetch/insert + table in `sources.rs` (same columns) → `recommendSourceStory` charts + `SOURCE_SQL_SNIPPETS` (recommendations.ts) → a discover hook in `discoverStories.ts`.
 
 Rust implementation: `src-tauri/src/stream.rs`, `src-tauri/src/sources.rs`.

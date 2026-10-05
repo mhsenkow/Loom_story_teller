@@ -28,7 +28,9 @@ export function buildBarFacetGrid(
   ci: number,
   agg: YAggregateOption,
   stackMode: "grouped" | "stacked" | "percent",
+  topN?: number | null,
 ): BarFacetHitPayload | null {
+  const maxX = topN != null && Number.isFinite(topN) ? Math.max(3, Math.min(50, Math.round(topN))) : BAR_FACET_MAX_X;
   const nested = new Map<string, Map<string, number[]>>();
   for (const r of rows) {
     const xk = String(r[xi]);
@@ -51,11 +53,11 @@ export function buildBarFacetGrid(
       return [xk, t] as [string, number];
     })
     .sort((a, b) => b[1] - a[1])
-    .slice(0, BAR_FACET_MAX_X);
+    .slice(0, maxX);
   if (xTotals.length === 0) return null;
   // Years, hours, sizes… read left-to-right in order, not ranked by total
   const order = classifyKeys(xTotals.map(([x]) => x));
-  if (order.kind !== "band" && nested.size <= BAR_FACET_MAX_X) {
+  if (order.kind !== "band" && nested.size <= maxX) {
     const rank = new Map(order.sorted.map((k, i) => [k, i]));
     xTotals.sort((a, b) => (rank.get(a[0]) ?? 0) - (rank.get(b[0]) ?? 0));
   }

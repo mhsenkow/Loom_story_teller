@@ -264,8 +264,12 @@ export interface ChartCapabilities {
   colorChannel: boolean;
   sizeChannel: boolean;
   aggregate: boolean;
-  /** Facet rows — stored in Vega-ish specs but not drawn by canvas yet */
+  /** Row facet / small multiples (bar, line, area, scatter). */
   facetRow: boolean;
+  /** Top-N category limit control (bar and other aggregated category charts). */
+  topN: boolean;
+  /** Second Y measure overlay (line / area). */
+  compareY: boolean;
   markPoints: boolean;
   opacityChannel: boolean;
   glowOutline: boolean;
@@ -296,7 +300,9 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     ].includes(kind),
     sizeChannel: pointMarks || kind === "dumbbell" || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || kind === "pyramid" || kind === "slope" || kind === "chernoff" || kind === "glyphStar" || kind === "flower" || isGpuSceneKind(kind),
     aggregate: ["bar", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind),
-    facetRow: false,
+    facetRow: kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble",
+    topN: kind === "bar" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle",
+    compareY: kind === "line" || kind === "area",
     markPoints: pointMarks || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || (isGpuSceneKind(kind) && kind !== "dataCube"),
     opacityChannel: pointMarks || kind === "strip" || kind === "parallel" || kind === "bucketField" || kind === "beeswarm" || (isGpuSceneKind(kind) && kind !== "dataCube"),
     glowOutline: pointMarks || kind === "firefly",

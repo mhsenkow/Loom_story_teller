@@ -359,6 +359,30 @@ function parseHn(body: unknown): Cell[][] {
   });
 }
 
+function parseLobsters(body: unknown): Cell[][] {
+  if (!Array.isArray(body)) return [];
+  return body.map((h) => {
+    const s = h as Record<string, unknown>;
+    const user = s.submitter_user;
+    const author =
+      typeof user === "string"
+        ? user
+        : user && typeof user === "object"
+          ? String((user as { username?: string }).username ?? "")
+          : "";
+    return [
+      String(s.short_id ?? ""),
+      String(s.title ?? ""),
+      author,
+      numOrNullVal(s.score),
+      numOrNullVal(s.comment_count),
+      String(s.url ?? ""),
+      Array.isArray(s.tags) ? (s.tags as string[]).join(",") : String(s.tags ?? ""),
+      s.created_at != null ? String(s.created_at) : null,
+    ];
+  });
+}
+
 function parseIss(body: unknown): Cell[][] {
   const list = Array.isArray(body) ? body : [body];
   const out: Cell[][] = [];
@@ -838,6 +862,8 @@ const SOURCE_PARSERS: Record<SourceKind, SourceParser> = {
   ukcarbon: parseUkCarbon,
   climate: parseClimate,
   buoys: parseColumnar("buoys"),
+  firms: parseColumnar("firms"),
+  nwis: parseColumnar("nwis"),
   opensky: parseOpensky,
   citibike: parseCitibike,
   mbta: parseColumnar("mbta"),
@@ -848,7 +874,9 @@ const SOURCE_PARSERS: Record<SourceKind, SourceParser> = {
   spaceweather: parseSpaceWeather,
   aurora: parseColumnar("aurora"),
   asteroids: parseColumnar("asteroids"),
+  starlink: parseColumnar("starlink"),
   hn: parseHn,
+  lobsters: parseLobsters,
   pageviews: parsePageviews,
   steam: parseColumnar("steam"),
   crypto: parseCrypto,
@@ -879,6 +907,8 @@ const SOURCE_MERGE: Record<SourceKind, { mode: "replace" | "append"; key?: numbe
   ukcarbon: { mode: "replace", key: 0 },
   climate: { mode: "replace", key: 0 },
   buoys: { mode: "replace", key: 0 },
+  firms: { mode: "replace", key: 0 },
+  nwis: { mode: "replace" },
   opensky: { mode: "append" }, // special-cased: snapshots stitched per icao24|ts
   citibike: { mode: "replace", key: 0 },
   mbta: { mode: "replace", key: 0 },
@@ -889,7 +919,9 @@ const SOURCE_MERGE: Record<SourceKind, { mode: "replace" | "append"; key?: numbe
   spaceweather: { mode: "replace", key: 0 },
   aurora: { mode: "replace" }, // one row per 2° cell by construction
   asteroids: { mode: "replace" }, // one object can make two passes in 60 days
+  starlink: { mode: "replace", key: 0 },
   hn: { mode: "replace", key: 0 },
+  lobsters: { mode: "replace", key: 0 },
   pageviews: { mode: "replace", key: 1 },
   steam: { mode: "replace", key: 0 },
   crypto: { mode: "replace", key: 0 },
