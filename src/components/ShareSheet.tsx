@@ -268,7 +268,7 @@ function ShareSheetBody() {
 
   const NEOSPACE_ORIGIN = "https://neospace.ibm.io";
 
-  /** One tap: publish lineage story → open NeoSpace compose with image + caption. */
+  /** One tap: open NeoSpace and hand off the PNG + caption (postMessage — Cache API is colo-local). */
   const handlePostToNeoSpace = async () => {
     if (!blob || desktop) {
       setToast(desktop ? "Post to NeoSpace from the web app at loom.ibm.io" : "Render the chart first");
@@ -279,31 +279,62 @@ function ShareSheetBody() {
       let storyUrl = link;
       if (!storyUrl) {
         const published = await publishStory();
-        if (!published) {
-          setToast("Couldn’t publish the chart page — try Get link first");
-          return;
+        if (published) {
+          setLink(published.url);
+          storyUrl = published.url;
         }
-        setLink(published.url);
-        storyUrl = published.url;
       }
-      const body = [caption.trim(), "", storyUrl].filter(Boolean).join("\n");
-      try {
-        if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
-          await navigator.clipboard.write([
-            new ClipboardItem({
-              "image/png": blob,
-              "text/plain": new Blob([body], { type: "text/plain" }),
-            }),
-          ]);
-        }
-      } catch {
-        /* mixed clipboard often blocked — NeoSpace fetches .img from the story URL */
-      }
+      const body = [caption.trim(), storyUrl ? `\n${storyUrl}` : ""].join("").trim();
       const dest = new URL(NEOSPACE_ORIGIN);
       dest.searchParams.set("compose", "loom");
-      dest.searchParams.set("story", storyUrl);
+      if (storyUrl) dest.searchParams.set("story", storyUrl);
       dest.searchParams.set("text", body);
-      window.open(dest.toString(), "_blank", "noopener,noreferrer");
+
+      // Keep window.opener so we can postMessage the image (do NOT use noopener).
+      const child = window.open(dest.toString(), "_blank");
+      if (!child) {
+        setToast("Pop-up blocked — allow pop-ups for Loom, then try again");
+        return;
+      }
+
+      const buffer = await blob.arrayBuffer();
+      const mime = blob.type || "image/png";
+      const filename = `${slugifyFilename(chartTitle || "chart")}.png`;
+
+      const send = () => {
+        try {
+          child.postMessage(
+            {
+              type: "loom-neospace-share",
+              v: 1,
+              text: body,
+              story: storyUrl || "",
+              image: {
+                name: filename,
+                type: mime.startsWith("image/") ? mime : "image/png",
+                buffer,
+              },
+            },
+            NEOSPACE_ORIGIN,
+          );
+        } catch {
+          /* child may have navigated */
+        }
+      };
+
+      // NeoSpace pings when ready; also retry a few times in case we miss the first ping.
+      const onMsg = (e: MessageEvent) => {
+        if (e.origin !== NEOSPACE_ORIGIN) return;
+        if (e.data?.type === "neospace-loom-ready") send();
+      };
+      window.addEventListener("message", onMsg);
+      send();
+      const timers = [400, 1200, 2500].map((ms) => window.setTimeout(send, ms));
+      window.setTimeout(() => {
+        window.removeEventListener("message", onMsg);
+        timers.forEach((t) => window.clearTimeout(t));
+      }, 8000);
+
       setToast("Opening NeoSpace with chart + lineage…");
       close();
     } finally {

@@ -740,6 +740,7 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
 
 const STORY_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 const MAX_STORY_HTML_BYTES = 4 * 1024 * 1024;
+const MAX_STORY_DATA_BYTES = 900_000;
 
 function storyId(): string {
   const bytes = crypto.getRandomValues(new Uint8Array(9));
@@ -749,7 +750,7 @@ function storyId(): string {
 }
 
 async function handlePublishStory(request: Request): Promise<Response> {
-  let payload: { html?: string; title?: string; ogImage?: string };
+  let payload: { html?: string; title?: string; ogImage?: string; data?: unknown };
   try {
     payload = (await request.json()) as typeof payload;
   } catch {
@@ -768,6 +769,24 @@ async function handlePublishStory(request: Request): Promise<Response> {
   const cacheUrl = new URL(`https://loom-story.internal/s/${id}`);
   const origin = new URL(request.url).origin;
 
+  // Optional data lineage companion — the rows that built the chart at share time.
+  let hasData = false;
+  if (payload.data != null) {
+    const dataJson = typeof payload.data === "string" ? payload.data : JSON.stringify(payload.data);
+    if (dataJson.length > 2 && dataJson.length <= MAX_STORY_DATA_BYTES) {
+      await cache.put(
+        `https://loom-story.internal/s/${id}.data`,
+        new Response(dataJson, {
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}`,
+          },
+        }),
+      );
+      hasData = true;
+    }
+  }
+
   // Link unfurlers (iMessage, Slack, X…) ignore data: URLs — host the preview
   // image beside the page and point og:image / twitter:image at it.
   const og = payload.ogImage?.match(/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/);
@@ -783,30 +802,42 @@ async function handlePublishStory(request: Request): Promise<Response> {
     html = html.split(`content="${payload.ogImage}"`).join(`content="${hosted}"`);
   }
 
+  // Point "Open in Loom" at the story snapshot when we have one.
+  if (hasData) {
+    const storyOpen = `${origin}/#story=${id}`;
+    html = html.replace(/data-loom-open="1"\s+href="[^"]*"/g, `data-loom-open="1" href="${storyOpen}"`);
+  }
+
   const res = new Response(html, {
     status: 200,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}`,
       "X-Loom-Story-Title": (payload.title || "Loom story").slice(0, 120),
+      ...(hasData ? { "X-Loom-Story-Data": "1" } : {}),
     },
   });
   await cache.put(cacheUrl.toString(), res.clone());
 
-  return json({ id, url: `${origin}/s/${id}` });
+  return json({ id, url: `${origin}/s/${id}`, hasData });
 }
 
 async function handleGetStory(id: string): Promise<Response> {
-  if (!/^[a-z0-9]{8,16}(\.img)?$/i.test(id)) {
+  if (!/^[a-z0-9]{8,16}(\.(img|data))?$/i.test(id)) {
     return json({ error: "Invalid story id" }, 400);
   }
   const cache = caches.default;
   const cacheUrl = `https://loom-story.internal/s/${id}`;
   const hit = await cache.match(cacheUrl);
   if (!hit) {
+    // Never let the edge cache a miss — Cache API is colo-local and 404s poison CF.
     return new Response("Story not found or expired.", {
       status: 404,
-      headers: { "Content-Type": "text/plain; charset=utf-8", ...CORS },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-store",
+        ...CORS,
+      },
     });
   }
   const headers = new Headers(hit.headers);
