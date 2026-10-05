@@ -25,8 +25,9 @@ import {
 import { downloadBlob } from "@/lib/zipStore";
 import { buildChartSharePageHtml } from "@/lib/dashboardMicrosite";
 import { isTauri } from "@/lib/tauri";
-import { chartLinkSrc, isPortableChartLink } from "@/lib/chartLink";
+import { chartLinkFromState, chartLinkSrc, isPortableChartLink } from "@/lib/chartLink";
 import { currentChartShareUrl } from "./ChartLinkSync";
+import { buildShareDataSnapshot } from "@/lib/shareLineage";
 
 const FORMATS: { id: SocialPresetId; label: string; hint: string }[] = [
   { id: "ig-square", label: "Square", hint: "Feed posts" },
@@ -95,7 +96,7 @@ function ShareSheetBody() {
   const [capturing, setCapturing] = useState(false);
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [busy, setBusy] = useState<null | "share" | "link">(null);
+  const [busy, setBusy] = useState<null | "share" | "link" | "neospace">(null);
   const [link, setLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<null | "caption" | "link" | "loom">(null);
   const captureSeq = useRef(0);
@@ -209,25 +210,102 @@ function ShareSheetBody() {
     }
   };
 
+  const publishStory = async (): Promise<{ url: string; id: string; hasData?: boolean } | null> => {
+    if (!blob) return null;
+    const image = await toJpegDataUrl(blob);
+    const st = useLoomStore.getState();
+    const chart = chartLinkFromState(st);
+    const snapshot = buildShareDataSnapshot({
+      sample: st.sampleRows,
+      file: st.selectedFile,
+      stats: st.columnStats,
+      chart,
+    });
+    const html = buildChartSharePageHtml({
+      title: chartTitle,
+      caption,
+      imageDataUrl: image,
+      sourceLabel: selectedFile?.name,
+      appUrl: typeof window !== "undefined" && !desktop ? window.location.origin : null,
+      openUrl: desktop ? null : currentChartShareUrl(),
+      lineage: snapshot
+        ? {
+            capturedAt: snapshot.capturedAt,
+            rowCount: snapshot.rows.length,
+            totalRows: snapshot.totalRows,
+            truncated: snapshot.truncated,
+            columns: snapshot.columns,
+          }
+        : null,
+    });
+    return publishStoryToWorker({
+      html,
+      title: chartTitle,
+      ogImageDataUrl: image,
+      data: snapshot ?? undefined,
+    });
+  };
+
   const handleGetLink = async () => {
     if (!blob) return;
     setBusy("link");
     try {
-      const image = await toJpegDataUrl(blob);
-      const html = buildChartSharePageHtml({
-        title: chartTitle,
-        caption,
-        imageDataUrl: image,
-        sourceLabel: selectedFile?.name,
-        appUrl: typeof window !== "undefined" && !desktop ? window.location.origin : null,
-        openUrl: desktop ? null : currentChartShareUrl(),
-      });
-      const published = await publishStoryToWorker({ html, title: chartTitle, ogImageDataUrl: image });
+      const published = await publishStory();
       if (!published) {
         setToast(desktop ? "Links need the web app — save the image instead" : "Couldn’t publish right now — share the image instead");
         return;
       }
       setLink(published.url);
+      setToast(
+        published.hasData
+          ? "Link ready — chart image + data snapshot (7 days)"
+          : "Link ready — chart image (add data by sharing again with rows loaded)",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const NEOSPACE_ORIGIN = "https://neospace.ibm.io";
+
+  /** One tap: publish lineage story → open NeoSpace compose with image + caption. */
+  const handlePostToNeoSpace = async () => {
+    if (!blob || desktop) {
+      setToast(desktop ? "Post to NeoSpace from the web app at loom.ibm.io" : "Render the chart first");
+      return;
+    }
+    setBusy("neospace");
+    try {
+      let storyUrl = link;
+      if (!storyUrl) {
+        const published = await publishStory();
+        if (!published) {
+          setToast("Couldn’t publish the chart page — try Get link first");
+          return;
+        }
+        setLink(published.url);
+        storyUrl = published.url;
+      }
+      const body = [caption.trim(), "", storyUrl].filter(Boolean).join("\n");
+      try {
+        if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              "image/png": blob,
+              "text/plain": new Blob([body], { type: "text/plain" }),
+            }),
+          ]);
+        }
+      } catch {
+        /* mixed clipboard often blocked — NeoSpace fetches .img from the story URL */
+      }
+      const dest = new URL(NEOSPACE_ORIGIN);
+      dest.searchParams.set("compose", "loom");
+      dest.searchParams.set("story", storyUrl);
+      dest.searchParams.set("text", body);
+      window.open(dest.toString(), "_blank", "noopener,noreferrer");
+      setToast("Opening NeoSpace with chart + lineage…");
+      close();
     } finally {
       setBusy(null);
     }
@@ -392,6 +470,17 @@ function ShareSheetBody() {
         </div>
 
         <div className="px-4 pt-3 space-y-2 shrink-0 border-t border-loom-border/60 mt-3">
+          {!desktop && (
+            <button
+              type="button"
+              onClick={handlePostToNeoSpace}
+              disabled={!ready || busy !== null}
+              className="w-full min-h-12 text-sm font-semibold rounded-lg border border-loom-accent/50 bg-loom-accent/15 text-loom-text hover:bg-loom-accent/25 disabled:opacity-50"
+              title="Publishes the chart with data lineage, then opens NeoSpace ready to post"
+            >
+              {busy === "neospace" ? "Sending to NeoSpace…" : "Post to NeoSpace"}
+            </button>
+          )}
           <button
             type="button"
             onClick={handleShare}
