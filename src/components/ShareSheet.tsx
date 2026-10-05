@@ -300,8 +300,11 @@ function ShareSheetBody() {
       const buffer = await blob.arrayBuffer();
       const mime = blob.type || "image/png";
       const filename = `${slugifyFilename(chartTitle || "chart")}.png`;
+      let delivered = false;
 
       const send = () => {
+        if (delivered || child.closed) return;
+        delivered = true;
         try {
           child.postMessage(
             {
@@ -318,21 +321,20 @@ function ShareSheetBody() {
             NEOSPACE_ORIGIN,
           );
         } catch {
-          /* child may have navigated */
+          delivered = false;
         }
       };
 
-      // NeoSpace pings when ready; also retry a few times in case we miss the first ping.
+      // Wait for NeoSpace ready ping; one delayed fallback if the ping never arrives.
       const onMsg = (e: MessageEvent) => {
         if (e.origin !== NEOSPACE_ORIGIN) return;
         if (e.data?.type === "neospace-loom-ready") send();
       };
       window.addEventListener("message", onMsg);
-      send();
-      const timers = [400, 1200, 2500].map((ms) => window.setTimeout(send, ms));
+      const fallback = window.setTimeout(send, 1500);
       window.setTimeout(() => {
         window.removeEventListener("message", onMsg);
-        timers.forEach((t) => window.clearTimeout(t));
+        window.clearTimeout(fallback);
       }, 8000);
 
       setToast("Opening NeoSpace with chart + lineage…");
