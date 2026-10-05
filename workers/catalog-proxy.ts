@@ -808,11 +808,11 @@ function storyId(): string {
 }
 
 async function handlePublishStory(request: Request, env: Env): Promise<Response> {
-  const origin = request.headers.get("Origin");
+  const requestOrigin = request.headers.get("Origin");
   // Same-origin SPA publishes; also allow workers.dev previews
   if (
-    origin &&
-    !originAllowed(origin, [
+    requestOrigin &&
+    !originAllowed(requestOrigin, [
       "loom.ibm.io",
       "loom-storyteller.mhsenkow.workers.dev",
       "localhost",
