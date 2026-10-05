@@ -43,6 +43,8 @@ export interface Env {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
   /** Fine-grained PAT with `issues: write` on mhsenkow/Loom_story_teller */
   GITHUB_TOKEN?: string;
+  /** Global story HTML / .img / .data — Cache API is colo-local and breaks NeoSpace handoff */
+  LOOM_STORIES?: KVNamespace;
 }
 
 const GITHUB_REPO = "mhsenkow/Loom_story_teller";
@@ -62,6 +64,45 @@ function json(data: unknown, status = 200): Response {
     status,
     headers: { "Content-Type": "application/json", ...CORS },
   });
+}
+
+/** In-isolate rate limit — dampens abuse across requests on this Worker. */
+type RateBucket = { count: number; resetAt: number };
+const rateBuckets = new Map<string, RateBucket>();
+
+function clientIp(request: Request): string {
+  return (
+    request.headers.get("CF-Connecting-IP") ||
+    request.headers.get("X-Forwarded-For")?.split(",")[0]?.trim() ||
+    "unknown"
+  );
+}
+
+function allowRequest(key: string, limit: number, windowMs: number): boolean {
+  const now = Date.now();
+  if (rateBuckets.size > 800) {
+    for (const [k, b] of rateBuckets) {
+      if (now > b.resetAt) rateBuckets.delete(k);
+    }
+  }
+  const b = rateBuckets.get(key);
+  if (!b || now > b.resetAt) {
+    rateBuckets.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (b.count >= limit) return false;
+  b.count += 1;
+  return true;
+}
+
+function originAllowed(origin: string | null, hosts: string[]): boolean {
+  if (!origin) return false;
+  try {
+    const host = new URL(origin).hostname.toLowerCase();
+    return hosts.some((h) => host === h || host.endsWith(`.${h}`));
+  } catch {
+    return false;
+  }
 }
 
 function optsFromUrl(url: URL): FetchDataGovOptions {
@@ -667,6 +708,23 @@ async function handleSource(kind: string, ctx: WaitUntil): Promise<Response> {
 }
 
 async function handleFeedback(request: Request, env: Env): Promise<Response> {
+  const origin = request.headers.get("Origin");
+  if (
+    !originAllowed(origin, [
+      "loom.ibm.io",
+      "loom-storyteller.mhsenkow.workers.dev",
+      "localhost",
+      "127.0.0.1",
+    ])
+  ) {
+    return json({ error: "Forbidden origin" }, 403);
+  }
+
+  const ip = clientIp(request);
+  if (!allowRequest(`feedback:${ip}`, 5, 60 * 60 * 1000)) {
+    return json({ error: "Too many notes — try again later" }, 429);
+  }
+
   if (!env.GITHUB_TOKEN) {
     return json(
       {
@@ -749,7 +807,27 @@ function storyId(): string {
     .slice(0, 12);
 }
 
-async function handlePublishStory(request: Request): Promise<Response> {
+async function handlePublishStory(request: Request, env: Env): Promise<Response> {
+  const origin = request.headers.get("Origin");
+  // Same-origin SPA publishes; also allow workers.dev previews
+  if (
+    origin &&
+    !originAllowed(origin, [
+      "loom.ibm.io",
+      "loom-storyteller.mhsenkow.workers.dev",
+      "localhost",
+      "127.0.0.1",
+    ])
+  ) {
+    return json({ error: "Forbidden origin" }, 403);
+  }
+
+  const ip = clientIp(request);
+  // 20 stories / hour / IP — enough for normal use, stops KV fill attacks
+  if (!allowRequest(`stories:${ip}`, 20, 60 * 60 * 1000)) {
+    return json({ error: "Too many publishes — try again later" }, 429);
+  }
+
   let payload: { html?: string; title?: string; ogImage?: string; data?: unknown };
   try {
     payload = (await request.json()) as typeof payload;
@@ -764,40 +842,35 @@ async function handlePublishStory(request: Request): Promise<Response> {
     return json({ error: "Expected an HTML document" }, 400);
   }
 
+  const kv = env.LOOM_STORIES;
+  if (!kv) {
+    return json({ error: "Story storage not configured (LOOM_STORIES KV)" }, 503);
+  }
+
   const id = storyId();
-  const cache = caches.default;
-  const cacheUrl = new URL(`https://loom-story.internal/s/${id}`);
   const origin = new URL(request.url).origin;
+  const ttl = STORY_TTL_SECONDS;
 
   // Optional data lineage companion — the rows that built the chart at share time.
   let hasData = false;
   if (payload.data != null) {
     const dataJson = typeof payload.data === "string" ? payload.data : JSON.stringify(payload.data);
     if (dataJson.length > 2 && dataJson.length <= MAX_STORY_DATA_BYTES) {
-      await cache.put(
-        `https://loom-story.internal/s/${id}.data`,
-        new Response(dataJson, {
-          headers: {
-            "Content-Type": "application/json; charset=utf-8",
-            "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}`,
-          },
-        }),
-      );
+      await kv.put(`s:${id}:data`, dataJson, { expirationTtl: ttl });
       hasData = true;
     }
   }
 
   // Link unfurlers (iMessage, Slack, X…) ignore data: URLs — host the preview
   // image beside the page and point og:image / twitter:image at it.
+  // KV (not Cache API) so NeoSpace can fetch .img from any Cloudflare colo.
   const og = payload.ogImage?.match(/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/);
   if (og && og[2]!.length < MAX_STORY_HTML_BYTES) {
     const bytes = Uint8Array.from(atob(og[2]!), (c) => c.charCodeAt(0));
-    await cache.put(
-      `https://loom-story.internal/s/${id}.img`,
-      new Response(bytes, {
-        headers: { "Content-Type": og[1]!, "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}` },
-      }),
-    );
+    await kv.put(`s:${id}:img`, bytes.buffer, {
+      expirationTtl: ttl,
+      metadata: { contentType: og[1]! },
+    });
     const hosted = `${origin}/s/${id}.img`;
     html = html.split(`content="${payload.ogImage}"`).join(`content="${hosted}"`);
   }
@@ -808,29 +881,39 @@ async function handlePublishStory(request: Request): Promise<Response> {
     html = html.replace(/data-loom-open="1"\s+href="[^"]*"/g, `data-loom-open="1" href="${storyOpen}"`);
   }
 
-  const res = new Response(html, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}`,
-      "X-Loom-Story-Title": (payload.title || "Loom story").slice(0, 120),
-      ...(hasData ? { "X-Loom-Story-Data": "1" } : {}),
+  await kv.put(`s:${id}:html`, html, {
+    expirationTtl: ttl,
+    metadata: {
+      contentType: "text/html; charset=utf-8",
+      title: (payload.title || "Loom story").slice(0, 120),
+      hasData: hasData ? "1" : "0",
     },
   });
-  await cache.put(cacheUrl.toString(), res.clone());
 
   return json({ id, url: `${origin}/s/${id}`, hasData });
 }
 
-async function handleGetStory(id: string): Promise<Response> {
+async function handleGetStory(id: string, env: Env): Promise<Response> {
   if (!/^[a-z0-9]{8,16}(\.(img|data))?$/i.test(id)) {
     return json({ error: "Invalid story id" }, 400);
   }
-  const cache = caches.default;
-  const cacheUrl = `https://loom-story.internal/s/${id}`;
-  const hit = await cache.match(cacheUrl);
-  if (!hit) {
-    // Never let the edge cache a miss — Cache API is colo-local and 404s poison CF.
+  const kv = env.LOOM_STORIES;
+  if (!kv) {
+    return new Response("Story storage not configured.", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store", ...CORS },
+    });
+  }
+
+  const [baseId, ext] = id.includes(".") ? (id.split(".") as [string, string]) : [id, "html"];
+  const key = `s:${baseId}:${ext === "img" ? "img" : ext === "data" ? "data" : "html"}`;
+  const hit = await kv.getWithMetadata<{ contentType?: string; title?: string; hasData?: string }>(
+    key,
+    ext === "img" ? "arrayBuffer" : "text",
+  );
+
+  if (hit.value == null) {
+    // Never let the edge cache a miss — 404s must stay uncached.
     return new Response("Story not found or expired.", {
       status: 404,
       headers: {
@@ -840,9 +923,26 @@ async function handleGetStory(id: string): Promise<Response> {
       },
     });
   }
-  const headers = new Headers(hit.headers);
-  headers.set("Access-Control-Allow-Origin", "*");
-  return new Response(hit.body, { status: 200, headers });
+
+  const meta = hit.metadata || {};
+  const headers = new Headers({
+    "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}`,
+    "Access-Control-Allow-Origin": "*",
+  });
+
+  if (ext === "img") {
+    headers.set("Content-Type", meta.contentType || "image/png");
+    return new Response(hit.value as ArrayBuffer, { status: 200, headers });
+  }
+  if (ext === "data") {
+    headers.set("Content-Type", "application/json; charset=utf-8");
+    return new Response(hit.value as string, { status: 200, headers });
+  }
+
+  headers.set("Content-Type", meta.contentType || "text/html; charset=utf-8");
+  if (meta.title) headers.set("X-Loom-Story-Title", meta.title);
+  if (meta.hasData === "1") headers.set("X-Loom-Story-Data", "1");
+  return new Response(hit.value as string, { status: 200, headers });
 }
 
 export default {
@@ -873,11 +973,11 @@ export default {
         return await handleFeedback(request, env);
       }
       if (url.pathname === "/api/stories" && request.method === "POST") {
-        return await handlePublishStory(request);
+        return await handlePublishStory(request, env);
       }
       if (url.pathname.startsWith("/s/")) {
         const id = url.pathname.slice(3).replace(/\/$/, "");
-        return await handleGetStory(id);
+        return await handleGetStory(id, env);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
