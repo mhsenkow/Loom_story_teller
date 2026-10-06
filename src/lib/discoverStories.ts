@@ -99,6 +99,8 @@ function chartVariantKey(chart: ChartRecommendation): string {
     chart.residualOverlay ? "1" : "",
     chart.anomalyHighlight ? "1" : "",
     chart.bumpMode ?? "",
+    chart.timeWindowField ?? "",
+    chart.timeWindow ?? "",
   ].join("|");
 }
 

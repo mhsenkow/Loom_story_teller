@@ -129,6 +129,7 @@ import {
   type SeriesNormalize,
   type YScaleKind,
 } from "@/lib/dsTransforms";
+import { applyChartTimeWindow } from "@/lib/chartTime";
 
 const DEFAULT_COLORS = discreteSeriesColors(
   resolveChartColors({ paletteId: "categorical" }),
@@ -291,6 +292,13 @@ export function ChartView() {
   const opacity = chartVisualOverrides.opacity ?? 0.7;
   const pointSize = chartVisualOverrides.pointSize ?? 12;
 
+  const chartSampleRows = useMemo(() => {
+    if (!sampleRows || !activeChart) return sampleRows;
+    const sliced = applyChartTimeWindow(sampleRows.rows, sampleRows.columns, activeChart);
+    if (!sliced.filtered) return sampleRows;
+    return { ...sampleRows, rows: sliced.rows };
+  }, [sampleRows, activeChart]);
+
   const themeUi = useMemo(() => getThemeUiColors(appSettings.theme), [appSettings.theme]);
 
   // Chart stage pixel size — must be in draw-effect deps so aspect/device
@@ -414,17 +422,19 @@ export function ChartView() {
   }, [colors, continuousStops, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart, barStackMode]);
 
   const renderIssue = useMemo(
-    () => getChartRenderIssue(activeChart, sampleRows),
-    [activeChart, sampleRows],
+    () => getChartRenderIssue(activeChart, chartSampleRows ?? sampleRows),
+    [activeChart, chartSampleRows, sampleRows],
   );
 
   const sampleHonestyLabel = useMemo(() => {
     if (!sampleRows) return "";
+    const shown = chartSampleRows?.rows.length ?? sampleRows.rows.length;
     const n = sampleRows.rows.length;
     const t = sampleRows.total_rows ?? n;
+    if (shown < n) return `${shown.toLocaleString()} / ${n.toLocaleString()} in window`;
     if (t > n) return `${n.toLocaleString()} / ${t.toLocaleString()} rows`;
     return `${n.toLocaleString()} rows`;
-  }, [sampleRows]);
+  }, [sampleRows, chartSampleRows]);
 
   const densityHint = useMemo(() => {
     if (!sampleRows || !activeChart) return null;
@@ -538,8 +548,8 @@ export function ChartView() {
     !forceCanvasCapture &&
     !!cubeRendererRef.current;
   const dataCube = useMemo(() => {
-    if (activeChart?.kind !== "dataCube" || !sampleRows?.rows?.length) return null;
-    return buildDataCube(sampleRows.rows, sampleRows.columns, {
+    if (activeChart?.kind !== "dataCube" || !chartSampleRows?.rows?.length) return null;
+    return buildDataCube(chartSampleRows.rows, chartSampleRows.columns, {
       xField: activeChart.xField,
       yField: activeChart.yField,
       zField: activeChart.zField,
@@ -553,13 +563,13 @@ export function ChartView() {
     activeChart?.zField,
     activeChart?.sizeField,
     activeChart?.yAggregate,
-    sampleRows,
+    chartSampleRows,
   ]);
   const pivotTable = useMemo(() => {
-    if (!cubeTableOpen || activeChart?.kind !== "dataCube" || !sampleRows?.rows?.length) return null;
+    if (!cubeTableOpen || activeChart?.kind !== "dataCube" || !chartSampleRows?.rows?.length) return null;
     return buildPivotTable(
-      sampleRows.rows,
-      sampleRows.columns,
+      chartSampleRows.rows,
+      chartSampleRows.columns,
       {
         xField: activeChart.xField,
         yField: activeChart.yField,
@@ -696,10 +706,10 @@ export function ChartView() {
       activeChart.kind === "globe" ||
       activeChart.kind === "globeTrail");
   const [canvasSized, setCanvasSized] = useState(false);
-  const exportStateRef = useRef({ activeChart, gpuReady, vegaSpec, sampleRows, chartVisualOverrides });
-  exportStateRef.current = { activeChart, gpuReady, vegaSpec, sampleRows, chartVisualOverrides };
-  const sampleRowsRef = useRef(sampleRows);
-  sampleRowsRef.current = sampleRows;
+  const exportStateRef = useRef({ activeChart, gpuReady, vegaSpec, sampleRows: chartSampleRows, chartVisualOverrides });
+  exportStateRef.current = { activeChart, gpuReady, vegaSpec, sampleRows: chartSampleRows, chartVisualOverrides };
+  const sampleRowsRef = useRef(chartSampleRows);
+  sampleRowsRef.current = chartSampleRows;
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
 
   const getEffectiveScatterBounds = useCallback(
@@ -923,8 +933,8 @@ export function ChartView() {
           return;
         }
         const chart = activeChart;
-        const rows = sampleRows?.rows;
-        const cols = sampleRows?.columns;
+        const rows = chartSampleRows?.rows;
+        const cols = chartSampleRows?.columns;
         if (!chart || !rows || !cols) return;
         const tt = scatterTooltip ?? chartTooltip;
         if (!tt) return;
@@ -1021,6 +1031,7 @@ export function ChartView() {
     setTooltipLink,
     activeChart,
     sampleRows,
+    chartSampleRows,
     scatterTooltip,
     chartTooltip,
     getEffectiveScatterBounds,
@@ -1695,25 +1706,25 @@ export function ChartView() {
   }, [setSelectedRowIndices, setToast, chartInteractionMode, lassoPoints, setLassoPoints]);
 
   const extractScatterData = useCallback((): { points: GPUScatterPoint[]; rowIndices: number[]; xMin: number; xMax: number; yMin: number; yMax: number } | null => {
-    if (!sampleRows || !activeChart) return null;
+    if (!chartSampleRows || !activeChart) return null;
     const spec = activeChart.spec as Record<string, unknown>;
     const encoding = spec.encoding as Record<string, { field: string }> | undefined;
     const xFieldName = encoding?.x?.field ?? activeChart.xField;
     const yFieldName = encoding?.y?.field ?? activeChart.yField;
     if (!xFieldName || !yFieldName) return null;
 
-    const xIdx = sampleRows.columns.indexOf(xFieldName);
-    const yIdx = sampleRows.columns.indexOf(yFieldName);
+    const xIdx = chartSampleRows.columns.indexOf(xFieldName);
+    const yIdx = chartSampleRows.columns.indexOf(yFieldName);
     const colorField =
       (encoding?.color as { field?: string } | undefined)?.field ?? activeChart.colorField ?? undefined;
     const sizeField = (encoding?.size as { field?: string } | undefined)?.field ?? activeChart.sizeField;
-    const cIdx = colorField ? sampleRows.columns.indexOf(colorField) : -1;
-    const sizeIdx = sizeField ? sampleRows.columns.indexOf(sizeField) : -1;
+    const cIdx = colorField ? chartSampleRows.columns.indexOf(colorField) : -1;
+    const sizeIdx = sizeField ? chartSampleRows.columns.indexOf(sizeField) : -1;
     if (xIdx === -1 || yIdx === -1) return null;
 
     let sizeMin = Infinity, sizeMax = -Infinity;
     if (sizeIdx >= 0) {
-      for (const row of sampleRows.rows) {
+      for (const row of chartSampleRows.rows) {
         const v = Number(row[sizeIdx]);
         if (!isNaN(v)) { sizeMin = Math.min(sizeMin, v); sizeMax = Math.max(sizeMax, v); }
       }
@@ -1727,7 +1738,7 @@ export function ChartView() {
     const rowIndices: number[] = [];
     let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
 
-    sampleRows.rows.forEach((row, rowIndex) => {
+    chartSampleRows.rows.forEach((row, rowIndex) => {
       const x = Number(row[xIdx]), y = Number(row[yIdx]);
       if (isNaN(x) || isNaN(y)) return;
       let cat = 0;
@@ -1750,7 +1761,7 @@ export function ChartView() {
     const xPad = (xMax - xMin) * 0.05 || 1;
     const yPad = (yMax - yMin) * 0.05 || 1;
     return { points, rowIndices, xMin: xMin - xPad, xMax: xMax + xPad, yMin: yMin - yPad, yMax: yMax + yPad };
-  }, [sampleRows, activeChart]);
+  }, [chartSampleRows, activeChart]);
 
   // Render active chart
   useEffect(() => {
@@ -1928,7 +1939,7 @@ export function ChartView() {
         octx.setTransform(1, 0, 0, 1, 0, 0);
       }
       const packed = extractGpuScenePoints(
-        sampleRows.rows,
+        chartSampleRows?.rows ?? sampleRows.rows,
         sampleRows.columns,
         {
           xField: activeChart.xField,
@@ -2056,8 +2067,8 @@ export function ChartView() {
     const w = cw / dpr;
     const h = ch / dpr;
 
-    const rowsAll = sampleRows?.rows;
-    const cols = sampleRows?.columns;
+    const rowsAll = chartSampleRows?.rows;
+    const cols = chartSampleRows?.columns;
     if (!Array.isArray(rowsAll) || !Array.isArray(cols)) return;
 
     const zoomScale = activeChart.kind === "scatter" ? scatterView.scale : 1;
@@ -2521,7 +2532,7 @@ export function ChartView() {
     }
 
     drawOneFrame(1);
-  }, [canvasSized, activeChart, sampleRows, selectedFile, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnote, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines]);
+  }, [canvasSized, activeChart, sampleRows, chartSampleRows, selectedFile, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnote, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines]);
 
   // Axes overlay for WebGPU scatter; clear when not scatter so overlay doesn't sit on top of line/bar
   useEffect(() => {

@@ -65,6 +65,15 @@ import {
 } from "@/lib/dataProvenance";
 import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 import {
+  CHART_TIME_RANGES,
+  applyChartTimeWindow,
+  chartTimeRangeOptions,
+  pickDefaultTimeField,
+  temporalColumnNames,
+  timeColumnSpanMs,
+  type ChartTimeRange,
+} from "@/lib/chartTime";
+import {
   runAnomaly,
   runForecast,
   runTrend,
@@ -2656,6 +2665,8 @@ function ChartPanelView() {
       residualOverlay: activeChart?.residualOverlay ?? null,
       anomalyHighlight: activeChart?.anomalyHighlight ?? null,
       bumpMode: activeChart?.bumpMode ?? null,
+      timeWindowField: activeChart?.timeWindowField ?? null,
+      timeWindow: activeChart?.timeWindow ?? null,
       tooltipFields: activeChart?.tooltipFields,
       tooltipKeyField: activeChart?.tooltipKeyField ?? null,
       barStackMode,
@@ -2679,6 +2690,8 @@ function ChartPanelView() {
       activeChart?.residualOverlay,
       activeChart?.anomalyHighlight,
       activeChart?.bumpMode,
+      activeChart?.timeWindowField,
+      activeChart?.timeWindow,
       activeChart?.tooltipFields,
       activeChart?.tooltipKeyField,
       barStackMode,
@@ -2828,6 +2841,33 @@ function ChartPanelView() {
         activeChart.colorField,
         tableName,
         { ...extraFromChart(), comparePrevious: on },
+      );
+      if (rec) setActiveChart(rec);
+    },
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+  );
+
+  const applyTimeWindow = useCallback(
+    (next: { field?: string | null; range?: ChartTimeRange | null }) => {
+      if (!activeChart || columnStats.length === 0) return;
+      const field =
+        next.field !== undefined
+          ? next.field
+          : (activeChart.timeWindowField ?? pickDefaultTimeField(columnStats, activeChart));
+      let range = next.range !== undefined ? next.range : (activeChart.timeWindow ?? "all");
+      if (!field) range = "all";
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        activeChart.colorField,
+        tableName,
+        {
+          ...extraFromChart(),
+          timeWindowField: field,
+          timeWindow: range && range !== "all" ? range : null,
+        },
       );
       if (rec) setActiveChart(rec);
     },
@@ -3075,6 +3115,13 @@ function ChartPanelView() {
   });
 
   const colType = (name: string) => columnStats.find((c) => c.name === name)?.data_type ?? "";
+  const timeColNames = temporalColumnNames(columnStats);
+  const timeFieldActive = activeChart.timeWindowField ?? pickDefaultTimeField(columnStats, activeChart);
+  const timeIdx = sampleRows && timeFieldActive ? sampleRows.columns.indexOf(timeFieldActive) : -1;
+  const timeSpanMs =
+    sampleRows && timeIdx >= 0 ? timeColumnSpanMs(sampleRows.rows, timeIdx) : 0;
+  const timeRangeChoices = chartTimeRangeOptions(timeSpanMs);
+  const timeWindowActive = activeChart.timeWindow ?? "all";
   const allColOptions: EncodingOption[] = columnStats.map((c) => ({
     value: c.name,
     label: c.name,
@@ -3430,6 +3477,65 @@ function ChartPanelView() {
                     />
                     Overlay earlier half (compare)
                   </label>
+                </>
+              )}
+              {timeColNames.length > 0 && (
+                <>
+                  <EncodingSlot
+                    label="Time"
+                    value={timeFieldActive ?? ""}
+                    options={timeColNames.map((n) => ({ value: n, label: n }))}
+                    allowEmpty
+                    emptyLabel="None"
+                    typeHint={timeFieldActive ? colType(timeFieldActive) : undefined}
+                    onChange={(v) =>
+                      applyTimeWindow({
+                        field: v === "" || v === "__none__" ? null : v,
+                        range: v === "" || v === "__none__" ? "all" : timeWindowActive,
+                      })
+                    }
+                  />
+                  <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
+                    <span className="text-2xs text-loom-muted shrink-0">Window</span>
+                    <div className="flex gap-1 flex-wrap">
+                      {(timeRangeChoices.includes(timeWindowActive)
+                        ? timeRangeChoices
+                        : [timeWindowActive, ...timeRangeChoices.filter((r) => r !== timeWindowActive)]
+                      ).map((r) => {
+                        const spec = CHART_TIME_RANGES.find((x) => x.value === r);
+                        const on = timeWindowActive === r;
+                        return (
+                          <button
+                            key={r}
+                            type="button"
+                            disabled={!timeFieldActive && r !== "all"}
+                            onClick={() => applyTimeWindow({ field: timeFieldActive, range: r })}
+                            className={`min-h-8 px-2.5 text-2xs rounded-md ${
+                              on
+                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
+                            }`}
+                            title={spec?.label ?? r}
+                          >
+                            {spec?.short ?? r}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  {timeWindowActive !== "all" && sampleRows && (
+                    <p className="text-2xs text-loom-muted pl-0.5">
+                      {(() => {
+                        const slice = applyChartTimeWindow(sampleRows.rows, sampleRows.columns, {
+                          timeWindowField: timeFieldActive,
+                          timeWindow: timeWindowActive,
+                        });
+                        return slice.filtered
+                          ? `${slice.kept.toLocaleString()} of ${slice.total.toLocaleString()} rows in this window`
+                          : "Window uses the newest timestamp in the sample.";
+                      })()}
+                    </p>
+                  )}
                 </>
               )}
               {caps.zChannel && (

@@ -37,6 +37,13 @@ export function getChartRenderIssue(
   const cols = sample.columns;
   const rows = sample.rows;
   if (rows.length === 0) {
+    if (chart.timeWindow && chart.timeWindow !== "all") {
+      return {
+        title: "No rows in this window",
+        message: "Nothing in the sample falls inside the Time window. Pick a wider window, or All, in Encoding.",
+        code: "no_rows",
+      };
+    }
     return { title: "No rows in sample", message: "This table returned zero rows. Try another file or adjust your query.", code: "no_rows" };
   }
 

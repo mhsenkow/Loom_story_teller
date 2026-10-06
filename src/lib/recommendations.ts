@@ -16,6 +16,12 @@
 // =================================================================
 
 import type { ColumnInfo, QueryResult } from "./store";
+import {
+  chartTimeWindowLabel,
+  pickDefaultTimeField,
+  suggestedChartTimeWindows,
+  type ChartTimeRange,
+} from "./chartTime";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
 import {
   applyPreferenceBoosts,
@@ -191,6 +197,10 @@ export interface ChartRecommendation {
   anomalyHighlight?: boolean | null;
   /** Bump: plot Δrank instead of absolute rank. */
   bumpMode?: "rank" | "delta" | null;
+  /** Timestamp column used to slice rows (independent of X). */
+  timeWindowField?: string | null;
+  /** Keep rows in this window, counted back from the newest value. */
+  timeWindow?: "all" | "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y" | null;
   /** Explicit tooltip column names; when unset, encoding fields are used. */
   tooltipFields?: string[] | null;
   /** Identity column for cross-chart tooltip link / lock (L key). */
@@ -567,6 +577,8 @@ export function createChartRec(
     residualOverlay?: boolean | null;
     anomalyHighlight?: boolean | null;
     bumpMode?: "rank" | "delta" | null;
+    timeWindowField?: string | null;
+    timeWindow?: "all" | "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y" | null;
   },
 ): ChartRecommendation | null {
   const numCols = columns.filter(c => inferType(c.data_type, c.name) === "quantitative");
@@ -588,6 +600,24 @@ export function createChartRec(
   const residualOverlay = extra?.residualOverlay ?? null;
   const anomalyHighlight = extra?.anomalyHighlight ?? null;
   const bumpMode = extra?.bumpMode ?? null;
+  const timeWindowField = extra?.timeWindowField ?? null;
+  const timeWindow = extra?.timeWindow && extra.timeWindow !== "all" ? extra.timeWindow : null;
+  const timeBit =
+    timeWindow && timeWindowField
+      ? timeWindow === "1h"
+        ? "last hour"
+        : timeWindow === "6h"
+          ? "last 6 hours"
+          : timeWindow === "24h"
+            ? "last 24 hours"
+            : timeWindow === "7d"
+              ? "last 7 days"
+              : timeWindow === "30d"
+                ? "last 30 days"
+                : timeWindow === "90d"
+                  ? "last 90 days"
+                  : "last year"
+      : null;
 
   if (kind === "scatter") {
     if (!yField || !numCols.some(c => c.name === xField) || !numCols.some(c => c.name === yField)) return null;
@@ -604,11 +634,14 @@ export function createChartRec(
       residualOverlay: residualOverlay || undefined,
       anomalyHighlight: anomalyHighlight || undefined,
       yScale: yScale || undefined,
+      timeWindowField: timeWindowField || undefined,
+      timeWindow: timeWindow || undefined,
       subtitle: [
         scatter.subtitle,
         residualOverlay ? "residuals vs fit" : null,
         anomalyHighlight ? "anomaly rings" : null,
         yScale && yScale !== "linear" ? `${yScale} Y` : null,
+        timeBit,
       ].filter(Boolean).join(" · "),
     };
   }
@@ -620,13 +653,17 @@ export function createChartRec(
       id: `corrMatrix-${labels.join("-")}`,
       kind: "corrMatrix",
       title: "Correlation matrix",
-      subtitle: `Pearson r across ${labels.length} measures`,
       score: 72,
       spec: {},
       xField: labels[0]!,
       yField: labels[1]!,
       colorField: null,
       tooltipFields: labels,
+      timeWindowField: timeWindowField || undefined,
+      timeWindow: timeWindow || undefined,
+      subtitle: timeBit
+        ? `Pearson r across ${labels.length} measures · ${timeBit}`
+        : `Pearson r across ${labels.length} measures`,
     };
   }
 
@@ -641,7 +678,8 @@ export function createChartRec(
     `${anomalyHighlight ? "-anom" : ""}` +
     `${bumpMode === "delta" ? "-delta" : ""}` +
     `${comparePrevious ? "-prev" : ""}` +
-    `${y2Field ? `-y2:${y2Field}` : ""}`;
+    `${y2Field ? `-y2:${y2Field}` : ""}` +
+    `${timeWindow && timeWindowField ? `-tw:${timeWindowField}:${timeWindow}` : ""}`;
   const id = `${kind}-${xField}-${yField ?? "n"}-${colorField ?? "n"}${rowField ? `-row:${rowField}` : ""}${barFacetId ? `-${barStackMode}` : ""}${dsId}`;
   const enc: Record<string, unknown> = {};
   let title = "";
@@ -969,6 +1007,8 @@ export function createChartRec(
           ...gpu,
           tooltipFields: extra?.tooltipFields,
           tooltipKeyField: extra?.tooltipKeyField,
+          timeWindowField: timeWindowField || undefined,
+          timeWindow: timeWindow || undefined,
         };
       }
       if (isGeoMapKind(kind)) {
@@ -981,6 +1021,8 @@ export function createChartRec(
           ...geo,
           tooltipFields: extra?.tooltipFields,
           tooltipKeyField: extra?.tooltipKeyField,
+          timeWindowField: timeWindowField || undefined,
+          timeWindow: timeWindow || undefined,
         };
       }
       if (isOddChartKind(kind)) {
@@ -995,6 +1037,8 @@ export function createChartRec(
           topN: topN ?? undefined,
           tooltipFields: extra?.tooltipFields,
           tooltipKeyField: extra?.tooltipKeyField,
+          timeWindowField: timeWindowField || undefined,
+          timeWindow: timeWindow || undefined,
         };
       }
       return null;
@@ -1040,7 +1084,10 @@ export function createChartRec(
     if (yScale && yScale !== "linear") bits.push(`${yScale} Y`);
     if (anomalyHighlight) bits.push("anomaly rings");
     if (comparePrevious) bits.push("vs earlier half");
+    if (timeBit) bits.push(timeBit);
     subtitle = bits.filter(Boolean).join(" · ") || subtitle;
+  } else if (timeBit) {
+    subtitle = subtitle ? `${subtitle} · ${timeBit}` : timeBit;
   }
 
   return {
@@ -1076,6 +1123,8 @@ export function createChartRec(
     residualOverlay: residualOverlay || undefined,
     anomalyHighlight: anomalyHighlight || undefined,
     bumpMode: bumpMode || undefined,
+    timeWindowField: timeWindowField || undefined,
+    timeWindow: timeWindow || undefined,
     tooltipFields: extra?.tooltipFields,
     tooltipKeyField: extra?.tooltipKeyField,
   };
@@ -2094,6 +2143,8 @@ export type RandomEncoding = {
   anomalyHighlight?: boolean | null;
   bumpMode?: "rank" | "delta" | null;
   barStackMode?: "grouped" | "stacked" | "percent" | null;
+  timeWindowField?: string | null;
+  timeWindow?: ChartTimeRange | null;
 };
 
 const FACET_RANDOM_KINDS = new Set<ChartKind>(["bar", "line", "area", "scatter", "bubble"]);
@@ -2150,6 +2201,8 @@ function withRandomEncodingExtras(
   let residualOverlay: boolean | null = null;
   let anomalyHighlight: boolean | null = null;
   let bumpMode: "rank" | "delta" | null = null;
+  let timeWindowField: string | null = null;
+  let timeWindow: ChartTimeRange | null = null;
 
   if (FACET_RANDOM_KINDS.has(kind)) {
     const facetPool = nomCols.filter(
@@ -2197,6 +2250,15 @@ function withRandomEncodingExtras(
 
   if (kind === "bump" && Math.random() < 0.4) bumpMode = "delta";
 
+  const timeCol = pickDefaultTimeField(columns, base);
+  if (timeCol && Math.random() < 0.42) {
+    const windows = suggestedChartTimeWindows(timeCol);
+    if (windows.length) {
+      timeWindowField = timeCol;
+      timeWindow = pick(windows) ?? windows[0]!;
+    }
+  }
+
   return {
     ...base,
     rowField,
@@ -2209,6 +2271,8 @@ function withRandomEncodingExtras(
     residualOverlay,
     anomalyHighlight,
     bumpMode,
+    timeWindowField,
+    timeWindow,
   };
 }
 
@@ -2622,6 +2686,8 @@ export function randomEncodingToExtra(enc: RandomEncoding): NonNullable<Paramete
     anomalyHighlight: enc.anomalyHighlight ?? null,
     bumpMode: enc.bumpMode ?? null,
     barStackMode: enc.barStackMode ?? undefined,
+    timeWindowField: enc.timeWindowField ?? null,
+    timeWindow: enc.timeWindow && enc.timeWindow !== "all" ? enc.timeWindow : null,
   };
 }
 
@@ -2941,6 +3007,25 @@ export function expandRecommendationsWithExtras(
         score: Math.max(50, rec.score - 2),
       });
     }
+
+    // Time windows — slice recent rows independent of the X axis
+    if (!rec.timeWindow || rec.timeWindow === "all") {
+      const twField = pickDefaultTimeField(columns, rec);
+      if (twField) {
+        const windows = suggestedChartTimeWindows(twField).slice(0, 2);
+        windows.forEach((range, i) => {
+          const label = chartTimeWindowLabel(range)?.toLowerCase() ?? range;
+          push({
+            ...rec,
+            id: `${rec.id}-tw-${range}`,
+            timeWindowField: twField,
+            timeWindow: range,
+            subtitle: rec.subtitle ? `${rec.subtitle} · ${label}` : label,
+            score: Math.max(46, rec.score - 2 - i),
+          });
+        });
+      }
+    }
   }
 
   // One correlation matrix if schema supports and none was pushed from a scatter seed
@@ -3073,6 +3158,8 @@ export function recommendStreamStory(
       topN?: number | null;
       y2Field?: string | null;
       comparePrevious?: boolean | null;
+      timeWindowField?: string | null;
+      timeWindow?: ChartTimeRange | null;
     },
   ): ChartRecommendation => ({
     id: mkId(),
@@ -3089,6 +3176,8 @@ export function recommendStreamStory(
     topN: extraEnc?.topN ?? undefined,
     y2Field: extraEnc?.y2Field ?? undefined,
     comparePrevious: extraEnc?.comparePrevious || undefined,
+    timeWindowField: extraEnc?.timeWindow && extraEnc.timeWindow !== "all" ? (extraEnc.timeWindowField ?? undefined) : undefined,
+    timeWindow: extraEnc?.timeWindow && extraEnc.timeWindow !== "all" ? extraEnc.timeWindow : undefined,
   });
 
   if (hasTs) {
@@ -3097,6 +3186,13 @@ export function recommendStreamStory(
   }
   if (hasWiki) {
     charts.push(mkRec("bar", "Edits by wiki", "Which language editions are most active", 90, "wiki", null, null, "count", { topN: 15 }));
+    if (hasTs) {
+      charts.push(mkRec("bar", "Edits by wiki · last hour", "Who is busiest right now", 89, "wiki", null, null, "count", {
+        topN: 12,
+        timeWindowField: "ts",
+        timeWindow: "1h",
+      }));
+    }
   }
   if (hasTs && hasWiki) {
     charts.push(mkRec("line", "Edits faceted by wiki", "One panel per language edition", 88, "ts", null, null, "count", { rowField: "wiki" }));
@@ -3159,6 +3255,8 @@ function mergeStoryCharts(
       r.anomalyHighlight ? "1" : "",
       r.bumpMode ?? "",
       r.comparePrevious ? "1" : "",
+      r.timeWindowField ?? "",
+      r.timeWindow ?? "",
     ].join("|");
   const seen = new Set([...curated, ...extras].map(keyOf));
   const presentKinds = new Set([...curated, ...extras].map((c) => c.kind));
@@ -3229,6 +3327,8 @@ export function recommendSourceStory(
       residualOverlay?: boolean | null;
       anomalyHighlight?: boolean | null;
       bumpMode?: "rank" | "delta" | null;
+      timeWindowField?: string | null;
+      timeWindow?: ChartTimeRange | null;
     },
   ): ChartRecommendation => ({
     id: mkId(), kind: k, title, subtitle, score, spec: {},
@@ -3248,6 +3348,11 @@ export function recommendSourceStory(
     residualOverlay: extraEnc?.residualOverlay || undefined,
     anomalyHighlight: extraEnc?.anomalyHighlight || undefined,
     bumpMode: k === "bump" && extraEnc?.bumpMode ? extraEnc.bumpMode : undefined,
+    timeWindowField:
+      extraEnc?.timeWindow && extraEnc.timeWindow !== "all"
+        ? (extraEnc.timeWindowField ?? undefined)
+        : undefined,
+    timeWindow: extraEnc?.timeWindow && extraEnc.timeWindow !== "all" ? extraEnc.timeWindow : undefined,
   });
 
   /** Curated first, then Facet/TopN/Compare, then full-schema recommend() (network, odd, …). */
@@ -3259,6 +3364,10 @@ export function recommendSourceStory(
   if (kind === "usgs") {
     return finish("Earthquake Analytics", [
         mk("geoPoints", "Quake map", "Projected locations on coastlines", 98, "longitude", "latitude", "mag_type", null, "magnitude"),
+        mk("geoPoints", "Quakes · last 6 hours", "Only the newest shakes on the map", 97, "longitude", "latitude", "mag_type", null, "magnitude", {
+          timeWindowField: "ts",
+          timeWindow: "6h",
+        }),
         mk("geoHex", "Quake hex density", "Where energy piles up on the map", 96, "longitude", "latitude", "mag_type"),
         mk("globe", "Quake globe", "Spin the planet — quakes as points", 95, "longitude", "latitude", "mag_type", null, "magnitude"),
         mk("scatter3d", "Orbit depth cloud", "Lat · lon · depth — drag to orbit", 94, "longitude", "latitude", "mag_type", null, "magnitude", { zField: "depth" }),
@@ -3386,6 +3495,10 @@ export function recommendSourceStory(
   if (kind === "opensky") {
     return finish("Aircraft over the US", [
         mk("geoPoints", "Sky map", "Projected positions on coastlines", 96, "longitude", "latitude", "origin_country", null, "baro_altitude"),
+        mk("geoPoints", "Sky · last hour", "Only craft with a fresh ping", 95, "longitude", "latitude", "origin_country", null, "baro_altitude", {
+          timeWindowField: "ts",
+          timeWindow: "1h",
+        }),
         mk("globeTrail", "Flight globe", "Craft paths wrapped on the sphere", 98, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
         mk("geoBubbles", "Altitude bubbles", "Sized by barometric altitude", 94, "longitude", "latitude", "origin_country", null, "baro_altitude"),
         mk("trailRibbon", "Flight ribbons", "Each craft leaves a fading trail", 92, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
@@ -3418,6 +3531,10 @@ export function recommendSourceStory(
   if (kind === "nyc311") {
     return finish("NYC 311 complaints", [
         mk("geoPoints", "Complaint map", "Tickets on a projected basemap", 98, "longitude", "latitude", "borough"),
+        mk("geoPoints", "Complaints · last 7 days", "Only the newest tickets on the map", 96, "longitude", "latitude", "borough", null, null, {
+          timeWindowField: "created_date",
+          timeWindow: "7d",
+        }),
         mk("geoHex", "Complaint density", "Hexbins of 311 heat", 96, "longitude", "latitude", "borough"),
         mk("bar", "Top complaint types", "What are New Yorkers reporting?", 92, "complaint_type", null, null, "count", null, { topN: 15 }),
         mk("bar", "Borough × type", "Stacked complaint mix by borough", 90, "borough", null, "complaint_type", "count", null, { topN: 8, barStackMode: "stacked" }),
@@ -3586,6 +3703,10 @@ export function recommendSourceStory(
   if (kind === "firms") {
     return finish("Active fires (VIIRS)", [
         mk("geoPoints", "Fire map", "Hotspots sized by fire radiative power", 98, "longitude", "latitude", "confidence", null, "frp"),
+        mk("geoPoints", "Fires · last 6 hours", "Only the freshest hotspots", 96, "longitude", "latitude", "confidence", null, "frp", {
+          timeWindowField: "acq_ts",
+          timeWindow: "6h",
+        }),
         mk("geoBubbles", "Fire power bubbles", "Bigger = more FRP", 94, "longitude", "latitude", "daynight", null, "frp"),
         mk("scatter", "Brightness vs power", "TI4 brightness against FRP", 88, "bright_ti4", "frp", "confidence"),
         mk("scatter", "Brightness · day/night facets", "Small multiples by day vs night", 84, "bright_ti4", "frp", "confidence", null, null, { rowField: "daynight" }),

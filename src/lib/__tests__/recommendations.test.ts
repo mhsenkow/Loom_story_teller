@@ -556,6 +556,18 @@ describe("recommendations", () => {
       expect(expanded.some((r) => r.yScale === "log")).toBe(true);
     });
 
+  it("adds time-window variants when a timestamp column exists", () => {
+      const cols: ColumnInfo[] = [
+        { name: "wiki", data_type: "VARCHAR", null_count: 0, distinct_count: 12, min_value: null, max_value: null },
+        { name: "ts", data_type: "TIMESTAMP", null_count: 0, distinct_count: 100, min_value: "2024-01-01", max_value: "2024-12-31" },
+        { name: "delta", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "1", max_value: "999" },
+      ];
+      const base = createChartRec("bar", cols, "wiki", "delta", null, "t")!;
+      const expanded = expandRecommendationsWithExtras([base], cols);
+      expect(expanded.some((r) => r.timeWindow === "1h" || r.timeWindow === "6h" || r.timeWindow === "24h")).toBe(true);
+      expect(expanded.some((r) => r.timeWindowField === "ts")).toBe(true);
+    });
+
     it("createChartRec builds pareto and corrMatrix", () => {
       const cols: ColumnInfo[] = [
         { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 8, min_value: null, max_value: null },

@@ -30,6 +30,7 @@ import { isGeoFamilyKind, isGeoMapKind, renderGeoMapCanvas, GEO_MAP_KIND_OPTIONS
 import { partitionRowsByFacet, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
 import { buildCorrMatrix, buildPareto, residualYs, rollingMean, normalizeSeriesValues } from "@/lib/dsTransforms";
+import { applyChartTimeWindow } from "@/lib/chartTime";
 
 const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
 
@@ -151,9 +152,10 @@ export function ChartCard({
 
     if (xIdx === -1) return;
 
+    const timed = applyChartTimeWindow(data.rows, data.columns, rec).rows;
     // Even sample across the whole table — the first rows of a sorted file (e.g. A–B countries) mislead
-    const stride = Math.max(1, Math.ceil(data.rows.length / 1500));
-    const rows = stride === 1 ? data.rows : data.rows.filter((_, i) => i % stride === 0);
+    const stride = Math.max(1, Math.ceil(timed.length / 1500));
+    const rows = stride === 1 ? timed : timed.filter((_, i) => i % stride === 0);
 
     const paintPanel = (
       panelRows: unknown[][],
@@ -325,7 +327,8 @@ export function ChartCard({
             rec.anomalyHighlight ||
             rec.bumpMode === "delta" ||
             rec.kind === "pareto" ||
-            rec.kind === "corrMatrix") && (
+            rec.kind === "corrMatrix" ||
+            (rec.timeWindow && rec.timeWindow !== "all")) && (
           <div className="flex flex-wrap gap-1 mt-0.5">
             {rec.rowField && (
               <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted truncate max-w-full">
@@ -390,6 +393,11 @@ export function ChartCard({
             {rec.kind === "corrMatrix" && (
               <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
                 Pearson r
+              </span>
+            )}
+            {rec.timeWindow && rec.timeWindow !== "all" && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                {rec.timeWindow}
               </span>
             )}
           </div>

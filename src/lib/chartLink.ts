@@ -49,6 +49,8 @@ export interface ChartLinkChart {
   residualOverlay?: boolean;
   anomalyHighlight?: boolean;
   bumpMode?: "rank" | "delta";
+  timeWindowField?: string;
+  timeWindow?: "all" | "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
   tooltipFields?: string[];
   tooltipKeyField?: string;
   /** The recommendation's own title / subtitle (story recs carry hand-written ones). */
@@ -156,6 +158,8 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     residualOverlay: rec.residualOverlay || undefined,
     anomalyHighlight: rec.anomalyHighlight || undefined,
     bumpMode: rec.bumpMode === "delta" || rec.bumpMode === "rank" ? rec.bumpMode : undefined,
+    timeWindowField: str(rec.timeWindowField),
+    timeWindow: rec.timeWindow && rec.timeWindow !== "all" ? rec.timeWindow : undefined,
     tooltipFields: rec.tooltipFields?.length ? [...rec.tooltipFields] : undefined,
     tooltipKeyField: str(rec.tooltipKeyField),
     title: str(rec.title),
@@ -204,6 +208,8 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["residualOverlay", "ro"],
   ["anomalyHighlight", "ah"],
   ["bumpMode", "bm"],
+  ["timeWindowField", "twf"],
+  ["timeWindow", "tw"],
   ["tooltipFields", "tf"],
   ["tooltipKeyField", "tk"],
   ["title", "ti"],
@@ -244,6 +250,7 @@ const AGGS = new Set<string>(Y_AGGREGATE_OPTIONS.map((o) => o.value));
 const ASPECTS = new Set<string>(CHART_ASPECTS.map((a) => a.id));
 const DEVICES = new Set<string>(["auto", "mobile", "tablet", "desktop"]);
 const STACKS = new Set<string>(["grouped", "stacked", "percent"]);
+const TIME_WINDOWS = new Set<string>(["all", "1h", "6h", "24h", "7d", "30d", "90d", "1y"]);
 
 const field = (v: unknown, max = 200): string | undefined => (typeof v === "string" && v.length > 0 && v.length <= max ? v : undefined);
 
@@ -282,7 +289,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
       f === "seriesNormalize" ||
       f === "residualOverlay" ||
       f === "anomalyHighlight" ||
-      f === "bumpMode"
+      f === "bumpMode" ||
+      f === "timeWindow"
     ) {
       continue;
     }
@@ -298,6 +306,9 @@ export function decodeChartLink(hash: string): ChartLink | null {
   if (cr.ro === true) chart.residualOverlay = true;
   if (cr.ah === true) chart.anomalyHighlight = true;
   if (cr.bm === "delta" || cr.bm === "rank") chart.bumpMode = cr.bm;
+  if (typeof cr.tw === "string" && TIME_WINDOWS.has(cr.tw) && cr.tw !== "all") {
+    chart.timeWindow = cr.tw as ChartLinkChart["timeWindow"];
+  }
   if (Array.isArray(cr.tf)) {
     const tf = cr.tf.filter((t): t is string => typeof t === "string" && t.length > 0 && t.length <= 200).slice(0, 40);
     if (tf.length) chart.tooltipFields = tf;
@@ -337,6 +348,7 @@ const ENCODING_FIELDS = [
   "outlineField",
   "opacityField",
   "y2Field",
+  "timeWindowField",
 ] as const;
 
 const norm = (v: unknown) => (v === null || v === undefined || v === "" ? undefined : v);
@@ -385,6 +397,8 @@ export function restoreChartRec(
       residualOverlay: c.residualOverlay ?? null,
       anomalyHighlight: c.anomalyHighlight ?? null,
       bumpMode: c.bumpMode ?? null,
+      timeWindowField: c.timeWindowField ?? null,
+      timeWindow: c.timeWindow ?? null,
       tooltipFields: c.tooltipFields ?? null,
       tooltipKeyField: c.tooltipKeyField ?? null,
       barStackMode: link.barStackMode ?? "grouped",
@@ -416,5 +430,6 @@ export function restoreChartRec(
   if (c.tooltipKeyField) out.tooltipKeyField = c.tooltipKeyField;
   if (c.title) out.title = c.title;
   if (c.subtitle !== undefined) out.subtitle = c.subtitle;
+  if (c.timeWindow) out.timeWindow = c.timeWindow;
   return out;
 }

@@ -166,6 +166,25 @@ describe("chart links", () => {
     expect(rec.id).toBe(original.id);
   });
 
+  it("round-trips a Time window on the chart payload", () => {
+    const original = createChartRec("bar", columns, "region", "revenue", null, "sales", {
+      timeWindowField: "date",
+      timeWindow: "24h",
+    })!;
+    expect(original.timeWindow).toBe("24h");
+    expect(original.timeWindowField).toBe("date");
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: original,
+    })!;
+    const decoded = decodeChartLink(encodeChartLink(link))!;
+    expect(decoded.chart.timeWindow).toBe("24h");
+    expect(decoded.chart.timeWindowField).toBe("date");
+    const rec = restoreChartRec(decoded, columns, [], "sales")!;
+    expect(rec.timeWindow).toBe("24h");
+    expect(rec.timeWindowField).toBe("date");
+  });
+
   it("prefers an identical rec already in the rail (keeps its spec)", () => {
     const story: ChartRecommendation = {
       id: "story-1",

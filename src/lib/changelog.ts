@@ -25,6 +25,29 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-06",
+    date: "2026-10-06",
+    title: "Time windows on Encoding",
+    summary: "Slice any chart to the last hour, day, week, or year — independently of the X axis.",
+    items: [
+      {
+        title: "Time in the Encoding panel",
+        detail:
+          "When a table has a date or timestamp column — live feeds, USGS, fires, sales files — Encoding shows Time and Window chips. Last 24 hours on a bar map of categories, last 7 days on a scatter: the clock is a data slice, not an axis.",
+      },
+      {
+        title: "Recent windows in Discover and Suggestions",
+        detail:
+          "What’s interesting and the suggestion rail surface “last hour / 6h / 24h” (or week/month for date columns) variants when a feed has a clock — open one and Encoding already has the window set. Random and Shuffle pick windows too.",
+      },
+      {
+        title: "Windows count from the newest row",
+        detail:
+          "Presets hide themselves when they would empty a short sample. Share links and suggestion cards keep the window you picked.",
+      },
+    ],
+  },
+  {
     id: "2026-10-05",
     date: "2026-10-05",
     title: "Facets, compare, and four new live feeds",
