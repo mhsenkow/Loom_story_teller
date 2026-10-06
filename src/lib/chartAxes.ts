@@ -116,7 +116,7 @@ export function layoutBandLabels(
   baseFont = 10,
 ): BandLabelLayout {
   const n = labels.length;
-  const fontSize = Math.max(9, Math.min(baseFont, bandWidth * 0.55 + 2));
+  const fontSize = Math.max(10, Math.min(baseFont, bandWidth * 0.55 + 2));
   ctx.save();
   ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
   const widths = labels.map((l) => ctx.measureText(l).width);

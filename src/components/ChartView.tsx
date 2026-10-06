@@ -362,7 +362,7 @@ export function ChartView() {
       titleFontWeight: chartVisualOverrides.titleFontWeight ?? 600,
       titleItalic: chartVisualOverrides.titleItalic ?? false,
       tickRotation: chartVisualOverrides.tickRotation ?? 0,
-      axisFontSize: isCompact ? 9 : Math.max(9, chartVisualOverrides.axisFontSize ?? 10),
+      axisFontSize: isCompact ? 10 : Math.max(10, chartVisualOverrides.axisFontSize ?? 11),
       markShape: motifShape,
       markStroke: chartVisualOverrides.markStroke ?? motif === "ring",
       markStrokeWidth: chartVisualOverrides.markStrokeWidth ?? 1,
@@ -378,7 +378,7 @@ export function ChartView() {
       gridStyle: chartVisualOverrides.gridStyle ?? axisFromStyle.gridStyle ?? "solid",
       gridOpacity: chartVisualOverrides.gridOpacity ?? axisFromStyle.gridOpacity ?? 0.5,
       tickCount: chartVisualOverrides.tickCount ?? 5,
-      axisLabelColor: chartVisualOverrides.axisLabelColor ?? themeUi.muted,
+      axisLabelColor: chartVisualOverrides.axisLabelColor ?? themeUi.label,
       showGrid,
       chartPadding: isCompact ? 36 : isMedium ? 46 : framePad,
       // "auto" shows a key only when a color field is encoded, in the emptiest corner
@@ -401,7 +401,7 @@ export function ChartView() {
       sourceFootnoteAlign: chartVisualOverrides.sourceFootnoteAlign ?? "left",
       themeBg: themeUi.bg,
       themeText: themeUi.text,
-      themeMuted: themeUi.muted,
+      themeMuted: themeUi.label,
       themeBorder: themeUi.border,
       yAggregate: (() => {
         if (!activeChart) return undefined;
@@ -1251,7 +1251,7 @@ export function ChartView() {
               burnIn: st.exportBurnIn,
               sourceLabel,
               themeText: themeUi.text,
-              themeMuted: themeUi.muted,
+              themeMuted: themeUi.label,
               themeBg: themeUi.bg,
             });
           }
@@ -1821,7 +1821,7 @@ export function ChartView() {
         centerOf,
         fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
         themeText: themeUi.text,
-        themeMuted: themeUi.muted,
+        themeMuted: themeUi.label,
         themeBorder: themeUi.border,
         themeBg: themeUi.bg,
         // The HTML pivot bar carries the legend live; Canvas draws it only for capture / export.
@@ -1847,7 +1847,7 @@ export function ChartView() {
             drawChartSourceFootnote(octx, w, h, 24, formatSourceFootnote(prov, footMode), {
               align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
               fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-              themeMuted: themeUi.muted,
+              themeMuted: themeUi.label,
               themeBorder: themeUi.border,
             });
           }
@@ -1866,7 +1866,7 @@ export function ChartView() {
             drawChartSourceFootnote(ctx, w, h, 24, formatSourceFootnote(prov, footMode), {
               align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
               fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-              themeMuted: themeUi.muted,
+              themeMuted: themeUi.label,
               themeBorder: themeUi.border,
             });
           }
@@ -1904,7 +1904,7 @@ export function ChartView() {
               drawChartSourceFootnote(ctx, w, h, 24, formatSourceFootnote(prov, footMode), {
                 align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
                 fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-                themeMuted: themeUi.muted,
+                themeMuted: themeUi.label,
                 themeBorder: themeUi.border,
               });
             }
@@ -1931,7 +1931,7 @@ export function ChartView() {
             drawChartSourceFootnote(octx, w, h, 24, formatSourceFootnote(prov, footMode), {
               align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
               fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-              themeMuted: themeUi.muted,
+              themeMuted: themeUi.label,
               themeBorder: themeUi.border,
             });
           }
@@ -2602,7 +2602,7 @@ export function ChartView() {
       pointSize: 8,
       axisFontSize: chartVisualOverrides.axisFontSize ?? 10,
       fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-      axisLabelColor: chartVisualOverrides.axisLabelColor ?? ui.muted,
+      axisLabelColor: chartVisualOverrides.axisLabelColor ?? ui.label,
       axisLineColor: chartVisualOverrides.axisLineColor ?? ui.border,
       axisLineWidth: chartVisualOverrides.axisLineWidth ?? 1,
       axisStyle: chartVisualOverrides.axisStyle ?? "rule",

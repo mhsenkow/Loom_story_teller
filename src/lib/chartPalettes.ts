@@ -51,20 +51,29 @@ export type ColorPalette = {
   source: PaletteSource;
 };
 
-export type ThemeUiColors = { bg: string; text: string; muted: string; border: string; accent: string };
+export type ThemeUiColors = {
+  bg: string;
+  text: string;
+  muted: string;
+  /** Stronger than muted — axes, footnotes, captions that must stay AA. */
+  label: string;
+  border: string;
+  accent: string;
+};
 
 /** Canonical UI colors per look theme (keep in sync with globals.css). */
 export const THEME_UI: Record<LookTheme, ThemeUiColors> = {
-  light: { bg: "#f0efeb", text: "#141414", muted: "#5a5a5a", border: "#c4c4be", accent: "#b84e1f" },
-  dark: { bg: "#0a0a0c", text: "#ececf1", muted: "#8b8b9a", border: "#2e2e36", accent: "#7b6cf0" },
-  contrast: { bg: "#000000", text: "#ffffff", muted: "#c8c8c8", border: "#ffffff", accent: "#ffff00" },
-  paper: { bg: "#e6dfd2", text: "#1a1610", muted: "#5c5548", border: "#bdb3a0", accent: "#7a3d0f" },
-  glass: { bg: "#dce6f4", text: "#0b1220", muted: "#4b5b70", border: "#64748b", accent: "#6d28d9" },
-  frost: { bg: "#060a14", text: "#f1f5f9", muted: "#a8b8cc", border: "#64748b", accent: "#c4b5fd" },
-  brutal: { bg: "#ffffff", text: "#000000", muted: "#2a2a2a", border: "#000000", accent: "#e00000" },
-  loom: { bg: "#0a0a0f", text: "#f0ede8", muted: "#b0aca4", border: "#2e2e3c", accent: "#e0b45a" },
-  tank: { bg: "#0a161c", text: "#d4eef2", muted: "#7eb4c4", border: "#2a5266", accent: "#6bb866" },
-  nes: { bg: "#1a8ad4", text: "#0a0a0a", muted: "#333333", border: "#000000", accent: "#d40028" },
+  light: { bg: "#f0efeb", text: "#141414", muted: "#5a5a5a", label: "#3d3d3d", border: "#c4c4be", accent: "#b84e1f" },
+  dark: { bg: "#0a0a0c", text: "#ececf1", muted: "#9e9eac", label: "#b4b4c0", border: "#2e2e36", accent: "#6a5ce0" },
+  contrast: { bg: "#000000", text: "#ffffff", muted: "#c8c8c8", label: "#ffffff", border: "#ffffff", accent: "#ffff00" },
+  paper: { bg: "#e6dfd2", text: "#1a1610", muted: "#5c5548", label: "#3f3a32", border: "#bdb3a0", accent: "#7a3d0f" },
+  glass: { bg: "#dce6f4", text: "#0b1220", muted: "#4b5b70", label: "#334155", border: "#64748b", accent: "#6d28d9" },
+  frost: { bg: "#060a14", text: "#f1f5f9", muted: "#a8b8cc", label: "#c8d4e4", border: "#64748b", accent: "#c4b5fd" },
+  brutal: { bg: "#ffffff", text: "#000000", muted: "#2a2a2a", label: "#111111", border: "#000000", accent: "#e00000" },
+  loom: { bg: "#0a0a0f", text: "#f0ede8", muted: "#b0aca4", label: "#d0ccc4", border: "#2e2e3c", accent: "#e0b45a" },
+  tank: { bg: "#0a161c", text: "#d4eef2", muted: "#7eb4c4", label: "#a8d4e0", border: "#2a5266", accent: "#6bb866" },
+  // Charts paint on light surface so axis/footnote text stays AA (chrome bg stays blue).
+  nes: { bg: "#f7f7f7", text: "#0a0a0a", muted: "#1a1a1a", label: "#0a0a0a", border: "#000000", accent: "#d40028" },
 };
 
 /** First 8 categorical stops — dark/frost/glass shell chart tokens. */

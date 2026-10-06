@@ -31,8 +31,8 @@
   --weight-ui-strong: 600;
   /* Primary button foreground — overridden when accent fails WCAG on white */
   --btn-primary-fg: #ffffff;
-  /* Secondary label token (stronger than muted for captions that must stay readable) */
-  --color-label: #9a9aa8;
+  /* Secondary label token (stronger than muted for captions / chart axes) */
+  --color-label: #a4a4b2;
 
   /* ---- Layout ---- */
   --sidebar-width: 260px;
@@ -59,9 +59,9 @@
   --color-bg-elev: #1a1a1f;
   --color-surface: #111114;
   --color-text: #ececf1;
-  --color-muted: #8b8b9a;
-  --color-label: #a4a4b2;
-  --color-accent: #6c5ce7;
+  --color-muted: #9e9eac;
+  --color-label: #b4b4c0;
+  --color-accent: #6a5ce0;
   --color-accent-2: #a29bfe;
   --color-border: #2a2a30;
   --color-success: #00d68f;
@@ -153,9 +153,9 @@ html.dark {
   --color-surface: #121216;
   --color-bg-elev: #1c1c22;
   --color-text: #ececf1;
-  --color-muted: #8b8b9a;
-  --color-label: #a8a8b6;
-  --color-accent: #7b6cf0;
+  --color-muted: #9e9eac;
+  --color-label: #b4b4c0;
+  --color-accent: #6a5ce0;
   --color-accent-2: #b4adff;
   --color-border: #2e2e36;
   --color-success: #1ad99a;
@@ -421,8 +421,9 @@ html[data-theme="nes"] {
   --color-surface: #f7f7f7;
   --color-bg-elev: #ffffff;
   --color-text: #0a0a0a;
-  --color-muted: #333333;
-  --color-label: #111111;
+  /* Stronger than #333 so captions stay AA on the blue chrome, and charts use surface bg */
+  --color-muted: #1a1a1a;
+  --color-label: #0a0a0a;
   --color-accent: #d40028;
   --color-accent-2: #e8c800;
   --color-border: #000000;

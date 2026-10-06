@@ -289,9 +289,9 @@ export function ChartCard({
         />
         {micro && (
           <span
-            className={`
-              absolute bottom-1 left-1 z-[1] max-w-[85%] truncate px-1 py-px text-[9px] font-mono font-semibold rounded
-              bg-loom-bg/75 backdrop-blur-[2px] pointer-events-none
+              className={`
+              absolute bottom-1 left-1 z-[1] max-w-[85%] truncate px-1 py-px text-2xs font-mono font-semibold rounded
+              bg-loom-bg/75 backdrop-blur-[2px] pointer-events-none text-loom-label
               ${kindColor(rec.kind)}
             `}
           >
@@ -331,72 +331,72 @@ export function ChartCard({
             (rec.timeWindow && rec.timeWindow !== "all")) && (
           <div className="flex flex-wrap gap-1 mt-0.5">
             {rec.rowField && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted truncate max-w-full">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label truncate max-w-full">
                 {micro ? `× ${rec.rowField}` : `Facet · ${rec.rowField}`}
               </span>
             )}
             {rec.topN != null && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 Top {rec.topN}
               </span>
             )}
             {rec.y2Field && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted truncate max-w-full">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label truncate max-w-full">
                 vs {rec.y2Field}
               </span>
             )}
             {rec.comparePrevious && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 vs earlier
               </span>
             )}
             {rec.rollingWindow && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 roll {rec.rollingWindow}
               </span>
             )}
             {rec.seriesNormalize === "index100" && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 index 100
               </span>
             )}
             {rec.seriesNormalize === "zscore" && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 z-score
               </span>
             )}
             {rec.yScale && rec.yScale !== "linear" && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 {rec.yScale} Y
               </span>
             )}
             {rec.residualOverlay && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 residuals
               </span>
             )}
             {rec.anomalyHighlight && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 anomalies
               </span>
             )}
             {rec.bumpMode === "delta" && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 Δ rank
               </span>
             )}
             {rec.kind === "pareto" && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 80/20
               </span>
             )}
             {rec.kind === "corrMatrix" && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 Pearson r
               </span>
             )}
             {rec.timeWindow && rec.timeWindow !== "all" && (
-              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 {rec.timeWindow}
               </span>
             )}

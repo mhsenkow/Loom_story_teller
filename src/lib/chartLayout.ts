@@ -84,7 +84,7 @@ export function resolveChartMargins(args: {
   if (isCompact) base = Math.min(Math.max(base, 36), 40);
 
   const cartesian = isCartesianKind(kind);
-  const fs = Math.max(8, axisFontSize);
+  const fs = Math.max(10, axisFontSize);
   const rot = Math.abs(tickRotation);
   // Tick stubs + label + axis field name below / beside the plot
   const tickBand = fs + 6;

@@ -3605,8 +3605,8 @@ export function recommendSourceStory(
   }
 
   if (kind === "pageviews") {
-    return finish("What the world read yesterday", [
-        mk("bar", "Most-read articles", "Yesterday's top English Wikipedia pages", 98, "article", "views", null, "max", null, { topN: 20 }),
+    return finish("What the world read recently", [
+        mk("bar", "Most-read articles", "Latest published Wikimedia day (often yesterday UTC)", 98, "article", "views", null, "max", null, { topN: 20 }),
         mk("treemap", "Attention map", "Each article sized by views", 92, "article", "views", null, "max", null, { topN: 20 }),
         mk("lollipop", "Top reads", "Views per article", 86, "article", "views", null, "max", null, { topN: 15 }),
       ]);

@@ -553,11 +553,11 @@ function hookFor(
     }
     return {
       hook:
-        topToday > 0
-          ? `${todayCountry} +${Math.round(topToday).toLocaleString()} cases today`
+        topToday > 100
+          ? `${todayCountry} +${Math.round(topToday).toLocaleString()} reported new cases (upstream daily; often laggy)`
           : `${topCountry} leads cumulative cases`,
       blurb: chart.subtitle || chart.title,
-      score: 84 + Math.min(10, topToday / 5000),
+      score: 84 + Math.min(10, topToday > 100 ? topToday / 5000 : 0),
       preferKind: "choropleth",
       category: "Health",
     };

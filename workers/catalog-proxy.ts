@@ -36,6 +36,8 @@ import {
   treasuryDebt,
   trimNwsAlerts,
   utcDay,
+  londonDay,
+  pageviewsPrimaryDaysAgo,
   worldBankWide,
 } from "./sourceTransforms";
 
@@ -340,7 +342,7 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
 
   ukcarbon: async () => {
     const [yesterday, today] = await Promise.all([
-      upstreamJson("Carbon Intensity", `https://api.carbonintensity.org.uk/intensity/date/${utcDay(1)}`),
+      upstreamJson("Carbon Intensity", `https://api.carbonintensity.org.uk/intensity/date/${londonDay(1)}`),
       upstreamJson("Carbon Intensity", "https://api.carbonintensity.org.uk/intensity/date"),
     ]);
     return JSON.stringify(mergeUkCarbon(yesterday, today));
@@ -445,14 +447,18 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   lobsters: () => upstreamText("Lobsters", "https://lobste.rs/hottest.json"),
 
   pageviews: async () => {
-    // Yesterday (UTC) lands a few hours after midnight — fall back to the day before.
+    // Top pageviews for day D usually land mid-day UTC on D+1 — try a short ladder.
     const url = (d: string) =>
       `https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access/${d.replace(/-/g, "/")}`;
-    try {
-      return await upstreamText("Wikimedia", url(utcDay(1)));
-    } catch {
-      return upstreamText("Wikimedia", url(utcDay(2)));
+    let lastErr: unknown;
+    for (const ago of pageviewsPrimaryDaysAgo()) {
+      try {
+        return await upstreamText("Wikimedia", url(utcDay(ago)));
+      } catch (e) {
+        lastErr = e;
+      }
     }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr ?? "Pageviews unavailable"));
   },
 
   crypto: async () => {

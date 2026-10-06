@@ -500,6 +500,8 @@ fn hn_fema_covid_nyc311_iss_parse() {
 
     let nyc = nyc311_rows(&serde_json::json!([{"unique_key": "65000001", "created_date": "2026-10-02T01:23:45.000", "complaint_type": "Noise", "descriptor": "Loud Music", "borough": "BROOKLYN", "city": "BROOKLYN", "latitude": "40.6782", "longitude": "-73.9442", "status": "Open", "agency": "NYPD"}])).unwrap();
     assert_eq!(nyc[0][6], Cell::F64(40.6782));
+    // Zone-less Socrata times are America/New_York → UTC (EDT in October).
+    assert_eq!(nyc[0][1], s("2026-10-02 05:23:45"));
 
     let iss = iss_rows(&serde_json::json!([{"latitude": 1.0, "longitude": 2.0, "altitude": 420.1, "velocity": 27600.0, "visibility": "daylight", "timestamp": 1790974000}, {"latitude": 3.0, "longitude": 4.0, "timestamp": 1790974600}])).unwrap();
     assert_eq!(iss.len(), 2);

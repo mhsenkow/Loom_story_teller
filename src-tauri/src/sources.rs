@@ -887,6 +887,42 @@ fn today_days() -> i64 {
     now_secs().div_euclid(86_400)
 }
 
+/// UK BST: last Sunday of March 01:00 UTC → last Sunday of October 01:00 UTC (+3600).
+fn uk_bst_offset_secs_at(utc_secs: i64) -> i64 {
+    let (y, _, _) = civil_from_days(utc_secs.div_euclid(86_400));
+    let march1 = days_from_civil(y, 3, 1);
+    let oct1 = days_from_civil(y, 10, 1);
+    let last_sunday = |month1: i64, dim: i64| {
+        let last = month1 + dim - 1;
+        let wd = (last + 4).rem_euclid(7);
+        last - wd
+    };
+    let start = last_sunday(march1, 31) * 86_400 + 3600; // 01:00 UTC
+    let end = last_sunday(oct1, 31) * 86_400 + 3600;
+    if utc_secs >= start && utc_secs < end {
+        3600
+    } else {
+        0
+    }
+}
+
+/// Calendar day `ago` days before today in Europe/London.
+fn london_days_ago(ago: i64) -> i64 {
+    let now = now_secs();
+    let off = uk_bst_offset_secs_at(now);
+    (now + off).div_euclid(86_400) - ago
+}
+
+/// Prefer day-2 before 14:00 UTC for Wikimedia top pageviews.
+fn pageviews_try_offsets() -> [i64; 3] {
+    let hour = (now_secs().rem_euclid(86_400)) / 3600;
+    if hour < 14 {
+        [2, 1, 3]
+    } else {
+        [1, 2, 3]
+    }
+}
+
 /// "YYYY-MM-DD" for days since epoch.
 pub(crate) fn fmt_date(days: i64) -> String {
     let (y, m, d) = civil_from_days(days);
@@ -919,6 +955,12 @@ fn num(s: &str, range: std::ops::Range<usize>) -> Option<i64> {
 /// "…:00.000-04:00", "… 12:00:00") into "YYYY-MM-DD HH:MM:SS". An offset or
 /// Z converts to UTC; text without one is kept as wall-clock time.
 pub(crate) fn parse_iso_utc(s: &str) -> Option<String> {
+    parse_iso_with_default_offset(s, 0)
+}
+
+/// Like `parse_iso_utc`, but zone-less timestamps use `default_offset_secs`
+/// (east of UTC — e.g. America/New_York is −14400 or −18000).
+pub(crate) fn parse_iso_with_default_offset(s: &str, default_offset_secs: i64) -> Option<String> {
     let s = s.trim();
     let y = num(s, 0..4)?;
     let m = num(s, 5..7)? as u32;
@@ -928,7 +970,7 @@ pub(crate) fn parse_iso_utc(s: &str) -> Option<String> {
     }
     let days = days_from_civil(y, m, d);
     if s.len() == 10 {
-        return Some(fmt_ts(days * 86_400));
+        return Some(fmt_ts(days * 86_400 - default_offset_secs));
     }
     let sep = s.as_bytes()[10];
     if sep != b'T' && sep != b' ' {
@@ -949,10 +991,10 @@ pub(crate) fn parse_iso_utc(s: &str) -> Option<String> {
         rest = r.trim_start_matches(|c: char| c.is_ascii_digit());
     }
     let offset = match rest {
-        "" => 0,
+        "" => default_offset_secs,
         "Z" | "z" => 0,
         tz => {
-            let sign = match tz.as_bytes()[0] {
+            let sign = match tz.as_bytes().first().copied()? {
                 b'+' => 1,
                 b'-' => -1,
                 _ => return None,
@@ -964,6 +1006,42 @@ pub(crate) fn parse_iso_utc(s: &str) -> Option<String> {
         }
     };
     Some(fmt_ts(days * 86_400 + hh * 3600 + mm * 60 + ss - offset))
+}
+
+/// US Eastern offset (seconds east of UTC) for a civil local date — second
+/// Sunday of March → first Sunday of November is EDT (−4h), else EST (−5h).
+fn us_eastern_offset_secs(y: i64, m: u32, d: u32) -> i64 {
+    let march = days_from_civil(y, 3, 1);
+    let nov = days_from_civil(y, 11, 1);
+    // Unix epoch day 0 is Thursday; (days + 4) % 7 == 0 → Sunday.
+    let sunday = |month1_days: i64| {
+        let wd = (month1_days + 4).rem_euclid(7);
+        let first_sun = if wd == 0 { 0 } else { 7 - wd };
+        month1_days + first_sun
+    };
+    let dst_start = sunday(march) + 7; // 2nd Sunday March
+    let dst_end = sunday(nov); // 1st Sunday November
+    let day = days_from_civil(y, m, d);
+    if day >= dst_start && day < dst_end {
+        -4 * 3600
+    } else {
+        -5 * 3600
+    }
+}
+
+fn jts_nyc(v: Option<&Value>) -> Cell {
+    match v.and_then(|x| x.as_str()) {
+        Some(s) => {
+            let y = num(s, 0..4).unwrap_or(1970);
+            let m = num(s, 5..7).unwrap_or(1) as u32;
+            let d = num(s, 8..10).unwrap_or(1) as u32;
+            let off = us_eastern_offset_secs(y, m, d);
+            parse_iso_with_default_offset(s, off)
+                .map(Cell::Str)
+                .unwrap_or(Cell::Null)
+        }
+        None => Cell::Null,
+    }
 }
 
 // ================================================================
@@ -1541,7 +1619,7 @@ pub(crate) fn nyc311_rows(body: &Value) -> Result<Vec<Row>, String> {
         .map(|r| {
             vec![
                 js(r.get("unique_key")),
-                jts(r.get("created_date")),
+                jts_nyc(r.get("created_date")),
                 js(r.get("complaint_type")),
                 js(r.get("descriptor")),
                 js(r.get("borough")),
@@ -2897,7 +2975,7 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
         "aq" => aq_rows(&get_json(&c, &aq_url()).await?, CITIES),
         "ukcarbon" => {
             let base = "https://api.carbonintensity.org.uk/intensity/date";
-            let mut bodies = vec![get_json(&c, &format!("{}/{}", base, fmt_date(today - 1))).await?];
+            let mut bodies = vec![get_json(&c, &format!("{}/{}", base, fmt_date(london_days_ago(1)))).await?];
             match get_json(&c, base).await {
                 Ok(b) => bodies.push(b),
                 Err(e) => eprintln!("[loom] ukcarbon today: {}", e),
@@ -2957,12 +3035,19 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
         "hn" => hn_rows(&get_json(&c, HN_URL).await?),
         "lobsters" => lobsters_rows(&get_json(&c, LOBSTERS_URL).await?),
         "pageviews" => {
-            // Yesterday (UTC) is published a few hours after midnight; fall back one more day.
-            let body = match get_json(&c, &pageviews_url(today - 1)).await {
-                Ok(b) => b,
-                Err(_) => get_json(&c, &pageviews_url(today - 2)).await?,
-            };
-            pageviews_rows(&body)
+            // Top pageviews for day D usually land mid-day UTC on D+1.
+            let mut body = None;
+            let mut last_err = None;
+            for ago in pageviews_try_offsets() {
+                match get_json(&c, &pageviews_url(today - ago)).await {
+                    Ok(b) => {
+                        body = Some(b);
+                        break;
+                    }
+                    Err(e) => last_err = Some(e),
+                }
+            }
+            pageviews_rows(&body.ok_or_else(|| last_err.unwrap_or_else(|| "Pageviews unavailable".into()))?)
         }
         "steam" => steam_rows(&get_json(&c, STEAM_URL).await?),
         "crypto" => fetch_crypto(ctx).await,

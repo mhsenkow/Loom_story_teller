@@ -25,6 +25,29 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-06c",
+    date: "2026-10-06",
+    title: "Honest clocks and clearer type",
+    summary: "NYC and UK dates land in the right zone, Wikipedia picks a published day, and chart labels stay readable across themes.",
+    items: [
+      {
+        title: "NYC 311 times are Eastern → UTC",
+        detail:
+          "Socrata’s zone-less created_date is interpreted as America/New_York before storage, so “last 7 days” matches the real calendar.",
+      },
+      {
+        title: "UK carbon and Wikipedia days",
+        detail:
+          "Carbon Intensity uses the London calendar day. Top pageviews try the latest published Wikimedia day (often day-2 before mid-afternoon UTC).",
+      },
+      {
+        title: "Typography that stays legible",
+        detail:
+          "Dark and NES themes lift muted/label contrast, chart axes and footnotes use the stronger label token at 11px, and suggestion chips stop shrinking to 9px.",
+      },
+    ],
+  },
+  {
     id: "2026-10-06b",
     date: "2026-10-06",
     title: "Truer clocks on live data",

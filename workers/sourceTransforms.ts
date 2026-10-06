@@ -371,6 +371,38 @@ export function utcDay(daysAgo: number, now = Date.now()): string {
   return new Date(now - daysAgo * 86_400_000).toISOString().slice(0, 10);
 }
 
+/** Calendar day in an IANA zone (not a fixed UTC lookback). */
+export function zonedCalendarDay(daysAgo: number, timeZone: string, now = Date.now()): string {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(now));
+  const get = (t: string) => Number(parts.find((p) => p.type === t)?.value ?? NaN);
+  const ms = Date.UTC(get("year"), get("month") - 1, get("day") - daysAgo, 12, 0, 0);
+  const out = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date(ms));
+  const g = (t: string) => out.find((p) => p.type === t)?.value ?? "00";
+  return `${g("year")}-${g("month")}-${g("day")}`;
+}
+
+/** Yesterday / N days ago on the UK calendar (Carbon Intensity date API). */
+export function londonDay(daysAgo: number, now = Date.now()): string {
+  return zonedCalendarDay(daysAgo, "Europe/London", now);
+}
+
+/** Prefer day-2 before ~14:00 UTC when yesterday’s top pageviews are not published yet. */
+export function pageviewsPrimaryDaysAgo(now = Date.now()): number[] {
+  const hour = new Date(now).getUTCHours();
+  const primary = hour < 14 ? 2 : 1;
+  return [primary, primary === 1 ? 2 : 1, 3];
+}
+
 // =================================================================
 // Columnar feeds: `{ columns, rows }` with the registry column names in
 // registry order (src/lib/sourceRegistry.ts). The browser parser maps by

@@ -10,6 +10,7 @@ import type { ColumnInfo } from "./store";
 import type { InspectResult, SourceKind, SourceStatus, StreamStatus } from "./tauri";
 import { SOURCE_DEFS } from "./sourceRegistry";
 import { treasuryDebt } from "../../workers/sourceTransforms";
+import { nycWallToUtcIso } from "./zonedTime";
 
 const MAX_ROWS = 8_000;
 const WIKI_SSE = "https://stream.wikimedia.org/v2/stream/recentchange";
@@ -581,7 +582,7 @@ function parseNyc311(body: unknown): Cell[][] {
     const row = r as Record<string, unknown>;
     return [
       String(row.unique_key ?? ""),
-      row.created_date != null ? String(row.created_date) : null,
+      nycWallToUtcIso(row.created_date),
       String(row.complaint_type ?? ""),
       String(row.descriptor ?? ""),
       String(row.borough ?? ""),

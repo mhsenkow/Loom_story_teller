@@ -461,7 +461,7 @@ export const SOURCE_DEFS: SourceDef[] = [
   def({
     kind: "pageviews",
     label: "Wikipedia most-read",
-    description: "Yesterday's 100 most-read English Wikipedia articles and their view counts.",
+    description: "Most-read English Wikipedia articles for the latest published day (often yesterday UTC; early UTC morning may still show the day before).",
     attribution: "Wikimedia REST API · CC0",
     homepage: "https://wikimedia.org/api/rest_v1/",
     fileName: "Wikipedia Most Read",
@@ -566,7 +566,7 @@ export const SOURCE_DEFS: SourceDef[] = [
   def({
     kind: "covid",
     label: "COVID by country",
-    description: "Cumulative COVID-19 cases and deaths by country (historical snapshot).",
+    description: "Cumulative COVID-19 cases and deaths by country. today_cases / today_deaths are upstream daily deltas and are often zero or stale — prefer cumulative columns for analysis.",
     attribution: "disease.sh · free",
     homepage: "https://disease.sh/",
     fileName: "COVID Countries",
