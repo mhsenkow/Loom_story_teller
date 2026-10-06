@@ -18,6 +18,7 @@
 import type { ColumnInfo, QueryResult } from "./store";
 import {
   chartTimeWindowLabel,
+  fieldLooksFutureDated,
   pickDefaultTimeField,
   suggestedChartTimeWindows,
   type ChartTimeRange,
@@ -604,19 +605,10 @@ export function createChartRec(
   const timeWindow = extra?.timeWindow && extra.timeWindow !== "all" ? extra.timeWindow : null;
   const timeBit =
     timeWindow && timeWindowField
-      ? timeWindow === "1h"
-        ? "last hour"
-        : timeWindow === "6h"
-          ? "last 6 hours"
-          : timeWindow === "24h"
-            ? "last 24 hours"
-            : timeWindow === "7d"
-              ? "last 7 days"
-              : timeWindow === "30d"
-                ? "last 30 days"
-                : timeWindow === "90d"
-                  ? "last 90 days"
-                  : "last year"
+      ? (chartTimeWindowLabel(
+          timeWindow,
+          fieldLooksFutureDated(timeWindowField) ? "forward" : "wall",
+        )?.toLowerCase() ?? null)
       : null;
 
   if (kind === "scatter") {
@@ -3014,7 +3006,10 @@ export function expandRecommendationsWithExtras(
       if (twField) {
         const windows = suggestedChartTimeWindows(twField).slice(0, 2);
         windows.forEach((range, i) => {
-          const label = chartTimeWindowLabel(range)?.toLowerCase() ?? range;
+          const label = chartTimeWindowLabel(
+            range,
+            fieldLooksFutureDated(twField) ? "forward" : "wall",
+          )?.toLowerCase() ?? range;
           push({
             ...rec,
             id: `${rec.id}-tw-${range}`,
@@ -3495,7 +3490,7 @@ export function recommendSourceStory(
   if (kind === "opensky") {
     return finish("Aircraft over the US", [
         mk("geoPoints", "Sky map", "Projected positions on coastlines", 96, "longitude", "latitude", "origin_country", null, "baro_altitude"),
-        mk("geoPoints", "Sky · last hour", "Only craft with a fresh ping", 95, "longitude", "latitude", "origin_country", null, "baro_altitude", {
+        mk("geoPoints", "Sky · last hour", "Craft with a last_contact in the past hour", 95, "longitude", "latitude", "origin_country", null, "baro_altitude", {
           timeWindowField: "ts",
           timeWindow: "1h",
         }),
@@ -3673,8 +3668,8 @@ export function recommendSourceStory(
 
   if (kind === "steam") {
     return finish("What gamers are playing", [
-        mk("bar", "Most-played games", "Peak concurrent players yesterday", 97, "name", "peak_players", null, "max", null, { topN: 15 }),
-        mk("bubble", "Price vs reviews", "Sized by peak players", 92, "price_usd", "positive_pct", null, null, "peak_players"),
+        mk("bar", "Most-played games", "Current concurrent players (CCU) right now", 97, "name", "peak_players", null, "max", null, { topN: 15 }),
+        mk("bubble", "Price vs reviews", "Sized by current CCU", 92, "price_usd", "positive_pct", null, null, "peak_players"),
         mk("histogram", "Review scores", "Share of positive reviews (%)", 86, "positive_pct", null, null),
         mk("bar", "Top developers", "Games in the top 100", 80, "developer", null, null, "count", null, { topN: 12 }),
       ]);

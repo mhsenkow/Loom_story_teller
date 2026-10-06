@@ -334,7 +334,7 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   aq: async () => {
     const url =
       `https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${OPEN_METEO_LATS}&longitude=${OPEN_METEO_LONS}` +
-      `&current=pm2_5,pm10,ozone,nitrogen_dioxide,european_aqi`;
+      `&current=pm2_5,pm10,ozone,nitrogen_dioxide,european_aqi&timezone=GMT`;
     return JSON.stringify(openMeteoCities(await upstreamJson("Open-Meteo AQ", url), "current"));
   },
 

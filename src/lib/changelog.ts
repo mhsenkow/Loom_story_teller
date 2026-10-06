@@ -25,6 +25,29 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-06b",
+    date: "2026-10-06",
+    title: "Truer clocks on live data",
+    summary: "Last-hour windows mean calendar time, USGS/NWS stay current, and Steam CCU is labeled honestly.",
+    items: [
+      {
+        title: "Live Time windows use the wall clock",
+        detail:
+          "“Last 6 hours” on earthquakes, fires, and aircraft means the last six hours on the clock — not six hours before the newest row in a lagging sample. Historical files still count back from their newest date. Upcoming asteroids and launches use a forward window (“next 24 hours”).",
+      },
+      {
+        title: "Web USGS and NWS match the rolling feed",
+        detail:
+          "Each poll replaces the buffer with the current day of quakes and the active alert set, so magnitude updates apply and expired alerts leave the map.",
+      },
+      {
+        title: "Aircraft timestamps and Steam CCU",
+        detail:
+          "OpenSky rows use each craft’s last_contact when available. Steam’s player column is labeled as current concurrent players (CCU), which is what SteamSpy actually returns.",
+      },
+    ],
+  },
+  {
     id: "2026-10-06",
     date: "2026-10-06",
     title: "Time windows on Encoding",

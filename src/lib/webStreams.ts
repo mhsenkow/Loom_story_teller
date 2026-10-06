@@ -203,7 +203,7 @@ function parseUsgs(body: unknown): Cell[][] {
     };
     const props = f.properties ?? {};
     const coords = f.geometry?.coordinates ?? [];
-    const id = String(props.ids ?? f.id ?? "");
+    const id = String(f.id ?? props.ids ?? "");
     out.push([
       id,
       numOrNullVal(props.mag),
@@ -247,10 +247,30 @@ function parseNws(body: unknown): Cell[][] {
   return out;
 }
 
-/** Open-Meteo GMT times come without an offset ("2026-10-02T14:00"); mark them UTC like desktop does. */
+/** Open-Meteo GMT times often omit an offset; mark them UTC like desktop does. */
 function openMeteoUtc(t: unknown): string | null {
   if (typeof t !== "string" || !t) return null;
-  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(t) ? `${t}:00.000Z` : t;
+  const s = t.trim();
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) return s;
+  // "2026-10-02T14:00" or "…T14:00:00" → UTC
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(s)) {
+    return s.length === 16 ? `${s}:00.000Z` : `${s}.000Z`;
+  }
+  return s;
+}
+
+/** ISO string for a date-ish value; numeric epoch s vs ms handled like parseChartTime. */
+function isoOrNull(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  if (typeof v === "number" && Number.isFinite(v)) {
+    const ms = v > 1e12 ? v : v > 1e9 ? v * 1000 : NaN;
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  const s = String(v).trim();
+  if (!s) return null;
+  const zoned = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : /^\d{4}-\d{2}-\d{2}T/.test(s) ? `${s}Z` : s;
+  const t = Date.parse(zoned);
+  return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
 
 function parseMeteo(body: unknown): Cell[][] {
@@ -315,13 +335,6 @@ function numOrNullVal(v: unknown): number | null {
   if (v == null || v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
-}
-
-/** ISO string for a date-ish value; `null` when it can't be parsed. */
-function isoOrNull(v: unknown): string | null {
-  if (v == null || v === "") return null;
-  const t = typeof v === "number" ? v : Date.parse(String(v));
-  return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
 
 function parseCrypto(body: unknown): Cell[][] {
@@ -487,7 +500,7 @@ function parseFema(body: unknown): Cell[][] {
 
 function parseOpensky(body: unknown): Cell[][] {
   const states = (body as { states?: unknown[]; time?: number })?.states;
-  const time = Number((body as { time?: number })?.time ?? 0);
+  const snapTime = Number((body as { time?: number })?.time ?? 0);
   if (!Array.isArray(states)) return [];
   const out: Cell[][] = [];
   for (const st of states.slice(0, 800)) {
@@ -495,6 +508,8 @@ function parseOpensky(body: unknown): Cell[][] {
     const lon = st[5] == null ? null : Number(st[5]);
     const lat = st[6] == null ? null : Number(st[6]);
     if (lon == null || lat == null || Number.isNaN(lon) || Number.isNaN(lat)) continue;
+    // Prefer last_contact (4) then time_position (3) over the poll snapshot time.
+    const contact = Number(st[4] ?? st[3] ?? snapTime) || 0;
     out.push([
       String(st[0] ?? ""),
       String(st[1] ?? "").trim(),
@@ -505,7 +520,9 @@ function parseOpensky(body: unknown): Cell[][] {
       numOrNullVal(st[9]),
       numOrNullVal(st[10]),
       Boolean(st[8]),
-      time ? new Date(time * 1000).toISOString() : new Date().toISOString(),
+      contact
+        ? new Date(contact * 1000).toISOString()
+        : new Date().toISOString(),
     ]);
   }
   return out;
@@ -898,10 +915,12 @@ const SOURCE_PARSERS: Record<SourceKind, SourceParser> = {
  * replace, across polls for append).
  */
 const SOURCE_MERGE: Record<SourceKind, { mode: "replace" | "append"; key?: number }> = {
-  usgs: { mode: "append", key: 0 },
+  // Rolling USGS day feed + active NWS set — replace so revisions apply and
+  // expired alerts / rolled-off quakes leave the buffer (matches desktop).
+  usgs: { mode: "replace", key: 0 },
   eonet: { mode: "replace", key: 0 },
   gdacs: { mode: "replace", key: 0 },
-  nws: { mode: "append", key: 0 },
+  nws: { mode: "replace", key: 0 },
   meteo: { mode: "replace" },
   aq: { mode: "replace" },
   ukcarbon: { mode: "replace", key: 0 },

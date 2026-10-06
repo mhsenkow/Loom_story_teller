@@ -9,6 +9,7 @@
 import { recommendSourceStory, recommendStreamStory } from "./recommendations";
 import type { ChartRecommendation } from "./recommendations";
 import type { ColumnInfo, QueryResult } from "./store";
+import { applyChartTimeWindow } from "./chartTime";
 import {
   ALL_SOURCE_KINDS,
   sourceSnapshot,
@@ -102,6 +103,13 @@ function chartVariantKey(chart: ChartRecommendation): string {
     chart.timeWindowField ?? "",
     chart.timeWindow ?? "",
   ].join("|");
+}
+
+/** Drop time-windowed charts that keep zero rows in the live sample. */
+function chartHasRowsInWindow(chart: ChartRecommendation, sample: QueryResult): boolean {
+  if (!chart.timeWindow || chart.timeWindow === "all" || !chart.timeWindowField) return true;
+  const slice = applyChartTimeWindow(sample.rows, sample.columns, chart);
+  return !slice.filtered || slice.kept > 0;
 }
 
 function pickPreferredChart(
@@ -860,9 +868,12 @@ async function probeKind(kind: SourceKind): Promise<DiscoverStory[]> {
     const story = recommendSourceStory(kind, snap.stats, snap.sample);
     if (!story.charts.length) return [];
 
+    const charts = story.charts.filter((c) => chartHasRowsInWindow(c, snap.sample));
+    if (!charts.length) return [];
+
     const out: DiscoverStory[] = [];
-    const primary = hookFor(kind, snap.sample, story.charts[0]!);
-    const chart0 = pickPreferredChart(story.charts, primary.preferKind) ?? story.charts[0]!;
+    const primary = hookFor(kind, snap.sample, charts[0]!);
+    const chart0 = pickPreferredChart(charts, primary.preferKind) ?? charts[0]!;
     const usedKeys = new Set<string>([chartVariantKey(chart0)]);
     out.push({
       id: `discover-${kind}`,
@@ -880,7 +891,7 @@ async function probeKind(kind: SourceKind): Promise<DiscoverStory[]> {
     });
 
     let altIdx = 0;
-    for (const alt of story.charts) {
+    for (const alt of charts) {
       if (out.length >= VARIANTS_PER_SOURCE) break;
       if (alt.id === chart0.id) continue;
       const key = chartVariantKey(alt);
@@ -919,11 +930,13 @@ async function probeWiki(): Promise<DiscoverStory[]> {
     if (!snap.sample.rows.length) return [];
     const story = recommendStreamStory(snap.stats, snap.sample);
     if (!story.charts.length) return [];
+    const charts = story.charts.filter((c) => chartHasRowsInWindow(c, snap.sample));
+    if (!charts.length) return [];
     const out: DiscoverStory[] = [];
-    const hooked = hookFor("wiki", snap.sample, story.charts[0]!);
+    const hooked = hookFor("wiki", snap.sample, charts[0]!);
     const usedKeys = new Set<string>();
-    for (let i = 0; i < Math.min(VARIANTS_PER_SOURCE, story.charts.length); i++) {
-      const chart = story.charts[i]!;
+    for (let i = 0; i < Math.min(VARIANTS_PER_SOURCE, charts.length); i++) {
+      const chart = charts[i]!;
       const key = chartVariantKey(chart);
       if (usedKeys.has(key)) continue;
       usedKeys.add(key);

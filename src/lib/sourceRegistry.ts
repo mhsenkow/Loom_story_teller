@@ -476,7 +476,7 @@ export const SOURCE_DEFS: SourceDef[] = [
   def({
     kind: "steam",
     label: "Steam top games",
-    description: "The 100 most-played Steam games of the last two weeks — players, reviews, price, and current discount.",
+    description: "The 100 most-played Steam games of the last two weeks — current concurrent players (CCU), reviews, price, and discount. (SteamSpy’s 2-week averages are often empty, so peak_players stores live CCU.)",
     attribution: "SteamSpy · free",
     homepage: "https://steamspy.com/api.php",
     fileName: "Steam Top Games",

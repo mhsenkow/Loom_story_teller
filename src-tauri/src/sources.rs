@@ -1197,7 +1197,7 @@ fn meteo_url() -> String {
 
 fn aq_url() -> String {
     format!(
-        "https://air-quality-api.open-meteo.com/v1/air-quality?{}&current=pm2_5,pm10,ozone,nitrogen_dioxide,european_aqi",
+        "https://air-quality-api.open-meteo.com/v1/air-quality?{}&current=pm2_5,pm10,ozone,nitrogen_dioxide,european_aqi&timezone=GMT",
         city_coord_params()
     )
 }
@@ -1393,7 +1393,13 @@ pub(crate) fn opensky_rows(body: &Value) -> Result<Vec<Row>, String> {
                 jf(a.get(9)),
                 jf(a.get(10)),
                 Cell::Bool(a[8].as_bool().unwrap_or(false)),
-                epoch_secs_cell(time),
+                // Prefer last_contact (4) then time_position (3) over poll time.
+                epoch_secs_cell(
+                    a.get(4)
+                        .and_then(as_i64_loose)
+                        .or_else(|| a.get(3).and_then(as_i64_loose))
+                        .unwrap_or(time),
+                ),
             ])
         })
         .take(MAX_AIRCRAFT)
@@ -1624,7 +1630,9 @@ pub(crate) fn launches_rows(body: &Value) -> Result<Vec<Row>, String> {
                 .or_else(|| str_of(r, "/mission/orbit/name"))
                 .or_else(|| str_of(r, "/mission_type"))
                 .or_else(|| str_of(r, "/mission/type"));
-            let orbital = !orbit.map(|o| o.to_lowercase().contains("suborbital")).unwrap_or(false);
+            let orbital = orbit
+                .map(|o| !o.to_lowercase().contains("suborbital"))
+                .unwrap_or(false);
             vec![
                 id_string(r.get("id")),
                 js(r.get("name")),

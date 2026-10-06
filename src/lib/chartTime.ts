@@ -1,9 +1,11 @@
 // =================================================================
 // Loom — Chart time windows (filter rows by a timestamp column)
 // =================================================================
-// Encoding Time is a data slice, not an axis: bar maps and scatters can
-// still be “last 24h” even when X is a category. Windows count back from
-// the newest parseable value in the sample (same idea as Dive).
+// Encoding Time is a data slice, not an axis. "Last Nh" for live feeds
+// anchors on the wall clock so a lagging sample still means calendar
+// time. Historical files (newest row far in the past) count back from
+// the newest parseable value — same idea as Dive. Future-dated columns
+// (approach_ts, launch net) use a forward window from now.
 // =================================================================
 
 import type { ColumnInfo } from "./store";
@@ -20,6 +22,11 @@ export const CHART_TIME_RANGES: { value: ChartTimeRange; label: string; short: s
   { value: "90d", label: "Last 90 days", short: "90d", ms: 90 * 86_400_000 },
   { value: "1y", label: "Last year", short: "1y", ms: 365 * 86_400_000 },
 ];
+
+/** How far ahead of wall clock counts as a "future" column (approaches, launches). */
+const FUTURE_SLACK_MS = 60 * 60 * 1000;
+/** Newest sample within this of now → treat as live (wall-clock windows). */
+const LIVE_LOOKBACK_MS = 14 * 86_400_000;
 
 const TIME_NAME = /(_at$|_date$|_ts$|^ts$|^time$|^date$|timestamp|created|updated|datetime|epoch|as_of|year|^yr$|^day$)/i;
 
@@ -107,52 +114,97 @@ export function pickDefaultTimeField(
     const score = (n: string) =>
       /^(ts|time|timestamp|created_at|date_utc|acq_ts|as_of)$/i.test(n) ? 0
         : /^(created_date|record_date|declaration_date|effective)$/i.test(n) ? 1
+        : /^(approach_ts|net|expires)$/i.test(n) ? 4
         : 2;
     return score(a) - score(b) || a.localeCompare(b);
   });
   return ranked[0] ?? null;
 }
 
+/** Columns that are mostly upcoming events — short "last Nh" suggestions mislead. */
+export function fieldLooksFutureDated(fieldName: string): boolean {
+  return /^(approach_ts|net|expires)$/i.test(fieldName) || /approach|launch.?net|expires/i.test(fieldName);
+}
+
 /**
  * Windows worth suggesting when we only know the column name (Discover /
- * Suggestions) — not the sample span. Year columns skip short windows.
+ * Suggestions) — not the sample span. Year columns skip short windows;
+ * future event times get forward-looking windows only.
  */
 export function suggestedChartTimeWindows(fieldName: string): Exclude<ChartTimeRange, "all">[] {
   if (/^(yr|year)$/i.test(fieldName) || /_year$/i.test(fieldName)) return ["1y"];
+  if (fieldLooksFutureDated(fieldName)) return ["24h", "7d", "30d"];
   if (
     /^(ts|time|timestamp|acq_ts|epoch|created_at)$/i.test(fieldName) ||
     /(_at|_ts)$/i.test(fieldName)
   ) {
     return ["1h", "6h", "24h"];
   }
-  if (/date|day|as_of|effective|expires|declaration/i.test(fieldName)) {
+  if (/date|day|as_of|effective|declaration/i.test(fieldName)) {
     return ["7d", "30d", "90d"];
   }
   return ["24h", "7d"];
 }
 
-export function chartTimeWindowLabel(range: ChartTimeRange | null | undefined): string | null {
+export type ChartTimeAnchorMode = "wall" | "sample" | "forward";
+
+/**
+ * Pick the window anchor from the newest sample time vs wall clock.
+ * - forward: sample is mostly in the future → window from now forward
+ * - wall: live / recent data → "last Nh" is calendar time
+ * - sample: historical files → count back from newest row
+ */
+export function chartTimeAnchorMode(sampleMax: number, now = Date.now()): ChartTimeAnchorMode {
+  if (sampleMax > now + FUTURE_SLACK_MS) return "forward";
+  if (sampleMax >= now - LIVE_LOOKBACK_MS) return "wall";
+  return "sample";
+}
+
+export function chartTimeWindowLabel(
+  range: ChartTimeRange | null | undefined,
+  mode: ChartTimeAnchorMode = "wall",
+): string | null {
   if (!range || range === "all") return null;
-  return CHART_TIME_RANGES.find((r) => r.value === range)?.label ?? range;
+  const past = CHART_TIME_RANGES.find((r) => r.value === range)?.label ?? range;
+  if (mode !== "forward") return past;
+  switch (range) {
+    case "1h":
+      return "Next hour";
+    case "6h":
+      return "Next 6 hours";
+    case "24h":
+      return "Next 24 hours";
+    case "7d":
+      return "Next 7 days";
+    case "30d":
+      return "Next 30 days";
+    case "90d":
+      return "Next 90 days";
+    case "1y":
+      return "Next year";
+    default:
+      return past;
+  }
 }
 
 export function applyChartTimeWindow<T extends unknown[]>(
   rows: T[],
   columns: string[],
   rec: { timeWindowField?: string | null; timeWindow?: ChartTimeRange | string | null } | null | undefined,
-): { rows: T[]; filtered: boolean; kept: number; total: number } {
+  now = Date.now(),
+): { rows: T[]; filtered: boolean; kept: number; total: number; mode: ChartTimeAnchorMode | null } {
   const total = rows.length;
   const field = rec?.timeWindowField;
   const range = rec?.timeWindow;
   if (!field || !range || range === "all") {
-    return { rows, filtered: false, kept: total, total };
+    return { rows, filtered: false, kept: total, total, mode: null };
   }
   const spec = CHART_TIME_RANGES.find((r) => r.value === range);
   if (!spec || !Number.isFinite(spec.ms)) {
-    return { rows, filtered: false, kept: total, total };
+    return { rows, filtered: false, kept: total, total, mode: null };
   }
   const idx = columns.indexOf(field);
-  if (idx < 0) return { rows, filtered: false, kept: total, total };
+  if (idx < 0) return { rows, filtered: false, kept: total, total, mode: null };
 
   let max = -Infinity;
   const times = rows.map((r) => {
@@ -160,11 +212,32 @@ export function applyChartTimeWindow<T extends unknown[]>(
     if (t != null && t > max) max = t;
     return t;
   });
-  if (!Number.isFinite(max)) return { rows, filtered: false, kept: total, total };
-  const cutoff = max - spec.ms;
-  const next = rows.filter((_, i) => {
-    const t = times[i];
-    return t != null && t >= cutoff && t <= max;
-  });
-  return { rows: next, filtered: true, kept: next.length, total };
+  if (!Number.isFinite(max)) return { rows, filtered: false, kept: total, total, mode: null };
+
+  const mode = fieldLooksFutureDated(field) && max > now
+    ? "forward"
+    : chartTimeAnchorMode(max, now);
+
+  let next: T[];
+  if (mode === "forward") {
+    const end = now + spec.ms;
+    next = rows.filter((_, i) => {
+      const t = times[i];
+      return t != null && t >= now && t <= end;
+    });
+  } else if (mode === "wall") {
+    const cutoff = now - spec.ms;
+    next = rows.filter((_, i) => {
+      const t = times[i];
+      // Allow 2 min of clock skew / slightly-future telemetry
+      return t != null && t >= cutoff && t <= now + 120_000;
+    });
+  } else {
+    const cutoff = max - spec.ms;
+    next = rows.filter((_, i) => {
+      const t = times[i];
+      return t != null && t >= cutoff && t <= max;
+    });
+  }
+  return { rows: next, filtered: true, kept: next.length, total, mode };
 }

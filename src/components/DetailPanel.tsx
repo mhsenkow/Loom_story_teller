@@ -3530,9 +3530,16 @@ function ChartPanelView() {
                           timeWindowField: timeFieldActive,
                           timeWindow: timeWindowActive,
                         });
-                        return slice.filtered
-                          ? `${slice.kept.toLocaleString()} of ${slice.total.toLocaleString()} rows in this window`
-                          : "Window uses the newest timestamp in the sample.";
+                        if (!slice.filtered) {
+                          return "Window uses the wall clock for live data, or the newest sample time for historical files.";
+                        }
+                        const modeHint =
+                          slice.mode === "forward"
+                            ? "upcoming from now"
+                            : slice.mode === "wall"
+                              ? "wall clock"
+                              : "from newest sample";
+                        return `${slice.kept.toLocaleString()} of ${slice.total.toLocaleString()} rows (${modeHint})`;
                       })()}
                     </p>
                   )}
