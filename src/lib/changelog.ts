@@ -45,6 +45,71 @@ export const CHANGELOG: ChangelogRelease[] = [
         detail:
           "NASA VIIRS active fires over the US, USGS river gauges, CelesTrak Starlink orbital elements, and Lobsters hottest stories.",
       },
+      {
+        title: "Suggestions pick up Facet, Top N, and Compare",
+        detail:
+          "Chart suggestion rails, live-source stories, Random / Shuffle, and file recommendations now propose small multiples, Top N bars, and Compare Y / earlier-half overlays when the schema fits.",
+      },
+      {
+        title: "Encoding and Visual controls match what charts actually draw",
+        detail:
+          "Facet, Top N, Compare, marks, glow, and data-label toggles now only appear for chart types that honor them — and tooltips stick when you edit geo, GPU, or creative charts.",
+      },
+      {
+        title: "Suggestion cards preview the real chart",
+        detail:
+          "What’s interesting and the Suggestions rail show a tiny canvas of just the chart shapes — Facet / Top N / Compare chips when those encodings are in play — so you can see the story before you open it.",
+      },
+      {
+        title: "More suggestion variants everywhere",
+        detail:
+          "Live-source stories, Random / Shuffle, and file recommendations surface more Facet, Top N, and Compare options so the first panel is packed with distinct chart ideas.",
+      },
+      {
+        title: "Shared links keep a data snapshot",
+        detail:
+          "Get link now freezes a capped copy of the rows that built the chart (with source, time, and columns) beside the preview. Open with shared data rebuilds the same chart from that snapshot for seven days — not whatever the live feed looks like later.",
+      },
+      {
+        title: "Stats links back to the data source",
+        detail:
+          "The Stats panel opens with a Source card — live feed homepage, catalog / pack credit, raw data URL, and capture time for shared snapshots — so you always have a path back to where the rows came from.",
+      },
+      {
+        title: "Source footnote on the chart",
+        detail:
+          "Chart → Visual → Source footnote draws lineage on the canvas (name, credit, or full). It ships with Share / PNG so the image still points back to the data — align left, center, or right.",
+      },
+      {
+        title: "Shared charts stay honest on reopen",
+        detail:
+          "Refresh keeps the frozen snapshot URL, shared rows show as a snapshot (not a live feed), and source footnotes stay visible on GPU scenes and globes.",
+      },
+      {
+        title: "Network and arc diagrams",
+        detail:
+          "Two new relational charts sit beside Sankey — a force-directed network and an arc diagram. Same Source → Target → Weight encoding, and they show up in suggestions when you have two categories.",
+      },
+      {
+        title: "What’s interesting shows more chart types",
+        detail:
+          "Discover now keeps up to 500 stories (about 20 chart variants per live feed) and fills in every chart kind the schema supports — networks, arcs, creative, maps — not just the curated defaults.",
+      },
+      {
+        title: "Share links look sharper everywhere",
+        detail:
+          "Get link letterboxes into a 1200×627 preview for Slack and iMessage, copies the URL for you, keeps the source footnote clear of the Loom footer, and opens shared snapshots with a single toast.",
+      },
+      {
+        title: "Stacked bars, 100% bars, and bucket fields in Discover",
+        detail:
+          "What’s interesting now surfaces grouped, stacked, and 100% stacked bars side by side — plus bucket-field paddocks for drilling into a category. Open one and Encoding already has the stack mode set.",
+      },
+      {
+        title: "Data-science chart variants everywhere",
+        detail:
+          "Rolling means, indexed / z-scored series, log Y, residual scatters, anomaly rings, Pareto (80/20), correlation matrices, period-over-period bars, and Δ-rank bumps now show up in What’s interesting, Suggestions, and Random / Shuffle when the schema fits.",
+      },
     ],
   },
   {

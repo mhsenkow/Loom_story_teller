@@ -16,6 +16,9 @@ import {
   getTopSuggestions,
   diversifyRecommendations,
   recommendSourceStory,
+  recommendStreamStory,
+  expandRecommendationsWithExtras,
+  randomEncodingToExtra,
 } from "../recommendations";
 import { chartCapabilities, encodingChannelLabels } from "../chartSupport";
 import type { ColumnInfo, QueryResult } from "../store";
@@ -189,6 +192,8 @@ describe("recommendations", () => {
       const kinds = CHART_KIND_OPTIONS.map((o) => o.value);
       expect(kinds).toContain("scatter");
       expect(kinds).toContain("sankey");
+      expect(kinds).toContain("network");
+      expect(kinds).toContain("arcDiagram");
       expect(kinds).toContain("bucketField");
       expect(kinds).toContain("chernoff");
       expect(kinds).toContain("isoScatter");
@@ -214,6 +219,48 @@ describe("recommendations", () => {
         expect(typeof caps.cartesian).toBe("boolean");
         expect(typeof caps.xChannel).toBe("boolean");
       }
+    });
+
+    it("capabilities stay honest about Facet / Top N / Compare / mark pipelines", () => {
+      expect(chartCapabilities("bar").facetRow).toBe(true);
+      expect(chartCapabilities("bar").topN).toBe(true);
+      expect(chartCapabilities("bar").barMarks).toBe(true);
+      expect(chartCapabilities("line").compareY).toBe(true);
+      expect(chartCapabilities("line").lineMarks).toBe(true);
+      expect(chartCapabilities("scatter").markPoints).toBe(true);
+      expect(chartCapabilities("scatter").scatterExtras).toBe(true);
+      // Bubble has size + facets, but not the scatter mark / trail pipeline
+      expect(chartCapabilities("bubble").facetRow).toBe(true);
+      expect(chartCapabilities("bubble").sizeChannel).toBe(true);
+      expect(chartCapabilities("bubble").markPoints).toBe(false);
+      expect(chartCapabilities("bubble").scatterExtras).toBe(false);
+      // Color UI must not claim kinds that ignore cIdx
+      expect(chartCapabilities("dumbbell").colorChannel).toBe(false);
+      expect(chartCapabilities("funnel").colorChannel).toBe(false);
+      // Odd / GPU don't get dead glow / trail / reference-line controls
+      expect(chartCapabilities("beeswarm").glowOutline).toBe(false);
+      expect(chartCapabilities("beeswarm").referenceLines).toBe(false);
+      expect(chartCapabilities("scatter3d").scatterExtras).toBe(false);
+      expect(chartCapabilities("waffle").topN).toBe(true);
+      expect(chartCapabilities("isoBars").topN).toBe(true);
+    });
+
+    it("createChartRec keeps tooltips on geo / GPU / odd rebuilds", () => {
+      const tip = ["city", "value"];
+      const geo = createChartRec("geoPoints", richColumns, "longitude", "latitude", "category", "t", {
+        tooltipFields: tip,
+        tooltipKeyField: "category",
+        sizeField: "value",
+      });
+      expect(geo?.tooltipFields).toEqual(tip);
+      expect(geo?.tooltipKeyField).toBe("category");
+
+      const odd = createChartRec("waffle", mixedColumns, "category", "value", null, "t", {
+        tooltipFields: tip,
+        topN: 10,
+      });
+      expect(odd?.tooltipFields).toEqual(tip);
+      expect(odd?.topN).toBe(10);
     });
 
     it("every supported kind can randomize encoding through createChartRec", () => {
@@ -288,7 +335,7 @@ describe("recommendations", () => {
       };
       const recs = recommend(cols, data, "corr.csv");
       expect(recs.length).toBeGreaterThan(5);
-      expect(recs.length).toBeLessThanOrEqual(40);
+      expect(recs.length).toBeLessThanOrEqual(72);
       const linked = recs.find((r) => r.kind === "scatter" && r.yField === "y_linked");
       const noisy = recs.find((r) => r.kind === "scatter" && r.yField === "noise");
       expect(linked).toBeDefined();
@@ -298,9 +345,9 @@ describe("recommendations", () => {
 
     it("getTopSuggestions returns varied kinds", () => {
       const recs = recommend(mixedColumns, null, "mixed.csv");
-      const tops = getTopSuggestions(recs, 6);
+      const tops = getTopSuggestions(recs, 8);
       expect(tops.length).toBeGreaterThan(1);
-      expect(tops.length).toBeLessThanOrEqual(6);
+      expect(tops.length).toBeLessThanOrEqual(8);
       const kinds = new Set(tops.map((t) => t.kind));
       expect(kinds.size).toBeGreaterThanOrEqual(Math.min(3, tops.length));
       expect(getBestSuggestion(recs)?.id).toBe(diversifyRecommendations(recs, 1)[0]?.id);
@@ -407,6 +454,152 @@ describe("recommendations", () => {
       expect(recommendSourceStory("nyc311", emptyStats, null).charts[0]?.kind).toBe("geoPoints");
       expect(recommendSourceStory("meteo", emptyStats, null).charts[0]?.kind).toBe("geoBubbles");
       expect(recommendSourceStory("aq", emptyStats, null).charts[0]?.kind).toBe("geoBubbles");
+    });
+
+    it("live stories ship Facet / Top N / Compare encodings", () => {
+      const meteo = recommendSourceStory("meteo", emptyStats, null).charts;
+      expect(meteo.some((c) => c.rowField === "city")).toBe(true);
+      expect(meteo.some((c) => c.y2Field === "humidity")).toBe(true);
+
+      const hn = recommendSourceStory("hn", emptyStats, null).charts;
+      expect(hn.some((c) => c.topN === 15)).toBe(true);
+      expect(hn.some((c) => c.rowField === "author")).toBe(true);
+
+      const nwis = recommendSourceStory("nwis", emptyStats, null).charts;
+      expect(nwis.some((c) => c.rowField === "site_name")).toBe(true);
+      expect(nwis.some((c) => c.y2Field === "gage_height_ft")).toBe(true);
+
+      const debt = recommendSourceStory("debt", emptyStats, null).charts;
+      expect(debt.some((c) => c.comparePrevious)).toBe(true);
+      expect(debt.some((c) => c.y2Field === "intragovernmental")).toBe(true);
+    });
+
+    it("live stories ship stacked / percent bars and bucket fields", () => {
+      const spacex = recommendSourceStory("spacex", emptyStats, null).charts;
+      expect(spacex.some((c) => c.kind === "bar" && c.barStackMode === "stacked")).toBe(true);
+      expect(spacex.some((c) => c.kind === "bar" && c.barStackMode === "percent")).toBe(true);
+      expect(spacex.some((c) => c.kind === "bar" && c.barStackMode === "grouped")).toBe(true);
+      expect(spacex.some((c) => c.kind === "bucketField")).toBe(true);
+
+      const nws = recommendSourceStory("nws", emptyStats, null).charts;
+      expect(nws.some((c) => c.kind === "bar" && c.barStackMode === "stacked")).toBe(true);
+      expect(nws.some((c) => c.kind === "bucketField")).toBe(true);
+
+      const nyc = recommendSourceStory("nyc311", emptyStats, null).charts;
+      expect(nyc.some((c) => c.barStackMode === "stacked")).toBe(true);
+      expect(nyc.some((c) => c.kind === "bucketField")).toBe(true);
+    });
+
+    it("source stories merge schema recommend() so network / arc appear", () => {
+      const story = recommendSourceStory("hn", mixedColumns, null);
+      const kinds = new Set(story.charts.map((c) => c.kind));
+      expect(story.charts.length).toBeGreaterThan(16);
+      expect(kinds.has("network")).toBe(true);
+      expect(kinds.has("arcDiagram")).toBe(true);
+      expect(kinds.has("sankey")).toBe(true);
+    });
+  });
+
+  describe("expandRecommendationsWithExtras", () => {
+    it("adds stacked and percent bar variants when a color category fits", () => {
+      const cols: ColumnInfo[] = [
+        { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 6, min_value: null, max_value: null },
+        { name: "product", data_type: "VARCHAR", null_count: 0, distinct_count: 4, min_value: null, max_value: null },
+        { name: "sales", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "1", max_value: "999" },
+      ];
+      const base = createChartRec("bar", cols, "region", "sales", null, "t")!;
+      const expanded = expandRecommendationsWithExtras([base], cols);
+      expect(expanded.some((c) => c.barStackMode === "stacked" && c.colorField === "product")).toBe(true);
+      expect(expanded.some((c) => c.barStackMode === "percent" && c.colorField === "product")).toBe(true);
+    });
+
+    it("adds Top N, facet, and compare variants for file suggestions", () => {
+      const cols: ColumnInfo[] = [
+        { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 6, min_value: null, max_value: null },
+        { name: "category", data_type: "VARCHAR", null_count: 0, distinct_count: 40, min_value: null, max_value: null },
+        { name: "ts", data_type: "TIMESTAMP", null_count: 0, distinct_count: 100, min_value: "2024-01-01", max_value: "2024-12-31" },
+        { name: "sales", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "1", max_value: "999" },
+        { name: "profit", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "0", max_value: "200" },
+      ];
+      const base = [
+        createChartRec("bar", cols, "category", "sales", null, "t")!,
+        createChartRec("line", cols, "ts", "sales", null, "t")!,
+        createChartRec("scatter", cols, "sales", "profit", null, "t")!,
+      ];
+      const expanded = expandRecommendationsWithExtras(base, cols);
+      expect(expanded.length).toBeGreaterThan(base.length);
+      expect(expanded.some((r) => r.topN === 15)).toBe(true);
+      expect(expanded.some((r) => r.rowField === "region")).toBe(true);
+      expect(expanded.some((r) => r.y2Field === "profit" || r.comparePrevious)).toBe(true);
+    });
+
+    it("adds DS variants: rolling, rebase, pareto, residual, corr, anomaly", () => {
+      const cols: ColumnInfo[] = [
+        { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 8, min_value: null, max_value: null },
+        { name: "ts", data_type: "TIMESTAMP", null_count: 0, distinct_count: 100, min_value: "2024-01-01", max_value: "2024-12-31" },
+        { name: "sales", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "1", max_value: "999" },
+        { name: "profit", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "0", max_value: "200" },
+        { name: "units", data_type: "DOUBLE", null_count: 0, distinct_count: 60, min_value: "1", max_value: "50" },
+      ];
+      const base = [
+        createChartRec("line", cols, "ts", "sales", "region", "t")!,
+        createChartRec("bar", cols, "region", "sales", null, "t")!,
+        createChartRec("scatter", cols, "sales", "profit", null, "t")!,
+      ];
+      const expanded = expandRecommendationsWithExtras(base, cols);
+      expect(expanded.some((r) => r.rollingWindow === 7 || r.rollingWindow === 30)).toBe(true);
+      expect(expanded.some((r) => r.seriesNormalize === "index100" || r.seriesNormalize === "zscore")).toBe(true);
+      expect(expanded.some((r) => r.kind === "pareto")).toBe(true);
+      expect(expanded.some((r) => r.residualOverlay)).toBe(true);
+      expect(expanded.some((r) => r.anomalyHighlight)).toBe(true);
+      expect(expanded.some((r) => r.kind === "corrMatrix")).toBe(true);
+      expect(expanded.some((r) => r.yScale === "log")).toBe(true);
+    });
+
+    it("createChartRec builds pareto and corrMatrix", () => {
+      const cols: ColumnInfo[] = [
+        { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 8, min_value: null, max_value: null },
+        { name: "sales", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "1", max_value: "999" },
+        { name: "profit", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "0", max_value: "200" },
+        { name: "units", data_type: "DOUBLE", null_count: 0, distinct_count: 60, min_value: "1", max_value: "50" },
+      ];
+      const p = createChartRec("pareto", cols, "region", "sales", null, "t");
+      expect(p?.kind).toBe("pareto");
+      const c = createChartRec("corrMatrix", cols, "sales", "profit", null, "t");
+      expect(c?.kind).toBe("corrMatrix");
+      expect(chartKindDataSupport(cols, "corrMatrix").ok).toBe(true);
+      expect(chartKindDataSupport(cols, "pareto").ok).toBe(true);
+    });
+
+    it("randomEncodingToExtra carries facet / topN / compare fields", () => {
+      const enc = getRandomEncoding(mixedColumns, "line");
+      expect(enc).toBeTruthy();
+      const extra = randomEncodingToExtra(enc!);
+      expect(extra).toHaveProperty("rowField");
+      expect(extra).toHaveProperty("topN");
+      expect(extra).toHaveProperty("y2Field");
+      expect(extra).toHaveProperty("comparePrevious");
+    });
+
+    it("recommend() surface includes expanded extras when schema allows", () => {
+      const recs = recommend(mixedColumns, null, "mixed.csv");
+      const hasExtra = recs.some((r) => r.rowField || r.topN || r.y2Field || r.comparePrevious);
+      expect(hasExtra).toBe(true);
+    });
+
+    it("stream story includes topN / facet / compare when columns exist", () => {
+      const cols: ColumnInfo[] = [
+        { name: "ts", data_type: "TIMESTAMP", null_count: 0, distinct_count: 50, min_value: null, max_value: null },
+        { name: "wiki", data_type: "VARCHAR", null_count: 0, distinct_count: 8, min_value: null, max_value: null },
+        { name: "bot", data_type: "BOOLEAN", null_count: 0, distinct_count: 2, min_value: null, max_value: null },
+        { name: "namespace", data_type: "VARCHAR", null_count: 0, distinct_count: 12, min_value: null, max_value: null },
+        { name: "delta", data_type: "INTEGER", null_count: 0, distinct_count: 40, min_value: "-100", max_value: "500" },
+        { name: "edit_type", data_type: "VARCHAR", null_count: 0, distinct_count: 4, min_value: null, max_value: null },
+      ];
+      const charts = recommendStreamStory(cols, null).charts;
+      expect(charts.some((c) => c.topN)).toBe(true);
+      expect(charts.some((c) => c.rowField === "wiki")).toBe(true);
+      expect(charts.some((c) => c.comparePrevious)).toBe(true);
     });
   });
 });

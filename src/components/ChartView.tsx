@@ -78,12 +78,14 @@ import {
   drawChartTicks,
   drawAxisFieldLabels,
   drawChartTitleBlock,
+  drawChartSourceFootnote,
   drawBandAxisX,
   drawBandAxisY,
   drawColorRamp,
   drawPositionedLabelsX,
   type PlotRect,
 } from "@/lib/chartLooks";
+import { formatSourceFootnote, resolveDataProvenance } from "@/lib/dataProvenance";
 import {
   aggregateAxisTitle,
   buildXModel,
@@ -114,6 +116,19 @@ import {
 } from "@/lib/chartTooltip";
 import { buildBarFacetGrid, type BarFacetHitPayload, type Canvas2DHitContext } from "@/lib/chartTooltip";
 import { partitionRowsByFacet, layoutFacetCells, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
+import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
+import {
+  anomalyRowIndices,
+  buildCorrMatrix,
+  buildPareto,
+  normalizeSeriesValues,
+  residualYs,
+  rollingMean,
+  scaleDomain,
+  scaleY,
+  type SeriesNormalize,
+  type YScaleKind,
+} from "@/lib/dsTransforms";
 
 const DEFAULT_COLORS = discreteSeriesColors(
   resolveChartColors({ paletteId: "categorical" }),
@@ -146,7 +161,7 @@ const DEFAULT_PAD = 56;
 
 /** x/y charts that share the L-frame + axis titles drawn by the dispatch. */
 const FRAMED_KINDS = new Set<string>([
-  "scatter", "bar", "histogram", "line", "area", "box", "bubble", "violin", "waterfall", "hexbin",
+  "scatter", "bar", "pareto", "histogram", "line", "area", "box", "bubble", "violin", "waterfall", "hexbin", "corrMatrix",
 ]);
 /** Charts with a category-label gutter: they draw their own frame; dispatch still titles the axes. */
 const OWN_FRAME_KINDS = new Set<string>(["strip", "lollipop", "dumbbell", "ridgeline", "heatmap"]);
@@ -374,6 +389,8 @@ export function ChartView() {
       ghostPlace: chartVisualOverrides.ghostPlace ?? "se",
       titleLayout: chartVisualOverrides.titleLayout ?? "pair",
       chartFrame: frame,
+      sourceFootnote: (chartVisualOverrides.sourceFootnote ?? "credit") !== "off",
+      sourceFootnoteAlign: chartVisualOverrides.sourceFootnoteAlign ?? "left",
       themeBg: themeUi.bg,
       themeText: themeUi.text,
       themeMuted: themeUi.muted,
@@ -387,6 +404,12 @@ export function ChartView() {
       topN: activeChart?.topN ?? undefined,
       y2Field: activeChart?.y2Field ?? undefined,
       comparePrevious: activeChart?.comparePrevious ?? undefined,
+      rollingWindow: activeChart?.rollingWindow ?? undefined,
+      yScale: activeChart?.yScale ?? undefined,
+      seriesNormalize: activeChart?.seriesNormalize ?? undefined,
+      residualOverlay: activeChart?.residualOverlay ?? undefined,
+      anomalyHighlight: activeChart?.anomalyHighlight ?? undefined,
+      bumpMode: activeChart?.bumpMode ?? undefined,
     };
   }, [colors, continuousStops, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart, barStackMode]);
 
@@ -729,7 +752,7 @@ export function ChartView() {
   const [showTitleEditButton, setShowTitleEditButton] = useState(false);
   const titleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const bestSuggestion = useMemo(() => getBestSuggestion(chartRecs), [chartRecs]);
-  const topSuggestions = useMemo(() => getTopSuggestions(chartRecs, 6), [chartRecs]);
+  const topSuggestions = useMemo(() => getTopSuggestions(chartRecs, 10), [chartRecs]);
   const suggestCycleRef = useRef(0);
   const tableName = selectedFile?.name?.replace(/\.\w+$/, "") ?? "";
 
@@ -1197,17 +1220,30 @@ export function ChartView() {
           }
         }
         }
-        // Attribution burn-in for platform / social PNG exports
+        // Attribution burn-in for platform / social PNG exports.
+        // When Visual → Source footnote already owns the bottom strip, skip the
+        // burn-in bar entirely so it doesn't paint over the lineage line.
         if (st.socialExportTarget) {
-          const { drawExportBurnIn } = await import("@/lib/socialExport");
-          const sourceLabel = st.selectedFile?.name ?? null;
-          drawExportBurnIn(ctx, w, h, {
-            burnIn: st.exportBurnIn,
-            sourceLabel,
-            themeText: themeUi.text,
-            themeMuted: themeUi.muted,
-            themeBg: themeUi.bg,
-          });
+          const footMode = st.chartVisualOverrides.sourceFootnote ?? "credit";
+          const footnoteOnChart = footMode !== "off";
+          if (!footnoteOnChart) {
+            const { drawExportBurnIn } = await import("@/lib/socialExport");
+            const { formatSourceFootnote, resolveDataProvenance } = await import("@/lib/dataProvenance");
+            const prov = resolveDataProvenance(st.selectedFile, {
+              loadedRows: st.sampleRows?.rows.length ?? null,
+              totalRows: st.sampleRows?.total_rows ?? st.selectedFile?.row_count ?? null,
+            });
+            const sourceLabel = prov
+              ? formatSourceFootnote(prov, "credit")
+              : st.selectedFile?.name ?? null;
+            drawExportBurnIn(ctx, w, h, {
+              burnIn: st.exportBurnIn,
+              sourceLabel,
+              themeText: themeUi.text,
+              themeMuted: themeUi.muted,
+              themeBg: themeUi.bg,
+            });
+          }
         }
         return new Promise<Blob | null>((resolve) => {
           off.toBlob((blob) => resolve(blob), "image/png");
@@ -1790,9 +1826,40 @@ export function ChartView() {
         cubeRendererRef.current.render(dataCube, view, continuousStops, opacity, cubeOpts);
         octx.setTransform(dpr, 0, 0, dpr, 0, 0);
         drawDataCubeFrontLayer(octx, dataCube, view, far, cubeOpts);
+        const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
+        if (footMode !== "off" && selectedFile) {
+          const prov = resolveDataProvenance(selectedFile, {
+            loadedRows: sampleRows?.rows.length ?? null,
+            totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+          });
+          if (prov) {
+            drawChartSourceFootnote(octx, w, h, 24, formatSourceFootnote(prov, footMode), {
+              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+              fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+              themeMuted: themeUi.muted,
+              themeBorder: themeUi.border,
+            });
+          }
+        }
         octx.setTransform(1, 0, 0, 1, 0, 0);
       } else {
         renderDataCubeCanvas(ctx, dataCube, w, h, cubeOpts);
+        const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
+        if (footMode !== "off" && selectedFile) {
+          const prov = resolveDataProvenance(selectedFile, {
+            loadedRows: sampleRows?.rows.length ?? null,
+            totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+          });
+          if (prov) {
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            drawChartSourceFootnote(ctx, w, h, 24, formatSourceFootnote(prov, footMode), {
+              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+              fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+              themeMuted: themeUi.muted,
+              themeBorder: themeUi.border,
+            });
+          }
+        }
       }
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       return;
@@ -1814,8 +1881,51 @@ export function ChartView() {
           ctx.clearRect(0, 0, w, h);
           ctx.fillStyle = themeUi.bg;
           ctx.fillRect(0, 0, w, h);
+          // Footnote on the 2D layer under the GPU canvas (zIndex keeps GPU on top for
+          // points; raise 2D briefly for the caption strip via a second pass on overlay).
+          const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
+          if (footMode !== "off" && selectedFile) {
+            const prov = resolveDataProvenance(selectedFile, {
+              loadedRows: sampleRows?.rows.length ?? null,
+              totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+            });
+            if (prov) {
+              drawChartSourceFootnote(ctx, w, h, 24, formatSourceFootnote(prov, footMode), {
+                align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+                fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+                themeMuted: themeUi.muted,
+                themeBorder: themeUi.border,
+              });
+            }
+          }
           ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
+      }
+      // Also paint on the axes overlay so the caption sits above the GPU canvas.
+      const overlay = axesOverlayRef.current;
+      const octx = overlay?.getContext("2d");
+      if (overlay && octx) {
+        const dpr = stageDpr();
+        const w = overlay.width / dpr;
+        const h = overlay.height / dpr;
+        octx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        octx.clearRect(0, 0, w, h);
+        const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
+        if (footMode !== "off" && selectedFile) {
+          const prov = resolveDataProvenance(selectedFile, {
+            loadedRows: sampleRows?.rows.length ?? null,
+            totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+          });
+          if (prov) {
+            drawChartSourceFootnote(octx, w, h, 24, formatSourceFootnote(prov, footMode), {
+              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+              fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+              themeMuted: themeUi.muted,
+              themeBorder: themeUi.border,
+            });
+          }
+        }
+        octx.setTransform(1, 0, 0, 1, 0, 0);
       }
       const packed = extractGpuScenePoints(
         sampleRows.rows,
@@ -1892,6 +2002,7 @@ export function ChartView() {
           isCompact,
           legendPosition: chartRenderOpts.legendPosition,
           axisFontSize: chartRenderOpts.axisFontSize,
+          sourceFootnote: chartRenderOpts.sourceFootnote,
         });
         const subPts = subsampleRowsForDensity(sd.points, 4500, scatterView.scale);
         const subIdx = subsampleRowsForDensity(sd.rowIndices, 4500, scatterView.scale);
@@ -1972,6 +2083,7 @@ export function ChartView() {
       isCompact,
       legendPosition: opts.legendPosition,
       axisFontSize: opts.axisFontSize,
+      sourceFootnote: opts.sourceFootnote,
     });
     const xIdx = cols.indexOf(activeChart.xField);
     const yIdx = activeChart.yField ? cols.indexOf(activeChart.yField) : -1;
@@ -2037,10 +2149,12 @@ export function ChartView() {
         if (!useFacets && (FRAMED_KINDS.has(kind) || OWN_FRAME_KINDS.has(kind))) {
           const measure = valueTitle(ropts, yIdx, kind === "line" ? "mean" : "sum");
           const yTitle =
-            kind === "bar" || kind === "line" || kind === "area" || kind === "waterfall" || kind === "lollipop"
+            kind === "bar" || kind === "pareto" || kind === "line" || kind === "area" || kind === "waterfall" || kind === "lollipop"
               ? measure
               : kind === "histogram"
                 ? "Count"
+              : kind === "corrMatrix"
+                ? "Pearson r"
                 : activeChart.yField;
           if (barHorizontal || kind === "lollipop") {
             drawAxisFieldLabels(ctx, w, h, pad, measure, activeChart.xField, opts);
@@ -2195,6 +2309,10 @@ export function ChartView() {
             break;
           case "forceBubble": renderFullForceBubble(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts); break;
           case "sankey": renderFullSankey(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts); break;
+          case "network": renderFullNetwork(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts); break;
+          case "arcDiagram": renderFullArcDiagram(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, ropts); break;
+          case "pareto": renderFullPareto(ctx, rows, xIdx, yIdx, w, h, pad, ropts); break;
+          case "corrMatrix": renderFullCorrMatrix(ctx, rows, cols, w, h, pad, ropts); break;
           default:
             if (isGeoMapKind(activeChart.kind)) {
               renderGeoMapCanvas(
@@ -2283,6 +2401,8 @@ export function ChartView() {
                   yAggregate: opts.yAggregate,
                   themeBg: opts.themeBg,
                   legendPosition: opts.legendPosition,
+                  topN: opts.topN,
+                  bumpMode: opts.bumpMode ?? activeChart.bumpMode ?? undefined,
                 },
                 false,
               );
@@ -2358,6 +2478,23 @@ export function ChartView() {
           drawSmartOverlays(ctx, w, h, pad, rows, cols, xIdx, yIdx, activeChart, smartResults);
         }
 
+        const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
+        if (footMode !== "off" && selectedFile) {
+          const prov = resolveDataProvenance(selectedFile, {
+            loadedRows: rows.length,
+            totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+          });
+          if (prov) {
+            const line = formatSourceFootnote(prov, footMode);
+            drawChartSourceFootnote(ctx, w, h, pad, line, {
+              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+              fontFamily,
+              themeMuted: opts.themeMuted,
+              themeBorder: opts.themeBorder,
+            });
+          }
+        }
+
         if (clipProgress < 1) ctx.restore();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
       } catch (err) {
@@ -2384,7 +2521,7 @@ export function ChartView() {
     }
 
     drawOneFrame(1);
-  }, [canvasSized, activeChart, sampleRows, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines]);
+  }, [canvasSized, activeChart, sampleRows, selectedFile, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnote, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines]);
 
   // Axes overlay for WebGPU scatter; clear when not scatter so overlay doesn't sit on top of line/bar
   useEffect(() => {
@@ -2401,6 +2538,35 @@ export function ChartView() {
     ctx.clearRect(0, 0, w, h);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
+    const paintFootnote = () => {
+      const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
+      if (footMode === "off" || !selectedFile) return;
+      const prov = resolveDataProvenance(selectedFile, {
+        loadedRows: sampleRows?.rows.length ?? null,
+        totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+      });
+      if (!prov) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawChartSourceFootnote(ctx, w, h, 24, formatSourceFootnote(prov, footMode), {
+        align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+        fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+        themeMuted: getThemeUiColors(appSettings.theme).muted,
+        themeBorder: getThemeUiColors(appSettings.theme).border,
+      });
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    };
+
+    // GPU scenes / globes: caption rides on the overlay above the WebGPU canvas.
+    if (
+      canvasSized &&
+      activeChart &&
+      ((useWebGpuScene && isWebGpuDrawableScene(activeChart.kind)) ||
+        (useWebGpuGlobe && isWebGpuGlobeKind(activeChart.kind)))
+    ) {
+      paintFootnote();
+      return;
+    }
+
     if (!canvasSized || !activeChart || activeChart.kind !== "scatter" || !gpuReady || !useWebGPUScatter) return;
     const sd = extractScatterData();
     if (!sd) return;
@@ -2415,6 +2581,7 @@ export function ChartView() {
       isCompact,
       legendPosition: chartVisualOverrides.legendPosition,
       axisFontSize: chartVisualOverrides.axisFontSize ?? 10,
+      sourceFootnote: (chartVisualOverrides.sourceFootnote ?? "credit") !== "off",
     });
     const eff = getEffectiveScatterBounds(sd, scatterView);
     const ui = getThemeUiColors(appSettings.theme);
@@ -2456,12 +2623,27 @@ export function ChartView() {
       themeBorder: ui.border,
       axisLabelColor: overlayOpts.axisLabelColor,
     });
+    const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
+    if (footMode !== "off" && selectedFile) {
+      const prov = resolveDataProvenance(selectedFile, {
+        loadedRows: sampleRows?.rows.length ?? null,
+        totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+      });
+      if (prov) {
+        drawChartSourceFootnote(ctx, w, h, overlayPad, formatSourceFootnote(prov, footMode), {
+          align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+          fontFamily: overlayOpts.fontFamily,
+          themeMuted: ui.muted,
+          themeBorder: ui.border,
+        });
+      }
+    }
     if (overlayOpts.showGrid) {
       drawGridLines(ctx, eff.xMin, eff.xMax, eff.yMin, eff.yMax, w, h, overlayPad, overlayOpts);
     }
     drawAxisTicks(ctx, eff.xMin, eff.xMax, eff.yMin, eff.yMax, w, h, overlayPad, overlayOpts);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, extractScatterData, getEffectiveScatterBounds, scatterView, chartVisualOverrides, refreshKey, appSettings.theme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h]);
+  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartVisualOverrides, refreshKey, appSettings.theme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h, selectedFile, sampleRows]);
 
   useEffect(() => {
     if (activeChart?.kind === "scatter") setScatterView({ scale: 1, panX: 0, panY: 0 });
@@ -2680,6 +2862,7 @@ export function ChartView() {
               data={sampleRows}
               isActive={activeChart?.id === rec.id}
               compact={mobileRail}
+              micro={!mobileRail && !suggestionsExpanded}
               onClick={() => selectRecommendation(rec)}
             />
           ))}
@@ -3374,6 +3557,9 @@ export interface ChartRenderOpts {
   ghostPlace?: string;
   titleLayout?: string;
   chartFrame?: string;
+  /** When true, bottom margin reserves space for the source lineage caption. */
+  sourceFootnote?: boolean;
+  sourceFootnoteAlign?: "left" | "center" | "right";
   // Theme-derived (so chart bg/title/axes follow app theme)
   themeBg?: string;
   themeText?: string;
@@ -3383,12 +3569,24 @@ export interface ChartRenderOpts {
   yAggregate?: YAggregateOption | null;
   /** Bar + Color: grouped (dodge), stacked, or 100% stacked — canvas + Vega via createChartRec. */
   barStackMode?: "grouped" | "stacked" | "percent";
-  /** Cap ranked categories (bar). */
+  /** Cap ranked categories (bar, lollipop, treemap, sunburst, forceBubble, funnel, waffle). */
   topN?: number | null;
   /** Second Y measure (line / area dashed overlay). */
   y2Field?: string | null;
   /** Overlay earlier half of the time series (line / area). */
   comparePrevious?: boolean | null;
+  /** Rolling mean window on line / area. */
+  rollingWindow?: 7 | 30 | null;
+  /** Y axis scale transform. */
+  yScale?: "linear" | "log" | "symlog" | null;
+  /** Rebase multi-series line/area. */
+  seriesNormalize?: "index100" | "zscore" | null;
+  /** Scatter: residual stems vs linear fit. */
+  residualOverlay?: boolean | null;
+  /** Ring z-score outliers on the measure. */
+  anomalyHighlight?: boolean | null;
+  /** Bump: absolute rank or Δrank. */
+  bumpMode?: "rank" | "delta" | null;
   /** Per-paint: renderers push hoverable marks here (tooltips + linked highlight). */
   hits?: HitTarget[];
   /** Per-paint: column names so renderers can title axes / tooltips. */
@@ -3861,14 +4059,38 @@ function renderFullScatter(
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const [dataXMin, dataXMax] = numRange(rows, xi);
   const [dataYMin, dataYMax] = numRange(rows, yi);
+  const xs = rows.map((r) => Number(r[xi]));
+  const ysRaw = rows.map((r) => Number(r[yi]));
+  const fit = opts?.residualOverlay ? residualYs(xs, ysRaw) : null;
+  const plotYs = fit
+    ? ysRaw.map((y, i) => (Number.isFinite(y) ? fit.residuals[i]! : NaN))
+    : ysRaw;
+  let dataYMin2 = dataYMin;
+  let dataYMax2 = dataYMax;
+  if (fit) {
+    const finite = plotYs.filter((v) => Number.isFinite(v));
+    dataYMin2 = finite.length ? Math.min(...finite) : -1;
+    dataYMax2 = finite.length ? Math.max(...finite) : 1;
+    if (dataYMin2 === dataYMax2) {
+      dataYMin2 -= 1;
+      dataYMax2 += 1;
+    }
+  }
   const xMin = viewBounds?.xMin ?? dataXMin;
   const xMax = viewBounds?.xMax ?? dataXMax;
-  const yMin = viewBounds?.yMin ?? dataYMin;
-  const yMax = viewBounds?.yMax ?? dataYMax;
+  let yMin = viewBounds?.yMin ?? dataYMin2;
+  let yMax = viewBounds?.yMax ?? dataYMax2;
+  const yScaleKind = (opts?.yScale ?? "linear") as YScaleKind;
+  if (yScaleKind !== "linear" && !fit) {
+    const d = scaleDomain(yMin, yMax, yScaleKind);
+    yMin = d.min;
+    yMax = d.max;
+  }
   const [sizeMin, sizeMax] = sizeIdx >= 0 ? numRange(rows, sizeIdx) : [0, 1];
   const sizeRange = sizeMax - sizeMin || 1;
   const catMap = new Map<string, number>();
   let next = 0;
+  const anom = opts?.anomalyHighlight ? new Set(anomalyRowIndices(rows, yi)) : null;
 
   const glowIdx = encodingIndices?.glowIdx ?? -1;
   const outlineIdx = encodingIndices?.outlineIdx ?? -1;
@@ -3881,9 +4103,10 @@ function renderFullScatter(
   const plotW = Math.max(1, w - 2 * pad);
   const plotH = Math.max(1, h - 2 * pad);
   let nValid = 0;
-  for (const r of rows) {
-    const x = Number(r[xi]), y = Number(r[yi]);
-    if (!isNaN(x) && !isNaN(y)) nValid++;
+  for (let i = 0; i < rows.length; i++) {
+    const x = Number(rows[i]![xi]);
+    const y = plotYs[i]!;
+    if (!isNaN(x) && Number.isFinite(y)) nValid++;
   }
   const marks = densityAwarePointMarks({
     n: nValid,
@@ -3901,18 +4124,41 @@ function renderFullScatter(
 
   drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
   const toSX = (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
-  const toSY = (v: number) => h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
+  const toSY = (v: number) => {
+    if (yScaleKind !== "linear" && !fit) {
+      const t = scaleY(v, yMin, yMax, yScaleKind);
+      return h - pad - t * (h - 2 * pad);
+    }
+    return h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
+  };
   if (opts) opts.scales = { x: toSX, y: toSY, valueAxis: "y", rect: plotOf(w, h, pad) };
-  if (opts?.showMarginals) drawScatterMarginals(ctx, rows, xi, yi, xMin, xMax, yMin, yMax, w, h, pad, opts);
-  if (opts?.connectTrail) drawScatterTrail(ctx, rows, xi, yi, ci, toSX, toSY, opts);
+  if (opts?.showMarginals && !fit) drawScatterMarginals(ctx, rows, xi, yi, xMin, xMax, yMin, yMax, w, h, pad, opts);
+  if (opts?.connectTrail && !fit) drawScatterTrail(ctx, rows, xi, yi, ci, toSX, toSY, opts);
+
+  // Residual mode: zero line; otherwise optional fit line under residual stems
+  if (fit) {
+    const zy = toSY(0);
+    ctx.strokeStyle = opts?.themeMuted ?? "rgba(128,128,128,0.55)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(pad, zy);
+    ctx.lineTo(w - pad, zy);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  } else if (opts?.residualOverlay === false && fit) {
+    // no-op
+  }
 
   const shape = opts?.markShape ?? "circle";
   const jitterPx = opts?.markJitter ?? 0;
   let pointIdx = 0;
   let rowIdx = 0;
-  for (const r of rows) {
-    const x = Number(r[xi]), y = Number(r[yi]);
-    if (isNaN(x) || isNaN(y)) continue;
+  for (let ri = 0; ri < rows.length; ri++) {
+    const r = rows[ri]!;
+    const x = Number(r[xi]);
+    const y = plotYs[ri]!;
+    if (isNaN(x) || !Number.isFinite(y)) continue;
     let cat = 0;
     if (ci >= 0) {
       const k = String(r[ci]);
@@ -3929,8 +4175,8 @@ function renderFullScatter(
     } else {
       radius = (baseRadius + maxSizeRadius) / 2;
     }
-    let sx = pad + ((x - xMin) / (xMax - xMin)) * (w - 2 * pad);
-    let sy = h - pad - ((y - yMin) / (yMax - yMin)) * (h - 2 * pad);
+    let sx = toSX(x);
+    let sy = toSY(y);
     if (jitterPx > 0) {
       sx += jitter(pointIdx * 2, jitterPx);
       sy += jitter(pointIdx * 2 + 1, jitterPx);
@@ -3956,9 +4202,23 @@ function renderFullScatter(
       };
     }
 
+    // Residual stems from zero (or fit) when overlaying residuals on original space
+    if (opts?.residualOverlay && !fit) {
+      // handled via plotYs replacement above
+    }
+
     drawMark(ctx, shape, sx, sy, radius, fillColor, baseAlpha, opts, pointOverrides);
+    if (anom?.has(ri)) {
+      ctx.strokeStyle = fillColor ?? cols[0]!;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.9;
+      ctx.beginPath();
+      ctx.arc(sx, sy, radius + 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     if (opts?.hits) {
-      const cols2 = [fieldLabel(opts, xi), fieldLabel(opts, yi)];
+      const cols2 = [fieldLabel(opts, xi), fit ? `${fieldLabel(opts, yi)} residual` : fieldLabel(opts, yi)];
       const vals: (string | number | null)[] = [formatTooltipNumber(x), formatTooltipNumber(y)];
       if (ci >= 0) { cols2.unshift(fieldLabel(opts, ci)); vals.unshift(String(r[ci])); }
       opts.hits.push({
@@ -4677,13 +4937,36 @@ function renderFullLine(
     data = [...data, ...y2];
   }
 
+  // Rolling mean / rebase on primary series (not compare overlays)
+  const rollW = opts?.rollingWindow ?? null;
+  const normMode = (opts?.seriesNormalize ?? null) as SeriesNormalize | null;
+  if (rollW || normMode) {
+    data = data.map((s) => {
+      if (s.compare) return s;
+      let vals = s.pts.map((p) => p.v);
+      if (rollW) vals = rollingMean(vals, rollW);
+      if (normMode) vals = normalizeSeriesValues(vals, normMode);
+      return { ...s, pts: s.pts.map((p, i) => ({ ...p, v: vals[i]! })) };
+    });
+  }
+
   let yMin = Infinity;
   let yMax = -Infinity;
   for (const s of data) for (const p of s.pts) { yMin = Math.min(yMin, p.v); yMax = Math.max(yMax, p.v); }
-  // Counts and sums read best from zero; averages zoom to their range
-  if (agg === "count" || (agg === "sum" && yMin >= 0)) yMin = Math.min(0, yMin);
+  // Counts and sums read best from zero; averages / indexed / z-score zoom to their range
+  if (!normMode && (agg === "count" || (agg === "sum" && yMin >= 0))) yMin = Math.min(0, yMin);
+  const yScaleKind = (opts?.yScale ?? "linear") as YScaleKind;
+  if (yScaleKind !== "linear") {
+    const d = scaleDomain(yMin, yMax, yScaleKind);
+    yMin = d.min;
+    yMax = d.max;
+  }
   const ys = niceTicks(yMin, yMax, opts?.tickCount ?? 5, true);
-  const Y = linear(ys.min, ys.max, rect.bottom, rect.top);
+  const Y = (v: number) => {
+    if (yScaleKind === "linear") return linear(ys.min, ys.max, rect.bottom, rect.top)(v);
+    const t = scaleY(v, ys.min, ys.max, yScaleKind);
+    return rect.bottom - t * (rect.bottom - rect.top);
+  };
   if (opts) {
     const dom = model.domain;
     opts.scales = { y: Y, x: dom ? (v: number) => rect.left + ((v - dom[0]) / (dom[1] - dom[0] || 1)) * span : undefined, valueAxis: "y", rect };
@@ -4697,6 +4980,13 @@ function renderFullLine(
   const vTitle = valueTitle(opts, yi, "mean");
   const maxPts = Math.max(...data.map((s) => s.pts.length));
   const hitR = Math.max(4, Math.min(12, span / Math.max(1, maxPts) / 2));
+  const anomKeys = new Set<string>();
+  if (opts?.anomalyHighlight && yi >= 0) {
+    for (const i of anomalyRowIndices(rows, yi)) {
+      const k = tb.keyOf(rows[i]!);
+      if (k) anomKeys.add(k);
+    }
+  }
   applyLineDash(ctx, opts?.lineStrokeStyle);
   data.forEach((s, si) => {
     const color = cols[si % cols.length]!;
@@ -4720,6 +5010,17 @@ function renderFullLine(
         ctx.fill();
       }
       applyLineDash(ctx, opts?.lineStrokeStyle);
+    }
+    if (!s.compare && anomKeys.size) {
+      ctx.setLineDash([]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      s.pts.forEach((p, i) => {
+        if (!anomKeys.has(p.key)) return;
+        ctx.beginPath();
+        ctx.arc(pts[i]!.x, pts[i]!.y, 6, 0, Math.PI * 2);
+        ctx.stroke();
+      });
     }
     s.pts.forEach((p, i) => {
       pushHit(opts, {
@@ -5116,7 +5417,17 @@ function renderFullArea(
       if (!isNaN(v)) buckets[si]![ki]!.push(v);
     }
   }
-  const values = buckets.map((b) => b.map((vals) => (vals.length ? aggregateValues(vals, agg) : 0)));
+  let values = buckets.map((b) => b.map((vals) => (vals.length ? aggregateValues(vals, agg) : 0)));
+  const rollW = opts?.rollingWindow ?? null;
+  const normMode = (opts?.seriesNormalize ?? null) as SeriesNormalize | null;
+  if (rollW || normMode) {
+    values = values.map((vals) => {
+      let v = vals;
+      if (rollW) v = rollingMean(v, rollW);
+      if (normMode) v = normalizeSeriesValues(v, normMode);
+      return v;
+    });
+  }
   const tops: number[][] = [];
   let maxStack = 0;
   let minVal = 0;
@@ -5152,8 +5463,21 @@ function renderFullArea(
   }
 
   // A single series may dip below zero; stacked series stack their positive parts
-  const ys = niceZeroScale(series.length === 1 ? minVal : 0, maxStack, opts?.tickCount ?? 5);
-  const Y = linear(ys.min, ys.max, rect.bottom, rect.top);
+  let yLo = series.length === 1 ? minVal : 0;
+  let yHi = maxStack;
+  const yScaleKind = (opts?.yScale ?? "linear") as YScaleKind;
+  if (yScaleKind !== "linear") {
+    const d = scaleDomain(yLo, yHi, yScaleKind);
+    yLo = d.min;
+    yHi = d.max;
+  }
+  const ys = niceZeroScale(yLo, yHi, opts?.tickCount ?? 5);
+  const Ylin = linear(ys.min, ys.max, rect.bottom, rect.top);
+  const Y = (v: number) => {
+    if (yScaleKind === "linear") return Ylin(v);
+    const t = scaleY(v, ys.min, ys.max, yScaleKind);
+    return rect.bottom - t * (rect.bottom - rect.top);
+  };
   if (opts) opts.scales = { y: Y, valueAxis: "y", rect };
   const X = (ki: number) => rect.left + model.pos[ki]! * span;
   drawChartGrid(ctx, w, h, rect, opts, { x: model.kind === "number" ? model.domain : null, y: [ys.min, ys.max] });
@@ -5293,7 +5617,7 @@ function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
     ctx.globalAlpha = 1;
     ctx.stroke();
     // Percent on wedges big enough to hold it
-    if (sweep > 0.32 && opts?.chartDetail !== "plain") {
+    if (sweep > 0.32 && opts?.showDataLabels !== false && opts?.chartDetail !== "plain") {
       const mid = start + sweep / 2;
       const r2 = (radius + innerR) / 2;
       ctx.fillStyle = contrastingInk(fill);
@@ -5881,7 +6205,7 @@ function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[][], xi
   const entries = [...groups.entries()]
     .map(([label, g]) => ({ label, value: aggregateValues(g.vals.filter(v => !isNaN(v)), agg), cat: g.cat }))
     .sort((a, b) => b.value - a.value)
-    .slice(0, 20);
+    .slice(0, opts?.topN != null ? clampTopN(opts.topN) : 20);
   if (entries.length === 0) return;
 
   const gutter = labelGutter(ctx, entries.map((e) => e.label), w, pad, opts);
@@ -5991,7 +6315,7 @@ function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi:
     .map(([label, g]) => ({ label, value: Math.abs(aggregateValues(g.vals, agg)), cat: g.cat }))
     .filter(e => e.value > 0)
     .sort((a, b) => b.value - a.value)
-    .slice(0, 40);
+    .slice(0, opts?.topN != null ? clampTopN(opts.topN) : 40);
   if (entries.length === 0) return;
 
   const catMap = new Map<string, number>();
@@ -6063,7 +6387,7 @@ function renderFullSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi
     }))
     .filter(e => e.total > 0)
     .sort((a, b) => b.total - a.total)
-    .slice(0, 20);
+    .slice(0, opts?.topN != null ? clampTopN(opts.topN) : 20);
   if (outerEntries.length === 0) return;
 
   const grandTotal = outerEntries.reduce((s, e) => s + e.total, 0);
@@ -6183,7 +6507,7 @@ function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][],
     .map(([label, g]) => ({ label, value: Math.abs(aggregateValues(g.vals, agg)), cat: g.cat }))
     .filter(e => e.value > 0)
     .sort((a, b) => b.value - a.value)
-    .slice(0, 50);
+    .slice(0, opts?.topN != null ? clampTopN(opts.topN) : 50);
   if (entries.length === 0) return;
 
   const catMap = new Map<string, number>();
@@ -6402,6 +6726,344 @@ function renderFullSankey(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: 
   ctx.textBaseline = "alphabetic";
   void fontFamily;
   setLegend(opts, []);
+}
+
+// --- Network (force-directed node-link) ---
+
+function renderFullNetwork(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.85;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const targetIdx = ci >= 0 ? ci : -1;
+  if (targetIdx < 0) return;
+  const weightIdx = yi >= 0 && yi !== targetIdx ? yi : -1;
+  const graph = buildFlowGraph(rows, xi, targetIdx, weightIdx);
+  if (!graph) return;
+  const { nodes, edges } = layoutForceNetwork(graph, w, h, pad);
+
+  const nodeColor = new Map<string, string>();
+  let colorI = 0;
+  for (const n of nodes) {
+    if (!nodeColor.has(n.id)) nodeColor.set(n.id, palette[colorI++ % palette.length]!);
+  }
+
+  // Edges under nodes
+  for (const e of edges) {
+    const col = nodeColor.get(e.source) ?? palette[0]!;
+    ctx.strokeStyle = col;
+    ctx.globalAlpha = Math.min(0.55, alpha * 0.55);
+    ctx.lineWidth = e.width;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(e.x1, e.y1);
+    ctx.lineTo(e.x2, e.y2);
+    ctx.stroke();
+  }
+
+  const sName = fieldLabel(opts, xi, "source");
+  const tName = fieldLabel(opts, targetIdx, "target");
+  const wTitle = weightIdx >= 0 ? fieldLabel(opts, weightIdx, "weight") : "Links";
+  ctx.globalAlpha = 1;
+  for (const n of nodes) {
+    const fill = nodeColor.get(n.id) ?? palette[0]!;
+    ctx.fillStyle = fill;
+    ctx.globalAlpha = alpha;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = opts?.themeBg ?? "#0e0e12";
+    ctx.globalAlpha = 1;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    if (n.r > 10) {
+      const fs = Math.max(8, Math.min(12, n.r * 0.45));
+      ctx.fillStyle = contrastingInk(fill);
+      ctx.font = `600 ${fs}px '${fontFamily}', sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(fitTextEllipsis(ctx, n.id, n.r * 1.8), n.x, n.y);
+    } else {
+      ctx.fillStyle = opts?.themeMuted ?? "#8b8b98";
+      ctx.font = `500 10px '${fontFamily}', sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(fitTextEllipsis(ctx, n.id, 72), n.x + n.r + 4, n.y);
+    }
+
+    pushHit(opts, {
+      shape: "circle", cx: n.x, cy: n.y, r: Math.max(6, n.r),
+      match: [[xi, n.id]],
+      summary: {
+        columns: [sName === tName ? "Node" : `${sName} / ${tName}`, wTitle],
+        row: [n.id, formatTooltipNumber(n.weight)],
+      },
+    });
+  }
+  ctx.textBaseline = "alphabetic";
+  ctx.globalAlpha = 1;
+  setLegend(opts, nodes.slice(0, 8).map((n) => ({ label: n.id, color: nodeColor.get(n.id) ?? palette[0]! })));
+}
+
+// --- Arc diagram ---
+
+function renderFullArcDiagram(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
+  const palette = opts?.colors ?? DEFAULT_COLORS;
+  const alpha = opts?.opacity ?? 0.75;
+  const fontFamily = opts?.fontFamily ?? "Inter";
+  const targetIdx = ci >= 0 ? ci : -1;
+  if (targetIdx < 0) return;
+  const weightIdx = yi >= 0 && yi !== targetIdx ? yi : -1;
+  const graph = buildFlowGraph(rows, xi, targetIdx, weightIdx, { maxNodes: 28, maxEdges: 60 });
+  if (!graph) return;
+  const { nodes, edges } = layoutArcDiagram(graph, w, h, pad);
+
+  const nodeColor = new Map<string, string>();
+  let colorI = 0;
+  for (const n of nodes) {
+    if (!nodeColor.has(n.id)) nodeColor.set(n.id, palette[colorI++ % palette.length]!);
+  }
+
+  for (const e of edges) {
+    ctx.strokeStyle = nodeColor.get(e.source) ?? palette[0]!;
+    ctx.globalAlpha = Math.min(0.5, alpha * 0.6);
+    ctx.lineWidth = e.width;
+    ctx.lineCap = "round";
+    strokeArcLink(ctx, e.x1, e.y1, e.x2, e.y2);
+  }
+
+  const sName = fieldLabel(opts, xi, "source");
+  const tName = fieldLabel(opts, targetIdx, "target");
+  const wTitle = weightIdx >= 0 ? fieldLabel(opts, weightIdx, "weight") : "Links";
+  ctx.globalAlpha = 1;
+  for (const n of nodes) {
+    const fill = nodeColor.get(n.id) ?? palette[0]!;
+    ctx.fillStyle = fill;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = opts?.themeBg ?? "#0e0e12";
+    ctx.lineWidth = 1.25;
+    ctx.stroke();
+
+    ctx.save();
+    ctx.translate(n.x, n.y + n.r + 3);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillStyle = opts?.themeMuted ?? "#8b8b98";
+    ctx.font = `500 9px '${fontFamily}', sans-serif`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(fitTextEllipsis(ctx, n.id, 56), 0, 0);
+    ctx.restore();
+
+    pushHit(opts, {
+      shape: "circle", cx: n.x, cy: n.y, r: Math.max(6, n.r + 2),
+      match: [[xi, n.id]],
+      summary: {
+        columns: [sName === tName ? "Node" : `${sName} / ${tName}`, wTitle],
+        row: [n.id, formatTooltipNumber(n.weight)],
+      },
+    });
+  }
+  ctx.textBaseline = "alphabetic";
+  setLegend(opts, nodes.slice(0, 8).map((n) => ({ label: n.id, color: nodeColor.get(n.id) ?? palette[0]! })));
+}
+
+// --- Pareto (ranked bars + cumulative %) ---
+
+function renderFullPareto(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  const cols = opts?.colors ?? DEFAULT_COLORS;
+  const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
+  const topN = clampTopN(opts?.topN, DEFAULT_TOP_N);
+  const byCat = new Map<string, number[]>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    if (!byCat.has(k)) byCat.set(k, []);
+    if (yi < 0) byCat.get(k)!.push(1);
+    else {
+      const v = Number(r[yi]);
+      if (!isNaN(v)) byCat.get(k)!.push(v);
+    }
+  }
+  const entries = [...byCat.entries()]
+    .map(([label, vals]) => ({ label, value: aggregateValues(vals, agg) }))
+    .filter((e) => e.value > 0);
+  const bins = buildPareto(entries).slice(0, topN);
+  if (bins.length === 0) return;
+
+  const rect = plotOf(w, h, pad);
+  const maxV = Math.max(...bins.map((b) => b.value));
+  const ys = niceTicks(0, maxV, opts?.tickCount ?? 5, true);
+  const Y = linear(ys.min, ys.max, rect.bottom, rect.top);
+  const Ypct = linear(0, 100, rect.bottom, rect.top);
+  const band = (rect.right - rect.left) / bins.length;
+  const barW = Math.max(2, band * 0.7);
+  if (opts) opts.scales = { y: Y, valueAxis: "y", rect };
+  drawChartGrid(ctx, w, h, rect, opts, { x: null, y: [ys.min, ys.max] });
+
+  const xName = fieldLabel(opts, xi);
+  const vTitle = valueTitle(opts, yi, agg);
+  const color = cols[0]!;
+  const corner = opts?.barCornerRadius ?? 3;
+  bins.forEach((b, i) => {
+    const x = rect.left + i * band + (band - barW) / 2;
+    const y = Y(b.value);
+    const bh = rect.bottom - y;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = opts?.opacity ?? 0.85;
+    ctx.beginPath();
+    barPath(ctx, x, y, barW, Math.max(1, bh), Math.min(corner, barW / 2, bh / 2), "up");
+    ctx.fill();
+    pushHit(opts, {
+      shape: "rect", x, y, w: barW, h: bh,
+      match: [[xi, b.label]],
+      summary: {
+        columns: [xName, vTitle, "Cumulative %"],
+        row: [b.label, formatTooltipNumber(b.value), `${b.cumulativePct.toFixed(1)}%`],
+      },
+    });
+  });
+  ctx.globalAlpha = 1;
+
+  // Cumulative % line + 80% marker
+  ctx.strokeStyle = cols[1] ?? cols[0]!;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  bins.forEach((b, i) => {
+    const x = rect.left + (i + 0.5) * band;
+    const y = Ypct(b.cumulativePct);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+  ctx.fillStyle = cols[1] ?? cols[0]!;
+  bins.forEach((b, i) => {
+    const x = rect.left + (i + 0.5) * band;
+    const y = Ypct(b.cumulativePct);
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  const y80 = Ypct(80);
+  ctx.strokeStyle = opts?.themeMuted ?? "rgba(128,128,128,0.55)";
+  ctx.setLineDash([4, 3]);
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(rect.left, y80);
+  ctx.lineTo(rect.right, y80);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = opts?.themeMuted ?? "#8b8b98";
+  ctx.font = axisFont(opts, 9);
+  ctx.textAlign = "right";
+  ctx.textBaseline = "bottom";
+  ctx.fillText("80%", rect.right - 2, y80 - 2);
+
+  setLegend(opts, [
+    { label: vTitle, color },
+    { label: "Cumulative %", color: cols[1] ?? cols[0]! },
+  ]);
+  drawChartTicks(ctx, 0, 1, ys.min, ys.max, w, h, rect, opts, { x: false });
+  drawBandAxisX(ctx, bins.map((b) => b.label), bins.map((_, i) => rect.left + (i + 0.5) * band), band, w, h, rect, opts, "nominal");
+}
+
+// --- Correlation matrix ---
+
+function renderFullCorrMatrix(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  columns: string[],
+  w: number,
+  h: number,
+  pad: number,
+  opts?: ChartRenderOpts,
+) {
+  const labels = (opts?.fieldNames ?? columns)
+    .map((name, i) => ({ name, i }))
+    .filter(({ name, i }) => {
+      // Prefer numeric-looking columns
+      let hits = 0;
+      const probe = Math.min(rows.length, 40);
+      for (let r = 0; r < probe; r++) {
+        const v = Number(rows[r]![i]);
+        if (Number.isFinite(v)) hits++;
+      }
+      return probe > 0 && hits / probe >= 0.5 && name.length > 0;
+    })
+    .slice(0, 8);
+  if (labels.length < 2) return;
+  const matrix = buildCorrMatrix(
+    rows,
+    labels.map((l) => l.i),
+    labels.map((l) => l.name),
+  );
+  if (!matrix) return;
+
+  const rect = plotOf(w, h, pad);
+  const n = matrix.labels.length;
+  const cellW = (rect.right - rect.left) / n;
+  const cellH = (rect.bottom - rect.top) / n;
+  const stops = opts?.continuousStops?.length
+    ? opts.continuousStops
+    : (opts?.colors ?? DEFAULT_COLORS);
+
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      const corr = matrix.matrix[r]![c]!;
+      const t = (corr + 1) / 2; // [-1,1] → [0,1]
+      const x = rect.left + c * cellW;
+      const y = rect.top + r * cellH;
+      ctx.fillStyle = sampleContinuous(stops, t);
+      ctx.globalAlpha = 0.35 + Math.abs(corr) * 0.65;
+      ctx.fillRect(x + 0.5, y + 0.5, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
+      if ((opts?.showDataLabels || cellW > 36) && cellW > 28 && cellH > 18) {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = opts?.themeText ?? "#111";
+        ctx.font = axisFont(opts, Math.min(11, cellW * 0.28));
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(corr.toFixed(2), x + cellW / 2, y + cellH / 2);
+      }
+      pushHit(opts, {
+        shape: "rect", x, y, w: cellW, h: cellH,
+        match: [],
+        summary: {
+          columns: ["Row", "Col", "r"],
+          row: [matrix.labels[r]!, matrix.labels[c]!, corr.toFixed(3)],
+        },
+      });
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Axis labels along left / bottom
+  ctx.fillStyle = opts?.axisLabelColor ?? opts?.themeMuted ?? "#8b8b98";
+  ctx.font = axisFont(opts, 9);
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  matrix.labels.forEach((lab, i) => {
+    const y = rect.top + (i + 0.5) * cellH;
+    ctx.fillText(fitTextEllipsis(ctx, lab, pad - 6), rect.left - 4, y);
+  });
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  matrix.labels.forEach((lab, i) => {
+    const x = rect.left + (i + 0.5) * cellW;
+    ctx.save();
+    ctx.translate(x, rect.bottom + 4);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillText(fitTextEllipsis(ctx, lab, 70), 0, 0);
+    ctx.restore();
+  });
 }
 
 // --- Dumbbell (category × start → end) ---
@@ -6687,7 +7349,7 @@ function renderFullFunnel(
     .map(([label, vals]) => ({ label, value: aggregateValues(vals.filter(v => !isNaN(v)), agg) }))
     .filter(e => e.value > 0)
     .sort((a, b) => b.value - a.value)
-    .slice(0, 12);
+    .slice(0, opts?.topN != null ? clampTopN(opts.topN) : 12);
   if (entries.length === 0) return;
 
   const maxVal = entries[0]!.value;

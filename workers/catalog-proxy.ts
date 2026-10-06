@@ -862,8 +862,9 @@ async function handlePublishStory(request: Request, env: Env): Promise<Response>
   }
 
   // Link unfurlers (iMessage, Slack, X…) ignore data: URLs — host the preview
-  // image beside the page and point og:image / twitter:image at it.
+  // image beside the page and point og:image / twitter:image / <img> at it.
   // KV (not Cache API) so NeoSpace can fetch .img from any Cloudflare colo.
+  // Prefer stable tokens from buildChartSharePageHtml; also rewrite legacy data: embeds.
   const og = payload.ogImage?.match(/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/);
   if (og && og[2]!.length < MAX_STORY_HTML_BYTES) {
     const bytes = Uint8Array.from(atob(og[2]!), (c) => c.charCodeAt(0));
@@ -872,7 +873,15 @@ async function handlePublishStory(request: Request, env: Env): Promise<Response>
       metadata: { contentType: og[1]! },
     });
     const hosted = `${origin}/s/${id}.img`;
-    html = html.split(`content="${payload.ogImage}"`).join(`content="${hosted}"`);
+    html = html
+      .split("__LOOM_SHARE_IMG__")
+      .join(hosted)
+      .split("__LOOM_OG_IMG__")
+      .join(hosted);
+    if (payload.ogImage) {
+      html = html.split(`content="${payload.ogImage}"`).join(`content="${hosted}"`);
+      html = html.split(`src="${payload.ogImage}"`).join(`src="${hosted}"`);
+    }
   }
 
   // Point "Open in Loom" at the story snapshot when we have one.

@@ -4,6 +4,7 @@
 // 1. While Chart view is showing, mirror the chart setup into the hash
 //    (debounced replaceState) so the address bar is always shareable.
 //    Leaving Chart view drops `#chart=` (Dive writes its own `#dive=`).
+//    Frozen share snapshots keep `#story={id}` so refresh reloads `/s/{id}.data`.
 // 2. When a shared link is pending (store `chartLink`, set by
 //    WebSessionResume) and its dataset is open, rebuild the chart from
 //    the columns and apply overrides, then clear the pending link.
@@ -20,12 +21,15 @@ import {
   encodeChartLink,
   restoreChartRec,
 } from "@/lib/chartLink";
+import { storyIdFromSharedPath } from "@/lib/shareLineage";
 
 const SYNC_DEBOUNCE_MS = 400;
 
 /** Absolute share URL for the current chart, or null when there's nothing to share. */
 export function currentChartShareUrl(): string | null {
   if (typeof window === "undefined") return null;
+  const storyId = storyIdFromSharedPath(useLoomStore.getState().selectedFile?.path);
+  if (storyId) return `${window.location.origin}${window.location.pathname}#story=${storyId}`;
   const link = chartLinkFromState(useLoomStore.getState());
   if (!link) return null;
   return `${window.location.origin}${window.location.pathname}#${encodeChartLink(link)}`;
@@ -89,7 +93,10 @@ export function ChartLinkSync() {
       panelTab: s.panelTab === "settings" ? "chart" : s.panelTab,
       chartLink: null,
     });
-    s.setToast(`Opened shared chart · ${chartLinkDatasetLabel(chartLink)}`);
+    // Snapshot reopen already toasted in WebSessionResume — don't stack a second one.
+    if (!storyIdFromSharedPath(selectedFile.path)) {
+      s.setToast(`Opened shared chart · ${chartLinkDatasetLabel(chartLink)}`);
+    }
   }, [chartLink, selectedFile, columnStats, sampleRows, inspectingFilePath]);
 
   // Mirror the chart setup into the hash while Chart view is showing.
@@ -98,11 +105,29 @@ export function ChartLinkSync() {
     prevView.current = viewMode;
     if (viewMode !== "chart") {
       // Only on the way out of Chart — never on first mount, where a shared
-      // #chart= link may not have been read yet.
-      if (was === "chart" && !useLoomStore.getState().chartLink && window.location.hash.startsWith("#chart=")) replaceHash("");
+      // #chart= / #story= link may not have been read yet.
+      if (
+        was === "chart" &&
+        !useLoomStore.getState().chartLink &&
+        (window.location.hash.startsWith("#chart=") || window.location.hash.startsWith("#story="))
+      ) {
+        replaceHash("");
+      }
       return;
     }
     if (chartLink) return; // keep the shared link in the bar until it applies
+
+    // Frozen share snapshot — keep #story= so refresh reloads /s/{id}.data
+    const storyId = storyIdFromSharedPath(selectedFile?.path);
+    if (storyId) {
+      const hash = `#story=${storyId}`;
+      const id = window.setTimeout(() => {
+        if (useLoomStore.getState().viewMode !== "chart") return;
+        if (window.location.hash !== hash) replaceHash(hash);
+      }, SYNC_DEBOUNCE_MS);
+      return () => window.clearTimeout(id);
+    }
+
     const link = chartLinkFromState({
       selectedFile,
       activeChart,

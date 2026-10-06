@@ -14,14 +14,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
 import { getRecommendationReason } from "@/lib/recommendations";
 import {
-  blobToDataUrl,
   buildSocialCaption,
   copyTextToClipboard,
   getSocialPreset,
   publishStoryToWorker,
   slugifyFilename,
+  toLinkPreviewJpeg,
   type SocialPresetId,
 } from "@/lib/socialExport";
+import { getThemeUiColors } from "@/lib/chartPalettes";
 import { downloadBlob } from "@/lib/zipStore";
 import { buildChartSharePageHtml } from "@/lib/dashboardMicrosite";
 import { isTauri } from "@/lib/tauri";
@@ -34,24 +35,8 @@ const FORMATS: { id: SocialPresetId; label: string; hint: string }[] = [
   { id: "ig-portrait", label: "Portrait", hint: "Instagram 4:5" },
   { id: "stories", label: "Story", hint: "Reels · TikTok" },
   { id: "x-landscape", label: "Wide", hint: "X · LinkedIn" },
+  { id: "linkedin-og", label: "Link", hint: "1.91:1 preview" },
 ];
-
-/** Re-encode as JPEG so the published page (image appears 3× in its HTML) stays small. */
-async function toJpegDataUrl(blob: Blob, quality = 0.88): Promise<string> {
-  try {
-    const bmp = await createImageBitmap(blob);
-    const c = document.createElement("canvas");
-    c.width = bmp.width;
-    c.height = bmp.height;
-    const ctx = c.getContext("2d");
-    if (!ctx) throw new Error("no 2d");
-    ctx.drawImage(bmp, 0, 0);
-    bmp.close();
-    return c.toDataURL("image/jpeg", quality);
-  } catch {
-    return blobToDataUrl(blob);
-  }
-}
 
 function canShareFiles(): boolean {
   if (typeof navigator === "undefined" || typeof navigator.share !== "function") return false;
@@ -102,8 +87,6 @@ function ShareSheetBody() {
   const captureSeq = useRef(0);
   const nativeShare = useMemo(canShareFiles, []);
   const desktop = useMemo(isTauri, []);
-  const creditOn = exportBurnIn.includeSource || exportBurnIn.includeLoomMark;
-
   const close = useCallback(() => setShareSheetOpen(false), [setShareSheetOpen]);
 
   const caption = useMemo(() => {
@@ -135,7 +118,7 @@ function ShareSheetBody() {
       }
       setBlob(out);
     })();
-  }, [activeChart, presetId, chartTitle, creditOn, retry]);
+  }, [activeChart, presetId, chartTitle, exportBurnIn.includeLoomMark, exportBurnIn.includeSource, retry]);
 
   useEffect(() => {
     if (!blob) return;
@@ -210,10 +193,12 @@ function ShareSheetBody() {
     }
   };
 
-  const publishStory = async (): Promise<{ url: string; id: string; hasData?: boolean } | null> => {
+  const publishStory = async () => {
     if (!blob) return null;
-    const image = await toJpegDataUrl(blob);
     const st = useLoomStore.getState();
+    const fill = getThemeUiColors(st.appSettings.theme).bg;
+    // Letterbox into 1200×627 so Slack / iMessage / LinkedIn unfurls stay sharp.
+    const image = await toLinkPreviewJpeg(blob, { fill, quality: 0.9 });
     const chart = chartLinkFromState(st);
     const snapshot = buildShareDataSnapshot({
       sample: st.sampleRows,
@@ -251,15 +236,26 @@ function ShareSheetBody() {
     setBusy("link");
     try {
       const published = await publishStory();
-      if (!published) {
-        setToast(desktop ? "Links need the web app — save the image instead" : "Couldn’t publish right now — share the image instead");
+      if (!published?.url) {
+        setToast(
+          desktop
+            ? "Links need the web app — save the image instead"
+            : published?.error || "Couldn’t publish right now — share the image instead",
+        );
         return;
       }
       setLink(published.url);
+      const copiedOk = await copyTextToClipboard(published.url);
+      setCopied(copiedOk ? "link" : null);
+      if (copiedOk) window.setTimeout(() => setCopied(null), 2200);
       setToast(
         published.hasData
-          ? "Link ready — chart image + data snapshot (7 days)"
-          : "Link ready — chart image (encoding link only; no frozen rows)",
+          ? copiedOk
+            ? "Link copied — image + data snapshot (7 days)"
+            : "Link ready — image + data snapshot (7 days)"
+          : copiedOk
+            ? "Link copied — chart image (7 days)"
+            : "Link ready — chart image (7 days)",
       );
     } finally {
       setBusy(null);
@@ -269,9 +265,9 @@ function ShareSheetBody() {
   const NEOSPACE_ORIGIN = "https://neospace.ibm.io";
 
   /**
-   * One tap: publish chart to Loom KV (`/s/{id}.img`), then open NeoSpace with
-   * the story URL. NeoSpace fetches the PNG over HTTPS — postMessage is optional
-   * (large charts / noopener tabs often drop it).
+   * One tap: publish chart to Loom KV (`/s/{id}.img` JPEG), then open NeoSpace
+   * with the story URL. NeoSpace fetches the hosted JPEG over HTTPS — postMessage
+   * of the sheet PNG is best-effort only.
    */
   const handlePostToNeoSpace = async () => {
     if (!blob || desktop) {
@@ -280,10 +276,9 @@ function ShareSheetBody() {
     }
     setBusy("neospace");
     try {
-      // Always (re)publish so NeoSpace can fetch a fresh KV-backed .img
       const published = await publishStory();
       if (!published?.url) {
-        setToast("Couldn’t publish the chart image — try again in a moment");
+        setToast(published?.error || "Couldn’t publish the chart image — try again in a moment");
         return;
       }
       setLink(published.url);
@@ -294,19 +289,16 @@ function ShareSheetBody() {
       dest.searchParams.set("story", storyUrl);
       dest.searchParams.set("text", body);
 
-      // Named window; avoid noopener so best-effort postMessage can still work
       const child = window.open(dest.toString(), "neospace_loom_share");
       if (!child) {
-        // Pop-up blocked — fall back to same-tab navigation (image still loads via story URL)
         window.location.assign(dest.toString());
         close();
         return;
       }
 
-      // Best-effort postMessage (may fail for large PNGs / severed opener)
+      // Best-effort: send the preview PNG; NeoSpace can also fetch /s/{id}.img (JPEG).
       try {
         const buffer = await blob.arrayBuffer();
-        const mime = blob.type || "image/png";
         const filename = `${slugifyFilename(chartTitle || "chart")}.png`;
         const send = () => {
           if (child.closed) return;
@@ -319,7 +311,7 @@ function ShareSheetBody() {
                 story: storyUrl,
                 image: {
                   name: filename,
-                  type: mime.startsWith("image/") ? mime : "image/png",
+                  type: "image/png",
                   buffer,
                 },
               },
@@ -482,17 +474,20 @@ function ShareSheetBody() {
           <label className="flex items-center gap-2 text-xs text-loom-text min-h-9">
             <input
               type="checkbox"
-              checked={creditOn}
+              checked={exportBurnIn.includeLoomMark}
               onChange={(e) =>
-                setExportBurnIn((prev) => ({ ...prev, includeSource: e.target.checked, includeLoomMark: e.target.checked }))
+                setExportBurnIn((prev) => ({ ...prev, includeLoomMark: e.target.checked }))
               }
             />
-            Credit the data source on the image
+            “Made with Loom” footer
+            <span className="text-2xs text-loom-muted">(source note is Chart → Visual → Footnote)</span>
           </label>
 
           {link && (
             <div className="rounded-lg border border-loom-accent/40 bg-loom-accent/5 p-2.5 space-y-2">
-              <p className="text-2xs text-loom-muted">Your chart page (live for 7 days)</p>
+              <p className="text-2xs text-loom-muted">
+                Public for 7 days — anyone with the link can open the chart image and data lineage.
+              </p>
               <p className="text-xs font-mono text-loom-text break-all">{link}</p>
               <button type="button" onClick={handleShareLink} className="loom-btn-primary w-full min-h-10 text-sm rounded-lg">
                 {copied === "link" ? "Link copied" : nativeShare || (typeof navigator !== "undefined" && typeof navigator.share === "function") ? "Share link" : "Copy link"}
@@ -503,15 +498,21 @@ function ShareSheetBody() {
 
         <div className="px-4 pt-3 space-y-2 shrink-0 border-t border-loom-border/60 mt-3">
           {!desktop && (
-            <button
-              type="button"
-              onClick={handlePostToNeoSpace}
-              disabled={!ready || busy !== null}
-              className="w-full min-h-12 text-sm font-semibold rounded-lg border border-loom-accent/50 bg-loom-accent/15 text-loom-text hover:bg-loom-accent/25 disabled:opacity-50"
-              title="Publishes the chart with data lineage, then opens NeoSpace ready to post"
-            >
-              {busy === "neospace" ? "Sending to NeoSpace…" : "Post to NeoSpace"}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handlePostToNeoSpace}
+                disabled={!ready || busy !== null}
+                className="w-full min-h-12 text-sm font-semibold rounded-lg border border-loom-accent/50 bg-loom-accent/15 text-loom-text hover:bg-loom-accent/25 disabled:opacity-50"
+                title="Publishes a public chart link (image + data lineage, 7 days), then opens NeoSpace ready to post"
+              >
+                {busy === "neospace" ? "Sending to NeoSpace…" : "Post to NeoSpace"}
+              </button>
+              <p className="text-2xs text-loom-muted text-center leading-snug px-1">
+                Publishes a <strong className="font-medium text-loom-text/80">public</strong> link
+                for 7 days (chart image + data lineage). Don’t share private or PII datasets.
+              </p>
+            </>
           )}
           <button
             type="button"

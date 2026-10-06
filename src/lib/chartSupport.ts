@@ -117,10 +117,14 @@ export function getChartRenderIssue(
     }
   }
 
-  if (chart.kind === "sankey") {
+  if (chart.kind === "sankey" || chart.kind === "network" || chart.kind === "arcDiagram") {
     const target = chart.colorField ?? chart.yField;
     if (!target) {
-      return { title: "Sankey needs a target", message: "Map a second category to Color (flow target).", code: "bad_target" };
+      return {
+        title: chart.kind === "network" ? "Network needs a target" : chart.kind === "arcDiagram" ? "Arc diagram needs a target" : "Sankey needs a target",
+        message: "Map a second category to Color (link target).",
+        code: "bad_target",
+      };
     }
     const ti = cols.indexOf(target);
     if (ti < 0) {
@@ -231,6 +235,9 @@ export function formatChartAggregationSummary(chart: ChartRecommendation): strin
     if (chart.kind === "heatmap") return "Color: count per cell";
     if (chart.kind === "hexbin") return "Color: count per hex cell";
     if (chart.kind === "sankey") return chart.yField ? `Flow width: ${chart.yField}` : "Flow width: row count";
+    if (chart.kind === "network" || chart.kind === "arcDiagram") {
+      return chart.yField ? `Link weight: ${chart.yField}` : "Link weight: row count";
+    }
     if (chart.kind === "radar") return "Axes: all numeric columns (mean per series)";
     if (chart.kind === "parallel") return "Axes: all numeric columns (one polyline per row)";
     if (chart.kind === "ridgeline") return "Density of X per Y group";
@@ -247,8 +254,8 @@ export function formatChartAggregationSummary(chart: ChartRecommendation): strin
 
 /** Charts that don’t use a cartesian X/Y plane (no axis chrome / grid). */
 const NON_CARTESIAN = new Set<ChartKind>([
-  "pie", "treemap", "sunburst", "forceBubble", "sankey", "radar", "choropleth",
-  "funnel", "parallel",
+  "pie", "treemap", "sunburst", "forceBubble", "sankey", "network", "arcDiagram", "radar", "choropleth",
+  "funnel", "parallel", "corrMatrix",
   ...(ODD_NON_CARTESIAN as unknown as ChartKind[]),
   ...(GPU_SCENE_NON_CARTESIAN as unknown as ChartKind[]),
   ...(GEO_MAP_NON_CARTESIAN as unknown as ChartKind[]),
@@ -287,7 +294,10 @@ export interface ChartCapabilities {
 /** Which Encoding / Visual controls actually affect this chart kind. */
 export function chartCapabilities(kind: ChartKind): ChartCapabilities {
   const cartesian = !NON_CARTESIAN.has(kind);
-  const pointMarks = kind === "scatter" || kind === "bubble";
+  const scatterLike = kind === "scatter";
+  const bubbleLike = kind === "bubble";
+  const odd = isOddChartKind(kind);
+  const gpu = isGpuSceneKind(kind);
   return {
     cartesian,
     // Radar/parallel draw every numeric column as an axis; X/Y slots are identity-only for parallel
@@ -297,22 +307,34 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     // Show Color only when the canvas reads colorField / cIdx for this kind
     colorChannel: ![
       "histogram", "pie", "heatmap", "hexbin", "box", "waterfall", "choropleth", "ridgeline", "dataCube",
+      "corrMatrix", "pareto",
+      // Canvas ignores color for these
+      "dumbbell", "funnel",
     ].includes(kind),
-    sizeChannel: pointMarks || kind === "dumbbell" || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || kind === "pyramid" || kind === "slope" || kind === "chernoff" || kind === "glyphStar" || kind === "flower" || isGpuSceneKind(kind),
-    aggregate: ["bar", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind),
+    sizeChannel: scatterLike || bubbleLike || kind === "dumbbell" || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || kind === "pyramid" || kind === "slope" || kind === "chernoff" || kind === "glyphStar" || kind === "flower" || gpu,
+    aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind),
     facetRow: kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble",
-    topN: kind === "bar" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle",
+    // Only kinds whose canvas path actually ranks/caps categories (see ChartView / oddCharts).
+    topN: kind === "bar" || kind === "pareto" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle" || kind === "isotype" || kind === "radialBar" || kind === "isoBars",
     compareY: kind === "line" || kind === "area",
-    markPoints: pointMarks || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || (isGpuSceneKind(kind) && kind !== "dataCube"),
-    opacityChannel: pointMarks || kind === "strip" || kind === "parallel" || kind === "bucketField" || kind === "beeswarm" || (isGpuSceneKind(kind) && kind !== "dataCube"),
-    glowOutline: pointMarks || kind === "firefly",
-    markMotif: cartesian && !["heatmap", "hexbin", "choropleth", "strip", "box", "violin", "ridgeline", "dumbbell", "contour", "voronoi"].includes(kind) && !isGpuSceneKind(kind) && !(GEO_MAP_NON_CARTESIAN as Set<string>).has(kind),
-    barMarks: kind === "bar" || kind === "histogram" || kind === "waterfall" || kind === "lollipop" || kind === "funnel" || kind === "isoBars",
-    lineMarks: kind === "line" || kind === "area" || kind === "parallel" || kind === "bump" || kind === "slope" || kind === "stream" || kind === "trailRibbon",
-    dataLabels: ["bar", "pie", "treemap", "forceBubble", "lollipop", "funnel", "dumbbell", "radialBar", "waffle"].includes(kind),
-    legend: (cartesian && !["histogram", "heatmap", "hexbin"].includes(kind)) || (isGeoMapKind(kind) && kind !== "geoHex") || kind === "radar" || kind === "pie" || kind === "sankey" || kind === "parallel" || kind === "funnel" || isOddChartKind(kind) || isGpuSceneKind(kind),
-    referenceLines: cartesian && !["heatmap", "hexbin", "box", "violin", "ridgeline", "contour", "voronoi"].includes(kind) && !isGpuSceneKind(kind),
-    scatterExtras: pointMarks || kind === "bucketField" || kind === "beeswarm" || kind === "scatter3d" || kind === "firefly",
+    // Visual mark shape / jitter / glow — only scatter's canvas mark pipeline
+    markPoints: scatterLike,
+    // Per-row opacity encoding (not global opacity slider)
+    opacityChannel: scatterLike || kind === "strip",
+    // Per-row glow / outline fields
+    glowOutline: scatterLike,
+    markMotif: cartesian && !["heatmap", "hexbin", "choropleth", "strip", "box", "violin", "ridgeline", "dumbbell", "contour", "voronoi", "corrMatrix"].includes(kind) && !gpu && !(GEO_MAP_NON_CARTESIAN as Set<string>).has(kind),
+    // barCornerRadius is only read by renderFullBar / pareto
+    barMarks: kind === "bar" || kind === "pareto",
+    // lineStrokeStyle / smooth / width — line + area canvas only
+    lineMarks: kind === "line" || kind === "area",
+    // Kinds that check opts.showDataLabels (or odd env.opts.showDataLabels)
+    dataLabels: ["bar", "pareto", "pie", "lollipop", "radialBar", "pyramid", "isoBars", "corrMatrix"].includes(kind),
+    legend: (cartesian && !["histogram", "heatmap", "hexbin", "corrMatrix"].includes(kind)) || (isGeoMapKind(kind) && kind !== "geoHex") || kind === "radar" || kind === "pie" || kind === "sankey" || kind === "network" || kind === "arcDiagram" || kind === "parallel" || kind === "funnel" || kind === "pareto" || odd || gpu,
+    // Reference lines need ropts.scales from the main cartesian path — not odd/GPU/geo
+    referenceLines: cartesian && !odd && !["heatmap", "hexbin", "box", "violin", "ridgeline", "contour", "voronoi", "corrMatrix"].includes(kind) && !gpu,
+    // Trail + marginals only in renderFullScatter
+    scatterExtras: scatterLike,
     emphasis: false,
   };
 }
@@ -334,7 +356,13 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
     case "hexbin":
       return base("X", "Y", "Density");
     case "sankey":
+    case "network":
+    case "arcDiagram":
       return base("Source", "Weight", "Target");
+    case "pareto":
+      return base("Category", "Value", "Color");
+    case "corrMatrix":
+      return base("Measure A", "Measure B", "Color");
     case "radar":
       return base("Axis", "Value", "Series");
     case "parallel":

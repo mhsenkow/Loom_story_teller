@@ -223,6 +223,10 @@ export function HydrateStore() {
         row_count: f.row_count,
         size_bytes: f.size_bytes,
         ...(f.sourceUrl ? { sourceUrl: f.sourceUrl } : {}),
+        ...(f.sourceHome ? { sourceHome: f.sourceHome } : {}),
+        ...(f.sourceCredit ? { sourceCredit: f.sourceCredit } : {}),
+        ...(f.capturedAt ? { capturedAt: f.capturedAt } : {}),
+        ...(f.originPath ? { originPath: f.originPath } : {}),
       })),
     );
   }, [recentFiles]);

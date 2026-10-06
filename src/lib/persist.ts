@@ -72,6 +72,10 @@ export interface RecentFileEntry {
   size_bytes: number;
   /** Remote CSV URL for web re-open (not the row data). */
   sourceUrl?: string;
+  sourceHome?: string;
+  sourceCredit?: string;
+  capturedAt?: string;
+  originPath?: string;
 }
 
 export function getRecentFiles(): RecentFileEntry[] {

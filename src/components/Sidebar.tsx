@@ -355,7 +355,11 @@ export function Sidebar() {
    * `rowLimit` is the row cap baked into the URL (Socrata `$limit`) so the toast can say
    * "first N rows" honestly when the portal has more.
    */
-  async function handleLoadRemoteCsv(url: string, filename: string, opts?: { rowLimit?: number }) {
+  async function handleLoadRemoteCsv(
+    url: string,
+    filename: string,
+    opts?: { rowLimit?: number; sourceCredit?: string; sourceHome?: string },
+  ) {
     const safeName = (filename || "dataset.csv").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
     const name = safeName.toLowerCase().endsWith(".csv") ? safeName : `${safeName}.csv`;
     setIsScanning(true);
@@ -364,6 +368,7 @@ export function Sidebar() {
       const path = `web://${name}`;
       const inspect = parseCsvToInspectResult(name, text);
       const rowCount = inspect.sample.total_rows ?? inspect.sample.rows.length;
+      const { guessHomepageFromDataUrl } = await import("@/lib/dataProvenance");
       const entry: FileEntry = {
         path,
         name,
@@ -371,6 +376,8 @@ export function Sidebar() {
         row_count: rowCount,
         size_bytes: text.length,
         sourceUrl: url,
+        sourceHome: opts?.sourceHome ?? guessHomepageFromDataUrl(url) ?? undefined,
+        sourceCredit: opts?.sourceCredit,
       };
       const prev = useLoomStore.getState();
       const cache = { ...prev.webFileCache, [path]: inspect };
@@ -666,7 +673,15 @@ function WikiStreamSection() {
         setToast("No Wikipedia events yet — wait a second and try Explore again");
         return;
       }
-      const streamFile = { path: "stream://wiki", name: "Wikipedia Live", extension: "stream", row_count: snap.sample.total_rows, size_bytes: 0 };
+      const streamFile = {
+        path: "stream://wiki",
+        name: "Wikipedia Live",
+        extension: "stream",
+        row_count: snap.sample.total_rows,
+        size_bytes: 0,
+        sourceHome: "https://www.wikimedia.org/",
+        sourceCredit: "Wikimedia recent changes · CC BY-SA",
+      };
       setSelectedFile(streamFile);
       setColumnStats(snap.stats);
       setSampleRows(snap.sample);
@@ -939,6 +954,8 @@ function SourceCard({ def }: { def: SourceDef }) {
         extension: "stream",
         row_count: snap.sample.total_rows,
         size_bytes: 0,
+        sourceHome: def.homepage,
+        sourceCredit: def.attribution,
       };
       setSelectedFile(file);
       addRecentFile(file);
@@ -1309,7 +1326,11 @@ function DataRegionView({
   onPickFolder: () => void;
   onRescanFolder: () => void;
   isWeb: boolean;
-  onLoadRemoteCsv: (url: string, filename: string, opts?: { rowLimit?: number }) => Promise<void>;
+  onLoadRemoteCsv: (
+    url: string,
+    filename: string,
+    opts?: { rowLimit?: number; sourceCredit?: string; sourceHome?: string },
+  ) => Promise<void>;
   onLoadFiles?: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onUseDemoData?: () => void;
   fileInputRef?: React.RefObject<HTMLInputElement | null>;
@@ -1408,7 +1429,12 @@ function DataRegionView({
     }
   }
 
-  async function handleLoadCsv(url: string, filename: string, resourceId: string, opts?: { rowLimit?: number }) {
+  async function handleLoadCsv(
+    url: string,
+    filename: string,
+    resourceId: string,
+    opts?: { rowLimit?: number; sourceCredit?: string; sourceHome?: string },
+  ) {
     setLoadingId(resourceId);
     try {
       await onLoadRemoteCsv(url, filename, opts);
@@ -1699,7 +1725,11 @@ function DataRegionView({
                     <button
                       type="button"
                       disabled={loadingId === pack.id || isScanning}
-                      onClick={() => void handleLoadCsv(pack.url, `${pack.id}.csv`, pack.id)}
+                      onClick={() =>
+                        void handleLoadCsv(pack.url, `${pack.id}.csv`, pack.id, {
+                          sourceCredit: pack.source,
+                        })
+                      }
                       className="text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50"
                     >
                       {loadingId === pack.id ? "Loading…" : "Explore CSV"}

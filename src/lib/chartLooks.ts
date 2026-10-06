@@ -765,3 +765,42 @@ export function drawChartTitleBlock(
   }
   ctx.restore();
 }
+
+/** Bottom source lineage footnote — rides with the chart into PNG / share. */
+export function drawChartSourceFootnote(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  pad: number,
+  text: string,
+  opts: {
+    align?: "left" | "center" | "right";
+    fontFamily?: string;
+    themeMuted?: string;
+    themeBorder?: string;
+  } = {},
+): void {
+  const line = text.trim();
+  if (!line) return;
+  const align = opts.align ?? "left";
+  const fontFamily = opts.fontFamily ?? "Inter";
+  const muted = opts.themeMuted ?? "#6b6b78";
+  const maxW = Math.max(48, w - pad * 2);
+  ctx.save();
+  ctx.font = `500 9px ${fontFamily}, sans-serif`;
+  ctx.fillStyle = muted;
+  ctx.textBaseline = "bottom";
+  ctx.textAlign = align === "center" ? "center" : align === "right" ? "right" : "left";
+  const x = align === "center" ? w / 2 : align === "right" ? w - pad : pad;
+  const y = h - Math.max(6, pad * 0.22);
+  ctx.strokeStyle = opts.themeBorder ?? muted;
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad, y - 11);
+  ctx.lineTo(w - pad, y - 11);
+  ctx.stroke();
+  ctx.globalAlpha = 0.9;
+  ctx.fillText(fitTextEllipsis(ctx, line, maxW), x, y);
+  ctx.restore();
+}

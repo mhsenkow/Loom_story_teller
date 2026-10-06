@@ -343,12 +343,57 @@ export async function recordCanvasVideo(
   });
 }
 
-/** Publish HTML story to Loom Worker; returns public URL or null. */
+/** Open Graph / link-preview canvas size (≈1.91:1). */
+export const LINK_PREVIEW_SIZE = { width: 1200, height: 627 } as const;
+
+/**
+ * Letterbox any image into a 1200×627 JPEG for Slack / iMessage / LinkedIn unfurls.
+ * Keeps the designed chart intact with theme padding instead of hard-cropping.
+ */
+export async function toLinkPreviewJpeg(
+  blob: Blob,
+  opts?: { quality?: number; fill?: string },
+): Promise<string> {
+  const quality = opts?.quality ?? 0.9;
+  const fill = opts?.fill ?? "#0a0a0c";
+  const { width: W, height: H } = LINK_PREVIEW_SIZE;
+  try {
+    const bmp = await createImageBitmap(blob);
+    const c = document.createElement("canvas");
+    c.width = W;
+    c.height = H;
+    const ctx = c.getContext("2d");
+    if (!ctx) throw new Error("no 2d");
+    ctx.fillStyle = fill;
+    ctx.fillRect(0, 0, W, H);
+    const scale = Math.min(W / bmp.width, H / bmp.height);
+    const dw = bmp.width * scale;
+    const dh = bmp.height * scale;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    bmp.close();
+    return c.toDataURL("image/jpeg", quality);
+  } catch {
+    return blobToDataUrl(blob);
+  }
+}
+
+export type PublishStoryResult = {
+  url: string;
+  id: string;
+  hasData?: boolean;
+  error?: string;
+};
+
+/** Publish HTML story to Loom Worker; returns public URL or an error message. */
 export async function publishStoryToWorker(input: {
   html: string;
   title: string;
   ogImageDataUrl?: string | null;
-}): Promise<{ url: string; id: string } | null> {
+  /** Optional data lineage companion (capped JSON) stored at `/s/{id}.data`. */
+  data?: unknown;
+}): Promise<PublishStoryResult | null> {
   try {
     const res = await fetch("/api/stories", {
       method: "POST",
@@ -357,13 +402,23 @@ export async function publishStoryToWorker(input: {
         html: input.html,
         title: input.title,
         ogImage: input.ogImageDataUrl ?? undefined,
+        data: input.data ?? undefined,
       }),
     });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { url?: string; id?: string };
-    if (!data.url || !data.id) return null;
-    return { url: data.url, id: data.id };
+    const data = (await res.json().catch(() => ({}))) as {
+      url?: string;
+      id?: string;
+      hasData?: boolean;
+      error?: string;
+    };
+    if (!res.ok) {
+      return { url: "", id: "", error: data.error || `Publish failed (${res.status})` };
+    }
+    if (!data.url || !data.id) {
+      return { url: "", id: "", error: data.error || "Publish returned no URL" };
+    }
+    return { url: data.url, id: data.id, hasData: !!data.hasData };
   } catch {
-    return null;
+    return { url: "", id: "", error: "Couldn’t reach the publish service" };
   }
 }

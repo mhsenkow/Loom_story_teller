@@ -56,6 +56,14 @@ export interface FileEntry {
   size_bytes: number;
   /** Remote CSV URL (web catalog / proxy). Used to re-fetch when session cache is cold. */
   sourceUrl?: string;
+  /** Upstream homepage / credit page (not the raw CSV). */
+  sourceHome?: string;
+  /** Short credit line (e.g. "USGS · public domain"). */
+  sourceCredit?: string;
+  /** When this view was frozen (ISO) — share snapshots and pinned captures. */
+  capturedAt?: string;
+  /** Original path before share hydrate (`stream://usgs`, `web://…`). */
+  originPath?: string;
 }
 
 export interface ColumnInfo {
@@ -269,6 +277,13 @@ export interface ChartVisualOverrides {
   ghostPlace?: "se" | "sw" | "ne" | "nw";
   titleLayout?: "pair" | "stack" | "spine" | "caption" | "ticket" | "slab";
   chartFrame?: "hero" | "compact" | "focus";
+  /**
+   * Source lineage drawn on the chart (and thus in PNG/share captures).
+   * `off` hides it; `name` / `credit` / `full` grow the footnote.
+   */
+  sourceFootnote?: "off" | "name" | "credit" | "full";
+  /** Horizontal placement of the source footnote. */
+  sourceFootnoteAlign?: "left" | "center" | "right";
 }
 
 interface LoomState {
@@ -726,6 +741,10 @@ export const useLoomStore = create<LoomState>((set, get) => ({
       activeChart: chart,
       vegaSpec: chart?.spec ?? null,
       aiSuggestionReason: opts?.fromAI ? (opts.aiReason ?? null) : null,
+      // Stacked / percent bars travel on the recommendation; apply when selected.
+      ...(chart?.kind === "bar"
+        ? { barStackMode: chart.barStackMode ?? "grouped" }
+        : {}),
     }),
   setChartVisualOverrides: (overrides) =>
     set((s) => ({
@@ -764,6 +783,10 @@ export const useLoomStore = create<LoomState>((set, get) => ({
       const merged = {
         ...file,
         sourceUrl: file.sourceUrl ?? prev?.sourceUrl,
+        sourceHome: file.sourceHome ?? prev?.sourceHome,
+        sourceCredit: file.sourceCredit ?? prev?.sourceCredit,
+        capturedAt: file.capturedAt ?? prev?.capturedAt,
+        originPath: file.originPath ?? prev?.originPath,
       };
       const list = s.recentFiles.filter((f) => f.path !== file.path);
       list.unshift(merged);

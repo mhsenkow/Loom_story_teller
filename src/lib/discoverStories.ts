@@ -59,10 +59,10 @@ export function requestDiscoverScan(): void {
 const SCAN_KINDS: readonly SourceKind[] = ALL_SOURCE_KINDS;
 
 /** Cap on stories shown in the discover grid (primary + alts across every feed). */
-export const DISCOVER_STORY_LIMIT = 80;
+export const DISCOVER_STORY_LIMIT = 500;
 
-/** How many chart variants to keep per live source. */
-const VARIANTS_PER_SOURCE = 3;
+/** How many chart variants to keep per live source (kinds + encodings). */
+export const VARIANTS_PER_SOURCE = 20;
 
 function colIndex(sample: QueryResult, name: string): number {
   return sample.columns.indexOf(name);
@@ -79,6 +79,27 @@ function strAt(sample: QueryResult, row: number, col: string): string {
   const i = colIndex(sample, col);
   if (i < 0) return "";
   return String(sample.rows[row]?.[i] ?? "");
+}
+
+function chartVariantKey(chart: ChartRecommendation): string {
+  return [
+    chart.kind,
+    chart.xField,
+    chart.yField ?? "",
+    chart.colorField ?? "",
+    chart.sizeField ?? "",
+    chart.rowField ?? "",
+    chart.topN ?? "",
+    chart.y2Field ?? "",
+    chart.comparePrevious ? "1" : "",
+    chart.barStackMode ?? "",
+    chart.rollingWindow ?? "",
+    chart.yScale ?? "",
+    chart.seriesNormalize ?? "",
+    chart.residualOverlay ? "1" : "",
+    chart.anomalyHighlight ? "1" : "",
+    chart.bumpMode ?? "",
+  ].join("|");
 }
 
 function pickPreferredChart(
@@ -840,7 +861,7 @@ async function probeKind(kind: SourceKind): Promise<DiscoverStory[]> {
     const out: DiscoverStory[] = [];
     const primary = hookFor(kind, snap.sample, story.charts[0]!);
     const chart0 = pickPreferredChart(story.charts, primary.preferKind) ?? story.charts[0]!;
-    const usedKinds = new Set<string>([chart0.kind]);
+    const usedKeys = new Set<string>([chartVariantKey(chart0)]);
     out.push({
       id: `discover-${kind}`,
       kind,
@@ -859,8 +880,10 @@ async function probeKind(kind: SourceKind): Promise<DiscoverStory[]> {
     let altIdx = 0;
     for (const alt of story.charts) {
       if (out.length >= VARIANTS_PER_SOURCE) break;
-      if (usedKinds.has(alt.kind)) continue;
-      usedKinds.add(alt.kind);
+      if (alt.id === chart0.id) continue;
+      const key = chartVariantKey(alt);
+      if (usedKeys.has(key)) continue;
+      usedKeys.add(key);
       altIdx += 1;
       out.push({
         id: `discover-${kind}-alt${altIdx}`,
@@ -872,7 +895,7 @@ async function probeKind(kind: SourceKind): Promise<DiscoverStory[]> {
         category: primary.category,
         chartKind: alt.kind,
         chart: alt,
-        score: Math.max(36, primary.score - 6 * altIdx),
+        score: Math.max(28, primary.score - 4 * altIdx),
         stats: snap.stats,
         sample: snap.sample,
       });
@@ -883,7 +906,7 @@ async function probeKind(kind: SourceKind): Promise<DiscoverStory[]> {
   }
 }
 
-async function probeWiki(): Promise<DiscoverStory | null> {
+async function probeWiki(): Promise<DiscoverStory[]> {
   try {
     const status = await streamStatus();
     if (!status.running) {
@@ -891,27 +914,35 @@ async function probeWiki(): Promise<DiscoverStory | null> {
     }
     await new Promise((r) => setTimeout(r, 800));
     const snap = await streamSnapshot(300);
-    if (!snap.sample.rows.length) return null;
+    if (!snap.sample.rows.length) return [];
     const story = recommendStreamStory(snap.stats, snap.sample);
-    const chart = story.charts[0];
-    if (!chart) return null;
-    const hooked = hookFor("wiki", snap.sample, chart);
-    return {
-      id: "discover-wiki",
-      kind: "wiki",
-      streamPath: "stream://wiki",
-      fileName: FILE_NAMES.wiki,
-      hook: hooked.hook,
-      blurb: hooked.blurb,
-      category: hooked.category,
-      chartKind: chart.kind,
-      chart,
-      score: hooked.score,
-      stats: snap.stats,
-      sample: snap.sample,
-    };
+    if (!story.charts.length) return [];
+    const out: DiscoverStory[] = [];
+    const hooked = hookFor("wiki", snap.sample, story.charts[0]!);
+    const usedKeys = new Set<string>();
+    for (let i = 0; i < Math.min(VARIANTS_PER_SOURCE, story.charts.length); i++) {
+      const chart = story.charts[i]!;
+      const key = chartVariantKey(chart);
+      if (usedKeys.has(key)) continue;
+      usedKeys.add(key);
+      out.push({
+        id: i === 0 ? "discover-wiki" : `discover-wiki-alt${out.length}`,
+        kind: "wiki",
+        streamPath: "stream://wiki",
+        fileName: FILE_NAMES.wiki,
+        hook: out.length === 0 ? hooked.hook : chart.title,
+        blurb: out.length === 0 ? hooked.blurb : chart.subtitle || hooked.blurb,
+        category: hooked.category,
+        chartKind: chart.kind,
+        chart,
+        score: Math.max(28, hooked.score - 4 * out.length),
+        stats: snap.stats,
+        sample: snap.sample,
+      });
+    }
+    return out;
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -963,7 +994,7 @@ export async function scanDiscoverStories(
     jobs.push(
       (async () => {
         const s = await withTimeout(probeWiki(), 10_000);
-        if (s) pushMany([s]);
+        pushMany(s ?? []);
       })(),
     );
   }

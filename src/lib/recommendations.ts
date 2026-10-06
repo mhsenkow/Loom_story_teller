@@ -89,6 +89,10 @@ export type ChartKind =
   | "choropleth"
   | "forceBubble"
   | "sankey"
+  | "network"
+  | "arcDiagram"
+  | "pareto"
+  | "corrMatrix"
   | OddChartKind
   | GpuSceneKind
   | GeoMapKind;
@@ -129,6 +133,10 @@ export const CHART_KIND_OPTIONS: { value: ChartKind; label: string }[] = [
   { value: "sunburst", label: "Sunburst" },
   { value: "forceBubble", label: "Force Bubble" },
   { value: "sankey", label: "Sankey" },
+  { value: "network", label: "Network" },
+  { value: "arcDiagram", label: "Arc diagram" },
+  { value: "pareto", label: "Pareto" },
+  { value: "corrMatrix", label: "Correlation matrix" },
   { value: "choropleth", label: "Choropleth map" },
   ...ODD_CHART_KIND_OPTIONS,
   ...GPU_SCENE_KIND_OPTIONS,
@@ -169,6 +177,20 @@ export interface ChartRecommendation {
   y2Field?: string | null;
   /** Overlay the earlier half of a time series as “previous” (line / area). */
   comparePrevious?: boolean | null;
+  /** Bar + Color: grouped (dodge), stacked, or 100% stacked. */
+  barStackMode?: "grouped" | "stacked" | "percent" | null;
+  /** Rolling mean window on line / area (points along X). */
+  rollingWindow?: 7 | 30 | null;
+  /** Y axis scale for magnitude charts. */
+  yScale?: "linear" | "log" | "symlog" | null;
+  /** Rebase multi-series line/area for fair compare. */
+  seriesNormalize?: "index100" | "zscore" | null;
+  /** Scatter: draw residual stems vs linear fit. */
+  residualOverlay?: boolean | null;
+  /** Scatter/line: ring z-score outlier rows on the measure. */
+  anomalyHighlight?: boolean | null;
+  /** Bump: plot Δrank instead of absolute rank. */
+  bumpMode?: "rank" | "delta" | null;
   /** Explicit tooltip column names; when unset, encoding fields are used. */
   tooltipFields?: string[] | null;
   /** Identity column for cross-chart tooltip link / lock (L key). */
@@ -297,20 +319,33 @@ export function diversifyRecommendations(
   const fieldKeys = new Set<string>();
 
   const fieldKey = (r: ChartRecommendation) =>
-    `${r.kind}|${r.xField}|${r.yField ?? ""}|${r.colorField ?? ""}`;
+    `${r.kind}|${r.xField}|${r.yField ?? ""}|${r.colorField ?? ""}|${r.rowField ?? ""}|${r.topN ?? ""}|${r.y2Field ?? ""}|${r.comparePrevious ? "cp" : ""}`;
 
-  // First pass: prefer new kinds / encodings
+  // Pass 0: one of each kind (best score) so rare types like network/arc aren't crowded out
+  const bestByKind = new Map<ChartKind, ChartRecommendation>();
+  for (const r of sorted) {
+    if (!bestByKind.has(r.kind)) bestByKind.set(r.kind, r);
+  }
+  for (const r of bestByKind.values()) {
+    if (out.length >= limit) break;
+    const fk = fieldKey(r);
+    out.push(r);
+    kindCount.set(r.kind, 1);
+    fieldKeys.add(fk);
+  }
+
+  // Pass 1: prefer new encodings / more of popular kinds (capped)
   for (const r of sorted) {
     if (out.length >= limit) break;
     const kc = kindCount.get(r.kind) ?? 0;
     const fk = fieldKey(r);
-    if (kc >= 4 && out.length >= Math.min(8, limit)) continue;
     if (fieldKeys.has(fk)) continue;
+    if (kc >= 4 && out.length >= Math.min(12, limit)) continue;
     out.push(r);
     kindCount.set(r.kind, kc + 1);
     fieldKeys.add(fk);
   }
-  // Second pass: fill remaining slots by score
+  // Pass 2: fill remaining slots by score
   for (const r of sorted) {
     if (out.length >= limit) break;
     if (out.some((o) => o.id === r.id)) continue;
@@ -397,9 +432,9 @@ export function createScatterRec(
 
 /** Kinds whose X (or slice / stage / identity) is a category. */
 const CATEGORY_X_KINDS = new Set<string>([
-  "bar", "lollipop", "pie", "treemap", "sunburst", "forceBubble", "funnel", "waterfall", "box", "violin",
+  "bar", "pareto", "lollipop", "pie", "treemap", "sunburst", "forceBubble", "funnel", "waterfall", "box", "violin",
   "beeswarm", "dumbbell", "pyramid", "slope", "radialBar", "waffle", "isotype", "isoBars", "mosaic",
-  "chord", "sankey", "bucketField",
+  "chord", "sankey", "network", "arcDiagram", "bucketField",
 ]);
 /** One glyph per row/entity — an identity column (country, name) rather than a few groups. */
 const IDENTITY_X_KINDS = new Set<string>(["chernoff", "glyphStar", "flower"]);
@@ -408,7 +443,7 @@ const CATEGORY_Y_KINDS = new Set<string>(["strip", "ridgeline"]);
 /** Kinds whose X is an ordering — time reads best. */
 const ORDERED_X_KINDS = new Set<string>(["line", "area", "bump", "stream", "horizon", "spiral"]);
 /** Kinds where Color is a required second category (target / segment). */
-const CATEGORY_COLOR_KINDS = new Set<string>(["mosaic", "chord", "sankey"]);
+const CATEGORY_COLOR_KINDS = new Set<string>(["mosaic", "chord", "sankey", "network", "arcDiagram"]);
 
 /**
  * Adapt an encoding when switching chart type: keep fields that suit the new kind,
@@ -526,6 +561,12 @@ export function createChartRec(
     tooltipFields?: string[] | null;
     tooltipKeyField?: string | null;
     barStackMode?: "grouped" | "stacked" | "percent";
+    rollingWindow?: 7 | 30 | null;
+    yScale?: "linear" | "log" | "symlog" | null;
+    seriesNormalize?: "index100" | "zscore" | null;
+    residualOverlay?: boolean | null;
+    anomalyHighlight?: boolean | null;
+    bumpMode?: "rank" | "delta" | null;
   },
 ): ChartRecommendation | null {
   const numCols = columns.filter(c => inferType(c.data_type, c.name) === "quantitative");
@@ -541,10 +582,16 @@ export function createChartRec(
   const y2Field = extra?.y2Field && numCols.some((c) => c.name === extra.y2Field) ? extra.y2Field : null;
   const comparePrevious = extra?.comparePrevious ?? null;
   const barStackMode = extra?.barStackMode ?? "grouped";
+  const rollingWindow = extra?.rollingWindow ?? null;
+  const yScale = extra?.yScale ?? null;
+  const seriesNormalize = extra?.seriesNormalize ?? null;
+  const residualOverlay = extra?.residualOverlay ?? null;
+  const anomalyHighlight = extra?.anomalyHighlight ?? null;
+  const bumpMode = extra?.bumpMode ?? null;
 
   if (kind === "scatter") {
     if (!yField || !numCols.some(c => c.name === xField) || !numCols.some(c => c.name === yField)) return null;
-    return createScatterRec(columns, xField, yField, colorField, tableName, sizeField, {
+    const scatter = createScatterRec(columns, xField, yField, colorField, tableName, sizeField, {
       glowField,
       outlineField,
       opacityField,
@@ -552,12 +599,50 @@ export function createChartRec(
       tooltipFields: extra?.tooltipFields,
       tooltipKeyField: extra?.tooltipKeyField ?? undefined,
     });
+    return {
+      ...scatter,
+      residualOverlay: residualOverlay || undefined,
+      anomalyHighlight: anomalyHighlight || undefined,
+      yScale: yScale || undefined,
+      subtitle: [
+        scatter.subtitle,
+        residualOverlay ? "residuals vs fit" : null,
+        anomalyHighlight ? "anomaly rings" : null,
+        yScale && yScale !== "linear" ? `${yScale} Y` : null,
+      ].filter(Boolean).join(" · "),
+    };
+  }
+
+  if (kind === "corrMatrix") {
+    if (numCols.length < 3) return null;
+    const labels = numCols.slice(0, 8).map((c) => c.name);
+    return {
+      id: `corrMatrix-${labels.join("-")}`,
+      kind: "corrMatrix",
+      title: "Correlation matrix",
+      subtitle: `Pearson r across ${labels.length} measures`,
+      score: 72,
+      spec: {},
+      xField: labels[0]!,
+      yField: labels[1]!,
+      colorField: null,
+      tooltipFields: labels,
+    };
   }
 
   const barFacetId =
     kind === "bar" &&
     Boolean(colorField && colorField !== xField && nomCols.some((c) => c.name === colorField));
-  const id = `${kind}-${xField}-${yField ?? "n"}-${colorField ?? "n"}${rowField ? `-row:${rowField}` : ""}${barFacetId ? `-${barStackMode}` : ""}`;
+  const dsId =
+    `${rollingWindow ? `-roll${rollingWindow}` : ""}` +
+    `${seriesNormalize ? `-${seriesNormalize}` : ""}` +
+    `${yScale && yScale !== "linear" ? `-${yScale}` : ""}` +
+    `${residualOverlay ? "-resid" : ""}` +
+    `${anomalyHighlight ? "-anom" : ""}` +
+    `${bumpMode === "delta" ? "-delta" : ""}` +
+    `${comparePrevious ? "-prev" : ""}` +
+    `${y2Field ? `-y2:${y2Field}` : ""}`;
+  const id = `${kind}-${xField}-${yField ?? "n"}-${colorField ?? "n"}${rowField ? `-row:${rowField}` : ""}${barFacetId ? `-${barStackMode}` : ""}${dsId}`;
   const enc: Record<string, unknown> = {};
   let title = "";
   let subtitle = "";
@@ -569,14 +654,18 @@ export function createChartRec(
     a === "mean" ? "Average" : a === "sum" ? "Sum" : a === "count" ? "Count" : a === "min" ? "Min" : "Max";
 
   switch (kind) {
-    case "bar": {
+    case "bar":
+    case "pareto": {
       const agg = aggForMeasure("sum");
       enc.x = { field: xField, type: "nominal", sort: "-y" };
       const yEnc: Record<string, unknown> = yField
         ? { field: yField, type: "quantitative", aggregate: agg }
         : { aggregate: "count", type: "quantitative" };
       const subOk = Boolean(
-        colorField && colorField !== xField && nomCols.some((c) => c.name === colorField),
+        kind === "bar" &&
+          colorField &&
+          colorField !== xField &&
+          nomCols.some((c) => c.name === colorField),
       );
       if (subOk && colorField) {
         enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
@@ -589,9 +678,12 @@ export function createChartRec(
         enc.color = { value: COLORS[0] };
       }
       enc.y = yEnc;
-      if (rowField) enc.row = { field: rowField, type: "nominal", header: { title: rowField } };
+      if (rowField && kind === "bar") enc.row = { field: rowField, type: "nominal", header: { title: rowField } };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      if (subOk && colorField) {
+      if (kind === "pareto") {
+        title = yField ? `Pareto — ${yField} by ${xField}` : `Pareto — count by ${xField}`;
+        subtitle = "bars + cumulative % (80/20)";
+      } else if (subOk && colorField) {
         title += ` × ${colorField}`;
         if (barStackMode === "grouped") subtitle = rowField ? `dodged by ${colorField}; facets by ${rowField}` : `grouped by ${colorField}`;
         else if (barStackMode === "stacked") subtitle = rowField ? `stacked by ${colorField}; facets by ${rowField}` : `stacked by ${colorField}`;
@@ -831,7 +923,9 @@ export function createChartRec(
       subtitle = "packed circles — size = value";
       break;
     }
-    case "sankey": {
+    case "sankey":
+    case "network":
+    case "arcDiagram": {
       // Color = flow target (required). Y = optional numeric weight; else row count.
       const target =
         colorField && nomCols.some((c) => c.name === colorField)
@@ -847,30 +941,61 @@ export function createChartRec(
         ? { field: yField!, type: "quantitative", aggregate: "sum" }
         : { aggregate: "count", type: "quantitative" };
       title = `${xField} → ${target}`;
-      subtitle = weightOk ? `weighted by ${yField}` : "flow between categories";
+      subtitle =
+        kind === "network"
+          ? weightOk
+            ? `network · weighted by ${yField}`
+            : "force-directed links"
+          : kind === "arcDiagram"
+            ? weightOk
+              ? `arcs · weighted by ${yField}`
+              : "arc diagram of links"
+            : weightOk
+              ? `weighted by ${yField}`
+              : "flow between categories";
       break;
     }
     default: {
       if (isGpuSceneKind(kind)) {
-        return buildGpuSceneRec(kind, columns, xField, yField, colorField, {
+        const gpu = buildGpuSceneRec(kind, columns, xField, yField, colorField, {
           sizeField,
           zField: extra?.zField,
           timeField: extra?.timeField,
           trailId: extra?.trailId,
           yAggregate,
         });
+        if (!gpu) return null;
+        return {
+          ...gpu,
+          tooltipFields: extra?.tooltipFields,
+          tooltipKeyField: extra?.tooltipKeyField,
+        };
       }
       if (isGeoMapKind(kind)) {
-        return buildGeoMapRec(kind, columns, xField, yField, colorField, {
+        const geo = buildGeoMapRec(kind, columns, xField, yField, colorField, {
           sizeField,
           yAggregate,
         });
+        if (!geo) return null;
+        return {
+          ...geo,
+          tooltipFields: extra?.tooltipFields,
+          tooltipKeyField: extra?.tooltipKeyField,
+        };
       }
       if (isOddChartKind(kind)) {
-        return buildOddChartRec(kind, columns, xField, yField, colorField, tableName, {
+        const odd = buildOddChartRec(kind, columns, xField, yField, colorField, tableName, {
           sizeField,
           yAggregate,
         });
+        if (!odd) return null;
+        // Preserve Encoding extras the odd builder doesn't know about (Top N, tooltips).
+        return {
+          ...odd,
+          topN: topN ?? undefined,
+          tooltipFields: extra?.tooltipFields,
+          tooltipKeyField: extra?.tooltipKeyField,
+        };
       }
       return null;
     }
@@ -898,13 +1023,25 @@ export function createChartRec(
     kind === "sunburst" ? { type: "arc" as const } :
     kind === "choropleth" ? { type: "geoshape" as const } :
     kind === "forceBubble" ? { type: "circle" as const, opacity: 0.75 } :
-    kind === "sankey" ? { type: "rect" as const } :
+    kind === "sankey" || kind === "network" || kind === "arcDiagram" ? { type: "rect" as const } :
+    kind === "pareto" ? { type: "bar" as const, cornerRadiusTopLeft: 3, cornerRadiusTopRight: 3 } :
     "rect";
 
   const effectiveYAggregate: YAggregateOption | undefined =
-    (kind === "bar" || kind === "line" || kind === "area" || kind === "pie" || kind === "waterfall" || kind === "lollipop" || kind === "radar" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "dumbbell")
+    (kind === "bar" || kind === "pareto" || kind === "line" || kind === "area" || kind === "pie" || kind === "waterfall" || kind === "lollipop" || kind === "radar" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "dumbbell")
       ? (!yField ? "count" : (yAggregate ?? (kind === "line" || kind === "dumbbell" ? "mean" : "sum")))
       : undefined;
+
+  if (kind === "line" || kind === "area") {
+    const bits = [subtitle].filter(Boolean);
+    if (rollingWindow) bits.push(`${rollingWindow}-pt rolling mean`);
+    if (seriesNormalize === "index100") bits.push("indexed to 100");
+    if (seriesNormalize === "zscore") bits.push("z-scored series");
+    if (yScale && yScale !== "linear") bits.push(`${yScale} Y`);
+    if (anomalyHighlight) bits.push("anomaly rings");
+    if (comparePrevious) bits.push("vs earlier half");
+    subtitle = bits.filter(Boolean).join(" · ") || subtitle;
+  }
 
   return {
     id,
@@ -932,6 +1069,13 @@ export function createChartRec(
     topN: topN ?? undefined,
     y2Field: y2Field ?? undefined,
     comparePrevious: comparePrevious || undefined,
+    barStackMode: kind === "bar" && barFacetId ? barStackMode : undefined,
+    rollingWindow: (kind === "line" || kind === "area") && rollingWindow ? rollingWindow : undefined,
+    yScale: yScale && yScale !== "linear" ? yScale : undefined,
+    seriesNormalize: (kind === "line" || kind === "area") && seriesNormalize ? seriesNormalize : undefined,
+    residualOverlay: residualOverlay || undefined,
+    anomalyHighlight: anomalyHighlight || undefined,
+    bumpMode: bumpMode || undefined,
     tooltipFields: extra?.tooltipFields,
     tooltipKeyField: extra?.tooltipKeyField,
   };
@@ -1690,20 +1834,43 @@ export function recommend(
     }
   }
 
-  // --- SANKEY: two nominals (flow from A → B, count or sum) ---
+  // --- SANKEY / NETWORK / ARC: two nominals (A → B, count or sum) ---
   for (let i = 0; i < nomCols.length && i < 3; i++) {
     for (let j = i + 1; j < nomCols.length && j < 4; j++) {
       const a = nomCols[i], b = nomCols[j];
       if (a.distinct_count < 2 || a.distinct_count > 20 || b.distinct_count < 2 || b.distinct_count > 20) continue;
+      const weight = numCols.length > 0 ? numCols[0].name : null;
       recs.push({
         id: `sankey-${a.name}-${b.name}`,
         kind: "sankey",
         title: `${a.name} → ${b.name}`,
         subtitle: "flow between categories",
-        score: 59,
+        score: 74,
         spec: {},
         xField: a.name,
-        yField: numCols.length > 0 ? numCols[0].name : null,
+        yField: weight,
+        colorField: b.name,
+      });
+      recs.push({
+        id: `network-${a.name}-${b.name}`,
+        kind: "network",
+        title: `${a.name} ↔ ${b.name}`,
+        subtitle: "force-directed network",
+        score: 73,
+        spec: {},
+        xField: a.name,
+        yField: weight,
+        colorField: b.name,
+      });
+      recs.push({
+        id: `arcDiagram-${a.name}-${b.name}`,
+        kind: "arcDiagram",
+        title: `${a.name} → ${b.name}`,
+        subtitle: "arc diagram",
+        score: 72,
+        spec: {},
+        xField: a.name,
+        yField: weight,
         colorField: b.name,
       });
     }
@@ -1754,7 +1921,9 @@ export function recommend(
 
   const model = prefs !== undefined ? prefs : getCachedVizPreferences();
   const boosted = applyPreferenceBoosts(recs, model, columns);
-  return diversifyRecommendations(boosted, 40);
+  // Facet / Top N / Compare Y variants for the suggestion rail + story picker
+  const withExtras = expandRecommendationsWithExtras(boosted, columns);
+  return diversifyRecommendations(withExtras, 72);
 }
 
 export interface StorySequence {
@@ -1868,18 +2037,25 @@ export function getBestSuggestion(recs: ChartRecommendation[]): ChartRecommendat
  */
 export function getTopSuggestions(
   recs: ChartRecommendation[],
-  limit = 6,
+  limit = 10,
 ): ChartRecommendation[] {
   if (recs.length === 0) return [];
-  // Soften per-kind cap for the short Suggest cycle so we get ~6 distinct stories
+  // Soften per-kind cap for the short Suggest cycle so we get ~8 distinct stories
+  // (allow Facet / Top N / Compare variants of the same kind).
   const sorted = [...recs].sort((a, b) => b.score - a.score);
   const out: ChartRecommendation[] = [];
   const kindCount = new Map<ChartKind, number>();
+  const encKey = (r: ChartRecommendation) =>
+    `${r.kind}|${r.xField}|${r.yField ?? ""}|${r.colorField ?? ""}|${r.rowField ?? ""}|${r.topN ?? ""}|${r.y2Field ?? ""}|${r.comparePrevious ? "1" : ""}`;
+  const seenEnc = new Set<string>();
   for (const r of sorted) {
     if (out.length >= limit) break;
+    const ek = encKey(r);
+    if (seenEnc.has(ek)) continue;
     const kc = kindCount.get(r.kind) ?? 0;
-    if (kc >= 2) continue;
+    if (kc >= 3) continue;
     out.push(r);
+    seenEnc.add(ek);
     kindCount.set(r.kind, kc + 1);
   }
   for (const r of sorted) {
@@ -1903,7 +2079,27 @@ export type RandomEncoding = {
   yField: string | null;
   colorField: string | null;
   sizeField?: string | null;
+  /** Small-multiples facet (bar / line / area / scatter). */
+  rowField?: string | null;
+  /** Category cap for ranked bars. */
+  topN?: number | null;
+  /** Second Y overlay (line / area). */
+  y2Field?: string | null;
+  /** Overlay earlier half of a time series (line / area). */
+  comparePrevious?: boolean | null;
+  rollingWindow?: 7 | 30 | null;
+  yScale?: "linear" | "log" | "symlog" | null;
+  seriesNormalize?: "index100" | "zscore" | null;
+  residualOverlay?: boolean | null;
+  anomalyHighlight?: boolean | null;
+  bumpMode?: "rank" | "delta" | null;
+  barStackMode?: "grouped" | "stacked" | "percent" | null;
 };
+
+const FACET_RANDOM_KINDS = new Set<ChartKind>(["bar", "line", "area", "scatter", "bubble"]);
+const TOP_N_RANDOM_KINDS = new Set<ChartKind>(["bar", "pareto", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "waffle", "isotype", "radialBar", "isoBars"]);
+const COMPARE_RANDOM_KINDS = new Set<ChartKind>(["line", "area"]);
+const TOP_N_RANDOM_PICKS = [10, 15, 20, 30] as const;
 
 /** Apply channel locks: keep pinned fields, fill the rest from a fresh random draw. */
 export function applyEncodingLocks(
@@ -1917,11 +2113,108 @@ export function applyEncodingLocks(
     yField: locks.y ? (keep.yField ?? null) : drawn.yField,
     colorField: locks.color ? (keep.colorField ?? null) : drawn.colorField,
     sizeField: locks.size ? (keep.sizeField ?? null) : drawn.sizeField,
+    // Facet / Top N / Compare / DS always reshuffle with the draw (no lock chips yet).
+    rowField: drawn.rowField,
+    topN: drawn.topN,
+    y2Field: drawn.y2Field,
+    comparePrevious: drawn.comparePrevious,
+    rollingWindow: drawn.rollingWindow,
+    yScale: drawn.yScale,
+    seriesNormalize: drawn.seriesNormalize,
+    residualOverlay: drawn.residualOverlay,
+    anomalyHighlight: drawn.anomalyHighlight,
+    bumpMode: drawn.bumpMode,
+    barStackMode: drawn.barStackMode,
+  };
+}
+
+/** Sprinkle Facet / Top N / Compare onto a base random encoding when the kind supports them. */
+function withRandomEncodingExtras(
+  kind: ChartKind,
+  columns: ColumnInfo[],
+  base: RandomEncoding,
+): RandomEncoding {
+  const numCols = columns.filter((c) => inferType(c.data_type, c.name) === "quantitative");
+  const nomCols = columns.filter((c) => inferType(c.data_type, c.name) === "nominal");
+  const pick = <T>(arr: T[]): T | undefined => arr[Math.floor(Math.random() * arr.length)];
+  const used = new Set(
+    [base.xField, base.yField, base.colorField, base.sizeField].filter((v): v is string => !!v),
+  );
+  let rowField: string | null = null;
+  let topN: number | null = null;
+  let y2Field: string | null = null;
+  let comparePrevious: boolean | null = null;
+  let rollingWindow: 7 | 30 | null = null;
+  let yScale: "linear" | "log" | "symlog" | null = null;
+  let seriesNormalize: "index100" | "zscore" | null = null;
+  let residualOverlay: boolean | null = null;
+  let anomalyHighlight: boolean | null = null;
+  let bumpMode: "rank" | "delta" | null = null;
+
+  if (FACET_RANDOM_KINDS.has(kind)) {
+    const facetPool = nomCols.filter(
+      (c) =>
+        c.distinct_count >= 2 &&
+        c.distinct_count <= 12 &&
+        c.name !== base.xField &&
+        // Prefer a second split dimension; allow reusing color for “both”
+        (c.name !== base.colorField || Math.random() > 0.55),
+    );
+    if (facetPool.length > 0 && Math.random() < 0.48) {
+      rowField = pick(facetPool)!.name;
+      // Sometimes facet-only (clear color) so Split → Facet shows up in the shuffle
+      if (base.colorField && rowField === base.colorField && Math.random() < 0.45) {
+        base = { ...base, colorField: null };
+      } else if (base.colorField && rowField !== base.colorField && Math.random() < 0.25) {
+        // Color within facets
+      } else if (!base.colorField && Math.random() < 0.3) {
+        // leave facet alone
+      }
+    }
+  }
+
+  if (TOP_N_RANDOM_KINDS.has(kind) && Math.random() < 0.65) {
+    topN = pick([...TOP_N_RANDOM_PICKS]) ?? 20;
+  }
+
+  if (COMPARE_RANDOM_KINDS.has(kind)) {
+    const y2Pool = numCols.filter((c) => c.name !== base.yField && c.name !== base.xField && !used.has(c.name));
+    if (y2Pool.length > 0 && base.yField && Math.random() < 0.36) {
+      y2Field = pick(y2Pool)!.name;
+    }
+    if (Math.random() < 0.28) comparePrevious = true;
+    if (Math.random() < 0.32) rollingWindow = Math.random() < 0.55 ? 7 : 30;
+    if (Math.random() < 0.22) seriesNormalize = Math.random() < 0.65 ? "index100" : "zscore";
+    if (Math.random() < 0.18) yScale = Math.random() < 0.7 ? "log" : "symlog";
+    if (Math.random() < 0.2) anomalyHighlight = true;
+  }
+
+  if (kind === "scatter") {
+    if (Math.random() < 0.28) residualOverlay = true;
+    if (Math.random() < 0.22) anomalyHighlight = true;
+    if (Math.random() < 0.14) yScale = "log";
+  }
+
+  if (kind === "bump" && Math.random() < 0.4) bumpMode = "delta";
+
+  return {
+    ...base,
+    rowField,
+    topN,
+    y2Field,
+    comparePrevious,
+    rollingWindow,
+    yScale,
+    seriesNormalize,
+    residualOverlay,
+    anomalyHighlight,
+    bumpMode,
   };
 }
 
 /** Pick a random valid encoding for the given chart kind. Returns null if no valid combo.
- *  Often includes a colorField when nominal columns exist (scatter/bar/line/bubble/…). */
+ *  Often includes a colorField when nominal columns exist (scatter/bar/line/bubble/…).
+ *  Also may set Facet / Top N / Compare Y when the kind supports them. */
 export function getRandomEncoding(
   columns: ColumnInfo[],
   kind: ChartKind,
@@ -1930,6 +2223,7 @@ export function getRandomEncoding(
   const nomCols = columns.filter(c => inferType(c.data_type, c.name) === "nominal");
   const timeCols = columns.filter(c => inferType(c.data_type, c.name) === "temporal");
   const pick = <T>(arr: T[]): T | undefined => arr[Math.floor(Math.random() * arr.length)];
+  const finish = (enc: RandomEncoding) => withRandomEncodingExtras(kind, columns, enc);
 
   switch (kind) {
     case "scatter": {
@@ -1939,19 +2233,28 @@ export function getRandomEncoding(
       if (x.name === y.name) return null;
       const color = nomCols.length > 0 && nomCols.some(c => c.distinct_count <= 20) ? pick(nomCols.filter(c => c.distinct_count <= 20)) ?? null : null;
       const sizeCol = numCols.length >= 3 && Math.random() > 0.5 ? pick(numCols.filter(c => c.name !== x.name && c.name !== y.name)) ?? null : null;
-      return { xField: x.name, yField: y.name, colorField: color?.name ?? null, sizeField: sizeCol?.name ?? null };
+      return finish({ xField: x.name, yField: y.name, colorField: color?.name ?? null, sizeField: sizeCol?.name ?? null });
     }
-    case "bar": {
-      const xBar = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 50));
+    case "bar":
+    case "pareto": {
+      const xBar = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= (kind === "pareto" ? 40 : 50)));
       if (!xBar) return null;
       const yBar = numCols.length > 0 && Math.random() > 0.3 ? pick(numCols)! : null;
-      const colorBar = nomCols.length > 0 && nomCols.some(c => c.name !== xBar.name) ? pick(nomCols.filter(c => c.name !== xBar.name)) ?? null : null;
-      return { xField: xBar.name, yField: yBar?.name ?? null, colorField: colorBar?.name ?? null };
+      const colorBar =
+        kind === "bar" && nomCols.length > 0 && nomCols.some(c => c.name !== xBar.name)
+          ? pick(nomCols.filter(c => c.name !== xBar.name)) ?? null
+          : null;
+      return finish({ xField: xBar.name, yField: yBar?.name ?? null, colorField: colorBar?.name ?? null });
+    }
+    case "corrMatrix": {
+      if (numCols.length < 3) return null;
+      const shuffled = [...numCols].sort(() => Math.random() - 0.5).slice(0, 8);
+      return finish({ xField: shuffled[0]!.name, yField: shuffled[1]!.name, colorField: null });
     }
     case "histogram": {
       const xHist = pick(numCols);
       if (!xHist) return null;
-      return { xField: xHist.name, yField: null, colorField: null };
+      return finish({ xField: xHist.name, yField: null, colorField: null });
     }
     case "line":
     case "area": {
@@ -1960,75 +2263,75 @@ export function getRandomEncoding(
       // Prefer a numeric Y; count-only series still render when yField is null.
       const yVal = numCols.length > 0 ? pick(numCols)! : null;
       const colorLine = nomCols.length > 0 && nomCols.some(c => c.distinct_count <= 15) ? pick(nomCols.filter(c => c.distinct_count <= 15 && c.name !== xTime.name)) ?? null : null;
-      return { xField: xTime.name, yField: yVal?.name ?? null, colorField: colorLine?.name ?? null };
+      return finish({ xField: xTime.name, yField: yVal?.name ?? null, colorField: colorLine?.name ?? null });
     }
     case "heatmap": {
       if (numCols.length >= 2 && Math.random() > 0.4) {
         const a = pick(numCols)!;
         const b = pick(numCols.filter((c) => c.name !== a.name)) ?? numCols.find((c) => c.name !== a.name);
-        if (a && b) return { xField: a.name, yField: b.name, colorField: null };
+        if (a && b) return finish({ xField: a.name, yField: b.name, colorField: null });
       }
       const a = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20));
       const b = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20 && c.name !== a?.name));
       if (!a || !b) return null;
-      return { xField: a.name, yField: b.name, colorField: null };
+      return finish({ xField: a.name, yField: b.name, colorField: null });
     }
     case "strip": {
       const xStrip = pick(numCols);
       const yStrip = pick(nomCols);
       if (!xStrip || !yStrip) return null;
       const colorStrip = nomCols.length > 0 && Math.random() > 0.4 ? pick(nomCols.filter(c => c.distinct_count <= 15)) ?? null : null;
-      return { xField: xStrip.name, yField: yStrip.name, colorField: colorStrip?.name ?? null };
+      return finish({ xField: xStrip.name, yField: yStrip.name, colorField: colorStrip?.name ?? null });
     }
     case "box": {
       const xBox = pick(nomCols.filter(c => c.distinct_count >= 2));
       const yBox = pick(numCols);
       if (!xBox || !yBox) return null;
-      return { xField: xBox.name, yField: yBox.name, colorField: null };
+      return finish({ xField: xBox.name, yField: yBox.name, colorField: null });
     }
     case "pie": {
       const xPie = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 15));
       if (!xPie) return null;
       const yPie = numCols.length > 0 && Math.random() > 0.4 ? pick(numCols)! : null;
-      return { xField: xPie.name, yField: yPie?.name ?? null, colorField: null };
+      return finish({ xField: xPie.name, yField: yPie?.name ?? null, colorField: null });
     }
     case "bubble": {
       if (numCols.length < 2) return null;
       const shuffled = [...numCols].sort(() => Math.random() - 0.5);
       const color = nomCols.length > 0 && nomCols.some(c => c.distinct_count <= 15) ? pick(nomCols.filter(c => c.distinct_count <= 15)) ?? null : null;
-      return {
+      return finish({
         xField: shuffled[0]!.name,
         yField: shuffled[1]!.name,
         colorField: color?.name ?? null,
         sizeField: shuffled[2]?.name ?? null,
-      };
+      });
     }
     case "violin": {
       const xViolin = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 12));
       const yViolin = pick(numCols);
       if (!xViolin || !yViolin) return null;
       const colorViolin = nomCols.length > 1 && Math.random() > 0.5 ? pick(nomCols.filter(c => c.name !== xViolin.name && c.distinct_count <= 8)) ?? null : null;
-      return { xField: xViolin.name, yField: yViolin.name, colorField: colorViolin?.name ?? null };
+      return finish({ xField: xViolin.name, yField: yViolin.name, colorField: colorViolin?.name ?? null });
     }
     case "radar": {
       if (numCols.length < 3) return null;
       const x = pick(numCols)!;
       const y = pick(numCols.filter(c => c.name !== x.name));
       const color = nomCols.length > 0 && nomCols.some(c => c.distinct_count >= 2 && c.distinct_count <= 8) ? pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 8)) ?? null : null;
-      return { xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null };
+      return finish({ xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null });
     }
     case "waterfall": {
       const xWf = pick(nomCols.filter(c => c.distinct_count >= 3 && c.distinct_count <= 20));
       if (!xWf) return null;
       const yWf = numCols.length > 0 ? pick(numCols)! : null;
-      return { xField: xWf.name, yField: yWf?.name ?? null, colorField: null };
+      return finish({ xField: xWf.name, yField: yWf?.name ?? null, colorField: null });
     }
     case "lollipop": {
       const xLol = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 30));
       if (!xLol) return null;
       const yLol = numCols.length > 0 ? pick(numCols)! : null;
       const colorLol = nomCols.length > 1 && Math.random() > 0.6 ? pick(nomCols.filter(c => c.name !== xLol.name && c.distinct_count <= 10)) ?? null : null;
-      return { xField: xLol.name, yField: yLol?.name ?? null, colorField: colorLol?.name ?? null };
+      return finish({ xField: xLol.name, yField: yLol?.name ?? null, colorField: colorLol?.name ?? null });
     }
     case "dumbbell": {
       if (numCols.length < 2) return null;
@@ -2038,76 +2341,78 @@ export function getRandomEncoding(
       const colorDb = nomCols.length > 1 && Math.random() > 0.6
         ? pick(nomCols.filter(c => c.name !== xDb.name && c.distinct_count <= 8)) ?? null
         : null;
-      return {
+      return finish({
         xField: xDb.name,
         yField: shuffled[0]!.name,
         colorField: colorDb?.name ?? null,
         sizeField: shuffled[1]!.name,
-      };
+      });
     }
     case "ridgeline": {
       const yRidge = pick(nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 10));
       const xRidge = pick(numCols);
       if (!xRidge || !yRidge) return null;
-      return { xField: xRidge.name, yField: yRidge.name, colorField: null };
+      return finish({ xField: xRidge.name, yField: yRidge.name, colorField: null });
     }
     case "hexbin": {
       if (numCols.length < 2) return null;
       const a = pick(numCols)!;
       const b = pick(numCols.filter(c => c.name !== a.name)) ?? numCols.find(c => c.name !== a.name);
       if (!b) return null;
-      return { xField: a.name, yField: b.name, colorField: null };
+      return finish({ xField: a.name, yField: b.name, colorField: null });
     }
     case "funnel": {
       const xFun = pick(nomCols.filter(c => c.distinct_count >= 3 && c.distinct_count <= 12));
       if (!xFun) return null;
       const yFun = numCols.length > 0 ? pick(numCols)! : null;
-      return { xField: xFun.name, yField: yFun?.name ?? null, colorField: null };
+      return finish({ xField: xFun.name, yField: yFun?.name ?? null, colorField: null });
     }
     case "parallel": {
       if (numCols.length < 3) return null;
       const x = pick(numCols)!;
       const y = pick(numCols.filter(c => c.name !== x.name));
       const color = nomCols.find(c => c.distinct_count >= 2 && c.distinct_count <= 10) ?? null;
-      return { xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null };
+      return finish({ xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null });
     }
     case "treemap": {
       const xTree = pick(nomCols.filter(c => c.distinct_count >= 3 && c.distinct_count <= 30));
       if (!xTree) return null;
       const yTree = numCols.length > 0 ? pick(numCols)! : null;
       const colorTree = nomCols.length > 1 ? pick(nomCols.filter(c => c.name !== xTree.name && c.distinct_count <= 10)) ?? null : null;
-      return { xField: xTree.name, yField: yTree?.name ?? null, colorField: colorTree?.name ?? null };
+      return finish({ xField: xTree.name, yField: yTree?.name ?? null, colorField: colorTree?.name ?? null });
     }
     case "sunburst": {
       const xSun = pick(nomCols.filter(c => c.distinct_count >= 3 && c.distinct_count <= 20));
       if (!xSun) return null;
       const ySun = numCols.length > 0 ? pick(numCols)! : null;
       const innerSun = nomCols.length > 1 ? pick(nomCols.filter(c => c.name !== xSun.name && c.distinct_count <= 8)) ?? null : null;
-      return { xField: xSun.name, yField: ySun?.name ?? null, colorField: innerSun?.name ?? null };
+      return finish({ xField: xSun.name, yField: ySun?.name ?? null, colorField: innerSun?.name ?? null });
     }
     case "choropleth": {
       const geoCols = nomCols.filter(c => isGeoRegionField(c.name) && c.distinct_count >= 3);
       const geoCol = geoCols.length > 0 ? pick(geoCols)! : pick(nomCols.filter(c => c.distinct_count >= 3));
       if (!geoCol) return null;
       const yGeo = numCols.length > 0 ? pick(numCols)! : null;
-      return { xField: geoCol.name, yField: yGeo?.name ?? null, colorField: null };
+      return finish({ xField: geoCol.name, yField: yGeo?.name ?? null, colorField: null });
     }
     case "forceBubble": {
       const xForce = pick(nomCols.filter(c => c.distinct_count >= 3 && c.distinct_count <= 40));
       if (!xForce) return null;
       const yForce = numCols.length > 0 ? pick(numCols)! : null;
       const colorForce = nomCols.length > 1 ? pick(nomCols.filter(c => c.name !== xForce.name && c.distinct_count <= 12)) ?? null : null;
-      return { xField: xForce.name, yField: yForce?.name ?? null, colorField: colorForce?.name ?? null };
+      return finish({ xField: xForce.name, yField: yForce?.name ?? null, colorField: colorForce?.name ?? null });
     }
-    case "sankey": {
+    case "sankey":
+    case "network":
+    case "arcDiagram": {
       if (nomCols.length < 2) return null;
-      const sankeyNom = nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20);
-      const a = pick(sankeyNom);
+      const flowNom = nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20);
+      const a = pick(flowNom);
       if (!a) return null;
-      const b = pick(sankeyNom.filter(c => c.name !== a.name));
+      const b = pick(flowNom.filter(c => c.name !== a.name));
       if (!b) return null;
       const yVal = numCols.length > 0 && Math.random() > 0.3 ? pick(numCols)! : null;
-      return { xField: a.name, yField: yVal?.name ?? null, colorField: b.name };
+      return finish({ xField: a.name, yField: yVal?.name ?? null, colorField: b.name });
     }
     default:
       if (isGpuSceneKind(kind)) return getGpuRandomEncoding(columns, kind);
@@ -2134,10 +2439,15 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
     case "histogram":
       return numCols.length >= 1 ? { ok: true, reason: "" } : { ok: false, reason: "Need a numeric column" };
     case "bar":
+    case "pareto":
     case "lollipop":
-      return nom(2, kind === "lollipop" ? 30 : 50).length >= 1
+      return nom(2, kind === "lollipop" ? 30 : kind === "pareto" ? 40 : 50).length >= 1
         ? { ok: true, reason: "" }
-        : { ok: false, reason: "Need a category (2–" + (kind === "lollipop" ? "30" : "50") + " distinct values)" };
+        : { ok: false, reason: "Need a category (2–" + (kind === "lollipop" ? "30" : kind === "pareto" ? "40" : "50") + " distinct values)" };
+    case "corrMatrix":
+      return numCols.length >= 3
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need ≥3 numeric columns" };
     case "dumbbell":
       return nom(2, 24).length >= 1 && numCols.length >= 2
         ? { ok: true, reason: "" }
@@ -2207,6 +2517,8 @@ export function chartKindDataSupport(columns: ColumnInfo[], kind: ChartKind): { 
         : { ok: false, reason: "Need a country or state column" };
     }
     case "sankey":
+    case "network":
+    case "arcDiagram":
       return nomCols.filter(c => c.distinct_count >= 2 && c.distinct_count <= 20).length >= 2
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need two categories (2–20 distinct each)" };
@@ -2245,8 +2557,20 @@ export function tryBuildRandomChartRec(
         const drawn = getRandomEncoding(columns, kind);
         if (!drawn) break;
         const enc = applyEncodingLocks(drawn, locks, keep);
-        const extra: Parameters<typeof createChartRec>[6] = {};
-        if (enc.sizeField) extra.sizeField = enc.sizeField;
+        const extra: Parameters<typeof createChartRec>[6] = {
+          sizeField: enc.sizeField ?? null,
+          rowField: enc.rowField ?? null,
+          topN: enc.topN ?? null,
+          y2Field: enc.y2Field ?? null,
+          comparePrevious: enc.comparePrevious ?? null,
+          rollingWindow: enc.rollingWindow ?? null,
+          yScale: enc.yScale ?? null,
+          seriesNormalize: enc.seriesNormalize ?? null,
+          residualOverlay: enc.residualOverlay ?? null,
+          anomalyHighlight: enc.anomalyHighlight ?? null,
+          bumpMode: enc.bumpMode ?? null,
+          barStackMode: enc.barStackMode ?? undefined,
+        };
         const rec = createChartRec(kind, columns, enc.xField, enc.yField, enc.colorField, tableName, extra);
         if (rec) return rec;
       }
@@ -2260,7 +2584,7 @@ export function tryBuildRandomChartRec(
 export function getRandomChartAndEncoding(
   columns: ColumnInfo[],
   tableName = "data",
-): { kind: ChartKind; xField: string; yField: string | null; colorField: string | null; sizeField?: string | null } | null {
+): RandomEncoding & { kind: ChartKind } | null {
   const rec = tryBuildRandomChartRec(columns, tableName);
   if (!rec) return null;
   return {
@@ -2269,7 +2593,374 @@ export function getRandomChartAndEncoding(
     yField: rec.yField,
     colorField: rec.colorField,
     sizeField: rec.sizeField ?? undefined,
+    rowField: rec.rowField ?? undefined,
+    topN: rec.topN ?? undefined,
+    y2Field: rec.y2Field ?? undefined,
+    comparePrevious: rec.comparePrevious ?? undefined,
+    rollingWindow: rec.rollingWindow ?? undefined,
+    yScale: rec.yScale ?? undefined,
+    seriesNormalize: rec.seriesNormalize ?? undefined,
+    residualOverlay: rec.residualOverlay ?? undefined,
+    anomalyHighlight: rec.anomalyHighlight ?? undefined,
+    bumpMode: rec.bumpMode ?? undefined,
+    barStackMode: rec.barStackMode ?? undefined,
   };
+}
+
+/** Extra encoding fields from a random draw — for createChartRec / DetailPanel shuffle. */
+export function randomEncodingToExtra(enc: RandomEncoding): NonNullable<Parameters<typeof createChartRec>[6]> {
+  return {
+    sizeField: enc.sizeField ?? null,
+    rowField: enc.rowField ?? null,
+    topN: enc.topN ?? null,
+    y2Field: enc.y2Field ?? null,
+    comparePrevious: enc.comparePrevious ?? null,
+    rollingWindow: enc.rollingWindow ?? null,
+    yScale: enc.yScale ?? null,
+    seriesNormalize: enc.seriesNormalize ?? null,
+    residualOverlay: enc.residualOverlay ?? null,
+    anomalyHighlight: enc.anomalyHighlight ?? null,
+    bumpMode: enc.bumpMode ?? null,
+    barStackMode: enc.barStackMode ?? undefined,
+  };
+}
+
+/**
+ * Deterministic Facet / Top N / Compare enrichments for suggestion rails.
+ * Returns alternate chart copies (not mutating the originals).
+ */
+export function expandRecommendationsWithExtras(
+  recs: ChartRecommendation[],
+  columns: ColumnInfo[],
+): ChartRecommendation[] {
+  const nomCols = columns.filter((c) => inferType(c.data_type, c.name) === "nominal");
+  const numCols = columns.filter((c) => inferType(c.data_type, c.name) === "quantitative");
+  const facetPool = (rec: ChartRecommendation) =>
+    nomCols.filter(
+      (c) =>
+        c.distinct_count >= 2 &&
+        c.distinct_count <= 10 &&
+        c.name !== rec.xField &&
+        c.name !== rec.yField,
+    );
+  const out = [...recs];
+  const seen = new Set(recs.map((r) => r.id));
+  const push = (rec: ChartRecommendation) => {
+    if (seen.has(rec.id)) return;
+    seen.add(rec.id);
+    out.push(rec);
+  };
+
+  for (const rec of recs.slice(0, 40)) {
+    // Top N on busy category charts
+    if (
+      (rec.kind === "bar" ||
+        rec.kind === "lollipop" ||
+        rec.kind === "treemap" ||
+        rec.kind === "sunburst" ||
+        rec.kind === "funnel" ||
+        rec.kind === "forceBubble" ||
+        rec.kind === "waffle" ||
+        rec.kind === "isotype" ||
+        rec.kind === "radialBar" ||
+        rec.kind === "isoBars") &&
+      !rec.topN &&
+      (columns.find((c) => c.name === rec.xField)?.distinct_count ?? 0) > 12
+    ) {
+      push({
+        ...rec,
+        id: `${rec.id}-top15`,
+        topN: 15,
+        subtitle: rec.subtitle ? `${rec.subtitle} · top 15` : "top 15 categories",
+        score: Math.max(40, rec.score - 3),
+      });
+      push({
+        ...rec,
+        id: `${rec.id}-top30`,
+        topN: 30,
+        subtitle: rec.subtitle ? `${rec.subtitle} · top 30` : "top 30 categories",
+        score: Math.max(38, rec.score - 5),
+      });
+    }
+
+    // Facet small multiples when a spare low-card category exists
+    if (FACET_RANDOM_KINDS.has(rec.kind) && !rec.rowField) {
+      const pool = facetPool(rec);
+      const facet =
+        pool.find((c) => c.name !== rec.colorField) ??
+        (rec.colorField && pool.some((c) => c.name === rec.colorField) ? pool.find((c) => c.name === rec.colorField) : null) ??
+        pool[0];
+      if (facet) {
+        const facetOnly = facet.name === rec.colorField;
+        push({
+          ...rec,
+          id: `${rec.id}-facet-${facet.name}`,
+          rowField: facet.name,
+          colorField: facetOnly ? null : rec.colorField,
+          subtitle: facetOnly
+            ? `small multiples by ${facet.name}`
+            : rec.colorField
+              ? `${rec.subtitle || "split"} · facets by ${facet.name}`
+              : `facets by ${facet.name}`,
+          score: Math.max(42, rec.score - 4),
+        });
+      }
+    }
+
+    // Stacked / 100% / grouped bar variants when a Color subcategory fits
+    if (rec.kind === "bar") {
+      const stackColor =
+        rec.colorField &&
+        rec.colorField !== rec.xField &&
+        nomCols.some((c) => c.name === rec.colorField && c.distinct_count >= 2 && c.distinct_count <= 12)
+          ? rec.colorField
+          : nomCols.find(
+              (c) =>
+                c.name !== rec.xField &&
+                c.name !== rec.yField &&
+                c.name !== rec.rowField &&
+                c.distinct_count >= 2 &&
+                c.distinct_count <= 12,
+            )?.name ?? null;
+      if (stackColor) {
+        const base = { ...rec, colorField: stackColor };
+        const alreadyGrouped =
+          rec.colorField === stackColor && (!rec.barStackMode || rec.barStackMode === "grouped");
+        if (!alreadyGrouped) {
+          push({
+            ...base,
+            id: `${rec.id}-grouped-${stackColor}`,
+            barStackMode: "grouped",
+            subtitle: `grouped by ${stackColor}`,
+            score: Math.max(44, rec.score - 2),
+          });
+        }
+        if (rec.barStackMode !== "stacked") {
+          push({
+            ...base,
+            id: `${rec.id}-stacked-${stackColor}`,
+            barStackMode: "stacked",
+            subtitle: `stacked by ${stackColor}`,
+            score: Math.max(48, rec.score - 1),
+          });
+        }
+        if (rec.barStackMode !== "percent") {
+          push({
+            ...base,
+            id: `${rec.id}-percent-${stackColor}`,
+            barStackMode: "percent",
+            subtitle: `100% stacked by ${stackColor}`,
+            score: Math.max(45, rec.score - 3),
+          });
+        }
+      }
+    }
+
+    // Compare Y / earlier half on multi-measure time series
+    if ((rec.kind === "line" || rec.kind === "area") && rec.yField && !rec.y2Field && !rec.comparePrevious) {
+      const y2 = numCols.find((c) => c.name !== rec.yField && c.name !== rec.xField);
+      if (y2) {
+        push({
+          ...rec,
+          id: `${rec.id}-vs-${y2.name}`,
+          y2Field: y2.name,
+          subtitle: `compare ${rec.yField} vs ${y2.name}`,
+          score: Math.max(44, rec.score - 5),
+        });
+      } else {
+        push({
+          ...rec,
+          id: `${rec.id}-prev`,
+          comparePrevious: true,
+          subtitle: rec.subtitle ? `${rec.subtitle} · vs earlier half` : "vs earlier half",
+          score: Math.max(42, rec.score - 6),
+        });
+      }
+    }
+
+    // Rolling mean / rebase / log-Y on line & area
+    if ((rec.kind === "line" || rec.kind === "area") && rec.yField) {
+      if (!rec.rollingWindow) {
+        push({
+          ...rec,
+          id: `${rec.id}-roll7`,
+          rollingWindow: 7,
+          subtitle: "7-point rolling mean",
+          score: Math.max(50, rec.score - 2),
+        });
+        push({
+          ...rec,
+          id: `${rec.id}-roll30`,
+          rollingWindow: 30,
+          subtitle: "30-point rolling mean",
+          score: Math.max(48, rec.score - 3),
+        });
+      }
+      if (!rec.seriesNormalize) {
+        push({
+          ...rec,
+          id: `${rec.id}-idx100`,
+          seriesNormalize: "index100",
+          subtitle: "indexed to 100 at start",
+          score: Math.max(47, rec.score - 4),
+        });
+        if (rec.colorField) {
+          push({
+            ...rec,
+            id: `${rec.id}-zscore`,
+            seriesNormalize: "zscore",
+            subtitle: "z-scored series",
+            score: Math.max(46, rec.score - 5),
+          });
+        }
+      }
+      if (!rec.yScale || rec.yScale === "linear") {
+        push({
+          ...rec,
+          id: `${rec.id}-logy`,
+          yScale: "log",
+          subtitle: "log Y scale",
+          score: Math.max(45, rec.score - 4),
+        });
+      }
+      if (!rec.anomalyHighlight) {
+        push({
+          ...rec,
+          id: `${rec.id}-anom`,
+          anomalyHighlight: true,
+          subtitle: "anomaly rings (|z|>2.5)",
+          score: Math.max(49, rec.score - 2),
+        });
+      }
+    }
+
+    // Period-over-period ghost on ordered bars
+    if (rec.kind === "bar" && !rec.comparePrevious && !rec.colorField) {
+      const xCol = columns.find((c) => c.name === rec.xField);
+      const ordered =
+        xCol &&
+        (inferType(xCol.data_type, xCol.name) === "temporal" ||
+          /^(year|yr|date|day|month|week|ts|time|fy)/i.test(xCol.name));
+      if (ordered) {
+        push({
+          ...rec,
+          id: `${rec.id}-pop`,
+          comparePrevious: true,
+          subtitle: "vs earlier half of the period",
+          score: Math.max(46, rec.score - 3),
+        });
+      }
+    }
+
+    // Pareto from busy category bars
+    if (
+      (rec.kind === "bar" || rec.kind === "lollipop") &&
+      (columns.find((c) => c.name === rec.xField)?.distinct_count ?? 0) >= 5
+    ) {
+      push({
+        ...rec,
+        id: `${rec.id}-pareto`,
+        kind: "pareto",
+        barStackMode: null,
+        colorField: null,
+        rowField: null,
+        title: rec.yField ? `Pareto — ${rec.yField} by ${rec.xField}` : `Pareto — ${rec.xField}`,
+        subtitle: "bars + cumulative % (80/20)",
+        score: Math.max(52, rec.score - 1),
+      });
+    }
+
+    // Residuals + anomaly on numeric scatters
+    if (rec.kind === "scatter" && rec.yField) {
+      if (!rec.residualOverlay) {
+        push({
+          ...rec,
+          id: `${rec.id}-resid`,
+          residualOverlay: true,
+          subtitle: "residuals vs linear fit",
+          score: Math.max(51, rec.score - 2),
+        });
+      }
+      if (!rec.anomalyHighlight) {
+        push({
+          ...rec,
+          id: `${rec.id}-anom`,
+          anomalyHighlight: true,
+          subtitle: "anomaly rings (|z|>2.5)",
+          score: Math.max(50, rec.score - 2),
+        });
+      }
+      if (!rec.yScale || rec.yScale === "linear") {
+        push({
+          ...rec,
+          id: `${rec.id}-logy`,
+          yScale: "log",
+          subtitle: "log Y scale",
+          score: Math.max(44, rec.score - 5),
+        });
+      }
+    }
+
+    // Correlation matrix when enough numerics
+    if (numCols.length >= 3 && rec.kind === "scatter") {
+      const labels = numCols.slice(0, 8).map((c) => c.name);
+      push({
+        id: `corrMatrix-${labels.join("-")}`,
+        kind: "corrMatrix",
+        title: "Correlation matrix",
+        subtitle: `Pearson r across ${labels.length} measures`,
+        score: Math.max(55, rec.score - 8),
+        spec: {},
+        xField: labels[0]!,
+        yField: labels[1]!,
+        colorField: null,
+        tooltipFields: labels,
+      });
+    }
+
+    // Contour density promote from scatter
+    if (rec.kind === "scatter" && rec.yField && oddChartDataSupport(columns, "contour").ok) {
+      const cont = buildOddChartRec("contour", columns, rec.xField, rec.yField, rec.colorField, "data", {});
+      if (cont) {
+        push({
+          ...cont,
+          id: `${rec.id}-contour`,
+          score: Math.max(54, rec.score - 3),
+          subtitle: "2D density contours",
+        });
+      }
+    }
+
+    // Delta-rank bump
+    if (rec.kind === "bump" && rec.bumpMode !== "delta") {
+      push({
+        ...rec,
+        id: `${rec.id}-delta`,
+        bumpMode: "delta",
+        subtitle: "Δ rank over time",
+        score: Math.max(50, rec.score - 2),
+      });
+    }
+  }
+
+  // One correlation matrix if schema supports and none was pushed from a scatter seed
+  if (numCols.length >= 3 && !out.some((r) => r.kind === "corrMatrix")) {
+    const labels = numCols.slice(0, 8).map((c) => c.name);
+    push({
+      id: `corrMatrix-${labels.join("-")}`,
+      kind: "corrMatrix",
+      title: "Correlation matrix",
+      subtitle: `Pearson r across ${labels.length} measures`,
+      score: 60,
+      spec: {},
+      xField: labels[0]!,
+      yField: labels[1]!,
+      colorField: null,
+      tooltipFields: labels,
+    });
+  }
+
+  return out;
 }
 
 /** Short, human-readable reason why this chart type fits the data. No LLM required. */
@@ -2286,6 +2977,10 @@ export function getRecommendationReason(rec: ChartRecommendation): string {
         : yField
           ? "Category vs value (sum/mean/count) → compare groups"
           : "Count by category";
+    case "pareto":
+      return "Ranked bars + cumulative share → see the 80/20 cut";
+    case "corrMatrix":
+      return "Pearson r across numeric columns → which measures move together";
     case "histogram":
       return "Single numeric column → distribution of values";
     case "area":
@@ -2328,6 +3023,10 @@ export function getRecommendationReason(rec: ChartRecommendation): string {
       return "Packed circles → size comparison without axes, grouped by category";
     case "sankey":
       return "Two categories → flow and volume between groups";
+    case "network":
+      return "Two categories → force-directed node-link graph of connections";
+    case "arcDiagram":
+      return "Two categories → nodes on a line with arcs for each link";
     default:
       if (isGpuSceneKind(kind)) return gpuSceneRecommendationReason(kind);
       if (isGeoMapKind(kind)) return geoMapRecommendationReason(kind);
@@ -2369,6 +3068,12 @@ export function recommendStreamStory(
     yField: string | null,
     colorField: string | null,
     yAggregate?: YAggregateOption | null,
+    extraEnc?: {
+      rowField?: string | null;
+      topN?: number | null;
+      y2Field?: string | null;
+      comparePrevious?: boolean | null;
+    },
   ): ChartRecommendation => ({
     id: mkId(),
     kind,
@@ -2380,22 +3085,30 @@ export function recommendStreamStory(
     yField,
     colorField,
     yAggregate: yAggregate ?? null,
+    rowField: extraEnc?.rowField ?? undefined,
+    topN: extraEnc?.topN ?? undefined,
+    y2Field: extraEnc?.y2Field ?? undefined,
+    comparePrevious: extraEnc?.comparePrevious || undefined,
   });
 
   if (hasTs) {
     charts.push(mkRec("line", "Edits over time", "Event rate trend — the pulse of Wikipedia", 95, "ts", null, null, "count"));
+    charts.push(mkRec("line", "Edits vs earlier half", "Recent pulse vs the first half of the buffer", 91, "ts", null, null, "count", { comparePrevious: true }));
   }
   if (hasWiki) {
-    charts.push(mkRec("bar", "Edits by wiki", "Which language editions are most active", 90, "wiki", null, null, "count"));
+    charts.push(mkRec("bar", "Edits by wiki", "Which language editions are most active", 90, "wiki", null, null, "count", { topN: 15 }));
+  }
+  if (hasTs && hasWiki) {
+    charts.push(mkRec("line", "Edits faceted by wiki", "One panel per language edition", 88, "ts", null, null, "count", { rowField: "wiki" }));
   }
   if (hasBot && hasWiki) {
-    charts.push(mkRec("bar", "Bot vs Human", "Automated edits vs manual contributions", 88, "bot", null, "wiki", "count"));
+    charts.push(mkRec("bar", "Bot vs Human", "Automated edits vs manual contributions", 86, "bot", null, "wiki", "count"));
   }
   if (hasDelta) {
-    charts.push(mkRec("histogram", "Edit size distribution", "How big are typical edits (bytes delta)", 85, "delta", null, null));
+    charts.push(mkRec("histogram", "Edit size distribution", "How big are typical edits (bytes delta)", 84, "delta", null, null));
   }
   if (hasNamespace && hasDelta) {
-    charts.push(mkRec("bar", "Impact by namespace", "Average edit size per namespace", 82, "namespace", "delta", null, "mean"));
+    charts.push(mkRec("bar", "Impact by namespace", "Average edit size per namespace", 82, "namespace", "delta", null, "mean", { topN: 12 }));
   }
   if (hasEditType) {
     charts.push(mkRec("pie", "Edit types", "New pages vs edits vs categorize vs log", 80, "edit_type", null, null, "count"));
@@ -2407,10 +3120,83 @@ export function recommendStreamStory(
     charts.push(mkRec("line", "Bot activity trend", "Are bots more active at certain times?", 75, "ts", null, "bot", "count"));
   }
 
+  const auto = recommend(columns, data, "Wikipedia Live");
   return {
     title: "Wikipedia Live: Real-time edit analytics",
-    charts: charts.slice(0, 6),
+    charts: mergeStoryCharts(charts, auto, columns, "wiki", 96),
   };
+}
+
+/**
+ * Merge curated + auto charts, keeping curated order and ensuring every
+ * schema-supported ChartKind gets at least one slot when possible.
+ */
+function mergeStoryCharts(
+  curated: ChartRecommendation[],
+  auto: ChartRecommendation[],
+  columns: ColumnInfo[],
+  tableName: string,
+  limit = 96,
+): ChartRecommendation[] {
+  const expanded = expandRecommendationsWithExtras(curated, columns);
+  const curatedIds = new Set(curated.map((c) => c.id));
+  const extras = expanded.filter((c) => !curatedIds.has(c.id));
+
+  const keyOf = (r: ChartRecommendation) =>
+    [
+      r.kind,
+      r.xField,
+      r.yField ?? "",
+      r.colorField ?? "",
+      r.rowField ?? "",
+      r.topN ?? "",
+      r.y2Field ?? "",
+      r.barStackMode ?? "",
+      r.rollingWindow ?? "",
+      r.yScale ?? "",
+      r.seriesNormalize ?? "",
+      r.residualOverlay ? "1" : "",
+      r.anomalyHighlight ? "1" : "",
+      r.bumpMode ?? "",
+      r.comparePrevious ? "1" : "",
+    ].join("|");
+  const seen = new Set([...curated, ...extras].map(keyOf));
+  const presentKinds = new Set([...curated, ...extras].map((c) => c.kind));
+
+  const autoDeduped = auto
+    .filter((r) => {
+      const k = keyOf(r);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
+    .map((r) => ({ ...r, score: Math.min(r.score, 70), id: `${tableName}-auto-${r.id}` }));
+
+  // Prefer auto charts that introduce a new kind first
+  const kindBoost = autoDeduped.filter((r) => !presentKinds.has(r.kind));
+  for (const r of kindBoost) presentKinds.add(r.kind);
+  const kindRest = autoDeduped.filter((r) => !kindBoost.includes(r));
+
+  // Fill any remaining supported kinds the auto rail still missed
+  const missing: ChartRecommendation[] = [];
+  for (const { value: kind } of CHART_KIND_OPTIONS) {
+    if (presentKinds.has(kind)) continue;
+    if (!chartKindDataSupport(columns, kind).ok) continue;
+    const enc = getRandomEncoding(columns, kind);
+    if (!enc) continue;
+    const rec = createChartRec(kind, columns, enc.xField, enc.yField, enc.colorField, tableName, {
+      sizeField: enc.sizeField,
+    });
+    if (!rec) continue;
+    missing.push({
+      ...rec,
+      score: Math.min(rec.score, 66),
+      id: `${tableName}-kind-${kind}`,
+    });
+    presentKinds.add(kind);
+  }
+
+  return [...curated, ...extras, ...kindBoost, ...missing, ...kindRest].slice(0, limit);
 }
 
 /**
@@ -2428,7 +3214,22 @@ export function recommendSourceStory(
     xField: string, yField: string | null, colorField: string | null,
     yAgg?: YAggregateOption | null,
     sizeField?: string | null,
-    extraEnc?: { zField?: string | null; timeField?: string | null; trailId?: string | null },
+    extraEnc?: {
+      zField?: string | null;
+      timeField?: string | null;
+      trailId?: string | null;
+      rowField?: string | null;
+      topN?: number | null;
+      y2Field?: string | null;
+      comparePrevious?: boolean | null;
+      barStackMode?: "grouped" | "stacked" | "percent" | null;
+      rollingWindow?: 7 | 30 | null;
+      yScale?: "linear" | "log" | "symlog" | null;
+      seriesNormalize?: "index100" | "zscore" | null;
+      residualOverlay?: boolean | null;
+      anomalyHighlight?: boolean | null;
+      bumpMode?: "rank" | "delta" | null;
+    },
   ): ChartRecommendation => ({
     id: mkId(), kind: k, title, subtitle, score, spec: {},
     xField, yField, colorField, yAggregate: yAgg ?? null,
@@ -2436,431 +3237,392 @@ export function recommendSourceStory(
     zField: extraEnc?.zField ?? undefined,
     timeField: extraEnc?.timeField ?? undefined,
     trailId: extraEnc?.trailId ?? undefined,
+    rowField: extraEnc?.rowField ?? undefined,
+    topN: extraEnc?.topN ?? undefined,
+    y2Field: extraEnc?.y2Field ?? undefined,
+    comparePrevious: extraEnc?.comparePrevious || undefined,
+    barStackMode: k === "bar" && colorField ? (extraEnc?.barStackMode ?? "grouped") : undefined,
+    rollingWindow: (k === "line" || k === "area") && extraEnc?.rollingWindow ? extraEnc.rollingWindow : undefined,
+    yScale: extraEnc?.yScale && extraEnc.yScale !== "linear" ? extraEnc.yScale : undefined,
+    seriesNormalize: (k === "line" || k === "area") && extraEnc?.seriesNormalize ? extraEnc.seriesNormalize : undefined,
+    residualOverlay: extraEnc?.residualOverlay || undefined,
+    anomalyHighlight: extraEnc?.anomalyHighlight || undefined,
+    bumpMode: k === "bump" && extraEnc?.bumpMode ? extraEnc.bumpMode : undefined,
+  });
+
+  /** Curated first, then Facet/TopN/Compare, then full-schema recommend() (network, odd, …). */
+  const finish = (title: string, charts: ChartRecommendation[]): StorySequence => ({
+    title,
+    charts: mergeStoryCharts(charts, recommend(columns, data, kind), columns, kind, 96),
   });
 
   if (kind === "usgs") {
-    return {
-      title: "Earthquake Analytics",
-      charts: [
+    return finish("Earthquake Analytics", [
         mk("geoPoints", "Quake map", "Projected locations on coastlines", 98, "longitude", "latitude", "mag_type", null, "magnitude"),
         mk("geoHex", "Quake hex density", "Where energy piles up on the map", 96, "longitude", "latitude", "mag_type"),
         mk("globe", "Quake globe", "Spin the planet — quakes as points", 95, "longitude", "latitude", "mag_type", null, "magnitude"),
         mk("scatter3d", "Orbit depth cloud", "Lat · lon · depth — drag to orbit", 94, "longitude", "latitude", "mag_type", null, "magnitude", { zField: "depth" }),
         mk("quakeTerrain", "Magnitude terrain", "Heightfield where energy piles up", 92, "longitude", "latitude", "mag_type", null, "magnitude", { zField: "magnitude" }),
         mk("firefly", "Firefly aftershocks", "Soft glow by magnitude", 88, "longitude", "latitude", "mag_type", null, "magnitude", { timeField: "ts" }),
-      ].slice(0, 6),
-    };
+      ]);
   }
 
   if (kind === "meteo") {
-    return {
-      title: "World Weather Comparison",
-      charts: [
+    return finish("World Weather Comparison", [
         mk("geoBubbles", "City climate map", "Twelve cities sized by temperature", 96, "longitude", "latitude", "city", null, "temperature"),
         mk("line", "Temperature over time", "How does temperature vary across cities?", 95, "ts", "temperature", "city"),
-        mk("stream", "Temp streams by city", "Organic stacked climate flow", 92, "ts", "temperature", "city"),
-        mk("beeswarm", "Temp swarm by city", "Every reading as a dot", 88, "city", "temperature", null),
-        mk("horizon", "Horizon temperature", "Folded bands of heat", 86, "ts", "temperature", null),
-        mk("radialBar", "City temp wheel", "Polar comparison", 82, "city", "temperature", null, "mean"),
-      ].slice(0, 6),
-    };
+        mk("line", "Temp · 7-pt rolling", "Smoothing the noise across cities", 94, "ts", "temperature", "city", "mean", null, { rollingWindow: 7 }),
+        mk("line", "Temp indexed to 100", "Fair compare — every city starts at 100", 93, "ts", "temperature", "city", "mean", null, { seriesNormalize: "index100" }),
+        mk("line", "Temp facets by city", "One panel per city", 92, "ts", "temperature", null, "mean", null, { rowField: "city" }),
+        mk("line", "Temp vs humidity", "Compare two measures over time", 90, "ts", "temperature", "city", "mean", null, { y2Field: "humidity" }),
+        mk("corrMatrix", "Climate correlations", "Temp · humidity · wind · pressure", 88, "temperature", "humidity", null),
+        mk("stream", "Temp streams by city", "Organic stacked climate flow", 86, "ts", "temperature", "city"),
+        mk("beeswarm", "Temp swarm by city", "Every reading as a dot", 84, "city", "temperature", null),
+      ]);
   }
 
   if (kind === "nws") {
-    return {
-      title: "US Weather Alert Analytics",
-      charts: [
-        mk("bar", "Alerts by event type", "What kinds of alerts are most common?", 95, "event", null, null, "count"),
+    return finish("US Weather Alert Analytics", [
+        mk("bar", "Alerts by event type", "What kinds of alerts are most common?", 95, "event", null, null, "count", null, { topN: 15 }),
+        mk("bar", "Severity × urgency", "Stacked severity, split by urgency", 93, "severity", null, "urgency", "count", null, { barStackMode: "stacked" }),
+        mk("bar", "Event mix (100%)", "Share of urgency within each event", 91, "event", null, "urgency", "count", null, { topN: 12, barStackMode: "percent" }),
         mk("bar", "Alerts by severity", "Distribution of severity levels", 90, "severity", null, null, "count"),
+        mk("bucketField", "Severity paddocks", "Alert dots bucketed by severity", 88, "severity", null, "urgency"),
         mk("pie", "Urgency breakdown", "How urgent are current alerts?", 85, "urgency", null, null, "count"),
-        mk("bar", "Top alert sources", "Which NWS offices issue most alerts?", 80, "sender_name", null, null, "count"),
-        mk("bar", "Certainty levels", "How certain are the alerts?", 75, "certainty", null, "severity", "count"),
-      ].slice(0, 5),
-    };
+        mk("bar", "Top alert sources", "Which NWS offices issue most alerts?", 80, "sender_name", null, null, "count", null, { topN: 12 }),
+        mk("bar", "Certainty levels", "How certain are the alerts?", 75, "certainty", null, "severity", "count", null, { barStackMode: "grouped" }),
+      ]);
   }
 
   if (kind === "world_bank") {
-    return {
-      title: "Global development",
-      charts: [
+    return finish("Global development", [
         mk("choropleth", "Life expectancy map", "Average years of life by country", 96, "country_code", "life_expectancy", null, "mean"),
         mk("bubble", "Wealth vs health", "GDP per person against life expectancy, sized by population", 98, "gdp_per_capita", "life_expectancy", null, null, "population"),
         mk("line", "Life expectancy over time", "Average across countries, 2000–2023", 92, "yr", "life_expectancy", null, "mean"),
-        mk("bar", "Most populous countries", "Peak population, 2000–2023", 90, "country_name", "population", null, "max"),
-        mk("scatter", "CO₂ vs wealth", "Emissions per person against GDP per person", 88, "gdp_per_capita", "co2_per_capita", null),
-        mk("choropleth", "GDP per person map", "Highest GDP per person reached", 84, "country_code", "gdp_per_capita", null, "max"),
-      ].slice(0, 6),
-    };
+        mk("line", "Life · 7-yr rolling", "Smoothed global average", 91, "yr", "life_expectancy", null, "mean", null, { rollingWindow: 7 }),
+        mk("line", "Life vs GDP over time", "Two development measures compared", 90, "yr", "life_expectancy", null, "mean", null, { y2Field: "gdp_per_capita" }),
+        mk("pareto", "Population Pareto", "Bars + cumulative share of people", 89, "country_name", "population", null, "max", null, { topN: 20 }),
+        mk("corrMatrix", "Development correlations", "GDP · life · CO₂ · population", 87, "gdp_per_capita", "life_expectancy", null),
+        mk("bar", "Most populous countries", "Peak population, 2000–2023", 86, "country_name", "population", null, "max", null, { topN: 15 }),
+        mk("scatter", "CO₂ vs wealth", "Emissions per person against GDP per person", 84, "gdp_per_capita", "co2_per_capita", null),
+        mk("scatter", "Wealth vs health · residuals", "Distance from the linear fit", 82, "gdp_per_capita", "life_expectancy", null, null, null, { residualOverlay: true }),
+      ]);
   }
 
   if (kind === "iss") {
-    return {
-      title: "ISS orbital track",
-      charts: [
+    return finish("ISS orbital track", [
         mk("globeTrail", "Orbit on the globe", "Great-circle path around the sphere", 98, "longitude", "latitude", null, null, "altitude_km", { timeField: "ts" }),
         mk("geoPoints", "Ground track map", "Projected path on coastlines", 96, "longitude", "latitude", null, null, "altitude_km", { timeField: "ts" }),
         mk("trailRibbon", "Orbital ribbons", "Path fades through recent samples", 94, "longitude", "latitude", null, null, "altitude_km", { timeField: "ts" }),
         mk("scatter3d", "Altitude cloud", "Lon · lat · altitude", 90, "longitude", "latitude", null, null, "velocity_kmh", { zField: "altitude_km", timeField: "ts" }),
         mk("line", "Altitude over time", "How high is the station?", 86, "ts", "altitude_km", null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "hn") {
-    return {
-      title: "Hacker News front page",
-      charts: [
-        mk("bar", "Top stories by points", "What's hottest right now?", 95, "title", "points", null, "max"),
+    return finish("Hacker News front page", [
+        mk("bar", "Top stories by points", "What's hottest right now?", 95, "title", "points", null, "max", null, { topN: 15 }),
+        mk("pareto", "Points Pareto", "Which stories carry most of the points?", 93, "title", "points", null, "max", null, { topN: 20 }),
         mk("scatter", "Points vs comments", "Discussion intensity", 90, "points", "num_comments", "author"),
-        mk("histogram", "Score distribution", "How viral is the front page?", 85, "points", null, null),
-        mk("bar", "Active authors", "Who is posting?", 78, "author", null, null, "count"),
-      ].slice(0, 5),
-    };
+        mk("scatter", "Points vs comments · residuals", "Stories off the linear fit", 88, "points", "num_comments", null, null, null, { residualOverlay: true }),
+        mk("scatter", "Points vs comments · facets", "One panel per author (top posters)", 86, "points", "num_comments", null, null, null, { rowField: "author" }),
+        mk("histogram", "Score distribution", "How viral is the front page?", 82, "points", null, null),
+        mk("bar", "Active authors", "Who is posting?", 78, "author", null, null, "count", null, { topN: 12 }),
+      ]);
   }
 
   if (kind === "crypto") {
-    return {
-      title: "Crypto markets",
-      charts: [
-        mk("bar", "Market cap leaders", "The biggest coins by value", 95, "symbol", "market_cap", null, "max"),
-        mk("bar", "24h movers", "Who gained and lost the most today", 92, "symbol", "change_24h_pct", null, "max"),
-        mk("treemap", "Market share", "Each coin's slice of the top 50", 90, "symbol", "market_cap", null, "max"),
-        mk("beeswarm", "Daily moves", "Every coin's 24h % change as a dot", 85, "symbol", "change_24h_pct", null),
+    return finish("Crypto markets", [
+        mk("bar", "Market cap leaders", "The biggest coins by value", 95, "symbol", "market_cap", null, "max", null, { topN: 15 }),
+        mk("pareto", "Market-cap Pareto", "Cumulative share of total value", 94, "symbol", "market_cap", null, "max", null, { topN: 20 }),
+        mk("bar", "24h movers", "Who gained and lost the most today", 92, "symbol", "change_24h_pct", null, "max", null, { topN: 15 }),
+        mk("scatter", "Cap vs change · log Y", "Magnitude on a log scale", 90, "market_cap", "change_24h_pct", null, null, null, { yScale: "log" }),
+        mk("corrMatrix", "Market correlations", "Price · cap · volume · change", 88, "price_usd", "market_cap", null),
+        mk("treemap", "Market share", "Each coin's slice of the top 50", 86, "symbol", "market_cap", null, "max", null, { topN: 20 }),
+        mk("beeswarm", "Daily moves", "Every coin's 24h % change as a dot", 84, "symbol", "change_24h_pct", null),
         mk("isoScatter", "Price · change · volume", "Pseudo-3D market space", 80, "price_usd", "change_24h_pct", "symbol", null, "volume_24h"),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "aq") {
-    return {
-      title: "City air quality",
-      charts: [
+    return finish("City air quality", [
         mk("geoBubbles", "AQI on the map", "Cities as pollution bubbles", 96, "longitude", "latitude", "city", null, "pm2_5"),
-        mk("bar", "PM2.5 by city", "Who is breathing the most fine particulate?", 95, "city", "pm2_5", null, "max"),
-        mk("bar", "European AQI", "Compare air quality index across cities", 90, "city", "european_aqi", null, "max"),
-        mk("scatter", "PM2.5 vs ozone", "Do pollutants move together?", 85, "pm2_5", "ozone", "city"),
-        mk("bar", "NO₂ by city", "Traffic and combustion signal", 80, "city", "nitrogen_dioxide", null, "max"),
-      ].slice(0, 5),
-    };
+        mk("bar", "PM2.5 by city", "Who is breathing the most fine particulate?", 95, "city", "pm2_5", null, "max", null, { topN: 12 }),
+        mk("pareto", "PM2.5 Pareto", "Which cities drive most of the load?", 93, "city", "pm2_5", null, "max", null, { topN: 15 }),
+        mk("bar", "European AQI", "Compare air quality index across cities", 90, "city", "european_aqi", null, "max", null, { topN: 12 }),
+        mk("scatter", "PM2.5 vs ozone", "Do pollutants move together?", 87, "pm2_5", "ozone", "city"),
+        mk("scatter", "PM2.5 vs ozone · residuals", "Cities off the linear fit", 85, "pm2_5", "ozone", "city", null, null, { residualOverlay: true }),
+        mk("corrMatrix", "Pollutant correlations", "PM2.5 · ozone · NO₂ · AQI", 83, "pm2_5", "ozone", null),
+        mk("bar", "NO₂ by city", "Traffic and combustion signal", 80, "city", "nitrogen_dioxide", null, "max", null, { topN: 12 }),
+      ]);
   }
 
   if (kind === "fx") {
-    return {
-      title: "Euro exchange rates",
-      charts: [
+    return finish("Euro exchange rates", [
         mk("box", "Volatility by currency", "Spread of daily % moves over 90 days", 92, "quote", "change_pct", null),
         mk("line", "Daily moves by currency", "% change vs the euro, day to day", 95, "as_of", "change_pct", "quote", "mean"),
+        mk("line", "Moves · 7-day rolling", "Smoothed % change by quote", 94, "as_of", "change_pct", "quote", "mean", null, { rollingWindow: 7 }),
+        mk("line", "Z-scored moves", "Each currency on a common scale", 92, "as_of", "change_pct", "quote", "mean", null, { seriesNormalize: "zscore" }),
+        mk("line", "Moves · anomaly rings", "Days that jump |z| > 2.5", 90, "as_of", "change_pct", "quote", "mean", null, { anomalyHighlight: true }),
+        mk("line", "Moves faceted by currency", "One panel per quote", 88, "as_of", "change_pct", null, "mean", null, { rowField: "quote" }),
         mk("bar", "Average rate vs EUR", "Units per euro, 90-day average", 85, "quote", "rate", null, "mean"),
+        mk("bar", "Rates vs earlier half", "Period-over-period ghost bars", 83, "quote", "rate", null, "mean", null, { comparePrevious: true }),
         mk("beeswarm", "Every daily move", "Each currency-day as a dot", 80, "quote", "change_pct", null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "fema") {
-    return {
-      title: "FEMA disaster declarations",
-      charts: [
+    return finish("FEMA disaster declarations", [
         mk("choropleth", "Declarations by state", "US states filled by declaration count", 98, "state", null, null, "count"),
-        mk("bar", "By incident type", "What kinds of disasters are declared?", 95, "incident_type", null, null, "count"),
-        mk("bar", "By state", "Which states see the most declarations?", 90, "state", null, null, "count"),
-        mk("bar", "Declaration type", "Major disaster vs emergency", 85, "declaration_type", null, null, "count"),
+        mk("bar", "By incident type", "What kinds of disasters are declared?", 95, "incident_type", null, null, "count", null, { topN: 15 }),
+        mk("bar", "Type × declaration", "Stacked incident mix by declaration kind", 93, "declaration_type", null, "incident_type", "count", null, { barStackMode: "stacked" }),
+        mk("bar", "State mix (100%)", "Share of incident types within top states", 90, "state", null, "incident_type", "count", null, { topN: 12, barStackMode: "percent" }),
+        mk("bucketField", "Type paddocks", "Declarations as dots in incident buckets", 86, "incident_type", null, "declaration_type"),
+        mk("bar", "Declaration type", "Major disaster vs emergency", 82, "declaration_type", null, null, "count"),
         mk("histogram", "Fiscal year declared", "When were they declared?", 78, "fy_declared", null, null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "opensky") {
-    return {
-      title: "Aircraft over the US",
-      charts: [
+    return finish("Aircraft over the US", [
         mk("geoPoints", "Sky map", "Projected positions on coastlines", 96, "longitude", "latitude", "origin_country", null, "baro_altitude"),
         mk("globeTrail", "Flight globe", "Craft paths wrapped on the sphere", 98, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
         mk("geoBubbles", "Altitude bubbles", "Sized by barometric altitude", 94, "longitude", "latitude", "origin_country", null, "baro_altitude"),
         mk("trailRibbon", "Flight ribbons", "Each craft leaves a fading trail", 92, "longitude", "latitude", "origin_country", null, "baro_altitude", { timeField: "ts", trailId: "icao24" }),
         mk("scatter3d", "Altitude orbit cloud", "Lon · lat · altitude — drag to orbit", 88, "longitude", "latitude", "origin_country", null, "velocity", { zField: "baro_altitude" }),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "countries") {
-    return {
-      title: "World countries",
-      charts: [
+    return finish("World countries", [
         mk("choropleth", "Population map", "Countries filled by population", 98, "cca3", "population", "region", "max"),
-        mk("bar", "Population leaders", "Most populous countries", 95, "name", "population", "region", "max"),
+        mk("bar", "Population leaders", "Most populous countries", 95, "name", "population", "region", "max", null, { topN: 15 }),
         mk("bucketField", "Regions as fields", "Countries as dots in regional paddocks", 90, "region", "population", "region", null, "area"),
         mk("glyphStar", "Country stars", "Multivariate star glyphs", 86, "name", "population", "area", null, "density"),
-        mk("isoBars", "Isometric population", "Fake-3D country blocks", 82, "name", "population", "region", "max"),
+        mk("isoBars", "Isometric population", "Fake-3D country blocks", 82, "name", "population", "region", "max", null, { topN: 15 }),
         mk("waffle", "Region waffle", "Share of countries by region", 78, "region", null, null, "count"),
-      ].slice(0, 6),
-    };
+      ]);
   }
 
   if (kind === "spacex") {
-    return {
-      title: "SpaceX launch history",
-      charts: [
-        mk("bar", "Launches by rocket", "Which vehicles flew — colored by outcome", 95, "rocket", null, "success", "count"),
-        mk("pie", "Success rate", "Share of missions that reached orbit", 90, "success", null, null, "count"),
-        mk("strip", "Launch timeline", "Every launch as a tick, by rocket", 85, "date_utc", "rocket", "success"),
-      ].slice(0, 5),
-    };
+    return finish("SpaceX launch history", [
+        mk("bar", "Launches by rocket", "Stacked by outcome", 95, "rocket", null, "success", "count", null, { barStackMode: "stacked" }),
+        mk("bar", "Rocket mix (100%)", "Success share within each vehicle", 92, "rocket", null, "success", "count", null, { barStackMode: "percent" }),
+        mk("bar", "Rockets side by side", "Grouped outcome counts", 90, "rocket", null, "success", "count", null, { barStackMode: "grouped" }),
+        mk("pie", "Success rate", "Share of missions that reached orbit", 88, "success", null, null, "count"),
+        mk("bucketField", "Outcome paddocks", "Launches as dots in success buckets", 84, "success", null, "rocket"),
+        mk("strip", "Launch timeline", "Every launch as a tick, by rocket", 82, "date_utc", "rocket", "success"),
+      ]);
   }
 
   if (kind === "nyc311") {
-    return {
-      title: "NYC 311 complaints",
-      charts: [
+    return finish("NYC 311 complaints", [
         mk("geoPoints", "Complaint map", "Tickets on a projected basemap", 98, "longitude", "latitude", "borough"),
         mk("geoHex", "Complaint density", "Hexbins of 311 heat", 96, "longitude", "latitude", "borough"),
-        mk("bar", "Top complaint types", "What are New Yorkers reporting?", 92, "complaint_type", null, null, "count"),
-        mk("bar", "By borough", "Where do tickets concentrate?", 86, "borough", null, null, "count"),
-        mk("bar", "By agency", "Who responds?", 80, "agency", null, null, "count"),
-      ].slice(0, 5),
-    };
+        mk("bar", "Top complaint types", "What are New Yorkers reporting?", 92, "complaint_type", null, null, "count", null, { topN: 15 }),
+        mk("bar", "Borough × type", "Stacked complaint mix by borough", 90, "borough", null, "complaint_type", "count", null, { topN: 8, barStackMode: "stacked" }),
+        mk("bar", "Borough mix (100%)", "Share of types within each borough", 88, "borough", null, "complaint_type", "count", null, { topN: 8, barStackMode: "percent" }),
+        mk("bucketField", "Borough paddocks", "Tickets as dots in borough fields", 86, "borough", null, "complaint_type"),
+        mk("bar", "By agency", "Who responds?", 80, "agency", null, null, "count", null, { topN: 12 }),
+      ]);
   }
 
   if (kind === "covid") {
-    return {
-      title: "COVID-19 by country",
-      charts: [
+    return finish("COVID-19 by country", [
         mk("choropleth", "Cases world map", "Countries filled by cumulative cases", 98, "country", "cases", "continent", "max"),
-        mk("bar", "Cases leaders", "Highest cumulative cases", 95, "country", "cases", "continent", "max"),
-        mk("pyramid", "Cases ↔ deaths", "Mirror comparison by country", 90, "country", "cases", null, null, "deaths"),
-        mk("slope", "Cases → deaths", "Lean diagonal of severity", 86, "country", "cases_per_million", null, null, "deaths_per_million"),
-        mk("mosaic", "Continent × country share", "Joint composition", 82, "continent", "cases", "country", "sum"),
-        mk("isotype", "Case units", "Icon stacks of magnitude", 78, "continent", "cases", null, "sum"),
-      ].slice(0, 6),
-    };
+        mk("bar", "Cases leaders", "Highest cumulative cases", 95, "country", "cases", "continent", "max", null, { topN: 15, barStackMode: "grouped" }),
+        mk("pareto", "Cases Pareto", "Cumulative share of global cases", 94, "country", "cases", null, "max", null, { topN: 20 }),
+        mk("bar", "Continent totals", "Stacked cases by continent · top countries", 92, "continent", "cases", "country", "max", null, { topN: 8, barStackMode: "stacked" }),
+        mk("corrMatrix", "COVID correlations", "Cases · deaths · per-million rates", 90, "cases", "deaths", null),
+        mk("scatter", "Cases vs deaths · log Y", "Severity on a log scale", 88, "cases", "deaths", "continent", null, null, { yScale: "log" }),
+        mk("bucketField", "Continent paddocks", "Countries as dots in continental fields", 86, "continent", "cases", "continent", null, "deaths"),
+        mk("pyramid", "Cases ↔ deaths", "Mirror comparison by country", 84, "country", "cases", null, null, "deaths"),
+        mk("slope", "Cases → deaths", "Lean diagonal of severity", 82, "country", "cases_per_million", null, null, "deaths_per_million"),
+        mk("mosaic", "Continent × country share", "Joint composition", 80, "continent", "cases", "country", "sum"),
+      ]);
   }
 
   if (kind === "launches") {
-    return {
-      title: "Upcoming space launches",
-      charts: [
+    return finish("Upcoming space launches", [
         mk("bar", "By agency", "Who is launching next?", 95, "agency", null, null, "count"),
         mk("bar", "By location", "Which pads are busiest?", 90, "location", null, null, "count"),
         mk("bar", "By rocket", "Vehicles on the schedule", 85, "rocket", null, null, "count"),
         mk("bar", "Status mix", "Go / Hold / TBD", 80, "status", null, null, "count"),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "eonet") {
-    return {
-      title: "Natural events on Earth",
-      charts: [
+    return finish("Natural events on Earth", [
         mk("geoPoints", "Active events map", "Wildfires, storms, and volcanoes NASA is tracking", 98, "longitude", "latitude", "category"),
         mk("bar", "Events by type", "What is burning, blowing, or erupting right now?", 94, "category", null, null, "count"),
         mk("globe", "Events on the globe", "Spin to see where nature is active", 92, "longitude", "latitude", "category"),
         mk("geoBubbles", "Events by size", "Bubble size from reported magnitude", 88, "longitude", "latitude", "category", null, "magnitude"),
         mk("bar", "Reporting sources", "Who reports these events?", 80, "source", null, null, "count"),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "citibike") {
-    return {
-      title: "Citi Bike right now",
-      charts: [
+    return finish("Citi Bike right now", [
         mk("geoPoints", "Bikes on the map", "Every dock, sized by bikes available", 98, "longitude", "latitude", null, null, "bikes_available"),
         mk("histogram", "How full are docks?", "Share of each dock filled with bikes", 94, "pct_full", null, null),
         mk("scatter", "Capacity vs bikes", "Big docks running empty or full", 90, "capacity", "bikes_available", null),
         mk("geoHex", "Dock density", "Where Citi Bike stations cluster", 86, "longitude", "latitude", null),
-        mk("bar", "Most bikes now", "Docks with the most bikes available", 82, "name", "bikes_available", null, "max"),
-      ].slice(0, 5),
-    };
+        mk("bar", "Most bikes now", "Docks with the most bikes available", 82, "name", "bikes_available", null, "max", null, { topN: 15 }),
+      ]);
   }
 
   if (kind === "spaceweather") {
-    return {
-      title: "Geomagnetic activity",
-      charts: [
+    return finish("Geomagnetic activity", [
         mk("line", "Kp index this week", "Kp 5+ is a geomagnetic storm — auroras farther from the poles", 98, "ts", "kp", null, "max"),
+        mk("line", "Kp · 7-pt rolling", "Smoothed storminess", 96, "ts", "kp", null, "max", null, { rollingWindow: 7 }),
+        mk("line", "Kp anomalies", "Ring the quiet-vs-storm outliers", 95, "ts", "kp", null, "max", null, { anomalyHighlight: true }),
+        mk("line", "Kp vs earlier half", "Recent storminess against the first half of the week", 94, "ts", "kp", null, "max", null, { comparePrevious: true }),
         mk("bar", "Storm levels", "How many 3-hour periods hit each G level", 90, "storm_level", null, null, "count"),
         mk("area", "Kp over time", "Filled view of geomagnetic activity", 86, "ts", "kp", null, "max"),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "ukcarbon") {
-    return {
-      title: "Britain's grid carbon",
-      charts: [
+    return finish("Britain's grid carbon", [
         mk("line", "Carbon intensity today", "Grams of CO₂ per kWh, every half hour (forecast)", 98, "ts", "forecast", null, "mean"),
-        mk("line", "Measured intensity", "Actual readings so far", 92, "ts", "actual", null, "mean"),
-        mk("scatter", "Forecast vs actual", "How good is the forecast?", 88, "forecast", "actual", null),
-        mk("bar", "Intensity bands", "Half hours by carbon index", 84, "intensity_index", null, null, "count"),
-      ].slice(0, 5),
-    };
+        mk("line", "Forecast vs actual", "Two intensity series compared", 94, "ts", "forecast", null, "mean", null, { y2Field: "actual" }),
+        mk("line", "Measured intensity", "Actual readings so far", 90, "ts", "actual", null, "mean"),
+        mk("scatter", "Forecast vs actual scatter", "How good is the forecast?", 86, "forecast", "actual", null),
+        mk("bar", "Intensity bands", "Half hours by carbon index", 82, "intensity_index", null, null, "count"),
+      ]);
   }
 
   if (kind === "pageviews") {
-    return {
-      title: "What the world read yesterday",
-      charts: [
-        mk("bar", "Most-read articles", "Yesterday's top English Wikipedia pages", 98, "article", "views", null, "max"),
-        mk("treemap", "Attention map", "Each article sized by views", 92, "article", "views", null, "max"),
-        mk("lollipop", "Top reads", "Views per article", 86, "article", "views", null, "max"),
-      ].slice(0, 5),
-    };
+    return finish("What the world read yesterday", [
+        mk("bar", "Most-read articles", "Yesterday's top English Wikipedia pages", 98, "article", "views", null, "max", null, { topN: 20 }),
+        mk("treemap", "Attention map", "Each article sized by views", 92, "article", "views", null, "max", null, { topN: 20 }),
+        mk("lollipop", "Top reads", "Views per article", 86, "article", "views", null, "max", null, { topN: 15 }),
+      ]);
   }
 
   if (kind === "climate") {
-    return {
-      title: "Global warming since 1880",
-      charts: [
+    return finish("Global warming since 1880", [
         mk("line", "Warming by year", "Average land + ocean anomaly vs the 20th-century mean (°C)", 99, "year", "anomaly_c", null, "mean"),
-        mk("spiral", "Climate spiral", "Each turn is a year — watch it widen", 95, "ts", "anomaly_c", null),
-        mk("line", "Every month since 1880", "Monthly anomaly (°C)", 90, "ts", "anomaly_c", null, "mean"),
+        mk("line", "Warming vs earlier half", "Recent decades against the first half of the record", 96, "year", "anomaly_c", null, "mean", null, { comparePrevious: true }),
+        mk("spiral", "Climate spiral", "Each turn is a year — watch it widen", 93, "ts", "anomaly_c", null),
+        mk("line", "Every month since 1880", "Monthly anomaly (°C)", 88, "ts", "anomaly_c", null, "mean"),
         mk("box", "Spread by month", "Which months run warmest?", 82, "month", "anomaly_c", null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "gdacs") {
-    return {
-      title: "Disasters underway",
-      charts: [
+    return finish("Disasters underway", [
         mk("geoBubbles", "Active disasters", "Sized by expected impact, colored by type", 98, "longitude", "latitude", "event_type", null, "alert_score"),
         mk("bar", "By disaster type", "What is happening most right now?", 94, "event_type", null, "alert_level", "count"),
         mk("bar", "By alert level", "Green / orange / red", 90, "alert_level", null, null, "count"),
-        mk("bar", "Countries affected", "Where alerts are concentrated", 84, "country", null, null, "count"),
-      ].slice(0, 5),
-    };
+        mk("bar", "Countries affected", "Where alerts are concentrated", 84, "country", null, null, "count", null, { topN: 15 }),
+      ]);
   }
 
   if (kind === "buoys") {
-    return {
-      title: "The ocean right now",
-      charts: [
+    return finish("The ocean right now", [
         mk("geoBubbles", "Wave heights at sea", "Every buoy sized by significant wave height", 97, "longitude", "latitude", null, null, "wave_height_m"),
         mk("scatter", "Wind vs waves", "Do stronger winds mean bigger seas?", 92, "wind_speed_ms", "wave_height_m", null),
         mk("geoBubbles", "Sea temperature", "Buoys sized by water temperature", 88, "longitude", "latitude", null, null, "water_temp_c"),
         mk("histogram", "Water temperatures", "Distribution across stations (°C)", 82, "water_temp_c", null, null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "mbta") {
-    return {
-      title: "Boston transit, live",
-      charts: [
+    return finish("Boston transit, live", [
         mk("geoPoints", "Every vehicle now", "Buses, subway, light rail, and commuter rail", 98, "longitude", "latitude", "route_type"),
-        mk("bar", "Busiest routes", "Vehicles running per route", 92, "route", null, "route_type", "count"),
+        mk("bar", "Busiest routes", "Vehicles running per route", 92, "route", null, "route_type", "count", null, { topN: 15 }),
         mk("bar", "By mode", "How the fleet splits right now", 88, "route_type", null, null, "count"),
         mk("histogram", "Speeds", "How fast vehicles are moving (mph)", 82, "speed_mph", null, null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "aurora") {
-    return {
-      title: "Aurora forecast",
-      charts: [
+    return finish("Aurora forecast", [
         mk("geoBubbles", "Aurora oval now", "Chance of aurora overhead in the next ~30 minutes", 98, "longitude", "latitude", null, null, "probability"),
         mk("globe", "Aurora on the globe", "Spin to the poles", 92, "longitude", "latitude", null, null, "probability"),
         mk("scatter", "Latitude vs chance", "How far from the poles it reaches", 86, "latitude", "probability", null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "asteroids") {
-    return {
-      title: "Asteroids passing Earth",
-      charts: [
+    return finish("Asteroids passing Earth", [
         mk("bubble", "Close passes", "Distance (lunar distances) vs speed, sized by estimated diameter", 97, "distance_ld", "velocity_kms", null, null, "diameter_m"),
         mk("bar", "Biggest visitors", "Estimated diameter (m)", 92, "name", "diameter_m", null, "max"),
         mk("histogram", "How close?", "Miss distance in lunar distances", 86, "distance_ld", null, null),
         mk("scatter", "Size vs distance", "Big ones pass farther out", 80, "diameter_m", "distance_ld", null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "steam") {
-    return {
-      title: "What gamers are playing",
-      charts: [
-        mk("bar", "Most-played games", "Peak concurrent players yesterday", 97, "name", "peak_players", null, "max"),
+    return finish("What gamers are playing", [
+        mk("bar", "Most-played games", "Peak concurrent players yesterday", 97, "name", "peak_players", null, "max", null, { topN: 15 }),
         mk("bubble", "Price vs reviews", "Sized by peak players", 92, "price_usd", "positive_pct", null, null, "peak_players"),
         mk("histogram", "Review scores", "Share of positive reviews (%)", 86, "positive_pct", null, null),
-        mk("bar", "Top developers", "Games in the top 100", 80, "developer", null, null, "count"),
-      ].slice(0, 5),
-    };
+        mk("bar", "Top developers", "Games in the top 100", 80, "developer", null, null, "count", null, { topN: 12 }),
+      ]);
   }
 
   if (kind === "bitcoin") {
-    return {
-      title: "Bitcoin, block by block",
-      charts: [
-        mk("bar", "Who mined the latest blocks", "Blocks per mining pool", 96, "pool", null, null, "count"),
+    return finish("Bitcoin, block by block", [
+        mk("bar", "Who mined the latest blocks", "Blocks per mining pool", 96, "pool", null, null, "count", null, { topN: 12 }),
         mk("line", "Transactions per block", "Over the latest ~60 blocks", 93, "ts", "tx_count", null, "max"),
-        mk("line", "Median fee", "sat/vB paid to get into each block", 90, "ts", "median_fee_sat_vb", null, "max"),
-        mk("scatter", "Transactions vs fees", "Busier blocks pay more?", 84, "tx_count", "total_fees_btc", "pool"),
-      ].slice(0, 5),
-    };
+        mk("line", "Tx vs median fee", "Throughput compared with fee pressure", 90, "ts", "tx_count", null, "max", null, { y2Field: "median_fee_sat_vb" }),
+        mk("line", "Median fee", "sat/vB paid to get into each block", 86, "ts", "median_fee_sat_vb", null, "max"),
+        mk("scatter", "Transactions vs fees", "Busier blocks pay more?", 82, "tx_count", "total_fees_btc", "pool"),
+      ]);
   }
 
   if (kind === "debt") {
-    return {
-      title: "US national debt",
-      charts: [
+    return finish("US national debt", [
         mk("line", "Total public debt", "Every business day since 1993 (US$)", 98, "record_date", "total_debt", null, "max"),
-        mk("line", "Held by the public", "Debt owned outside the federal government", 92, "record_date", "held_by_public", null, "max"),
+        mk("line", "Public vs intragovernmental", "Two ownership stacks compared", 94, "record_date", "held_by_public", null, "max", null, { y2Field: "intragovernmental" }),
+        mk("line", "Held by the public", "Debt owned outside the federal government", 90, "record_date", "held_by_public", null, "max"),
         mk("line", "Intragovernmental", "Debt the government owes itself (trust funds)", 86, "record_date", "intragovernmental", null, "max"),
-      ].slice(0, 5),
-    };
+        mk("line", "Total vs earlier half", "Recent debt path against the first half of the series", 82, "record_date", "total_debt", null, "max", null, { comparePrevious: true }),
+      ]);
   }
 
   if (kind === "firms") {
-    return {
-      title: "Active fires (VIIRS)",
-      charts: [
+    return finish("Active fires (VIIRS)", [
         mk("geoPoints", "Fire map", "Hotspots sized by fire radiative power", 98, "longitude", "latitude", "confidence", null, "frp"),
         mk("geoBubbles", "Fire power bubbles", "Bigger = more FRP", 94, "longitude", "latitude", "daynight", null, "frp"),
         mk("scatter", "Brightness vs power", "TI4 brightness against FRP", 88, "bright_ti4", "frp", "confidence"),
+        mk("scatter", "Brightness · day/night facets", "Small multiples by day vs night", 84, "bright_ti4", "frp", "confidence", null, null, { rowField: "daynight" }),
         mk("bar", "By confidence", "How many high / nominal / low detections?", 80, "confidence", null, null, "count"),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "nwis") {
-    return {
-      title: "US river gauges",
-      charts: [
+    return finish("US river gauges", [
         mk("line", "Discharge by site", "Cubic feet per second over the past 2 days", 98, "ts", "discharge_cfs", "site_name", "mean"),
-        mk("line", "Gage height", "Stage in feet by river", 92, "ts", "gage_height_ft", "site_name", "mean"),
+        mk("line", "Discharge facets", "One panel per river", 95, "ts", "discharge_cfs", null, "mean", null, { rowField: "site_name" }),
+        mk("line", "Discharge vs stage", "Flow compared with gage height", 92, "ts", "discharge_cfs", "site_name", "mean", null, { y2Field: "gage_height_ft" }),
         mk("geoBubbles", "Latest flow on the map", "Sites sized by recent discharge", 88, "longitude", "latitude", "site_name", null, "discharge_cfs"),
         mk("scatter", "Stage vs discharge", "How height tracks flow", 82, "gage_height_ft", "discharge_cfs", "site_name"),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "starlink") {
-    return {
-      title: "Starlink constellation",
-      charts: [
+    return finish("Starlink constellation", [
         mk("scatter", "Inclination vs mean motion", "Orbital families in the fleet", 96, "inclination", "mean_motion", null),
         mk("histogram", "Inclination spread", "How tightly clustered are the planes?", 90, "inclination", null, null),
         mk("scatter", "Eccentricity vs mean motion", "Near-circular LEO shell", 86, "eccentricity", "mean_motion", null),
         mk("beeswarm", "Mean motion swarm", "Every sat as a dot along orbits/day", 80, "object_name", "mean_motion", null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
   if (kind === "lobsters") {
-    return {
-      title: "Lobsters hottest",
-      charts: [
-        mk("bar", "Top by score", "What's hottest right now?", 95, "title", "score", null, "max"),
+    return finish("Lobsters hottest", [
+        mk("bar", "Top by score", "What's hottest right now?", 95, "title", "score", null, "max", null, { topN: 15 }),
         mk("scatter", "Score vs comments", "Discussion intensity", 90, "score", "comment_count", "author"),
-        mk("bar", "Active authors", "Who is posting?", 82, "author", null, null, "count"),
+        mk("scatter", "Score vs comments · facets", "Small multiples by author", 86, "score", "comment_count", null, null, null, { rowField: "author" }),
+        mk("bar", "Active authors", "Who is posting?", 82, "author", null, null, "count", null, { topN: 12 }),
         mk("histogram", "Score distribution", "How viral is the front page?", 78, "score", null, null),
-      ].slice(0, 5),
-    };
+      ]);
   }
 
-  return { title: `${kind} data`, charts: [] };
+  return finish(`${kind} data`, []);
 }
 
 /** SQL queries for each source kind. */

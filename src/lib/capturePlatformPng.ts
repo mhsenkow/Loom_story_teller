@@ -227,7 +227,12 @@ export async function applyBurnInToPng(
   blob: Blob,
   sourceLabel?: string | null,
 ): Promise<Blob> {
-  const burnIn = useLoomStore.getState().exportBurnIn;
+  const st = useLoomStore.getState();
+  // Visual footnote already owns the bottom strip during chart capture.
+  if ((st.chartVisualOverrides.sourceFootnote ?? "credit") !== "off") {
+    return blob;
+  }
+  const burnIn = st.exportBurnIn;
   if (
     !burnIn.includeSource &&
     !burnIn.includeTimestamp &&

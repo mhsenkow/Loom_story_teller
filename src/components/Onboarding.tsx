@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useLoomStore } from "@/lib/store";
 import { openDataSources } from "@/components/StartHere";
+import { ChartCard } from "@/components/ChartCard";
 import {
   scanDiscoverStories,
   DISCOVER_SEEN_KEY,
@@ -20,6 +21,7 @@ import {
 } from "@/lib/discoverStories";
 import { recommendSourceStory, recommendStreamStory } from "@/lib/recommendations";
 import { ALL_SOURCE_KINDS, sourceStatus, streamStatus } from "@/lib/tauri";
+import { SOURCE_BY_KIND } from "@/lib/sourceRegistry";
 import { ODD_CHART_KIND_OPTIONS } from "@/lib/oddCharts";
 import { GEO_MAP_KIND_OPTIONS, isGeoFamilyKind } from "@/lib/geoMaps";
 
@@ -52,9 +54,12 @@ const CHART_KIND_LABELS: Record<string, string> = Object.fromEntries([
   ["treemap", "Treemap"],
   ["sunburst", "Sunburst"],
   ["sankey", "Sankey"],
+  ["network", "Network"],
+  ["arcDiagram", "Arc diagram"],
   ["radar", "Radar"],
   ["choropleth", "Choropleth"],
   ["forceBubble", "Force bubble"],
+  ["bucketField", "Bucket field"],
   ["waterfall", "Waterfall"],
   ["ridgeline", "Ridgeline"],
   ["funnel", "Funnel"],
@@ -82,6 +87,7 @@ export function Onboarding() {
   );
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [chartFilter, setChartFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [sortMode, setSortMode] = useState<SortMode>("score");
   const whatsNewOpen = useLoomStore((s) => s.whatsNewOpen);
 
@@ -111,6 +117,7 @@ export function Onboarding() {
       setShow(true);
       setCategoryFilter("all");
       setChartFilter("all");
+      setSourceFilter("all");
       setSortMode("score");
       setScannedHint(`Scanning ${ALL_SOURCE_KINDS.length + 1} live feeds…`);
       void (async () => {
@@ -145,9 +152,9 @@ export function Onboarding() {
     };
 
     const id = window.setTimeout(() => {
-      // Opened from a shared #chart= / #dive= link — show that, not discover
+      // Opened from a shared #chart= / #dive= / #story= link — show that, not discover
       // (don't mark discover seen; it greets them next time).
-      if (/(?:^#|&)(?:chart|dive)=/.test(window.location.hash)) {
+      if (/(?:^#|&)(?:chart|dive|story)=/.test(window.location.hash)) {
         setShow(false);
         return;
       }
@@ -186,6 +193,16 @@ export function Onboarding() {
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [stories]);
 
+  const sources = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of stories) {
+      if (!map.has(s.kind)) map.set(s.kind, s.fileName);
+    }
+    return Array.from(map.entries())
+      .map(([kind, fileName]) => ({ kind, fileName }))
+      .sort((a, b) => a.fileName.localeCompare(b.fileName));
+  }, [stories]);
+
   const chartKinds = useMemo(() => {
     const set = new Set<string>();
     for (const s of stories) set.add(s.chartKind);
@@ -196,6 +213,9 @@ export function Onboarding() {
     let list = stories;
     if (categoryFilter !== "all") {
       list = list.filter((s) => s.category === categoryFilter);
+    }
+    if (sourceFilter !== "all") {
+      list = list.filter((s) => s.kind === sourceFilter);
     }
     if (chartFilter === "maps") {
       list = list.filter((s) => isGeoFamilyKind(s.chartKind));
@@ -225,7 +245,7 @@ export function Onboarding() {
       }
     });
     return sorted;
-  }, [stories, categoryFilter, chartFilter, sortMode]);
+  }, [stories, categoryFilter, sourceFilter, chartFilter, sortMode]);
 
   const dismiss = () => {
     try {
@@ -256,6 +276,15 @@ export function Onboarding() {
         extension: "stream",
         row_count: story.sample.total_rows,
         size_bytes: 0,
+        ...(story.kind === "wiki"
+          ? {
+              sourceHome: "https://www.wikimedia.org/",
+              sourceCredit: "Wikimedia recent changes · CC BY-SA",
+            }
+          : {
+              sourceHome: SOURCE_BY_KIND[story.kind]?.homepage,
+              sourceCredit: SOURCE_BY_KIND[story.kind]?.attribution,
+            }),
       };
       setSelectedFile(file);
       setColumnStats(story.stats);
@@ -270,11 +299,13 @@ export function Onboarding() {
         charts.find((c) => c.kind === story.chart.kind && c.title === story.chart.title) ??
         charts.find((c) => c.kind === story.chart.kind) ??
         charts[0]!;
-      setChartRecs(charts);
-      setActiveChart(preferred);
+      // Open the exact Discover chart that was previewed (stack mode, encodings).
+      const openChart = { ...preferred, ...story.chart, id: story.chart.id || preferred.id };
+      setChartRecs([openChart, ...charts.filter((c) => c.id !== openChart.id)]);
+      setActiveChart(openChart);
       // The hook ("M5.8 quake — …") is the headline people came for; keep it on the chart.
-      if (story.hook && story.hook !== preferred.title) {
-        useLoomStore.getState().setChartTitleOverride(preferred.id, story.hook);
+      if (story.hook && story.hook !== openChart.title) {
+        useLoomStore.getState().setChartTitleOverride(openChart.id, story.hook);
       }
       setVegaSpec(null);
       setViewMode("chart");
@@ -303,24 +334,39 @@ export function Onboarding() {
   const clearFilters = () => {
     setCategoryFilter("all");
     setChartFilter("all");
+    setSourceFilter("all");
     setSortMode("score");
   };
 
   const topicFade = useEdgeFade<HTMLDivElement>();
+  const sourceFade = useEdgeFade<HTMLDivElement>();
   const kindFade = useEdgeFade<HTMLDivElement>();
 
-  const filtersActive = categoryFilter !== "all" || chartFilter !== "all" || sortMode !== "score";
+  const filtersActive =
+    categoryFilter !== "all" || chartFilter !== "all" || sourceFilter !== "all" || sortMode !== "score";
 
   const exploreSummary = useMemo(() => {
     const parts: string[] = [];
     if (categoryFilter !== "all") parts.push(categoryFilter);
+    if (sourceFilter !== "all") {
+      parts.push(sources.find((s) => s.kind === sourceFilter)?.fileName ?? sourceFilter);
+    }
     if (chartFilter !== "all") parts.push(chartKindLabel(chartFilter));
     if (phase === "scan" && stories.length > 0) return scannedHint;
     if (parts.length === 0) {
       return `${visible.length} live ${visible.length === 1 ? "story" : "stories"} across open data`;
     }
     return `${visible.length} ${visible.length === 1 ? "story" : "stories"} · ${parts.join(" · ")}`;
-  }, [categoryFilter, chartFilter, phase, stories.length, scannedHint, visible.length]);
+  }, [
+    categoryFilter,
+    sourceFilter,
+    chartFilter,
+    phase,
+    stories.length,
+    scannedHint,
+    visible.length,
+    sources,
+  ]);
 
   // The scan keeps streaming in the background while What's new is up, so
   // stories are ready the moment it closes.
@@ -435,6 +481,37 @@ export function Onboarding() {
                 </div>
               </div>
 
+              {sources.length > 1 && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
+                    From
+                  </span>
+                  <div
+                    className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5"
+                    ref={sourceFade.ref}
+                    style={sourceFade.style}
+                    role="group"
+                    aria-label="Source"
+                  >
+                    <div className="flex items-center gap-0.5 w-max">
+                      <FilterChip
+                        label="All"
+                        pressed={sourceFilter === "all"}
+                        onClick={() => setSourceFilter("all")}
+                      />
+                      {sources.map((src) => (
+                        <FilterChip
+                          key={src.kind}
+                          label={src.fileName}
+                          pressed={sourceFilter === src.kind}
+                          onClick={() => setSourceFilter(src.kind)}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {chartKinds.length > 1 && (
                 <div
                   className="flex items-center gap-2 min-w-0"
@@ -512,49 +589,25 @@ export function Onboarding() {
           )}
 
           {(phase === "ready" || stories.length > 0) && visible.length > 0 && (
-            <ul className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 content-start gap-1.5 list-none m-0 p-0">
+            <ul className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 content-start gap-2 list-none m-0 p-0">
               {visible.map((s) => (
-                <li key={s.id} className="min-w-0">
-                  <button
-                    type="button"
-                    disabled={openingId != null}
-                    onClick={() => void openStory(s)}
-                    className={`
-                      group w-full h-full text-left border border-loom-border rounded-lg p-2
-                      bg-loom-elevated/40 hover:border-loom-accent/50 hover:bg-loom-accent/5 active:bg-loom-accent/10
-                      transition-colors disabled:opacity-60 flex flex-col gap-1 min-h-[6.5rem] sm:min-h-[5.25rem]
-                      ${openingId === s.id ? "border-loom-accent ring-1 ring-loom-accent/30" : ""}
-                    `}
-                  >
-                    <div className="flex items-start justify-between gap-1">
-                      <span className="text-[10px] sm:text-[9px] uppercase tracking-wider font-medium text-loom-muted truncate leading-tight">
-                        {s.category}
-                        <span className="text-loom-muted/50 mx-0.5">·</span>
-                        <span className="normal-case tracking-normal font-normal">{s.fileName}</span>
-                      </span>
-                      <span
-                        className="shrink-0 text-[10px] sm:text-[9px] px-1 py-px rounded bg-loom-bg/70 border border-loom-border/70 text-loom-accent leading-tight"
-                        title={s.chartKind}
-                      >
-                        {chartKindLabel(s.chartKind)}
-                      </span>
-                    </div>
-                    <p className="text-sm sm:text-xs font-semibold text-loom-text leading-snug line-clamp-3 sm:line-clamp-2 group-hover:text-loom-accent transition-colors">
-                      {s.hook}
-                    </p>
-                    <p className="text-[11px] sm:text-[10px] text-loom-muted leading-snug line-clamp-2 sm:line-clamp-1 mt-auto">{s.blurb}</p>
-                    <div className="hidden sm:flex items-center justify-between gap-1">
-                      <span
-                        className="text-[9px] font-mono text-loom-muted/70 tabular-nums"
-                        title={`Match score ${Math.round(s.score)}`}
-                      >
-                        {Math.round(s.score)}
-                      </span>
-                      <span className="text-[9px] text-loom-muted opacity-0 group-hover:opacity-100 transition-opacity">
-                        {openingId === s.id ? "…" : "→"}
-                      </span>
-                    </div>
-                  </button>
+                <li key={s.id} className="min-w-0 animate-fade-in">
+                  <div className="relative">
+                    <span className="absolute top-1.5 left-1.5 z-10 text-[9px] uppercase tracking-wider font-medium text-loom-muted bg-loom-bg/85 border border-loom-border/70 rounded px-1 py-px max-w-[70%] truncate pointer-events-none">
+                      {s.category}
+                    </span>
+                    <ChartCard
+                      rec={{
+                        ...s.chart,
+                        title: s.hook,
+                        subtitle: s.blurb,
+                      }}
+                      data={s.sample}
+                      isActive={openingId === s.id}
+                      onClick={() => void openStory(s)}
+                      micro
+                    />
+                  </div>
                 </li>
               ))}
             </ul>

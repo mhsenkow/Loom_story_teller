@@ -282,26 +282,62 @@ export interface ChartSharePageInput {
   appUrl?: string | null;
   /** Absolute Loom URL with `#chart=…` that reopens this exact chart (replaces the "make your own" link). */
   openUrl?: string | null;
+  /** When a data snapshot travels with the story — show lineage details. */
+  lineage?: {
+    capturedAt: string;
+    rowCount: number;
+    totalRows: number;
+    truncated: boolean;
+    columns: string[];
+  } | null;
 }
+
+/** Stable tokens the Worker rewrites to hosted `/s/{id}.img` URLs. */
+export const LOOM_SHARE_IMG_TOKEN = "__LOOM_SHARE_IMG__";
+export const LOOM_OG_IMG_TOKEN = "__LOOM_OG_IMG__";
 
 /**
  * Single-chart share page: one big image, headline, caption, source.
- * The Worker swaps the og:image data URL for a hosted PNG so links unfurl.
+ * Image slots use stable tokens so the Worker can swap in hosted JPEGs
+ * (unfurlers reject data: URLs; huge HTML payloads are slow).
  */
 export function buildChartSharePageHtml(input: ChartSharePageInput): string {
   const LOOM = snapshotThemeTokens();
   const title = escapeHtml(input.title || "Loom chart");
   const captionText = (input.caption || "").trim();
   const desc = escapeHtml((captionText || `${input.title} — made with Loom`).slice(0, 280));
-  const img = escapeHtml(input.imageDataUrl);
+  // Prefer tokens; fall back to escaped data URL for offline / non-Worker paths.
+  const img = input.imageDataUrl?.startsWith("data:")
+    ? LOOM_SHARE_IMG_TOKEN
+    : escapeHtml(input.imageDataUrl || LOOM_SHARE_IMG_TOKEN);
+  const ogImg = LOOM_OG_IMG_TOKEN;
   const captionHtml = captionText
     ? `<p class="cs-caption">${escapeHtml(captionText).replace(/\n/g, "<br />")}</p>`
     : "";
-  const source = input.sourceLabel
-    ? `<p class="cs-meta">Data: ${escapeHtml(input.sourceLabel)} · ${escapeHtml(new Date().toLocaleString())}</p>`
-    : `<p class="cs-meta">${escapeHtml(new Date().toLocaleString())}</p>`;
+  const when = input.lineage?.capturedAt
+    ? new Date(input.lineage.capturedAt).toLocaleString()
+    : new Date().toLocaleString();
+  const sourceBits: string[] = [];
+  if (input.sourceLabel) sourceBits.push(`Data: ${escapeHtml(input.sourceLabel)}`);
+  sourceBits.push(escapeHtml(when));
+  if (input.lineage) {
+    const n = input.lineage.truncated
+      ? `${input.lineage.rowCount.toLocaleString()} of ${input.lineage.totalRows.toLocaleString()} rows`
+      : `${input.lineage.rowCount.toLocaleString()} rows`;
+    sourceBits.push(escapeHtml(n));
+    sourceBits.push("snapshot travels with this link");
+  }
+  const source = `<p class="cs-meta">${sourceBits.join(" · ")}</p>`;
+  const colLine =
+    input.lineage?.columns?.length
+      ? `<p class="cs-meta cs-cols">Columns: ${escapeHtml(input.lineage.columns.slice(0, 24).join(", "))}${
+          input.lineage.columns.length > 24 ? "…" : ""
+        }</p>`
+      : "";
   const cta = input.openUrl
-    ? `<a class="cs-cta" href="${escapeHtml(input.openUrl)}">Open this chart in Loom →</a>`
+    ? `<a class="cs-cta" data-loom-open="1" href="${escapeHtml(input.openUrl)}">${
+        input.lineage ? "Open with shared data in Loom →" : "Open this chart in Loom →"
+      }</a>`
     : input.appUrl
       ? `<a class="cs-cta" href="${escapeHtml(input.appUrl)}">Make your own with Loom →</a>`
       : `<span class="cs-cta">Made with Loom</span>`;
@@ -316,11 +352,13 @@ export function buildChartSharePageHtml(input: ChartSharePageInput): string {
   <meta property="og:type" content="article" />
   <meta property="og:title" content="${title}" />
   <meta property="og:description" content="${desc}" />
-  <meta property="og:image" content="${img}" />
+  <meta property="og:image" content="${ogImg}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="627" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${title}" />
   <meta name="twitter:description" content="${desc}" />
-  <meta name="twitter:image" content="${img}" />
+  <meta name="twitter:image" content="${ogImg}" />
   <style>
     * { box-sizing: border-box; }
     body {
@@ -345,6 +383,7 @@ export function buildChartSharePageHtml(input: ChartSharePageInput): string {
     .cs-figure img { display: block; width: 100%; height: auto; }
     .cs-caption { margin: 0; font-size: 0.95rem; line-height: 1.55; color: ${LOOM.text}; opacity: 0.88; }
     .cs-meta { margin: 0; font-size: 0.75rem; color: ${LOOM.muted}; }
+    .cs-cols { opacity: 0.85; word-break: break-word; }
     .cs-cta {
       align-self: flex-start;
       margin-top: 6px;
@@ -364,6 +403,7 @@ export function buildChartSharePageHtml(input: ChartSharePageInput): string {
     <figure class="cs-figure"><img src="${img}" alt="${title}" /></figure>
     ${captionHtml}
     ${source}
+    ${colLine}
     ${cta}
   </main>
 </body>

@@ -43,6 +43,12 @@ export interface ChartLinkChart {
   topN?: number;
   y2Field?: string;
   comparePrevious?: boolean;
+  rollingWindow?: 7 | 30;
+  yScale?: "linear" | "log" | "symlog";
+  seriesNormalize?: "index100" | "zscore";
+  residualOverlay?: boolean;
+  anomalyHighlight?: boolean;
+  bumpMode?: "rank" | "delta";
   tooltipFields?: string[];
   tooltipKeyField?: string;
   /** The recommendation's own title / subtitle (story recs carry hand-written ones). */
@@ -144,6 +150,12 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
     y2Field: str(rec.y2Field),
     comparePrevious: rec.comparePrevious || undefined,
+    rollingWindow: rec.rollingWindow === 7 || rec.rollingWindow === 30 ? rec.rollingWindow : undefined,
+    yScale: rec.yScale && rec.yScale !== "linear" ? rec.yScale : undefined,
+    seriesNormalize: rec.seriesNormalize === "index100" || rec.seriesNormalize === "zscore" ? rec.seriesNormalize : undefined,
+    residualOverlay: rec.residualOverlay || undefined,
+    anomalyHighlight: rec.anomalyHighlight || undefined,
+    bumpMode: rec.bumpMode === "delta" || rec.bumpMode === "rank" ? rec.bumpMode : undefined,
     tooltipFields: rec.tooltipFields?.length ? [...rec.tooltipFields] : undefined,
     tooltipKeyField: str(rec.tooltipKeyField),
     title: str(rec.title),
@@ -186,6 +198,12 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["topN", "tn"],
   ["y2Field", "y2"],
   ["comparePrevious", "cp"],
+  ["rollingWindow", "rw"],
+  ["yScale", "ys"],
+  ["seriesNormalize", "sn"],
+  ["residualOverlay", "ro"],
+  ["anomalyHighlight", "ah"],
+  ["bumpMode", "bm"],
   ["tooltipFields", "tf"],
   ["tooltipKeyField", "tk"],
   ["title", "ti"],
@@ -252,13 +270,34 @@ export function decodeChartLink(hash: string): ChartLink | null {
 
   const chart: ChartLinkChart = { kind: kind as ChartKind, xField };
   for (const [f, k] of CHART_KEYS) {
-    if (f === "kind" || f === "xField" || f === "yAggregate" || f === "tooltipFields" || f === "topN" || f === "comparePrevious") continue;
+    if (
+      f === "kind" ||
+      f === "xField" ||
+      f === "yAggregate" ||
+      f === "tooltipFields" ||
+      f === "topN" ||
+      f === "comparePrevious" ||
+      f === "rollingWindow" ||
+      f === "yScale" ||
+      f === "seriesNormalize" ||
+      f === "residualOverlay" ||
+      f === "anomalyHighlight" ||
+      f === "bumpMode"
+    ) {
+      continue;
+    }
     const v = field(cr[k], f === "title" || f === "subtitle" ? 300 : 200);
     if (v) chart[f] = v;
   }
   if (typeof cr.a === "string" && AGGS.has(cr.a)) chart.yAggregate = cr.a as YAggregateOption;
   if (typeof cr.tn === "number" && Number.isFinite(cr.tn)) chart.topN = Math.max(3, Math.min(50, Math.round(cr.tn)));
   if (cr.cp === true) chart.comparePrevious = true;
+  if (cr.rw === 7 || cr.rw === 30) chart.rollingWindow = cr.rw;
+  if (cr.ys === "log" || cr.ys === "symlog" || cr.ys === "linear") chart.yScale = cr.ys;
+  if (cr.sn === "index100" || cr.sn === "zscore") chart.seriesNormalize = cr.sn;
+  if (cr.ro === true) chart.residualOverlay = true;
+  if (cr.ah === true) chart.anomalyHighlight = true;
+  if (cr.bm === "delta" || cr.bm === "rank") chart.bumpMode = cr.bm;
   if (Array.isArray(cr.tf)) {
     const tf = cr.tf.filter((t): t is string => typeof t === "string" && t.length > 0 && t.length <= 200).slice(0, 40);
     if (tf.length) chart.tooltipFields = tf;
@@ -340,6 +379,12 @@ export function restoreChartRec(
       topN: c.topN ?? null,
       y2Field: c.y2Field ?? null,
       comparePrevious: c.comparePrevious ?? null,
+      rollingWindow: c.rollingWindow ?? null,
+      yScale: c.yScale ?? null,
+      seriesNormalize: c.seriesNormalize ?? null,
+      residualOverlay: c.residualOverlay ?? null,
+      anomalyHighlight: c.anomalyHighlight ?? null,
+      bumpMode: c.bumpMode ?? null,
       tooltipFields: c.tooltipFields ?? null,
       tooltipKeyField: c.tooltipKeyField ?? null,
       barStackMode: link.barStackMode ?? "grouped",

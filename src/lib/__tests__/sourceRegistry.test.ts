@@ -77,9 +77,17 @@ describe.each(SOURCE_DEFS.map((d) => [d.kind, d] as const))("source %s", (kind, 
     const story = recommendSourceStory(kind, columnsFor(kind), null);
     expect(story.charts.length, "no default charts").toBeGreaterThan(0);
     for (const c of story.charts) {
-      const fields = [c.xField, c.yField, c.colorField, c.sizeField, c.zField, c.timeField, c.trailId].filter(
-        (f): f is string => !!f,
-      );
+      const fields = [
+        c.xField,
+        c.yField,
+        c.colorField,
+        c.sizeField,
+        c.zField,
+        c.timeField,
+        c.trailId,
+        c.rowField,
+        c.y2Field,
+      ].filter((f): f is string => typeof f === "string" && f.length > 0);
       for (const f of fields) expect(def.columns, `${c.title} → ${f}`).toContain(f);
     }
   });

@@ -133,6 +133,10 @@ export interface OddRenderOpts {
   themeBg?: string;
   /** "none" suppresses the renderer's own color legend; otherwise it draws one when a color field is encoded. */
   legendPosition?: string | null;
+  /** Cap categories (waffle / radial / iso bars) when Encoding Top N is set. */
+  topN?: number | null;
+  /** Bump: absolute rank or Δrank over time. */
+  bumpMode?: "rank" | "delta" | null;
 }
 
 type ColType = "quantitative" | "nominal" | "temporal";
@@ -1347,7 +1351,9 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   let entries = groupSum(rows, xi, yi, how).filter(([, v]) => v > 0);
   if (!entries.length) return "Nothing positive to split into 100 cells";
   const { mini, ink } = env;
-  const maxCats = 8;
+  const maxCats = env.opts.topN != null
+    ? Math.max(3, Math.min(20, Math.round(env.opts.topN)))
+    : 8;
   const otherColor = inkTint(ink, 0.4);
   let hasOther = false;
   if (entries.length > maxCats) {
@@ -1425,7 +1431,10 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
 function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number) {
   if (xi < 0) return "Choose a category for the unit chart";
   const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
-  const entries = groupSum(rows, xi, yi, how).filter(([, v]) => v > 0).slice(0, env.mini ? 5 : 8);
+  const entries = groupSum(rows, xi, yi, how).filter(([, v]) => v > 0).slice(
+    0,
+    env.opts.topN != null ? Math.max(3, Math.min(20, Math.round(env.opts.topN))) : (env.mini ? 5 : 8),
+  );
   if (!entries.length) return "Nothing positive to count in units";
   const { mini, ink } = env;
   const maxV = Math.max(...entries.map(([, v]) => v));
@@ -1743,7 +1752,22 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
     scored.forEach((sc, i) => m.set(sc.s, i + 1));
     return m;
   });
+  const deltaMode = env.opts.bumpMode === "delta";
+  const values = ranks.map((m, i) => {
+    if (!deltaMode || i === 0) return m;
+    const prev = ranks[i - 1]!;
+    const out = new Map<string, number>();
+    for (const s of series) {
+      const cur = m.get(s);
+      const p = prev.get(s);
+      if (cur != null && p != null) out.set(s, p - cur); // positive = climbed
+    }
+    return out;
+  });
   const maxRank = series.length;
+  const deltaSpan = deltaMode
+    ? Math.max(1, ...values.flatMap((m) => [...m.values()].map((v) => Math.abs(v))))
+    : 0;
   ctx.font = fontOf(10, env.font);
   const labelW = mini ? 0 : Math.min(130, Math.max(...series.map((s) => ctx.measureText(s).width)) + 18);
   const base = basePlot(env);
@@ -1752,23 +1776,43 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
   const ph = plot.bottom - plot.top;
   const xAt = (i: number) => plot.left + model.pos[i]! * pw;
   const yAt = (rank: number) => plot.top + ((rank - 1) / Math.max(1, maxRank - 1)) * ph;
+  const yAtDelta = (d: number) => plot.top + ((deltaSpan - d) / (2 * deltaSpan || 1)) * ph;
   if (!mini) {
     ctx.strokeStyle = inkTint(ink, ink.light ? 0.1 : 0.12);
     ctx.lineWidth = 1;
     ctx.fillStyle = ink.muted;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
-    const every = Math.max(1, Math.ceil(12 / Math.max(1, ph / Math.max(1, maxRank - 1))));
-    for (let k = 1; k <= maxRank; k++) {
-      const y = Math.round(yAt(k)) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(plot.left, y);
-      ctx.lineTo(plot.right, y);
-      ctx.stroke();
-      if ((k - 1) % every === 0) ctx.fillText(`#${k}`, plot.left - 8, y);
+    if (deltaMode) {
+      for (const d of [-deltaSpan, 0, deltaSpan]) {
+        const y = Math.round(yAtDelta(d)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(plot.left, y);
+        ctx.lineTo(plot.right, y);
+        ctx.stroke();
+        ctx.fillText(d === 0 ? "0" : d > 0 ? `↑${d}` : `↓${Math.abs(d)}`, plot.left - 8, y);
+      }
+    } else {
+      const every = Math.max(1, Math.ceil(12 / Math.max(1, ph / Math.max(1, maxRank - 1))));
+      for (let k = 1; k <= maxRank; k++) {
+        const y = Math.round(yAt(k)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(plot.left, y);
+        ctx.lineTo(plot.right, y);
+        ctx.stroke();
+        if ((k - 1) % every === 0) ctx.fillText(`#${k}`, plot.left - 8, y);
+      }
     }
     drawOrderedXAxis(ctx, env, model, plot);
-    drawAxisFieldLabels(ctx, env.w, env.h, env.pad, fieldName(env, xi), `Rank by ${fieldName(env, yi)}`, env.look);
+    drawAxisFieldLabels(
+      ctx,
+      env.w,
+      env.h,
+      env.pad,
+      fieldName(env, xi),
+      deltaMode ? `Δ rank by ${fieldName(env, yi)}` : `Rank by ${fieldName(env, yi)}`,
+      env.look,
+    );
   }
   const ends: { s: string; y: number; color: string }[] = [];
   series.forEach((s) => {
@@ -1781,13 +1825,13 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
     let pen = false;
     let last: { x: number; y: number } | null = null;
     model.keys.forEach((_, i) => {
-      const rank = ranks[i]!.get(s);
-      if (rank == null) {
+      const v = values[i]!.get(s);
+      if (v == null) {
         pen = false;
         return;
       }
       const x = xAt(i);
-      const y = yAt(rank);
+      const y = deltaMode ? yAtDelta(v) : yAt(v);
       if (!pen) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
       pen = true;
@@ -1797,8 +1841,8 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
     ctx.globalAlpha = 1;
     if (!mini) {
       model.keys.forEach((_, i) => {
-        const rank = ranks[i]!.get(s);
-        if (rank != null) dot(ctx, xAt(i), yAt(rank), 3.2, color, 1, ink.bg);
+        const v = values[i]!.get(s);
+        if (v != null) dot(ctx, xAt(i), deltaMode ? yAtDelta(v) : yAt(v), 3.2, color, 1, ink.bg);
       });
     }
     if (last) ends.push({ s, y: (last as { y: number }).y, color });
@@ -2075,7 +2119,10 @@ function drawSpiral(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
 function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number) {
   if (xi < 0) return "Choose a category for the wheel";
   const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
-  const entries = groupSum(rows, xi, yi, how).filter(([, v]) => v > 0).slice(0, 16);
+  const entries = groupSum(rows, xi, yi, how).filter(([, v]) => v > 0).slice(
+    0,
+    env.opts.topN != null ? Math.max(3, Math.min(30, Math.round(env.opts.topN))) : 16,
+  );
   if (!entries.length) return "Nothing positive to plot on the wheel";
   const { mini, ink } = env;
   const plot = basePlot(env);
@@ -2295,7 +2342,10 @@ function drawVoronoi(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number) {
   if (xi < 0) return "Choose a category for the bars";
   const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
-  const entries = groupSum(rows, xi, yi, how).filter(([, v]) => v > 0).slice(0, 12);
+  const entries = groupSum(rows, xi, yi, how).filter(([, v]) => v > 0).slice(
+    0,
+    env.opts.topN != null ? Math.max(3, Math.min(30, Math.round(env.opts.topN))) : 12,
+  );
   if (!entries.length) return "Nothing positive to stack into bars";
   const { mini, ink } = env;
   const base = basePlot(env);

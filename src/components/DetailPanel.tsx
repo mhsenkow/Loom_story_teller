@@ -50,6 +50,7 @@ import {
   applyEncodingLocks,
   chartKindDataSupport,
   tryBuildRandomChartRec,
+  randomEncodingToExtra,
   recommendStorySequence,
   recommendStreamStory,
   type ChartKind,
@@ -57,6 +58,11 @@ import {
   type EncodingShuffleLocks,
 } from "@/lib/recommendations";
 import { computeDataQualityHints, formatChartAggregationSummary, chartCapabilities, encodingChannelLabels } from "@/lib/chartSupport";
+import {
+  resolveDataProvenance,
+  provenanceKindLabel,
+  type DataProvenance,
+} from "@/lib/dataProvenance";
 import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 import {
   runAnomaly,
@@ -68,7 +74,7 @@ import {
 } from "@/lib/smartAnalytics";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
-import { exportDashboardMicrosite, streamSnapshot, isTauri, isTauri as checkTauri } from "@/lib/tauri";
+import { exportDashboardMicrosite, streamSnapshot, isTauri, isTauri as checkTauri, openExternalUrl } from "@/lib/tauri";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
 import {
   SOCIAL_PRESETS,
@@ -1379,11 +1385,19 @@ const Ico = {
 } as const;
 
 function StatsView() {
-  const { columnStats, sampleRows } = useLoomStore();
+  const { columnStats, sampleRows, selectedFile } = useLoomStore();
   const stats = columnStats ?? [];
   const dq = useMemo(() => computeDataQualityHints(stats, sampleRows), [stats, sampleRows]);
+  const provenance = useMemo(
+    () =>
+      resolveDataProvenance(selectedFile, {
+        loadedRows: sampleRows?.rows.length ?? null,
+        totalRows: sampleRows?.total_rows ?? selectedFile?.row_count ?? null,
+      }),
+    [selectedFile, sampleRows],
+  );
 
-  if (stats.length === 0) {
+  if (stats.length === 0 && !provenance) {
     return (
       <div className="p-4 text-center text-sm text-loom-muted">
         No column stats. Select a file or run a query to see stats.
@@ -1393,43 +1407,108 @@ function StatsView() {
 
   return (
     <div className="p-3 space-y-2">
-      {(dq.nullHeavy.length > 0 || dq.constantCols.length > 0 || dq.duplicateSummary) && (
-        <div className="loom-card border border-loom-border/80 p-2 space-y-1.5">
-          <p className="text-xs font-semibold text-loom-text">Data health</p>
-          {dq.nullHeavy.length > 0 && (
-            <div className="text-2xs text-loom-muted">
-              <span className="text-loom-text font-medium">High nulls: </span>
-              {dq.nullHeavy.map((h) => `${h.name} (${h.pct}%)`).join(", ")}
+      {provenance && <ProvenanceCard provenance={provenance} />}
+      {stats.length === 0 ? (
+        <div className="text-center text-sm text-loom-muted py-4">No column stats yet.</div>
+      ) : (
+        <>
+          {(dq.nullHeavy.length > 0 || dq.constantCols.length > 0 || dq.duplicateSummary) && (
+            <div className="loom-card border border-loom-border/80 p-2 space-y-1.5">
+              <p className="text-xs font-semibold text-loom-text">Data health</p>
+              {dq.nullHeavy.length > 0 && (
+                <div className="text-2xs text-loom-muted">
+                  <span className="text-loom-text font-medium">High nulls: </span>
+                  {dq.nullHeavy.map((h) => `${h.name} (${h.pct}%)`).join(", ")}
+                </div>
+              )}
+              {dq.constantCols.length > 0 && (
+                <div className="text-2xs text-loom-muted">
+                  <span className="text-loom-text font-medium">Constant / single value: </span>
+                  {dq.constantCols.join(", ")}
+                </div>
+              )}
+              {dq.duplicateSummary && (
+                <div className="text-2xs text-loom-muted">
+                  <span className="text-loom-text font-medium">Duplicates: </span>
+                  {dq.duplicateSummary}
+                </div>
+              )}
             </div>
           )}
-          {dq.constantCols.length > 0 && (
-            <div className="text-2xs text-loom-muted">
-              <span className="text-loom-text font-medium">Constant / single value: </span>
-              {dq.constantCols.join(", ")}
+          {stats.map((col) => (
+            <div key={String(col.name)} className="loom-card space-y-1.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-medium text-loom-text">{col.name ?? "—"}</span>
+                <span className="loom-badge">{col.data_type ?? "?"}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-2xs font-mono">
+                <StatRow label="Distinct" value={formatNumber(Number(col.distinct_count) || 0)} />
+                <StatRow label="Nulls" value={formatNumber(Number(col.null_count) || 0)} />
+                <StatRow label="Min" value={col.min_value != null ? String(col.min_value) : "—"} />
+                <StatRow label="Max" value={col.max_value != null ? String(col.max_value) : "—"} />
+              </div>
             </div>
-          )}
-          {dq.duplicateSummary && (
-            <div className="text-2xs text-loom-muted">
-              <span className="text-loom-text font-medium">Duplicates: </span>
-              {dq.duplicateSummary}
-            </div>
-          )}
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ProvenanceCard({ provenance }: { provenance: DataProvenance }) {
+  const openLink = async (href: string) => {
+    try {
+      if (isTauri()) await openExternalUrl(href);
+      else window.open(href, "_blank", "noopener,noreferrer");
+    } catch {
+      window.open(href, "_blank", "noopener,noreferrer");
+    }
+  };
+
+  return (
+    <div className="loom-card border border-loom-accent/25 bg-loom-accent/5 p-2.5 space-y-2">
+      <div className="flex items-start justify-between gap-2 min-w-0">
+        <div className="min-w-0 space-y-0.5">
+          <p className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/90">Source</p>
+          <p className="text-xs font-semibold text-loom-text leading-snug truncate" title={provenance.title}>
+            {provenance.title}
+          </p>
+        </div>
+        <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded border border-loom-border/80 text-loom-muted">
+          {provenanceKindLabel(provenance.kind)}
+        </span>
+      </div>
+      {provenance.credit && (
+        <p className="text-2xs text-loom-muted leading-snug">{provenance.credit}</p>
+      )}
+      <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-2xs text-loom-muted font-mono">
+        {provenance.rowsLabel && <span>{provenance.rowsLabel}</span>}
+        {provenance.capturedAt && (
+          <span title={provenance.capturedAt}>
+            Captured {new Date(provenance.capturedAt).toLocaleString()}
+          </span>
+        )}
+      </div>
+      {provenance.links.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {provenance.links.map((link) => (
+            <button
+              key={link.href}
+              type="button"
+              onClick={() => void openLink(link.href)}
+              className="text-2xs px-2 py-1 rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 transition-colors"
+              title={link.href}
+            >
+              {link.label} ↗
+            </button>
+          ))}
         </div>
       )}
-      {stats.map((col) => (
-        <div key={String(col.name)} className="loom-card space-y-1.5">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono font-medium text-loom-text">{col.name ?? "—"}</span>
-            <span className="loom-badge">{col.data_type ?? "?"}</span>
-          </div>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-2xs font-mono">
-            <StatRow label="Distinct" value={formatNumber(Number(col.distinct_count) || 0)} />
-            <StatRow label="Nulls" value={formatNumber(Number(col.null_count) || 0)} />
-            <StatRow label="Min" value={col.min_value != null ? String(col.min_value) : "—"} />
-            <StatRow label="Max" value={col.max_value != null ? String(col.max_value) : "—"} />
-          </div>
-        </div>
-      ))}
+      {!provenance.links.length && provenance.kind === "local" && (
+        <p className="text-2xs text-loom-muted/80 leading-snug">
+          Local file — no public URL on this dataset. Export / share will still credit the filename.
+        </p>
+      )}
     </div>
   );
 }
@@ -1804,11 +1883,11 @@ function ExportView() {
         title: dash.name,
         ogImageDataUrl: og,
       });
-      if (published) {
+      if (published?.url) {
         await copyTextToClipboard(published.url);
         setToast(`Published — URL copied`);
       } else {
-        setCopyError("Publish unavailable offline — download the story bundle instead.");
+        setCopyError(published?.error || "Publish unavailable offline — download the story bundle instead.");
       }
     } catch (e) {
       console.warn(e);
@@ -1931,7 +2010,7 @@ function ExportView() {
             <span className="text-2xs text-loom-muted">Burn-in footer</span>
             {(
               [
-                ["includeSource", "Source file"],
+                ["includeSource", "Source (if no on-chart footnote)"],
                 ["includeTimestamp", "Timestamp"],
                 ["includeHandle", "Handle"],
                 ["includeLoomMark", "Made with Loom"],
@@ -2539,7 +2618,6 @@ function ChartPanelView() {
   const [moreChannelsOpen, setMoreChannelsOpen] = useState(() =>
     Boolean(
       activeChart?.sizeField ||
-        activeChart?.rowField ||
         activeChart?.glowField ||
         activeChart?.outlineField ||
         activeChart?.opacityField,
@@ -2572,6 +2650,12 @@ function ChartPanelView() {
       topN: activeChart?.topN ?? null,
       y2Field: activeChart?.y2Field ?? null,
       comparePrevious: activeChart?.comparePrevious ?? null,
+      rollingWindow: activeChart?.rollingWindow ?? null,
+      yScale: activeChart?.yScale ?? null,
+      seriesNormalize: activeChart?.seriesNormalize ?? null,
+      residualOverlay: activeChart?.residualOverlay ?? null,
+      anomalyHighlight: activeChart?.anomalyHighlight ?? null,
+      bumpMode: activeChart?.bumpMode ?? null,
       tooltipFields: activeChart?.tooltipFields,
       tooltipKeyField: activeChart?.tooltipKeyField ?? null,
       barStackMode,
@@ -2589,6 +2673,12 @@ function ChartPanelView() {
       activeChart?.topN,
       activeChart?.y2Field,
       activeChart?.comparePrevious,
+      activeChart?.rollingWindow,
+      activeChart?.yScale,
+      activeChart?.seriesNormalize,
+      activeChart?.residualOverlay,
+      activeChart?.anomalyHighlight,
+      activeChart?.bumpMode,
       activeChart?.tooltipFields,
       activeChart?.tooltipKeyField,
       barStackMode,
@@ -2744,25 +2834,50 @@ function ChartPanelView() {
     [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
   );
 
+  /** Drop Encoding extras the target kind cannot render (stale Facet / Top N / Compare). */
+  const extrasForKind = useCallback(
+    (kind: ChartKind, base: ReturnType<typeof extraFromChart>) => {
+      const caps = chartCapabilities(kind);
+      return {
+        ...base,
+        rowField: caps.facetRow ? base.rowField : null,
+        topN: caps.topN ? base.topN : null,
+        y2Field: caps.compareY ? base.y2Field : null,
+        comparePrevious: caps.compareY ? base.comparePrevious : null,
+        sizeField: caps.sizeChannel ? base.sizeField : null,
+        zField: caps.zChannel ? base.zField : null,
+        glowField: caps.glowOutline ? base.glowField : null,
+        outlineField: caps.glowOutline ? base.outlineField : null,
+        opacityField: caps.opacityChannel ? base.opacityField : null,
+      };
+    },
+    [],
+  );
+
   const applyChartType = useCallback(
     (kind: ChartKind) => {
       if (!activeChart || columnStats.length === 0) return;
       const fit = fitEncodingToKind(kind, columnStats, activeChart);
-      let rec = createChartRec(kind, columnStats, fit.xField, fit.yField, fit.colorField, tableName, extraFromChart());
+      const sanitized = extrasForKind(kind, extraFromChart());
+      let rec = createChartRec(kind, columnStats, fit.xField, fit.yField, fit.colorField, tableName, sanitized);
       if (!rec) {
         for (let i = 0; i < 24; i++) {
           const enc = getRandomEncoding(columnStats, kind);
           if (!enc) break;
-          const extra: Parameters<typeof createChartRec>[6] = { ...extraFromChart() };
-          if (enc.sizeField) extra.sizeField = enc.sizeField;
-          rec = createChartRec(kind, columnStats, enc.xField, enc.yField, enc.colorField, tableName, extra);
+          const extra: Parameters<typeof createChartRec>[6] = {
+            ...sanitized,
+            ...randomEncodingToExtra(enc),
+          };
+          // Re-sanitize after random extras (which may set facet/topN/compare).
+          const cleaned = extrasForKind(kind, { ...extraFromChart(), ...extra });
+          rec = createChartRec(kind, columnStats, enc.xField, enc.yField, enc.colorField, tableName, cleaned);
           if (rec) break;
         }
       }
       if (rec) setActiveChart(rec);
       else setToast(`Can’t build a ${kind} chart from these columns`);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart, setToast],
+    [activeChart, columnStats, tableName, setActiveChart, extraFromChart, extrasForKind, setToast],
   );
 
   const kindSupport = useCallback((kind: ChartKind) => chartKindDataSupport(columnStats, kind), [columnStats]);
@@ -2861,7 +2976,7 @@ function ChartPanelView() {
       const enc = applyEncodingLocks(drawn, encodingLocks, keep);
       const extra: Parameters<typeof createChartRec>[6] = {
         ...extraFromChart(),
-        sizeField: enc.sizeField ?? null,
+        ...randomEncodingToExtra(enc),
       };
       const rec = createChartRec(
         activeChart.kind,
@@ -2878,6 +2993,16 @@ function ChartPanelView() {
           rec.xField,
           rec.yField,
           encodingLocks.color ? null : rec.colorField,
+          rec.rowField ? `facets:${rec.rowField}` : null,
+          rec.topN ? `top ${rec.topN}` : null,
+          rec.y2Field ? `vs ${rec.y2Field}` : null,
+          rec.comparePrevious ? "vs earlier" : null,
+          rec.rollingWindow ? `roll ${rec.rollingWindow}` : null,
+          rec.seriesNormalize === "index100" ? "index 100" : rec.seriesNormalize === "zscore" ? "z-score" : null,
+          rec.yScale && rec.yScale !== "linear" ? `${rec.yScale} Y` : null,
+          rec.residualOverlay ? "residuals" : null,
+          rec.anomalyHighlight ? "anomalies" : null,
+          rec.bumpMode === "delta" ? "Δ rank" : null,
         ].filter(Boolean);
         setToast(`Shuffled · ${bits.join(" × ")}`);
         return;
@@ -2924,7 +3049,13 @@ function ChartPanelView() {
   const showOpacityEnc = caps.opacityChannel;
   const showGlowOutline = caps.glowOutline;
   const splitField = activeChart.colorField ?? activeChart.rowField ?? null;
-  const splitMode: "color" | "facet" | "both" | null = !splitField
+  /** Split chips only make sense when Color and Facet share (or could share) one field. */
+  const splitCompatible =
+    !!splitField &&
+    (!activeChart.colorField ||
+      !activeChart.rowField ||
+      activeChart.colorField === activeChart.rowField);
+  const splitMode: "color" | "facet" | "both" | null = !splitCompatible
     ? null
     : activeChart.colorField && activeChart.rowField
       ? "both"
@@ -2934,9 +3065,14 @@ function ChartPanelView() {
   const numericCols = columnStats.filter(
     (c) => ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL"].some((t) => (c.data_type ?? "").toUpperCase().includes(t)),
   );
-  const nominalForRow = columnStats.filter(
-    (c) => !numericCols.some((n) => n.name === c.name) && (c.distinct_count ?? 0) >= 2 && (c.distinct_count ?? 0) <= 30,
-  );
+  const nominalForRow = columnStats.filter((c) => {
+    if (numericCols.some((n) => n.name === c.name)) return false;
+    const d = c.distinct_count ?? 0;
+    if (d < 2 || d > 30) return false;
+    // Don't facet by the same field already on X or Y
+    if (c.name === activeChart.xField || c.name === activeChart.yField) return false;
+    return true;
+  });
 
   const colType = (name: string) => columnStats.find((c) => c.name === name)?.data_type ?? "";
   const allColOptions: EncodingOption[] = columnStats.map((c) => ({
@@ -3220,7 +3356,7 @@ function ChartPanelView() {
                   onChange={(v) => applyEncodingExtra("row", v === "" ? "__none__" : v)}
                 />
               )}
-              {showRow && splitField && (
+              {showRow && splitCompatible && splitField && (
                 <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
                   <span className="text-2xs text-loom-muted shrink-0">Split</span>
                   <div className="flex gap-1 flex-wrap">
@@ -3862,6 +3998,39 @@ function ChartPanelView() {
                   { value: "focus", label: "Focus", icon: Ico.focus },
                 ]}
               />
+              <div className="space-y-1.5">
+                <p className="text-2xs text-loom-muted">Source footnote</p>
+                <p className="text-[10px] text-loom-muted/80 leading-snug">
+                  Drawn on the chart (and in Share / PNG) — pathway back to the data.
+                </p>
+                <select
+                  className="loom-input text-2xs w-full py-1.5"
+                  value={chartVisualOverrides.sourceFootnote ?? "credit"}
+                  onChange={(e) =>
+                    updateOverride(
+                      "sourceFootnote",
+                      e.target.value as "off" | "name" | "credit" | "full",
+                    )
+                  }
+                >
+                  <option value="off">Off</option>
+                  <option value="name">Name only</option>
+                  <option value="credit">Name + credit</option>
+                  <option value="full">Full lineage</option>
+                </select>
+                {(chartVisualOverrides.sourceFootnote ?? "credit") !== "off" && (
+                  <IconToggleGroup
+                    label="Footnote align"
+                    value={chartVisualOverrides.sourceFootnoteAlign ?? "left"}
+                    onChange={(v) => updateOverride("sourceFootnoteAlign", v)}
+                    options={[
+                      { value: "left", label: "Left", icon: Ico.plain },
+                      { value: "center", label: "Center", icon: Ico.viz },
+                      { value: "right", label: "Right", icon: Ico.deep },
+                    ]}
+                  />
+                )}
+              </div>
               <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
                 <input
                   type="checkbox"

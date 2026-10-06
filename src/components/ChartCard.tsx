@@ -27,6 +27,9 @@ import { isOddChartKind, renderOddChart, ODD_CHART_KIND_OPTIONS } from "@/lib/od
 import { isGpuSceneKind, extractGpuScenePoints, renderGpuSceneCanvas, GPU_SCENE_KIND_OPTIONS } from "@/lib/gpuScenes";
 import { buildDataCube, renderDataCubeCanvas } from "@/lib/dataCube";
 import { isGeoFamilyKind, isGeoMapKind, renderGeoMapCanvas, GEO_MAP_KIND_OPTIONS } from "@/lib/geoMaps";
+import { partitionRowsByFacet, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
+import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
+import { buildCorrMatrix, buildPareto, residualYs, rollingMean, normalizeSeriesValues } from "@/lib/dsTransforms";
 
 const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
 
@@ -55,6 +58,10 @@ const KIND_LABELS: Record<string, string> = {
   choropleth: "Choropleth",
   forceBubble: "Force Bubble",
   sankey: "Sankey",
+  network: "Network",
+  arcDiagram: "Arc diagram",
+  pareto: "Pareto",
+  corrMatrix: "Correlation",
   ...Object.fromEntries(ODD_CHART_KIND_OPTIONS.map((o) => [o.value, o.label])),
   ...Object.fromEntries(GPU_SCENE_KIND_OPTIONS.map((o) => [o.value, o.label])),
   ...Object.fromEntries(GEO_MAP_KIND_OPTIONS.map((o) => [o.value, o.label])),
@@ -67,6 +74,7 @@ export function ChartCard({
   onClick,
   compact = false,
   hero = false,
+  micro = false,
 }: {
   rec: ChartRecommendation;
   data: QueryResult | null;
@@ -76,6 +84,8 @@ export function ChartCard({
   compact?: boolean;
   /** Large preview for deep-scan swipe deck */
   hero?: boolean;
+  /** Shape-first thumb — denser canvas, thinner chrome (What’s interesting / dense rails) */
+  micro?: boolean;
 }) {
   const theme = useLoomStore((s) => s.appSettings.theme);
   const colorblind = useLoomStore((s) => s.appSettings.colorblindCharts);
@@ -127,13 +137,17 @@ export function ChartCard({
 
     const w = width;
     const h = height;
-    const pad = 6;
+    // Micro thumbs skip chrome padding — just the marks, shrunk to fit
+    const pad = micro ? 3 : hero ? 8 : 6;
 
     ctx.clearRect(0, 0, w, h);
 
     const xIdx = data.columns.indexOf(rec.xField);
     const yIdx = rec.yField ? data.columns.indexOf(rec.yField) : -1;
     const cIdx = rec.colorField ? data.columns.indexOf(rec.colorField) : -1;
+    const rowIdx = rec.rowField ? data.columns.indexOf(rec.rowField) : -1;
+    const y2Idx = rec.y2Field ? data.columns.indexOf(rec.y2Field) : -1;
+    const topN = rec.topN != null ? clampTopN(rec.topN) : null;
 
     if (xIdx === -1) return;
 
@@ -141,159 +155,87 @@ export function ChartCard({
     const stride = Math.max(1, Math.ceil(data.rows.length / 1500));
     const rows = stride === 1 ? data.rows : data.rows.filter((_, i) => i % stride === 0);
 
-    if (rec.kind === "scatter" && yIdx >= 0) {
-      drawScatter(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "bar") {
-      drawBar(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "histogram") {
-      drawHistogram(ctx, rows, xIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "line" && yIdx >= 0) {
-      drawLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "heatmap" && yIdx >= 0) {
-      drawHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
-    } else if (rec.kind === "strip" && yIdx >= 0) {
-      drawStrip(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "box" && yIdx >= 0) {
-      drawBox(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, ui);
-    } else if (rec.kind === "area" && yIdx >= 0) {
-      drawArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "pie") {
-      drawPie(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "bubble" && yIdx >= 0) {
-      const sizeIdx = rec.sizeField ? data.columns.indexOf(rec.sizeField) : -1;
-      drawBubble(ctx, rows, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "violin" && yIdx >= 0) {
-      drawViolin(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "radar") {
-      drawRadar(ctx, rows, data.columns, xIdx, yIdx, cIdx, w, h, pad, COLORS, ui);
-    } else if (rec.kind === "waterfall") {
-      drawWaterfall(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "lollipop") {
-      drawLollipop(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "dumbbell" && yIdx >= 0) {
-      const sizeIdx = rec.sizeField ? data.columns.indexOf(rec.sizeField) : -1;
-      if (sizeIdx >= 0) drawDumbbell(ctx, rows, xIdx, yIdx, sizeIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "ridgeline" && yIdx >= 0) {
-      drawRidgeline(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "hexbin" && yIdx >= 0) {
-      drawHexbin(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
-    } else if (rec.kind === "funnel") {
-      drawFunnel(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "parallel") {
-      drawParallel(ctx, rows, data.columns, cIdx, w, h, pad, COLORS, ui);
-    } else if (rec.kind === "treemap") {
-      drawTreemap(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "sunburst") {
-      drawSunburst(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, ui);
-    } else if (rec.kind === "forceBubble") {
-      drawForceBubble(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (rec.kind === "sankey") {
-      drawSankey(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
-    } else if (isGeoFamilyKind(rec.kind)) {
-      const geoKind = rec.kind === "choropleth" ? "choropleth" as const : rec.kind;
-      if (geoKind === "choropleth" || isGeoMapKind(geoKind)) {
-        renderGeoMapCanvas(
-          geoKind,
-          ctx,
-          rows,
-          data.columns,
-          {
-            xField: rec.xField,
-            yField: rec.yField,
-            colorField: rec.colorField,
-            sizeField: rec.sizeField,
-          },
-          w,
-          h,
-          pad,
-          {
-            colors: COLORS,
-            opacity: 0.85,
-            // Thumbnail scale: bigger marks so a handful of points still reads
-            pointSize: 3.2,
-            mini: true,
-            // Let the card's themed background show through (the renderer
-            // otherwise paints a hard-coded near-black fill).
-            themeBg: "rgba(0,0,0,0)",
-            themeText: ui.text,
-            themeBorder: ui.border,
-            themeMuted: ui.muted,
-            continuousStops: SEQ,
-          },
-        );
-      }
-    } else if (rec.kind === "dataCube") {
-      const cube = buildDataCube(rows, data.columns, {
-        xField: rec.xField,
-        yField: rec.yField,
-        zField: rec.zField,
-        valueField: rec.sizeField,
-        aggregate: rec.yAggregate,
-      });
-      if (cube) {
-        const ui = getThemeUiColors(theme);
-        renderDataCubeCanvas(ctx, cube, w, h, {
-          ramp: COLORS,
-          opacity: 0.9,
-          camera: { yaw: 0.62, pitch: 0.42, zoom: hero ? 1 : 1.12 },
-          themeBg: "rgba(0,0,0,0)",
-          themeText: ui.text,
-          themeMuted: ui.muted,
-          themeBorder: ui.border,
-          mini: !hero,
-          showLegend: hero,
-        });
-      }
-    } else if (isGpuSceneKind(rec.kind)) {
-      const packed = extractGpuScenePoints(rows, data.columns, {
-        xField: rec.xField,
-        yField: rec.yField,
-        zField: rec.zField,
-        colorField: rec.colorField,
-        sizeField: rec.sizeField,
-        timeField: rec.timeField,
-        trailId: rec.trailId,
-      }, 1200);
-      if (packed) {
-        renderGpuSceneCanvas(rec.kind, ctx, packed, w, h, pad, {
-          colors: COLORS,
-          opacity: 0.85,
-          pointSize: 2.6,
-          // Transparent so the card's themed background shows (renderer
-          // default is a hard-coded near-black fill).
-          themeBg: "rgba(0,0,0,0)",
-          themeText: ui.text,
-          themeMuted: ui.muted,
-          themeBorder: ui.border,
-        });
-      }
-    } else if (isOddChartKind(rec.kind)) {
-      const sizeIdx = rec.sizeField ? data.columns.indexOf(rec.sizeField) : -1;
-      renderOddChart(
-        rec.kind,
-        ctx,
-        rows,
-        data.columns,
+    const paintPanel = (
+      panelRows: unknown[][],
+      ox: number,
+      oy: number,
+      pw: number,
+      ph: number,
+      panelPad = pad,
+    ) => {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(ox, oy, pw, ph);
+      ctx.clip();
+      ctx.translate(ox, oy);
+      paintKind(ctx, panelRows, {
+        kind: rec.kind,
         xIdx,
         yIdx,
         cIdx,
-        sizeIdx,
-        w,
-        h,
-        pad,
-        {
-          colors: COLORS,
-          opacity: 0.85,
-          pointSize: 2.5,
-          axisLabelColor: ui.muted,
-          themeText: ui.text,
-          themeMuted: ui.muted,
-          themeBorder: ui.border,
-        },
-        true,
-      );
+        y2Idx,
+        sizeIdx: rec.sizeField ? data.columns.indexOf(rec.sizeField) : -1,
+        columns: data.columns,
+        w: pw,
+        h: ph,
+        pad: panelPad,
+        colors: COLORS,
+        seq: SEQ,
+        ui,
+        topN,
+        comparePrevious: !!rec.comparePrevious,
+        yAggregate: rec.yAggregate ?? null,
+        barStackMode: rec.barStackMode ?? null,
+        rollingWindow: rec.rollingWindow ?? null,
+        seriesNormalize: rec.seriesNormalize ?? null,
+        residualOverlay: !!rec.residualOverlay,
+        anomalyHighlight: !!rec.anomalyHighlight,
+        bumpMode: rec.bumpMode ?? null,
+        zField: rec.zField,
+        timeField: rec.timeField,
+        trailId: rec.trailId,
+        sizeField: rec.sizeField,
+        xField: rec.xField,
+        yField: rec.yField,
+        colorField: rec.colorField,
+        hero,
+      });
+      ctx.restore();
+    };
+
+    if (rowIdx >= 0 && (rec.kind === "bar" || rec.kind === "line" || rec.kind === "area" || rec.kind === "scatter" || rec.kind === "bubble")) {
+      const panels = partitionRowsByFacet(rows, rowIdx, hero ? 6 : micro ? 4 : 4);
+      if (panels.length >= 2) {
+        const cols = panels.length <= 2 ? panels.length : 2;
+        const rowsN = Math.ceil(panels.length / cols);
+        const gap = micro ? 1 : 2;
+        const cw = (w - gap * (cols - 1)) / cols;
+        const ch = (h - gap * (rowsN - 1)) / rowsN;
+        const labelH = micro ? 0 : 10;
+        panels.forEach((p, i) => {
+          const c = i % cols;
+          const r = Math.floor(i / cols);
+          const x = c * (cw + gap);
+          const y = r * (ch + gap);
+          if (!micro) {
+            // Tiny facet label strip (full cards only — micro is shapes-only)
+            ctx.fillStyle = ui.muted;
+            ctx.globalAlpha = 0.85;
+            ctx.font = `600 ${Math.max(7, Math.min(9, ch * 0.12))}px Inter, sans-serif`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "top";
+            const label = p.key.length > 14 ? `${p.key.slice(0, 13)}…` : p.key;
+            ctx.fillText(label, x + 2, y + 1);
+            ctx.globalAlpha = 1;
+          }
+          paintPanel(p.rows, x, y + labelH, cw, Math.max(12, ch - labelH), micro ? 2 : 3);
+        });
+        return;
+      }
     }
-  }, [rec, data, theme, hero, COLORS, SEQ, ui]);
+
+    paintPanel(rows, 0, 0, w, h, pad);
+  }, [rec, data, theme, hero, micro, COLORS, SEQ, ui]);
 
   useEffect(() => {
     draw();
@@ -332,18 +274,31 @@ export function ChartCard({
         className={`relative w-full bg-loom-bg ${
           hero
             ? "aspect-[4/3] min-h-[200px] sm:min-h-[260px] rounded-t-xl"
-            : compact
-              ? "aspect-[5/3] min-h-[72px] rounded-t-md"
-              : "aspect-[4/3] min-h-[80px]"
+            : micro
+              ? "aspect-[5/4] min-h-[104px] sm:min-h-[112px]"
+              : compact
+                ? "aspect-[5/3] min-h-[72px] rounded-t-md"
+                : "aspect-[4/3] min-h-[80px]"
         }`}
       >
         <canvas
           ref={canvasRef}
           className="absolute inset-0 w-full h-full"
         />
+        {micro && (
+          <span
+            className={`
+              absolute bottom-1 left-1 z-[1] max-w-[85%] truncate px-1 py-px text-[9px] font-mono font-semibold rounded
+              bg-loom-bg/75 backdrop-blur-[2px] pointer-events-none
+              ${kindColor(rec.kind)}
+            `}
+          >
+            {KIND_LABELS[rec.kind] ?? rec.kind}
+          </span>
+        )}
       </div>
-      <div className={`flex flex-col gap-0.5 text-left ${hero ? "px-4 py-3" : compact ? "px-2 py-1.5" : "px-2.5 py-2"}`}>
-        {(!compact || hero) && (
+      <div className={`flex flex-col gap-0.5 text-left ${hero ? "px-4 py-3" : micro ? "px-2 py-1.5" : compact ? "px-2 py-1.5" : "px-2.5 py-2"}`}>
+        {(!compact || hero) && !micro && (
           <div className="flex items-center gap-1.5 min-w-0">
             <span className={`
               inline-block max-w-full truncate px-1.5 py-0.5 text-2xs font-mono font-semibold rounded
@@ -356,8 +311,89 @@ export function ChartCard({
             )}
           </div>
         )}
-        <p className={`font-medium text-loom-text leading-tight ${hero ? "text-sm line-clamp-2" : compact ? "text-2xs line-clamp-2" : "text-xs line-clamp-2"}`}>{rec.title}</p>
-        {(!compact || hero) && rec.subtitle && <p className={`text-loom-muted ${hero ? "text-xs line-clamp-2" : "text-2xs truncate"}`}>{rec.subtitle}</p>}
+        <p className={`font-medium text-loom-text leading-tight ${hero ? "text-sm line-clamp-2" : micro || compact ? "text-2xs line-clamp-2" : "text-xs line-clamp-2"}`}>{rec.title}</p>
+        {!micro && (!compact || hero) && rec.subtitle && <p className={`text-loom-muted ${hero ? "text-xs line-clamp-2" : "text-2xs truncate"}`}>{rec.subtitle}</p>}
+        {(micro || (!compact || hero)) &&
+          (rec.rowField ||
+            rec.topN ||
+            rec.y2Field ||
+            rec.comparePrevious ||
+            rec.rollingWindow ||
+            rec.seriesNormalize ||
+            (rec.yScale && rec.yScale !== "linear") ||
+            rec.residualOverlay ||
+            rec.anomalyHighlight ||
+            rec.bumpMode === "delta" ||
+            rec.kind === "pareto" ||
+            rec.kind === "corrMatrix") && (
+          <div className="flex flex-wrap gap-1 mt-0.5">
+            {rec.rowField && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted truncate max-w-full">
+                {micro ? `× ${rec.rowField}` : `Facet · ${rec.rowField}`}
+              </span>
+            )}
+            {rec.topN != null && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                Top {rec.topN}
+              </span>
+            )}
+            {rec.y2Field && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted truncate max-w-full">
+                vs {rec.y2Field}
+              </span>
+            )}
+            {rec.comparePrevious && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                vs earlier
+              </span>
+            )}
+            {rec.rollingWindow && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                roll {rec.rollingWindow}
+              </span>
+            )}
+            {rec.seriesNormalize === "index100" && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                index 100
+              </span>
+            )}
+            {rec.seriesNormalize === "zscore" && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                z-score
+              </span>
+            )}
+            {rec.yScale && rec.yScale !== "linear" && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                {rec.yScale} Y
+              </span>
+            )}
+            {rec.residualOverlay && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                residuals
+              </span>
+            )}
+            {rec.anomalyHighlight && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                anomalies
+              </span>
+            )}
+            {rec.bumpMode === "delta" && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                Δ rank
+              </span>
+            )}
+            {rec.kind === "pareto" && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                80/20
+              </span>
+            )}
+            {rec.kind === "corrMatrix" && (
+              <span className="text-[9px] px-1 py-px rounded border border-loom-border/80 text-loom-muted">
+                Pearson r
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </button>
   );
@@ -367,19 +403,211 @@ function kindColor(kind: string): string {
   // Theme-aware tint via chart palette tokens (see globals.css --chart-*)
   const n =
     kind === "scatter" || kind === "bubble" || kind === "forceBubble" || kind === "hexbin" ? 1
-    : kind === "bar" || kind === "lollipop" || kind === "waterfall" || kind === "dumbbell" || kind === "funnel" ? 2
+    :     kind === "bar" || kind === "pareto" || kind === "lollipop" || kind === "waterfall" || kind === "dumbbell" || kind === "funnel" ? 2
     : kind === "histogram" || kind === "area" ? 3
     : kind === "line" || kind === "parallel" ? 4
-    : kind === "heatmap" || kind === "treemap" ? 5
+    : kind === "heatmap" || kind === "treemap" || kind === "corrMatrix" ? 5
     : kind === "strip" || kind === "box" || kind === "violin" || kind === "ridgeline" ? 6
     : kind === "pie" || kind === "sunburst" || kind === "radar" ? 7
-    : kind === "choropleth" || kind === "sankey" || isGeoFamilyKind(kind) ? 8
+    : kind === "choropleth" || kind === "sankey" || kind === "network" || kind === "arcDiagram" || isGeoFamilyKind(kind) ? 8
     : 0;
   if (!n) return "bg-loom-muted/20 text-loom-muted";
   return `loom-kind-${n}`;
 }
 
 // --- Mini renderers (simple, fast, no labels) ---
+
+type PaintArgs = {
+  kind: string;
+  xIdx: number;
+  yIdx: number;
+  cIdx: number;
+  y2Idx: number;
+  sizeIdx: number;
+  columns: string[];
+  w: number;
+  h: number;
+  pad: number;
+  colors: string[];
+  seq: string[];
+  ui: ThemeUiColors;
+  topN: number | null;
+  comparePrevious: boolean;
+  yAggregate: YAggregateOption | null;
+  barStackMode?: "grouped" | "stacked" | "percent" | null;
+  rollingWindow?: 7 | 30 | null;
+  seriesNormalize?: "index100" | "zscore" | null;
+  residualOverlay?: boolean;
+  anomalyHighlight?: boolean;
+  bumpMode?: "rank" | "delta" | null;
+  zField?: string | null;
+  timeField?: string | null;
+  trailId?: string | null;
+  sizeField?: string | null;
+  xField: string;
+  yField: string | null;
+  colorField: string | null;
+  hero: boolean;
+};
+
+function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArgs) {
+  const { kind, xIdx, yIdx, cIdx, y2Idx, sizeIdx, w, h, pad, colors: COLORS, seq: SEQ, ui } = a;
+  if (kind === "scatter" && yIdx >= 0) {
+    drawScatter(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.residualOverlay);
+  } else if (kind === "bar") {
+    drawBar(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN, a.barStackMode ?? "grouped");
+  } else if (kind === "pareto") {
+    drawPareto(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.topN);
+  } else if (kind === "corrMatrix") {
+    drawCorrMatrixThumb(ctx, rows, a.columns, w, h, pad, SEQ);
+  } else if (kind === "histogram") {
+    drawHistogram(ctx, rows, xIdx, w, h, pad, COLORS);
+  } else if (kind === "line" && yIdx >= 0) {
+    drawLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize);
+  } else if (kind === "heatmap" && yIdx >= 0) {
+    drawHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
+  } else if (kind === "strip" && yIdx >= 0) {
+    drawStrip(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
+  } else if (kind === "box" && yIdx >= 0) {
+    drawBox(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, ui);
+  } else if (kind === "area" && yIdx >= 0) {
+    drawArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize);
+  } else if (kind === "pie") {
+    drawPie(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+  } else if (kind === "bubble" && yIdx >= 0) {
+    drawBubble(ctx, rows, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, COLORS);
+  } else if (kind === "violin" && yIdx >= 0) {
+    drawViolin(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+  } else if (kind === "radar") {
+    drawRadar(ctx, rows, a.columns, xIdx, yIdx, cIdx, w, h, pad, COLORS, ui);
+  } else if (kind === "waterfall") {
+    drawWaterfall(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+  } else if (kind === "lollipop") {
+    drawLollipop(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.topN);
+  } else if (kind === "dumbbell" && yIdx >= 0) {
+    if (sizeIdx >= 0) drawDumbbell(ctx, rows, xIdx, yIdx, sizeIdx, w, h, pad, COLORS);
+  } else if (kind === "ridgeline" && yIdx >= 0) {
+    drawRidgeline(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+  } else if (kind === "hexbin" && yIdx >= 0) {
+    drawHexbin(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
+  } else if (kind === "funnel") {
+    drawFunnel(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.topN);
+  } else if (kind === "parallel") {
+    drawParallel(ctx, rows, a.columns, cIdx, w, h, pad, COLORS, ui);
+  } else if (kind === "treemap") {
+    drawTreemap(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN);
+  } else if (kind === "sunburst") {
+    drawSunburst(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, ui, a.topN);
+  } else if (kind === "forceBubble") {
+    drawForceBubble(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN);
+  } else if (kind === "sankey") {
+    drawSankey(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
+  } else if (kind === "network") {
+    drawNetwork(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
+  } else if (kind === "arcDiagram") {
+    drawArcDiagram(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
+  } else if (isGeoFamilyKind(kind)) {
+    const geoKind = kind === "choropleth" ? "choropleth" as const : kind;
+    if (geoKind === "choropleth" || isGeoMapKind(geoKind)) {
+      renderGeoMapCanvas(
+        geoKind,
+        ctx,
+        rows,
+        a.columns,
+        {
+          xField: a.xField,
+          yField: a.yField,
+          colorField: a.colorField,
+          sizeField: a.sizeField,
+        },
+        w,
+        h,
+        pad,
+        {
+          colors: COLORS,
+          opacity: 0.85,
+          pointSize: 3.2,
+          mini: true,
+          themeBg: "rgba(0,0,0,0)",
+          themeText: ui.text,
+          themeBorder: ui.border,
+          themeMuted: ui.muted,
+          continuousStops: SEQ,
+        },
+      );
+    }
+  } else if (kind === "dataCube") {
+    const cube = buildDataCube(rows, a.columns, {
+      xField: a.xField,
+      yField: a.yField,
+      zField: a.zField,
+      valueField: a.sizeField,
+      aggregate: a.yAggregate,
+    });
+    if (cube) {
+      renderDataCubeCanvas(ctx, cube, w, h, {
+        ramp: COLORS,
+        opacity: 0.9,
+        camera: { yaw: 0.62, pitch: 0.42, zoom: a.hero ? 1 : 1.12 },
+        themeBg: "rgba(0,0,0,0)",
+        themeText: ui.text,
+        themeMuted: ui.muted,
+        themeBorder: ui.border,
+        mini: !a.hero,
+        showLegend: a.hero,
+      });
+    }
+  } else if (isGpuSceneKind(kind)) {
+    const packed = extractGpuScenePoints(rows, a.columns, {
+      xField: a.xField,
+      yField: a.yField,
+      zField: a.zField,
+      colorField: a.colorField,
+      sizeField: a.sizeField,
+      timeField: a.timeField,
+      trailId: a.trailId,
+    }, 1200);
+    if (packed) {
+      renderGpuSceneCanvas(kind, ctx, packed, w, h, pad, {
+        colors: COLORS,
+        opacity: 0.85,
+        pointSize: 2.6,
+        themeBg: "rgba(0,0,0,0)",
+        themeText: ui.text,
+        themeMuted: ui.muted,
+        themeBorder: ui.border,
+      });
+    }
+  } else if (isOddChartKind(kind)) {
+    renderOddChart(
+      kind,
+      ctx,
+      rows,
+      a.columns,
+      xIdx,
+      yIdx,
+      cIdx,
+      sizeIdx,
+      w,
+      h,
+      pad,
+      {
+        colors: COLORS,
+        opacity: 0.85,
+        pointSize: 2.5,
+        axisLabelColor: ui.muted,
+        themeText: ui.text,
+        themeMuted: ui.muted,
+        themeBorder: ui.border,
+        yAggregate: a.yAggregate,
+        topN: a.topN,
+        legendPosition: "none",
+        bumpMode: a.bumpMode ?? undefined,
+      },
+      true,
+    );
+  }
+}
 
 function numericRange(rows: unknown[][], idx: number): [number, number] {
   let min = Infinity, max = -Infinity;
@@ -437,30 +665,143 @@ function strokeSeries(ctx: CanvasRenderingContext2D, ys: number[], yMin: number,
   });
 }
 
-function drawScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
+function drawScatter(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  colors: string[],
+  residualOverlay = false,
+) {
   const [xMin, xMax] = numericRange(rows, xi);
-  const [yMin, yMax] = numericRange(rows, yi);
+  const xs = rows.map((r) => Number(r[xi]));
+  const ysRaw = rows.map((r) => Number(r[yi]));
+  const fit = residualOverlay ? residualYs(xs, ysRaw) : null;
+  const plotYs = fit ? fit.residuals : ysRaw;
+  let yMin = Infinity;
+  let yMax = -Infinity;
+  for (const y of plotYs) {
+    if (!Number.isFinite(y)) continue;
+    yMin = Math.min(yMin, y);
+    yMax = Math.max(yMax, y);
+  }
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
+    [yMin, yMax] = numericRange(rows, yi);
+  }
+  if (yMin === yMax) {
+    yMin -= 1;
+    yMax += 1;
+  }
   const catMap = new Map<string, number>();
   let nextCat = 0;
   const COL = colors.length ? colors : FALLBACK_COLORS;
 
-  for (const r of rows) {
-    const x = Number(r[xi]), y = Number(r[yi]);
-    if (isNaN(x) || isNaN(y)) continue;
+  for (let ri = 0; ri < rows.length; ri++) {
+    const r = rows[ri]!;
+    const x = Number(r[xi]);
+    const y = plotYs[ri]!;
+    if (isNaN(x) || !Number.isFinite(y)) continue;
     let cat = 0;
     if (ci >= 0) {
       const k = String(r[ci]);
       if (!catMap.has(k)) catMap.set(k, nextCat++);
       cat = catMap.get(k)!;
     }
-    const sx = pad + ((x - xMin) / (xMax - xMin)) * (w - 2 * pad);
-    const sy = h - pad - ((y - yMin) / (yMax - yMin)) * (h - 2 * pad);
+    const sx = pad + ((x - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
+    const sy = h - pad - ((y - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
     ctx.beginPath();
     // Slightly larger marks read better in 4:3 thumbs without blobbing
     ctx.arc(sx, sy, Math.max(1.75, Math.min(w, h) * 0.012), 0, Math.PI * 2);
     ctx.fillStyle = COL[cat % COL.length];
     ctx.globalAlpha = 0.72;
     ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawPareto(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  w: number,
+  h: number,
+  pad: number,
+  colors: string[],
+  topN: number | null,
+) {
+  const COL = colors.length ? colors : FALLBACK_COLORS;
+  const byCat = new Map<string, number>();
+  for (const r of rows) {
+    const k = String(r[xi]);
+    if (yi < 0) byCat.set(k, (byCat.get(k) ?? 0) + 1);
+    else {
+      const v = Number(r[yi]);
+      if (!isNaN(v)) byCat.set(k, (byCat.get(k) ?? 0) + v);
+    }
+  }
+  const bins = buildPareto([...byCat.entries()].map(([label, value]) => ({ label, value }))).slice(0, topN ?? 12);
+  if (!bins.length) return;
+  const maxV = Math.max(...bins.map((b) => b.value));
+  const band = (w - 2 * pad) / bins.length;
+  const barW = Math.max(2, band * 0.7);
+  bins.forEach((b, i) => {
+    const x = pad + i * band + (band - barW) / 2;
+    const bh = ((b.value / (maxV || 1)) * (h - 2 * pad));
+    ctx.fillStyle = COL[0]!;
+    ctx.globalAlpha = 0.8;
+    ctx.fillRect(x, h - pad - bh, barW, bh);
+  });
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = COL[1] ?? COL[0]!;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  bins.forEach((b, i) => {
+    const x = pad + (i + 0.5) * band;
+    const y = h - pad - (b.cumulativePct / 100) * (h - 2 * pad);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+}
+
+function drawCorrMatrixThumb(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  columns: string[],
+  w: number,
+  h: number,
+  pad: number,
+  colors: string[],
+) {
+  const idxs: number[] = [];
+  const labels: string[] = [];
+  for (let i = 0; i < columns.length && labels.length < 6; i++) {
+    let hits = 0;
+    const probe = Math.min(rows.length, 24);
+    for (let r = 0; r < probe; r++) if (Number.isFinite(Number(rows[r]![i]))) hits++;
+    if (probe > 0 && hits / probe >= 0.5) {
+      idxs.push(i);
+      labels.push(columns[i]!);
+    }
+  }
+  const matrix = buildCorrMatrix(rows, idxs, labels);
+  if (!matrix || matrix.labels.length < 2) return;
+  const n = matrix.labels.length;
+  const cellW = (w - 2 * pad) / n;
+  const cellH = (h - 2 * pad) / n;
+  const stops = colors.length ? colors : FALLBACK_COLORS;
+  for (let r = 0; r < n; r++) {
+    for (let c = 0; c < n; c++) {
+      const corr = matrix.matrix[r]![c]!;
+      ctx.fillStyle = sampleContinuous(stops, (corr + 1) / 2);
+      ctx.globalAlpha = 0.4 + Math.abs(corr) * 0.6;
+      ctx.fillRect(pad + c * cellW + 0.5, pad + r * cellH + 0.5, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
+    }
   }
   ctx.globalAlpha = 1;
 }
@@ -475,35 +816,63 @@ function drawBar(
   h: number,
   pad: number,
   colors: string[],
+  topN: number | null = null,
+  stackMode: "grouped" | "stacked" | "percent" = "grouped",
 ) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const plotH = h - 2 * pad;
   const chartW = w - 2 * pad;
   const barColorIdx = ci >= 0 && ci !== xi ? ci : -1;
   const agg: YAggregateOption = yi < 0 ? "count" : "sum";
-  const facet = barColorIdx >= 0 ? buildBarFacetGrid(rows, xi, yi, barColorIdx, agg, "grouped") : null;
+  const limit = topN ?? DEFAULT_TOP_N;
+  const facet = barColorIdx >= 0 ? buildBarFacetGrid(rows, xi, yi, barColorIdx, agg, stackMode, limit) : null;
 
   if (facet && facet.grid.length > 0 && facet.subLabels.length > 0) {
     const { xLabels, subLabels, grid } = facet;
     const nx = xLabels.length;
     const ns = subLabels.length;
-    let maxVal = 0;
-    for (let gi = 0; gi < nx; gi++) {
-      for (let si = 0; si < ns; si++) {
-        maxVal = Math.max(maxVal, grid[gi]![si]!);
-      }
-    }
-    if (maxVal <= 0) return;
     const groupW = chartW / nx;
-    const innerW = Math.max(1, (groupW - 4) / ns);
-    for (let gi = 0; gi < nx; gi++) {
-      for (let si = 0; si < ns; si++) {
-        const val = grid[gi]![si]!;
-        const barH = (val / maxVal) * plotH;
-        const x = pad + gi * groupW + 2 + si * innerW;
-        ctx.fillStyle = COL[si % COL.length];
-        ctx.globalAlpha = 0.85;
-        ctx.fillRect(x, h - pad - barH, Math.max(1, innerW - 1), barH);
+    if (stackMode === "grouped") {
+      let maxVal = 0;
+      for (let gi = 0; gi < nx; gi++) {
+        for (let si = 0; si < ns; si++) maxVal = Math.max(maxVal, grid[gi]![si]!);
+      }
+      if (maxVal <= 0) return;
+      const innerW = Math.max(1, (groupW - 4) / ns);
+      for (let gi = 0; gi < nx; gi++) {
+        for (let si = 0; si < ns; si++) {
+          const val = grid[gi]![si]!;
+          const barH = (val / maxVal) * plotH;
+          const x = pad + gi * groupW + 2 + si * innerW;
+          ctx.fillStyle = COL[si % COL.length];
+          ctx.globalAlpha = 0.85;
+          ctx.fillRect(x, h - pad - barH, Math.max(1, innerW - 1), barH);
+        }
+      }
+    } else {
+      let maxStack = 0;
+      const totals = xLabels.map((_, gi) => {
+        let t = 0;
+        for (let si = 0; si < ns; si++) t += grid[gi]![si]!;
+        maxStack = Math.max(maxStack, t);
+        return t;
+      });
+      if (maxStack <= 0) return;
+      const barW = Math.max(2, groupW * 0.65);
+      for (let gi = 0; gi < nx; gi++) {
+        const total = totals[gi]! || 1;
+        let acc = 0;
+        const x = pad + gi * groupW + (groupW - barW) / 2;
+        for (let si = 0; si < ns; si++) {
+          const val = grid[gi]![si]!;
+          if (val <= 0) continue;
+          const share = stackMode === "percent" ? val / total : val / maxStack;
+          const segH = share * plotH;
+          ctx.fillStyle = COL[si % COL.length];
+          ctx.globalAlpha = 0.85;
+          ctx.fillRect(x, h - pad - acc - segH, barW, segH);
+          acc += segH;
+        }
       }
     }
     ctx.globalAlpha = 1;
@@ -522,7 +891,7 @@ function drawBar(
       groups.set(k, (groups.get(k) ?? 0) + v);
     }
   }
-  const entries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
+  const entries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
   if (entries.length === 0) return;
   const maxVal = Math.max(...entries.map(e => e[1]), 1);
   const barW = Math.max(2, (w - 2 * pad) / entries.length - 2);
@@ -560,12 +929,48 @@ function drawHistogram(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
   ctx.globalAlpha = 1;
 }
 
-function drawLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
+function drawLine(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  colors: string[],
+  y2Idx = -1,
+  comparePrevious = false,
+  rollingWindow: 7 | 30 | null = null,
+  seriesNormalize: "index100" | "zscore" | null = null,
+) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
-  const series = ci >= 0 && ci !== xi
+  const transform = (ys: number[]) => {
+    let v = ys;
+    if (rollingWindow) v = rollingMean(v, rollingWindow);
+    if (seriesNormalize) v = normalizeSeriesValues(v, seriesNormalize);
+    return v;
+  };
+  const series = (ci >= 0 && ci !== xi
     ? groupRows(rows, ci, 6).map((g) => seriesByX(g, xi, yi))
-    : [seriesByX(rows, xi, yi)];
-  const all = series.flat();
+    : [seriesByX(rows, xi, yi)]).map(transform);
+  const extras: { ys: number[]; dashed: boolean; color: string }[] = [];
+  if (y2Idx >= 0 && y2Idx !== yi) {
+    extras.push({
+      ys: transform(seriesByX(rows, xi, y2Idx)),
+      dashed: true,
+      color: COL[Math.min(1, COL.length - 1)]!,
+    });
+  }
+  if (comparePrevious && series[0] && series[0].length >= 4) {
+    const mid = Math.floor(series[0].length / 2);
+    extras.push({
+      ys: series[0].slice(0, mid),
+      dashed: true,
+      color: COL[0]!,
+    });
+  }
+  const all = [...series.flat(), ...extras.flatMap((e) => e.ys)].filter((v) => Number.isFinite(v));
   if (all.length === 0) return;
   const yMin = Math.min(...all);
   const yMax = Math.max(...all);
@@ -575,9 +980,20 @@ function drawLine(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, 
   series.forEach((ys, i) => {
     if (ys.length === 0) return;
     ctx.strokeStyle = COL[i % COL.length];
+    ctx.setLineDash([]);
     strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
     ctx.stroke();
   });
+  extras.forEach((e) => {
+    if (e.ys.length < 2) return;
+    ctx.strokeStyle = e.color;
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash(e.dashed ? [3, 2] : []);
+    strokeSeries(ctx, e.ys, yMin, yMax, w, h, pad);
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
   ctx.globalAlpha = 1;
 }
 
@@ -686,16 +1102,41 @@ function drawBox(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, y
   ctx.globalAlpha = 1;
 }
 
-function drawArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
+function drawArea(
+  ctx: CanvasRenderingContext2D,
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  w: number,
+  h: number,
+  pad: number,
+  colors: string[],
+  y2Idx = -1,
+  comparePrevious = false,
+  rollingWindow: 7 | 30 | null = null,
+  seriesNormalize: "index100" | "zscore" | null = null,
+) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
-  const series = ci >= 0 && ci !== xi
+  const transform = (ys: number[]) => {
+    let v = ys;
+    if (rollingWindow) v = rollingMean(v, rollingWindow);
+    if (seriesNormalize) v = normalizeSeriesValues(v, seriesNormalize);
+    return v;
+  };
+  const series = (ci >= 0 && ci !== xi
     ? groupRows(rows, ci, 4).map((g) => seriesByX(g, xi, yi))
-    : [seriesByX(rows, xi, yi)];
-  const all = series.flat();
+    : [seriesByX(rows, xi, yi)]).map(transform);
+  const overlays: number[][] = [];
+  if (y2Idx >= 0 && y2Idx !== yi) overlays.push(transform(seriesByX(rows, xi, y2Idx)));
+  if (comparePrevious && series[0] && series[0].length >= 4) {
+    overlays.push(series[0].slice(0, Math.floor(series[0].length / 2)));
+  }
+  const all = [...series.flat(), ...overlays.flat()].filter((v) => Number.isFinite(v));
   if (all.length === 0) return;
   // Area marks are anchored at zero like the full chart (or the min when all-negative).
-  const yMin = Math.min(0, ...all);
-  const yMax = Math.max(0, ...all);
+  const yMin = seriesNormalize ? Math.min(...all) : Math.min(0, ...all);
+  const yMax = seriesNormalize ? Math.max(...all) : Math.max(0, ...all);
   series.forEach((ys, j) => {
     if (ys.length === 0) return;
     const color = COL[j % COL.length];
@@ -709,9 +1150,20 @@ function drawArea(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, 
     ctx.strokeStyle = color;
     ctx.globalAlpha = 0.95;
     ctx.lineWidth = 1.25;
+    ctx.setLineDash([]);
     strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
     ctx.stroke();
   });
+  overlays.forEach((ys, oi) => {
+    if (ys.length < 2) return;
+    ctx.strokeStyle = COL[(series.length + oi) % COL.length]!;
+    ctx.globalAlpha = 0.8;
+    ctx.lineWidth = 1.25;
+    ctx.setLineDash([3, 2]);
+    strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
+    ctx.stroke();
+  });
+  ctx.setLineDash([]);
   ctx.globalAlpha = 1;
 }
 
@@ -973,7 +1425,7 @@ function drawWaterfall(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
   ctx.globalAlpha = 1;
 }
 
-function drawLollipop(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
+function drawLollipop(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[], topN: number | null = null) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, number>();
   for (const r of rows) {
@@ -981,7 +1433,7 @@ function drawLollipop(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numb
     const v = yi >= 0 ? Number(r[yi]) : 1;
     groups.set(k, (groups.get(k) ?? 0) + (isNaN(v) ? 0 : v));
   }
-  const entries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  const entries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, topN ?? 10);
   if (entries.length === 0) return;
   const maxVal = Math.max(...entries.map(e => e[1]), 1);
   const bandH = (h - 2 * pad) / entries.length;
@@ -1004,11 +1456,11 @@ function drawLollipop(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numb
   ctx.globalAlpha = 1;
 }
 
-function drawTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, _ci: number, w: number, h: number, pad: number, colors: string[]) {
+function drawTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, _ci: number, w: number, h: number, pad: number, colors: string[], topN: number | null = null) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, number>();
   for (const r of rows) { const k = String(r[xi]); const v = yi >= 0 ? Number(r[yi]) : 1; groups.set(k, (groups.get(k) ?? 0) + (isNaN(v) ? 0 : Math.abs(v))); }
-  const entries = [...groups.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 20);
+  const entries = [...groups.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, topN ?? 20);
   if (entries.length === 0) return;
   type R = { x: number; y: number; w: number; h: number; idx: number };
   const rects: R[] = [];
@@ -1029,11 +1481,11 @@ function drawTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numbe
   ctx.globalAlpha = 1;
 }
 
-function drawSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, _ci: number, w: number, h: number, pad: number, colors: string[], ui: ThemeUiColors) {
+function drawSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, _ci: number, w: number, h: number, pad: number, colors: string[], ui: ThemeUiColors, topN: number | null = null) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, number>();
   for (const r of rows) { const k = String(r[xi]); const v = yi >= 0 ? Number(r[yi]) : 1; groups.set(k, (groups.get(k) ?? 0) + (isNaN(v) ? 0 : Math.abs(v))); }
-  const entries = [...groups.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const entries = [...groups.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, topN ?? 12);
   if (entries.length === 0) return;
   const total = entries.reduce((s, [, v]) => s + v, 0);
   const cx = w / 2, cy = h / 2, outerR = Math.min(w, h) / 2 - pad - 2, innerR = outerR * 0.4;
@@ -1054,7 +1506,7 @@ function drawSunburst(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numb
   }
 }
 
-function drawForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
+function drawForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[], topN: number | null = null) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, { val: number; cat: string }>();
   for (const r of rows) {
@@ -1062,7 +1514,7 @@ function drawForceBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: n
     const prev = groups.get(k);
     if (prev) prev.val += (isNaN(v) ? 0 : v); else groups.set(k, { val: isNaN(v) ? 0 : v, cat });
   }
-  const entries = [...groups.entries()].map(([, g]) => g).filter(g => g.val > 0).sort((a, b) => b.val - a.val).slice(0, 20);
+  const entries = [...groups.entries()].map(([, g]) => g).filter(g => g.val > 0).sort((a, b) => b.val - a.val).slice(0, topN ?? 20);
   if (entries.length === 0) return;
   const maxVal = Math.max(...entries.map(e => e.val));
   const catLabels = ci >= 0 ? [...new Set(entries.map(e => e.cat))] : [];
@@ -1121,6 +1573,57 @@ function drawSankey(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
   }
   for (const [i, s] of sources.entries()) { const r = sY.get(s)!; ctx.fillStyle = COL[i % COL.length]; ctx.globalAlpha = 0.9; ctx.fillRect(lx, r.y, 3, r.h); }
   for (const [i, t] of targets.entries()) { const r = tY.get(t)!; ctx.fillStyle = COL[i % COL.length]; ctx.globalAlpha = 0.7; ctx.fillRect(rx, r.y, 3, r.h); }
+  ctx.globalAlpha = 1;
+}
+
+function drawNetwork(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
+  const COL = colors.length ? colors : FALLBACK_COLORS;
+  const tIdx = ci >= 0 ? ci : -1;
+  if (tIdx < 0) return;
+  const graph = buildFlowGraph(rows, xi, tIdx, yi >= 0 && yi !== tIdx ? yi : -1, { maxNodes: 18, maxEdges: 40 });
+  if (!graph) return;
+  const { nodes, edges } = layoutForceNetwork(graph, w, h, pad, { mini: true, iterations: 35 });
+  const colorOf = new Map(nodes.map((n, i) => [n.id, COL[i % COL.length]!] as const));
+  for (const e of edges) {
+    ctx.strokeStyle = colorOf.get(e.source) ?? COL[0]!;
+    ctx.globalAlpha = 0.35;
+    ctx.lineWidth = e.width;
+    ctx.beginPath();
+    ctx.moveTo(e.x1, e.y1);
+    ctx.lineTo(e.x2, e.y2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 0.85;
+  for (const n of nodes) {
+    ctx.fillStyle = colorOf.get(n.id) ?? COL[0]!;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawArcDiagram(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
+  const COL = colors.length ? colors : FALLBACK_COLORS;
+  const tIdx = ci >= 0 ? ci : -1;
+  if (tIdx < 0) return;
+  const graph = buildFlowGraph(rows, xi, tIdx, yi >= 0 && yi !== tIdx ? yi : -1, { maxNodes: 16, maxEdges: 36 });
+  if (!graph) return;
+  const { nodes, edges } = layoutArcDiagram(graph, w, h, pad, { mini: true });
+  const colorOf = new Map(nodes.map((n, i) => [n.id, COL[i % COL.length]!] as const));
+  for (const e of edges) {
+    ctx.strokeStyle = colorOf.get(e.source) ?? COL[0]!;
+    ctx.globalAlpha = 0.4;
+    ctx.lineWidth = e.width;
+    strokeArcLink(ctx, e.x1, e.y1, e.x2, e.y2);
+  }
+  ctx.globalAlpha = 0.9;
+  for (const n of nodes) {
+    ctx.fillStyle = colorOf.get(n.id) ?? COL[0]!;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.globalAlpha = 1;
 }
 
@@ -1231,14 +1734,14 @@ function drawHexbin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
   ctx.globalAlpha = 1;
 }
 
-function drawFunnel(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
+function drawFunnel(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[], topN: number | null = null) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, number>();
   for (const r of rows) {
     const k = String(r[xi]); const v = yi >= 0 ? Number(r[yi]) : 1;
     groups.set(k, (groups.get(k) ?? 0) + (isNaN(v) ? 0 : Math.abs(v)));
   }
-  const entries = [...groups.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  const entries = [...groups.entries()].filter(([, v]) => v > 0).sort((a, b) => b[1] - a[1]).slice(0, topN ?? 8);
   if (!entries.length) return;
   const maxVal = entries[0]![1];
   const minW = (w - 2 * pad) * 0.2, maxW = w - 2 * pad;

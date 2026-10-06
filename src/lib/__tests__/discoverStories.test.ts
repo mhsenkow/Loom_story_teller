@@ -3,7 +3,7 @@
 // =================================================================
 
 import { describe, it, expect } from "vitest";
-import { DISCOVER_SEEN_KEY, DISCOVER_STORY_LIMIT } from "../discoverStories";
+import { DISCOVER_SEEN_KEY, DISCOVER_STORY_LIMIT, VARIANTS_PER_SOURCE } from "../discoverStories";
 import { ALL_SOURCE_KINDS } from "../tauri";
 
 describe("discoverStories", () => {
@@ -11,8 +11,10 @@ describe("discoverStories", () => {
     expect(DISCOVER_SEEN_KEY).toBe("loom-discover-v1");
   });
 
-  it("scans every live SourceKind plus room for wiki variants", () => {
+  it("scans every live SourceKind with room for many chart variants", () => {
     expect(ALL_SOURCE_KINDS.length).toBe(34);
-    expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(ALL_SOURCE_KINDS.length * 2);
+    expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(400);
+    expect(VARIANTS_PER_SOURCE).toBeGreaterThanOrEqual(15);
+    expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(ALL_SOURCE_KINDS.length * VARIANTS_PER_SOURCE * 0.5);
   });
 });

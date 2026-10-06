@@ -9,7 +9,7 @@ import type { ChartKind } from "./recommendations";
 
 /** Kinds with no edge axes — they don't need tick / axis-title gutters. */
 const NON_CARTESIAN = new Set<ChartKind>([
-  "pie", "treemap", "sunburst", "forceBubble", "sankey", "radar", "funnel",
+  "pie", "treemap", "sunburst", "forceBubble", "sankey", "network", "arcDiagram", "radar", "funnel",
   // Maps and 3D scenes label inside their own frame
   "choropleth", "geoPoints", "geoBubbles", "geoHex", "globe", "globeTrail", "arcMap",
   "scatter3d", "trailRibbon", "quakeTerrain", "firefly", "loomWeave", "dataCube",
@@ -61,6 +61,8 @@ export function resolveChartMargins(args: {
   isCompact?: boolean;
   legendPosition?: string | null;
   axisFontSize?: number;
+  /** Reserve a caption strip for source lineage. */
+  sourceFootnote?: boolean;
 }): ChartMargins {
   const {
     kind,
@@ -73,6 +75,7 @@ export function resolveChartMargins(args: {
     isCompact = false,
     legendPosition,
     axisFontSize = 10,
+    sourceFootnote = false,
   } = args;
 
   let base = basePad;
@@ -97,12 +100,16 @@ export function resolveChartMargins(args: {
     : Math.max(base * 0.55, 20);
   let right = Math.max(base * 0.55, cartesian ? 20 : 18);
 
+  if (sourceFootnote) {
+    bottom = Math.max(bottom, bottom + 16);
+  }
+
   // Legend floats inside the plot; only nudge when it would crowd the edge
   if (legendPosition === "right" || legendPosition === "top-right") {
     right = Math.max(right, 28);
   }
   if (legendPosition === "bottom") {
-    bottom = Math.max(bottom, 14 + tickBand + fieldBand + 8);
+    bottom = Math.max(bottom, 14 + tickBand + fieldBand + 8 + (sourceFootnote ? 14 : 0));
   }
 
   // Keep a usable plot (≥40% of short side); shrink gutters proportionally if needed
@@ -147,6 +154,7 @@ export function resolveChartPad(args: {
   isCompact?: boolean;
   legendPosition?: string | null;
   axisFontSize?: number;
+  sourceFootnote?: boolean;
 }): number {
   const m = resolveChartMargins(args);
   // Balanced inset: bias toward the larger gutters so labels never clip,

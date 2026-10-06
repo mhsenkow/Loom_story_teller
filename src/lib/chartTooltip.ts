@@ -847,6 +847,8 @@ export function pickCanvasTooltipRowIndex(
     case "choropleth":
     case "forceBubble":
     case "sankey":
+    case "network":
+    case "arcDiagram":
       if (yIdx >= 0) {
         const n = pickLineLikeNearestFixed(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
         if (n != null) return n;

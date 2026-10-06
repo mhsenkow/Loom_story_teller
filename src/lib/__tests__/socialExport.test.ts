@@ -8,8 +8,10 @@ import {
   getSocialPreset,
   buildSocialCaption,
   slugifyFilename,
+  LINK_PREVIEW_SIZE,
 } from "../socialExport";
 import { buildZip } from "../zipStore";
+import { LOOM_OG_IMG_TOKEN, LOOM_SHARE_IMG_TOKEN, buildChartSharePageHtml } from "../dashboardMicrosite";
 
 describe("socialExport", () => {
   it("includes platform presets with pixel targets", () => {
@@ -21,6 +23,21 @@ describe("socialExport", () => {
     expect(stories.height).toBe(1920);
     expect(stories.safeZones).toBe(true);
     expect(SOCIAL_PRESETS.length).toBeGreaterThanOrEqual(6);
+    expect(getSocialPreset("linkedin-og").width).toBe(LINK_PREVIEW_SIZE.width);
+    expect(getSocialPreset("linkedin-og").height).toBe(LINK_PREVIEW_SIZE.height);
+  });
+
+  it("share page HTML uses stable image tokens for Worker rewrite", () => {
+    const html = buildChartSharePageHtml({
+      title: "Test",
+      caption: "Hello",
+      imageDataUrl: "data:image/jpeg;base64,abc",
+      openUrl: "https://loom.ibm.io/#story=abc",
+    });
+    expect(html).toContain(LOOM_SHARE_IMG_TOKEN);
+    expect(html).toContain(LOOM_OG_IMG_TOKEN);
+    expect(html).toContain('og:image:width" content="1200"');
+    expect(html).not.toContain("data:image/jpeg;base64,abc");
   });
 
   it("builds a paste-ready caption", () => {
