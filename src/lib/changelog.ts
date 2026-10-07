@@ -25,6 +25,42 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-07c",
+    date: "2026-10-07",
+    title: "What’s interesting, clearer",
+    summary: "Discover hooks stay honest, rankings don’t flood, and a slow scan no longer wipes the stories you already saw.",
+    items: [
+      {
+        title: "Discover stories that mean “right now”",
+        detail:
+          "Weather uses the latest reading per city, launches pick the soonest NET, OpenSky counts planes not trail points, Steam says “playing now,” and SpaceX only scores finished flights.",
+      },
+      {
+        title: "Less noise, no wipe",
+        detail:
+          "Fewer chart variants per feed so one source can’t dominate the grid. Re-scanning won’t clear cards a slow timeout used to erase.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-07b",
+    date: "2026-10-07",
+    title: "Tooltips match Encoding",
+    summary: "Hover readouts honor the Tooltip field chips — including data cubes and aggregated bars.",
+    items: [
+      {
+        title: "Tooltip fields actually show up",
+        detail:
+          "Data cube (and other aggregated) hovers keep axis/measure summaries, then append the fields you picked in Encoding — so name, developer, and friends appear next to the bin ranges.",
+      },
+      {
+        title: "Honest note for GPU / map charts",
+        detail:
+          "3D particle scenes and most geo maps still don’t hover yet; Encoding says so instead of pretending the chips work.",
+      },
+    ],
+  },
+  {
     id: "2026-10-07",
     date: "2026-10-07",
     title: "When the data happened",

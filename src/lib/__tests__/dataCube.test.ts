@@ -110,7 +110,29 @@ describe("buildDataCube", () => {
     expect(tip.columns.slice(0, 4)).toEqual(["region", "product", "year", "Average of sales"]);
     expect(tip.columns).toContain("Rows");
   });
+
+  it("Encoding Tooltip fields merge onto the structural cube tip", async () => {
+    const { mergeChartTooltip } = await import("../chartTooltip");
+    const cube = buildDataCube(rows, columns, {
+      xField: "region",
+      yField: "product",
+      zField: "year",
+      valueField: "sales",
+      aggregate: "sum",
+    })!;
+    const cell = cube.cells[0]!;
+    const tip = cubeCellTooltip(cube, cell);
+    const allCols = [...columns, "note"];
+    const raw = [...(rows[cell.rowIndex] as (string | number)[]), "picked"];
+    const merged = mergeChartTooltip(tip, allCols, raw, ["region", "sales", "note"]);
+    expect(merged.columns.slice(0, 3)).toEqual(["region", "product", "year"]);
+    // Axis + "Sum of sales" already cover region/sales — only extra chip appends
+    expect(merged.columns).not.toContain("sales");
+    expect(merged.columns).toContain("note");
+    expect(merged.row[merged.columns.indexOf("note")]).toBe("picked");
+  });
 });
+
 
 describe("cube camera", () => {
   const cube = buildDataCube(rows, columns, { xField: "region", yField: "product", zField: "year" })!;

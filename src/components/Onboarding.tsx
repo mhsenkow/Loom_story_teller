@@ -110,8 +110,11 @@ export function Onboarding() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     let cancelled = false;
+    /** Bumps on each scan so a slow prior scan can’t wipe a newer one (or clear progressive cards). */
+    let scanGen = 0;
 
     const runScan = () => {
+      const gen = ++scanGen;
       setPhase("scan");
       setStories([]);
       setShow(true);
@@ -122,31 +125,42 @@ export function Onboarding() {
       setScannedHint(`Scanning ${ALL_SOURCE_KINDS.length + 1} live feeds…`);
       void (async () => {
         try {
-          const found = await Promise.race([
-            scanDiscoverStories({
-              limit: DISCOVER_STORY_LIMIT,
-              includeWiki: true,
-              onStory: (story, soFar) => {
-                if (cancelled) return;
-                setStories(soFar);
-                setPhase("ready");
-                const sources = new Set(soFar.map((s) => s.kind)).size;
-                setScannedHint(
-                  `${soFar.length} stories · ${sources}/${ALL_SOURCE_KINDS.length + 1} feeds`,
-                );
-                void story;
-              },
-            }),
-            new Promise<DiscoverStory[]>((resolve) => {
-              window.setTimeout(() => resolve([]), 22_000);
-            }),
-          ]);
-          if (cancelled) return;
-          const final = found.length ? found : [];
-          setStories(final);
-          setPhase(final.length ? "ready" : "error");
+          const found = await scanDiscoverStories({
+            limit: DISCOVER_STORY_LIMIT,
+            includeWiki: true,
+            onStory: (_story, soFar) => {
+              if (cancelled || gen !== scanGen) return;
+              setStories(soFar);
+              setPhase("ready");
+              const sources = new Set(soFar.map((s) => s.kind)).size;
+              setScannedHint(
+                `${soFar.length} stories · ${sources}/${ALL_SOURCE_KINDS.length + 1} feeds`,
+              );
+            },
+          });
+          if (cancelled || gen !== scanGen) return;
+          if (found.length) {
+            setStories(found);
+            setPhase("ready");
+            const sources = new Set(found.map((s) => s.kind)).size;
+            setScannedHint(
+              `${found.length} stories · ${sources}/${ALL_SOURCE_KINDS.length + 1} feeds`,
+            );
+            return;
+          }
+          // Don’t wipe cards that already streamed in if the final pass is empty.
+          setStories((prev) => {
+            if (prev.length) {
+              setPhase("ready");
+              return prev;
+            }
+            setPhase("error");
+            return prev;
+          });
         } catch {
-          if (!cancelled) setPhase((p) => (p === "ready" ? p : "error"));
+          if (!cancelled && gen === scanGen) {
+            setPhase((p) => (p === "ready" ? p : "error"));
+          }
         }
       })();
     };
@@ -182,6 +196,7 @@ export function Onboarding() {
 
     return () => {
       cancelled = true;
+      scanGen += 1;
       window.clearTimeout(id);
       window.removeEventListener("loom-discover", onForce);
     };

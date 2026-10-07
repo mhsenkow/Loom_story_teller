@@ -8,7 +8,7 @@
 
 import type { ColumnInfo } from "./store";
 import type { InspectResult, SourceKind, SourceStatus, StreamStatus } from "./tauri";
-import { SOURCE_DEFS } from "./sourceRegistry";
+import { SOURCE_BY_KIND, SOURCE_DEFS, sortRowsByOrderBy } from "./sourceRegistry";
 import { treasuryDebt } from "../../workers/sourceTransforms";
 import { nycWallToUtcIso } from "./zonedTime";
 
@@ -118,8 +118,13 @@ function statsFromBuffer(buf: BufferState): ColumnInfo[] {
   });
 }
 
-function snapshotFromBuffer(buf: BufferState, limit = 500): InspectResult {
-  const rows = buf.rows.slice(-limit).reverse();
+function snapshotFromBuffer(buf: BufferState, limit = 500, orderBy?: string): InspectResult {
+  // Match desktop DuckDB ORDER BY so Discover / Explore see the same “top” rows.
+  const rows = (
+    orderBy
+      ? sortRowsByOrderBy(buf.rows, buf.columns, orderBy).slice(0, limit)
+      : buf.rows.slice(-limit).reverse()
+  ) as Cell[][];
   return {
     stats: statsFromBuffer(buf),
     sample: {
@@ -1126,7 +1131,7 @@ export async function webSourceSnapshot(
   kind: SourceKind,
   limit?: number,
 ): Promise<InspectResult> {
-  return snapshotFromBuffer(sourceBufs[kind], limit ?? 500);
+  return snapshotFromBuffer(sourceBufs[kind], limit ?? 500, SOURCE_BY_KIND[kind]?.orderBy);
 }
 
 export async function webSourceClear(kind: SourceKind): Promise<void> {

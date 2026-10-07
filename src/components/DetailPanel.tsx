@@ -3665,6 +3665,11 @@ function ChartPanelView() {
               </button>
               {tooltipOpen && (
                 <div className="space-y-2">
+                  {!caps.tooltipHover && (
+                    <p className="text-2xs text-loom-muted leading-snug">
+                      Hover tooltips aren’t available for this chart type yet — field picks still save for share / when you switch kinds.
+                    </p>
+                  )}
                   <div className="flex flex-wrap gap-1.5">
                     {columnStats.map((c) => {
                       const on = activeChart.tooltipFields?.includes(c.name) ?? false;

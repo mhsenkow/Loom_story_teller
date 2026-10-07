@@ -244,6 +244,7 @@ export function resolveTooltipFieldNames(chart: ChartRecommendation, allColumns:
   };
   push(chart.xField);
   push(chart.yField);
+  push(chart.zField);
   push(chart.colorField);
   push(chart.sizeField);
   push(chart.rowField);
@@ -265,6 +266,49 @@ export function projectRowForTooltip(
     if (idx < 0) continue;
     columns.push(name);
     cells.push(row[idx] ?? null);
+  }
+  return { columns, row: cells };
+}
+
+function tooltipColumnCovered(existing: string[], field: string): boolean {
+  const n = field.toLowerCase();
+  for (const c of existing) {
+    const e = c.toLowerCase();
+    if (e === n) return true;
+    // Aggregated summaries already show the measure ("Sum of negative")
+    if (e.endsWith(` of ${n}`) || e.startsWith(`${n} (`)) return true;
+    // "Rows" covers a synthetic / column named count
+    if (n === "count" && (e === "rows" || e === "count")) return true;
+    if (n === "rows" && e === "count") return true;
+  }
+  return false;
+}
+
+/**
+ * Prefer structural hit summary (bar value, cube bins…), then append Encoding
+ * Tooltip fields from a representative raw row so the panel chips match hover.
+ */
+export function mergeChartTooltip(
+  structural: { columns: string[]; row: (string | number | boolean | null)[] } | null | undefined,
+  allColumns: string[],
+  rawRow: (string | number | boolean | null)[] | null | undefined,
+  fieldNames: string[],
+): { columns: string[]; row: (string | number | boolean | null)[] } {
+  const columns = structural?.columns?.length ? [...structural.columns] : [];
+  const cells: (string | number | boolean | null)[] = structural?.row?.length
+    ? [...structural.row]
+    : [];
+  if (rawRow && fieldNames.length) {
+    for (const name of fieldNames) {
+      if (tooltipColumnCovered(columns, name)) continue;
+      const idx = allColumns.indexOf(name);
+      if (idx < 0) continue;
+      columns.push(name);
+      cells.push(rawRow[idx] ?? null);
+    }
+  }
+  if (!columns.length && rawRow) {
+    return projectRowForTooltip(allColumns, rawRow, fieldNames);
   }
   return { columns, row: cells };
 }

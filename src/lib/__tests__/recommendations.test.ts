@@ -243,6 +243,10 @@ describe("recommendations", () => {
       expect(chartCapabilities("scatter3d").scatterExtras).toBe(false);
       expect(chartCapabilities("waffle").topN).toBe(true);
       expect(chartCapabilities("isoBars").topN).toBe(true);
+      expect(chartCapabilities("dataCube").tooltipHover).toBe(true);
+      expect(chartCapabilities("bar").tooltipHover).toBe(true);
+      expect(chartCapabilities("scatter3d").tooltipHover).toBe(false);
+      expect(chartCapabilities("geoPoints").tooltipHover).toBe(false);
     });
 
     it("createChartRec keeps tooltips on geo / GPU / odd rebuilds", () => {

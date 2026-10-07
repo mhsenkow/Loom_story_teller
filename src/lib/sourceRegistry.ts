@@ -615,6 +615,48 @@ export const SOURCE_BY_KIND: Record<SourceKind, SourceDef> = Object.fromEntries(
   SOURCE_DEFS.map((d) => [d.kind, d]),
 ) as Record<SourceKind, SourceDef>;
 
+/**
+ * Sort rows to match a registry `orderBy` clause (e.g. `net ASC`, `as_of DESC, quote`).
+ * Used so web buffers and Discover hooks see the same “top” row as desktop DuckDB.
+ */
+export function sortRowsByOrderBy(
+  rows: unknown[][],
+  columns: string[],
+  orderBy: string,
+): unknown[][] {
+  const specs = orderBy
+    .split(",")
+    .map((part) => {
+      const m = /^([a-zA-Z_][a-zA-Z0-9_]*)\s*(ASC|DESC)?$/i.exec(part.trim());
+      if (!m) return null;
+      const idx = columns.indexOf(m[1]!);
+      if (idx < 0) return null;
+      return { idx, desc: (m[2] ?? "ASC").toUpperCase() === "DESC" };
+    })
+    .filter((s): s is { idx: number; desc: boolean } => s != null);
+  if (!specs.length) return rows;
+  return [...rows].sort((a, b) => {
+    for (const { idx, desc } of specs) {
+      const av = a[idx];
+      const bv = b[idx];
+      if (av == null && bv == null) continue;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const an = typeof av === "number" ? av : Number(av);
+      const bn = typeof bv === "number" ? bv : Number(bv);
+      if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) {
+        return desc ? bn - an : an - bn;
+      }
+      const as = String(av);
+      const bs = String(bv);
+      if (as === bs) continue;
+      const cmp = as < bs ? -1 : 1;
+      return desc ? -cmp : cmp;
+    }
+    return 0;
+  });
+}
+
 export function isSourceKind(v: string): v is SourceKind {
   return (SOURCE_KINDS as readonly string[]).includes(v);
 }

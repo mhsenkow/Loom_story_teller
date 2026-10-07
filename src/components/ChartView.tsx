@@ -110,6 +110,7 @@ import {
   pickHitTarget,
   rowForHitTarget,
   type HitTarget,
+  mergeChartTooltip,
   projectRowForTooltip,
   resolveTooltipFieldNames,
   rowMatchesTooltipLink,
@@ -1443,7 +1444,17 @@ export function ChartView() {
           return;
         }
         const tip = cubeCellTooltip(frame.cube, cell);
-        setChartTooltip({ clientX: e.clientX, clientY: e.clientY, rowIndex: cell.rowIndex, row: tip.row, columns: tip.columns });
+        const srCube = sampleRowsRef.current;
+        const rawCube = srCube?.rows[cell.rowIndex] ?? null;
+        const fields = resolveTooltipFieldNames(ac, srCube?.columns ?? []);
+        const merged = mergeChartTooltip(tip, srCube?.columns ?? [], rawCube, fields);
+        setChartTooltip({
+          clientX: e.clientX,
+          clientY: e.clientY,
+          rowIndex: cell.rowIndex,
+          row: merged.row,
+          columns: merged.columns,
+        });
         setCubeHover((prev) =>
           prev && prev.xi === cell.xi && prev.yi === cell.yi && prev.zi === cell.zi ? prev : { xi: cell.xi, yi: cell.yi, zi: cell.zi },
         );
@@ -1476,8 +1487,9 @@ export function ChartView() {
         return;
       }
       const rawRow = sr.rows[rowIdx]!;
-      // Aggregated marks (bars, slices, bins…) read out their own value, not one raw row
-      const proj = target?.summary ?? projectRowForTooltip(sr.columns, rawRow, resolveTooltipFieldNames(ac, sr.columns));
+      // Aggregated marks keep structural summary (bar value, bin…); Encoding Tooltip fields append.
+      const fields = resolveTooltipFieldNames(ac, sr.columns);
+      const proj = mergeChartTooltip(target?.summary ?? null, sr.columns, rawRow, fields);
       setChartTooltip({
         clientX: e.clientX,
         clientY: e.clientY,

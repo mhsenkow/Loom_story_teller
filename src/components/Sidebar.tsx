@@ -1494,7 +1494,7 @@ function DataRegionView({
           >
             ✦ What’s interesting right now
           </button>
-          <p className="text-2xs text-loom-muted mt-1.5 text-center">Scans every live feed and opens the best one as a chart.</p>
+          <p className="text-2xs text-loom-muted mt-1.5 text-center">Scans every live feed and shows chartable stories — pick one to open.</p>
         </section>
 
         {/* Get data in — web: upload / explore; desktop: folder */}

@@ -296,6 +296,8 @@ export interface ChartCapabilities {
   scatterExtras: boolean;
   /** emphasisStyle is stored but not applied by the canvas renderer yet */
   emphasis: boolean;
+  /** Hover readout honors Encoding Tooltip fields (false for GPU scenes / most geo maps). */
+  tooltipHover: boolean;
 }
 
 /** Which Encoding / Visual controls actually affect this chart kind. */
@@ -343,6 +345,8 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     // Trail + marginals only in renderFullScatter
     scatterExtras: scatterLike,
     emphasis: false,
+    // GPU particle scenes and lon/lat maps lack hover; dataCube has its own picker
+    tooltipHover: kind === "dataCube" || (!gpu && !isGeoMapKind(kind)),
   };
 }
 
