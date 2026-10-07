@@ -38,7 +38,7 @@ export const CHANGELOG: ChangelogRelease[] = [
       {
         title: "Less noise, no wipe",
         detail:
-          "Fewer chart variants per feed so one source can’t dominate the grid. Re-scanning won’t clear cards a slow timeout used to erase.",
+          "Alt charts score lower so one feed doesn’t own the top of the grid, while Discover still keeps thousands of variants. Re-scanning won’t clear cards a slow timeout used to erase.",
       },
     ],
   },

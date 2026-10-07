@@ -60,10 +60,10 @@ export function requestDiscoverScan(): void {
 const SCAN_KINDS: readonly SourceKind[] = ALL_SOURCE_KINDS;
 
 /** Cap on stories shown in the discover grid (primary + alts across every feed). */
-export const DISCOVER_STORY_LIMIT = 500;
+export const DISCOVER_STORY_LIMIT = 10_000;
 
 /** How many chart variants to keep per live source (kinds + encodings). */
-export const VARIANTS_PER_SOURCE = 4;
+export const VARIANTS_PER_SOURCE = 40;
 
 function colIndex(sample: QueryResult, name: string): number {
   return sample.columns.indexOf(name);

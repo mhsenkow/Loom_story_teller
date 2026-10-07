@@ -12,9 +12,10 @@ describe("discoverStories", () => {
     expect(DISCOVER_SEEN_KEY).toBe("loom-discover-v1");
   });
 
-  it("keeps Discover variants tight so one feed cannot flood the grid", () => {
+  it("keeps room for many chart variants across every live feed", () => {
     expect(ALL_SOURCE_KINDS.length).toBe(34);
-    expect(VARIANTS_PER_SOURCE).toBeLessThanOrEqual(5);
+    expect(VARIANTS_PER_SOURCE).toBeGreaterThanOrEqual(20);
+    expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(10_000);
     expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(ALL_SOURCE_KINDS.length * VARIANTS_PER_SOURCE);
   });
 
