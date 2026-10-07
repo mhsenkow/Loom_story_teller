@@ -785,7 +785,7 @@ export function drawChartSourceFootnote(
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean)
-    .slice(0, 2);
+    .slice(0, 3);
   if (!lines.length) return;
   const align = opts.align ?? "left";
   const fontFamily = opts.fontFamily ?? "Inter";

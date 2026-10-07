@@ -491,8 +491,9 @@ export type ChartColorStatusHints = {
 };
 
 /**
- * Status-bar label for what color is doing — e.g. `color: views · Diverging Hot–Cold`.
- * Null when color isn’t meaningfully in play (default auto categorical, no Color field).
+ * Label for what color is doing — e.g. `nest: rank · Diverging Hot–Cold`.
+ * `channelLabel` is the Encoding slot name (Color / Nest / Heat…).
+ * Null only when color isn’t meaningfully in play.
  */
 export function formatChartColorStatus(
   chart: ChartColorStatusHints | null | undefined,
@@ -503,6 +504,8 @@ export function formatChartColorStatus(
     theme?: string | null;
     colorblind?: boolean;
     colorFieldType?: "quantitative" | "nominal" | "ordinal" | null;
+    /** Encoding panel name for the color slot (“Nest” on treemap, “Heat” on heatmap…). */
+    channelLabel?: string | null;
   } = {},
 ): string | null {
   if (!chart?.kind) return null;
@@ -511,24 +514,25 @@ export function formatChartColorStatus(
   const userPicked =
     (paletteId !== "auto" && paletteId !== "theme") || (scaleKind != null && scaleKind !== "auto");
 
-  const field =
-    (chart.colorField && chart.colorField.trim()) ||
-    (VALUE_RAMP_KINDS.has(chart.kind)
-      ? chart.yField || chart.sizeField || null
-      : null);
+  const colorField = chart.colorField?.trim() || null;
+  const measureField =
+    VALUE_RAMP_KINDS.has(chart.kind) ? chart.yField || chart.sizeField || null : null;
+  const field = colorField || measureField;
 
   const resolved = resolveChartColors({
     paletteId,
     theme: opts.theme,
     colorblind: opts.colorblind,
     chartKind: chart.kind,
-    colorFieldType: opts.colorFieldType ?? (field && !chart.colorField ? "quantitative" : null),
+    colorFieldType:
+      opts.colorFieldType ??
+      (colorField ? null : field ? "quantitative" : null),
     reverse: opts.reverse,
     scaleKind,
   });
 
   const atPlay =
-    !!chart.colorField ||
+    !!colorField ||
     resolved.continuous ||
     VALUE_RAMP_KINDS.has(chart.kind) ||
     userPicked;
@@ -537,8 +541,9 @@ export function formatChartColorStatus(
   const palette = getPaletteById(resolved.paletteId);
   const name = palette?.name ?? resolved.paletteId;
   const rev = opts.reverse ? " ↺" : "";
-  if (field) return `color: ${field} · ${name}${rev}`;
-  return `color · ${name}${rev}`;
+  const role = (opts.channelLabel?.trim() || "color").toLowerCase();
+  if (field) return `${role}: ${field} · ${name}${rev}`;
+  return `${role} · ${name}${rev}`;
 }
 
 /** Back-compat: discrete color list for a palette id (theme-aware). */

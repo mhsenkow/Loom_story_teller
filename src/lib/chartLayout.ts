@@ -100,9 +100,9 @@ export function resolveChartMargins(args: {
     : Math.max(base * 0.55, 20);
   let right = Math.max(base * 0.55, cartesian ? 20 : 18);
 
-  // Credit + optional time span (two lines) under the plot
+  // Credit + optional time / color lines under the plot
   if (sourceFootnote) {
-    bottom += 28;
+    bottom += 40;
   }
 
   // Legend floats inside the plot; only nudge when it would crowd the edge

@@ -36,7 +36,12 @@ import {
   type YAggregateOption,
   type ChartRecommendation,
 } from "@/lib/recommendations";
-import { getChartRenderIssue, formatChartAggregationSummary, chartCapabilities } from "@/lib/chartSupport";
+import {
+  getChartRenderIssue,
+  formatChartAggregationSummary,
+  chartCapabilities,
+  encodingChannelLabels,
+} from "@/lib/chartSupport";
 import { isOddChartKind, renderOddChart } from "@/lib/oddCharts";
 import {
   extractGpuScenePoints,
@@ -314,6 +319,7 @@ export function ChartView() {
       theme: appSettings.theme,
       colorblind: !!appSettings.colorblindCharts,
       colorFieldType,
+      channelLabel: encodingChannelLabels(activeChart.kind).color,
     });
   }, [
     activeChart,
@@ -332,7 +338,7 @@ export function ChartView() {
     return { ...sampleRows, rows: sliced.rows };
   }, [sampleRows, activeChart]);
 
-  /** Source credit + “when?” time span under the plot (time shows even if source is off). */
+  /** Source credit + “when?” + color encoding under the plot. */
   const chartFootnoteText = useMemo(() => {
     const rows = chartSampleRows ?? sampleRows;
     const timeLine = formatChartTimeFootnote(
@@ -350,7 +356,9 @@ export function ChartView() {
       });
       if (prov) sourceLine = formatSourceFootnote(prov, footMode);
     }
-    return composeChartFootnote(sourceLine, timeLine);
+    // Color rides the canvas footnote so it’s visible even when the status bar is cramped.
+    const meta = [timeLine, chartColorStatus].filter(Boolean).join(" · ");
+    return composeChartFootnote(sourceLine, meta || null);
   }, [
     chartSampleRows,
     sampleRows,
@@ -358,6 +366,7 @@ export function ChartView() {
     columnStats,
     chartVisualOverrides.sourceFootnote,
     selectedFile,
+    chartColorStatus,
   ]);
 
   const themeUi = useMemo(() => getThemeUiColors(appSettings.theme), [appSettings.theme]);
@@ -3505,16 +3514,18 @@ export function ChartView() {
         })()}
 
         {activeChart && !isMobile && (
-          <div className="flex flex-wrap items-center gap-2 px-3 h-[var(--statusbar-height)] border-t border-loom-border text-2xs text-loom-muted font-mono">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 min-h-[var(--statusbar-height)] py-0.5 border-t border-loom-border text-2xs text-loom-muted font-mono">
             <span>Vega-Lite spec: {activeChart.kind}</span>
             <span className="text-loom-border">|</span>
             <span>{activeChart.xField}{activeChart.yField ? ` × ${activeChart.yField}` : ""}</span>
-            {chartColorStatus && (
+            {chartColorStatus ? (
               <>
                 <span className="text-loom-border">|</span>
-                <span title="How color is encoded on this chart">{chartColorStatus}</span>
+                <span className="text-loom-text" title="How color is encoded on this chart">
+                  {chartColorStatus}
+                </span>
               </>
-            )}
+            ) : null}
             <span className="text-loom-border">|</span>
             <span title="Press L while hovering a point to lock/unlock tooltip filter across charts">
               Tooltip L = link
@@ -6373,9 +6384,19 @@ function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi:
 
   const catMap = new Map<string, number>();
   if (ci >= 0 && ci !== xi) for (const e of entries) if (!catMap.has(e.cat)) catMap.set(e.cat, catMap.size);
+  // Continuous palette: ramp by nest/color when numeric, else by the measure (views).
+  const nestNumeric =
+    catMap.size > 0 &&
+    entries.every((e) => Number.isFinite(Number(e.cat)));
+  const rampByNest = !!ramp && ramp.length >= 2 && nestNumeric;
   const rampByValue = !!ramp && ramp.length >= 2 && catMap.size === 0;
-  const vMin = rampByValue ? Math.min(...entries.map((e) => e.value)) : 0;
-  const vMax = rampByValue ? Math.max(...entries.map((e) => e.value)) : 1;
+  const rampVals = rampByNest
+    ? entries.map((e) => Number(e.cat))
+    : rampByValue
+      ? entries.map((e) => e.value)
+      : [];
+  const vMin = rampVals.length ? Math.min(...rampVals) : 0;
+  const vMax = rampVals.length ? Math.max(...rampVals) : 1;
   const total = entries.reduce((s, e) => s + e.value, 0);
   const rects = squarify(entries, pad, pad, w - 2 * pad, h - 2 * pad);
   const xName = fieldLabel(opts, xi);
@@ -6383,8 +6404,9 @@ function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi:
 
   for (const rect of rects) {
     let fill: string;
-    if (rampByValue) {
-      const t = vMax > vMin ? (rect.value - vMin) / (vMax - vMin) : 0.5;
+    if (rampByNest || rampByValue) {
+      const raw = rampByNest ? Number(rect.cat) : rect.value;
+      const t = vMax > vMin ? (raw - vMin) / (vMax - vMin) : 0.5;
       fill = sampleContinuous(ramp!, t);
     } else if (catMap.size) {
       fill = palette[(catMap.get(rect.cat) ?? 0) % palette.length]!;

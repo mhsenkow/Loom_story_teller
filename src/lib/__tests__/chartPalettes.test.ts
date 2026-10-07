@@ -56,6 +56,12 @@ describe("chartPalettes catalog", () => {
     ).toBe("color: views · Diverging Hot–Cold");
     expect(
       formatChartColorStatus(
+        { kind: "treemap", xField: "article", yField: "views", colorField: "rank" },
+        { paletteId: "div-hot-cold", channelLabel: "Nest" },
+      ),
+    ).toBe("nest: rank · Diverging Hot–Cold");
+    expect(
+      formatChartColorStatus(
         { kind: "scatter", xField: "a", yField: "b", colorField: "region" },
         { paletteId: "categorical" },
       ),
