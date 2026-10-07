@@ -228,9 +228,24 @@ export async function applyBurnInToPng(
   sourceLabel?: string | null,
 ): Promise<Blob> {
   const st = useLoomStore.getState();
-  // Visual footnote already owns the bottom strip during chart capture.
+  // Chart canvas already owns the bottom strip (source credit and/or time span).
+  // Time span draws even when Visual → Source footnote is off, so skip burn-in
+  // whenever a temporal column is available on the active chart sample.
   if ((st.chartVisualOverrides.sourceFootnote ?? "credit") !== "off") {
     return blob;
+  }
+  try {
+    const { formatChartTimeFootnote } = await import("@/lib/chartTime");
+    const rows = st.sampleRows;
+    const timeLine = formatChartTimeFootnote(
+      rows?.rows,
+      rows?.columns,
+      st.activeChart,
+      st.columnStats,
+    );
+    if (timeLine) return blob;
+  } catch {
+    /* keep burn-in path */
   }
   const burnIn = st.exportBurnIn;
   if (

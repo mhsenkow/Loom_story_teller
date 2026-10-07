@@ -129,7 +129,11 @@ import {
   type SeriesNormalize,
   type YScaleKind,
 } from "@/lib/dsTransforms";
-import { applyChartTimeWindow } from "@/lib/chartTime";
+import {
+  applyChartTimeWindow,
+  composeChartFootnote,
+  formatChartTimeFootnote,
+} from "@/lib/chartTime";
 
 const DEFAULT_COLORS = discreteSeriesColors(
   resolveChartColors({ paletteId: "categorical" }),
@@ -299,6 +303,34 @@ export function ChartView() {
     return { ...sampleRows, rows: sliced.rows };
   }, [sampleRows, activeChart]);
 
+  /** Source credit + “when?” time span under the plot (time shows even if source is off). */
+  const chartFootnoteText = useMemo(() => {
+    const rows = chartSampleRows ?? sampleRows;
+    const timeLine = formatChartTimeFootnote(
+      rows?.rows,
+      rows?.columns,
+      activeChart,
+      columnStats,
+    );
+    const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
+    let sourceLine: string | null = null;
+    if (footMode !== "off" && selectedFile) {
+      const prov = resolveDataProvenance(selectedFile, {
+        loadedRows: rows?.rows.length ?? null,
+        totalRows: rows?.total_rows ?? selectedFile.row_count,
+      });
+      if (prov) sourceLine = formatSourceFootnote(prov, footMode);
+    }
+    return composeChartFootnote(sourceLine, timeLine);
+  }, [
+    chartSampleRows,
+    sampleRows,
+    activeChart,
+    columnStats,
+    chartVisualOverrides.sourceFootnote,
+    selectedFile,
+  ]);
+
   const themeUi = useMemo(() => getThemeUiColors(appSettings.theme), [appSettings.theme]);
 
   // Chart stage pixel size — must be in draw-effect deps so aspect/device
@@ -397,7 +429,7 @@ export function ChartView() {
       ghostPlace: chartVisualOverrides.ghostPlace ?? "se",
       titleLayout: chartVisualOverrides.titleLayout ?? "pair",
       chartFrame: frame,
-      sourceFootnote: (chartVisualOverrides.sourceFootnote ?? "credit") !== "off",
+      sourceFootnote: Boolean(chartFootnoteText),
       sourceFootnoteAlign: chartVisualOverrides.sourceFootnoteAlign ?? "left",
       themeBg: themeUi.bg,
       themeText: themeUi.text,
@@ -419,7 +451,7 @@ export function ChartView() {
       anomalyHighlight: activeChart?.anomalyHighlight ?? undefined,
       bumpMode: activeChart?.bumpMode ?? undefined,
     };
-  }, [colors, continuousStops, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart, barStackMode]);
+  }, [colors, continuousStops, opacity, pointSize, chartVisualOverrides, themeUi, isCompact, isMedium, activeChart, barStackMode, chartFootnoteText]);
 
   const renderIssue = useMemo(
     () => getChartRenderIssue(activeChart, chartSampleRows ?? sampleRows),
@@ -706,8 +738,22 @@ export function ChartView() {
       activeChart.kind === "globe" ||
       activeChart.kind === "globeTrail");
   const [canvasSized, setCanvasSized] = useState(false);
-  const exportStateRef = useRef({ activeChart, gpuReady, vegaSpec, sampleRows: chartSampleRows, chartVisualOverrides });
-  exportStateRef.current = { activeChart, gpuReady, vegaSpec, sampleRows: chartSampleRows, chartVisualOverrides };
+  const exportStateRef = useRef({
+    activeChart,
+    gpuReady,
+    vegaSpec,
+    sampleRows: chartSampleRows,
+    chartVisualOverrides,
+    chartFootnoteText,
+  });
+  exportStateRef.current = {
+    activeChart,
+    gpuReady,
+    vegaSpec,
+    sampleRows: chartSampleRows,
+    chartVisualOverrides,
+    chartFootnoteText,
+  };
   const sampleRowsRef = useRef(chartSampleRows);
   sampleRowsRef.current = chartSampleRows;
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
@@ -1232,11 +1278,9 @@ export function ChartView() {
         }
         }
         // Attribution burn-in for platform / social PNG exports.
-        // When Visual → Source footnote already owns the bottom strip, skip the
-        // burn-in bar entirely so it doesn't paint over the lineage line.
+        // When the canvas already has a source/time footnote, skip the burn-in bar.
         if (st.socialExportTarget) {
-          const footMode = st.chartVisualOverrides.sourceFootnote ?? "credit";
-          const footnoteOnChart = footMode !== "off";
+          const footnoteOnChart = Boolean(exportStateRef.current.chartFootnoteText);
           if (!footnoteOnChart) {
             const { drawExportBurnIn } = await import("@/lib/socialExport");
             const { formatSourceFootnote, resolveDataProvenance } = await import("@/lib/dataProvenance");
@@ -1837,39 +1881,25 @@ export function ChartView() {
         cubeRendererRef.current.render(dataCube, view, continuousStops, opacity, cubeOpts);
         octx.setTransform(dpr, 0, 0, dpr, 0, 0);
         drawDataCubeFrontLayer(octx, dataCube, view, far, cubeOpts);
-        const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
-        if (footMode !== "off" && selectedFile) {
-          const prov = resolveDataProvenance(selectedFile, {
-            loadedRows: sampleRows?.rows.length ?? null,
-            totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+        if (chartFootnoteText) {
+          drawChartSourceFootnote(octx, w, h, 24, chartFootnoteText, {
+            align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+            fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+            themeMuted: themeUi.label,
+            themeBorder: themeUi.border,
           });
-          if (prov) {
-            drawChartSourceFootnote(octx, w, h, 24, formatSourceFootnote(prov, footMode), {
-              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
-              fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-              themeMuted: themeUi.label,
-              themeBorder: themeUi.border,
-            });
-          }
         }
         octx.setTransform(1, 0, 0, 1, 0, 0);
       } else {
         renderDataCubeCanvas(ctx, dataCube, w, h, cubeOpts);
-        const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
-        if (footMode !== "off" && selectedFile) {
-          const prov = resolveDataProvenance(selectedFile, {
-            loadedRows: sampleRows?.rows.length ?? null,
-            totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+        if (chartFootnoteText) {
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+          drawChartSourceFootnote(ctx, w, h, 24, chartFootnoteText, {
+            align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+            fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+            themeMuted: themeUi.label,
+            themeBorder: themeUi.border,
           });
-          if (prov) {
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-            drawChartSourceFootnote(ctx, w, h, 24, formatSourceFootnote(prov, footMode), {
-              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
-              fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-              themeMuted: themeUi.label,
-              themeBorder: themeUi.border,
-            });
-          }
         }
       }
       ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1894,20 +1924,13 @@ export function ChartView() {
           ctx.fillRect(0, 0, w, h);
           // Footnote on the 2D layer under the GPU canvas (zIndex keeps GPU on top for
           // points; raise 2D briefly for the caption strip via a second pass on overlay).
-          const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
-          if (footMode !== "off" && selectedFile) {
-            const prov = resolveDataProvenance(selectedFile, {
-              loadedRows: sampleRows?.rows.length ?? null,
-              totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+          if (chartFootnoteText) {
+            drawChartSourceFootnote(ctx, w, h, 24, chartFootnoteText, {
+              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+              fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+              themeMuted: themeUi.label,
+              themeBorder: themeUi.border,
             });
-            if (prov) {
-              drawChartSourceFootnote(ctx, w, h, 24, formatSourceFootnote(prov, footMode), {
-                align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
-                fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-                themeMuted: themeUi.label,
-                themeBorder: themeUi.border,
-              });
-            }
           }
           ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
@@ -1921,20 +1944,13 @@ export function ChartView() {
         const h = overlay.height / dpr;
         octx.setTransform(dpr, 0, 0, dpr, 0, 0);
         octx.clearRect(0, 0, w, h);
-        const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
-        if (footMode !== "off" && selectedFile) {
-          const prov = resolveDataProvenance(selectedFile, {
-            loadedRows: sampleRows?.rows.length ?? null,
-            totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+        if (chartFootnoteText) {
+          drawChartSourceFootnote(octx, w, h, 24, chartFootnoteText, {
+            align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+            fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
+            themeMuted: themeUi.label,
+            themeBorder: themeUi.border,
           });
-          if (prov) {
-            drawChartSourceFootnote(octx, w, h, 24, formatSourceFootnote(prov, footMode), {
-              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
-              fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
-              themeMuted: themeUi.label,
-              themeBorder: themeUi.border,
-            });
-          }
         }
         octx.setTransform(1, 0, 0, 1, 0, 0);
       }
@@ -2489,21 +2505,13 @@ export function ChartView() {
           drawSmartOverlays(ctx, w, h, pad, rows, cols, xIdx, yIdx, activeChart, smartResults);
         }
 
-        const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
-        if (footMode !== "off" && selectedFile) {
-          const prov = resolveDataProvenance(selectedFile, {
-            loadedRows: rows.length,
-            totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+        if (chartFootnoteText) {
+          drawChartSourceFootnote(ctx, w, h, pad, chartFootnoteText, {
+            align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+            fontFamily,
+            themeMuted: opts.themeMuted,
+            themeBorder: opts.themeBorder,
           });
-          if (prov) {
-            const line = formatSourceFootnote(prov, footMode);
-            drawChartSourceFootnote(ctx, w, h, pad, line, {
-              align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
-              fontFamily,
-              themeMuted: opts.themeMuted,
-              themeBorder: opts.themeBorder,
-            });
-          }
         }
 
         if (clipProgress < 1) ctx.restore();
@@ -2532,7 +2540,7 @@ export function ChartView() {
     }
 
     drawOneFrame(1);
-  }, [canvasSized, activeChart, sampleRows, chartSampleRows, selectedFile, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnote, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines]);
+  }, [canvasSized, activeChart, sampleRows, chartSampleRows, chartFootnoteText, selectedFile, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines]);
 
   // Axes overlay for WebGPU scatter; clear when not scatter so overlay doesn't sit on top of line/bar
   useEffect(() => {
@@ -2550,15 +2558,9 @@ export function ChartView() {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     const paintFootnote = () => {
-      const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
-      if (footMode === "off" || !selectedFile) return;
-      const prov = resolveDataProvenance(selectedFile, {
-        loadedRows: sampleRows?.rows.length ?? null,
-        totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
-      });
-      if (!prov) return;
+      if (!chartFootnoteText) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawChartSourceFootnote(ctx, w, h, 24, formatSourceFootnote(prov, footMode), {
+      drawChartSourceFootnote(ctx, w, h, 24, chartFootnoteText, {
         align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
         fontFamily: chartVisualOverrides.fontFamily ?? "Inter",
         themeMuted: getThemeUiColors(appSettings.theme).muted,
@@ -2592,7 +2594,7 @@ export function ChartView() {
       isCompact,
       legendPosition: chartVisualOverrides.legendPosition,
       axisFontSize: chartVisualOverrides.axisFontSize ?? 10,
-      sourceFootnote: (chartVisualOverrides.sourceFootnote ?? "credit") !== "off",
+      sourceFootnote: Boolean(chartFootnoteText),
     });
     const eff = getEffectiveScatterBounds(sd, scatterView);
     const ui = getThemeUiColors(appSettings.theme);
@@ -2634,27 +2636,20 @@ export function ChartView() {
       themeBorder: ui.border,
       axisLabelColor: overlayOpts.axisLabelColor,
     });
-    const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
-    if (footMode !== "off" && selectedFile) {
-      const prov = resolveDataProvenance(selectedFile, {
-        loadedRows: sampleRows?.rows.length ?? null,
-        totalRows: sampleRows?.total_rows ?? selectedFile.row_count,
+    if (chartFootnoteText) {
+      drawChartSourceFootnote(ctx, w, h, overlayPad, chartFootnoteText, {
+        align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+        fontFamily: overlayOpts.fontFamily,
+        themeMuted: ui.muted,
+        themeBorder: ui.border,
       });
-      if (prov) {
-        drawChartSourceFootnote(ctx, w, h, overlayPad, formatSourceFootnote(prov, footMode), {
-          align: chartVisualOverrides.sourceFootnoteAlign ?? "left",
-          fontFamily: overlayOpts.fontFamily,
-          themeMuted: ui.muted,
-          themeBorder: ui.border,
-        });
-      }
     }
     if (overlayOpts.showGrid) {
       drawGridLines(ctx, eff.xMin, eff.xMax, eff.yMin, eff.yMax, w, h, overlayPad, overlayOpts);
     }
     drawAxisTicks(ctx, eff.xMin, eff.xMax, eff.yMin, eff.yMax, w, h, overlayPad, overlayOpts);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartVisualOverrides, refreshKey, appSettings.theme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h, selectedFile, sampleRows]);
+  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartVisualOverrides, refreshKey, appSettings.theme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h, selectedFile, sampleRows, chartFootnoteText]);
 
   useEffect(() => {
     if (activeChart?.kind === "scatter") setScatterView({ scale: 1, panX: 0, panY: 0 });

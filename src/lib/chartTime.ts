@@ -28,7 +28,7 @@ const FUTURE_SLACK_MS = 60 * 60 * 1000;
 /** Newest sample within this of now → treat as live (wall-clock windows). */
 const LIVE_LOOKBACK_MS = 14 * 86_400_000;
 
-const TIME_NAME = /(_at$|_date$|_ts$|^ts$|^time$|^date$|timestamp|created|updated|datetime|epoch|as_of|year|^yr$|^day$)/i;
+const TIME_NAME = /(_at$|_date$|Date$|_ts$|^ts$|^time$|^date$|timestamp|created|updated|datetime|epoch|as_of|year|^yr$|^day$|declaration)/i;
 
 export function columnLooksTemporal(dataType: string, name: string): boolean {
   const t = (dataType ?? "").toUpperCase();
@@ -240,4 +240,131 @@ export function applyChartTimeWindow<T extends unknown[]>(
     });
   }
   return { rows: next, filtered: true, kept: next.length, total, mode };
+}
+
+/** Min/max parseable times for a column in the (already windowed) sample. */
+export function chartDataTimeSpan(
+  rows: unknown[][],
+  columns: string[],
+  field: string | null | undefined,
+): { field: string; minMs: number; maxMs: number; count: number } | null {
+  if (!field || !rows.length) return null;
+  const idx = columns.indexOf(field);
+  if (idx < 0) return null;
+  let min = Infinity;
+  let max = -Infinity;
+  let count = 0;
+  for (const r of rows) {
+    const t = parseChartTime(r[idx]);
+    if (t == null) continue;
+    count += 1;
+    if (t < min) min = t;
+    if (t > max) max = t;
+  }
+  if (!count || !Number.isFinite(min) || !Number.isFinite(max)) return null;
+  return { field, minMs: min, maxMs: max, count };
+}
+
+function utcYmd(ms: number): { y: number; m: number; d: number } {
+  const dt = new Date(ms);
+  return { y: dt.getUTCFullYear(), m: dt.getUTCMonth(), d: dt.getUTCDate() };
+}
+
+function formatUtcDay(ms: number, withYear: boolean): string {
+  const { y, m, d } = utcYmd(ms);
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m]!;
+  return withYear ? `${mon} ${d}, ${y}` : `${mon} ${d}`;
+}
+
+function formatUtcMonthYear(ms: number): string {
+  const { y, m } = utcYmd(ms);
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m]!;
+  return `${mon} ${y}`;
+}
+
+function formatUtcTime(ms: number): string {
+  const dt = new Date(ms);
+  const hh = String(dt.getUTCHours()).padStart(2, "0");
+  const mm = String(dt.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+/** Human range for a span (UTC), e.g. "Jan 8, 2020 – Oct 6, 2026". */
+export function formatChartTimeSpanRange(minMs: number, maxMs: number): string {
+  if (minMs === maxMs) {
+    const dt = new Date(minMs);
+    const midnight =
+      dt.getUTCHours() === 0 && dt.getUTCMinutes() === 0 && dt.getUTCSeconds() === 0;
+    if (midnight) return formatUtcDay(minMs, true);
+    return `${formatUtcDay(minMs, true)} ${formatUtcTime(minMs)} UTC`;
+  }
+  const a = utcYmd(minMs);
+  const b = utcYmd(maxMs);
+  const spanMs = maxMs - minMs;
+  // Same calendar day and under 2 days → show clock times
+  if (a.y === b.y && a.m === b.m && a.d === b.d && spanMs < 2 * 86_400_000) {
+    return `${formatUtcDay(minMs, true)} · ${formatUtcTime(minMs)}–${formatUtcTime(maxMs)} UTC`;
+  }
+  // Multi-year with long span → month-year endpoints
+  if (a.y !== b.y && spanMs > 400 * 86_400_000) {
+    return `${formatUtcMonthYear(minMs)} – ${formatUtcMonthYear(maxMs)}`;
+  }
+  if (a.y === b.y) {
+    return `${formatUtcDay(minMs, false)} – ${formatUtcDay(maxMs, true)}`;
+  }
+  return `${formatUtcDay(minMs, true)} – ${formatUtcDay(maxMs, true)}`;
+}
+
+/**
+ * Footnote line for when the chart’s rows happen — window label + date range.
+ * Uses Encoding Time field when set; otherwise the best temporal column.
+ */
+export function formatChartTimeFootnote(
+  rows: unknown[][] | null | undefined,
+  columns: string[] | null | undefined,
+  rec: {
+    timeWindowField?: string | null;
+    timeWindow?: ChartTimeRange | string | null;
+    timeField?: string | null;
+    xField?: string;
+  } | null | undefined,
+  columnInfos?: ColumnInfo[] | null,
+): string | null {
+  if (!rows?.length || !columns?.length) return null;
+  const field =
+    (rec?.timeWindowField && columns.includes(rec.timeWindowField) ? rec.timeWindowField : null) ||
+    (columnInfos?.length ? pickDefaultTimeField(columnInfos, rec) : null) ||
+    (rec?.timeField && columns.includes(rec.timeField) ? rec.timeField : null) ||
+    (rec?.xField && columns.includes(rec.xField) && columnLooksTemporal("TIMESTAMP", rec.xField)
+      ? rec.xField
+      : null) ||
+    columns.find((c) => columnLooksTemporal("VARCHAR", c)) ||
+    null;
+  if (!field) return null;
+  const span = chartDataTimeSpan(rows, columns, field);
+  if (!span) return null;
+  const range = formatChartTimeSpanRange(span.minMs, span.maxMs);
+  const mode =
+    fieldLooksFutureDated(field) && span.maxMs > Date.now()
+      ? "forward"
+      : chartTimeAnchorMode(span.maxMs);
+  const windowBit = chartTimeWindowLabel(
+    rec?.timeWindow && rec.timeWindow !== "all" ? (rec.timeWindow as ChartTimeRange) : null,
+    mode,
+  );
+  if (windowBit) return `${windowBit} · ${range}`;
+  // All-time / no window: still answer “when?”
+  if (span.minMs === span.maxMs) return range;
+  return `${range}`;
+}
+
+/** Source credit + optional time line (newline when both). */
+export function composeChartFootnote(
+  sourceLine: string | null | undefined,
+  timeLine: string | null | undefined,
+): string | null {
+  const src = sourceLine?.trim() || null;
+  const time = timeLine?.trim() || null;
+  if (src && time) return `${src}\n${time}`;
+  return src || time;
 }

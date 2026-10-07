@@ -767,6 +767,7 @@ export function drawChartTitleBlock(
 }
 
 /** Bottom source lineage footnote — rides with the chart into PNG / share. */
+/** Bottom source / time footnote — rides into PNG / share. Supports 1–2 lines (`\\n`). */
 export function drawChartSourceFootnote(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -780,27 +781,35 @@ export function drawChartSourceFootnote(
     themeBorder?: string;
   } = {},
 ): void {
-  const line = text.trim();
-  if (!line) return;
+  const lines = text
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 2);
+  if (!lines.length) return;
   const align = opts.align ?? "left";
   const fontFamily = opts.fontFamily ?? "Inter";
   const muted = opts.themeMuted ?? "#9e9eac";
   const maxW = Math.max(48, w - pad * 2);
+  const lineH = 13;
+  const baseY = h - Math.max(6, pad * 0.22);
+  const topLineY = baseY - (lines.length - 1) * lineH;
   ctx.save();
   ctx.font = `500 11px ${fontFamily}, sans-serif`;
   ctx.fillStyle = muted;
   ctx.textBaseline = "bottom";
   ctx.textAlign = align === "center" ? "center" : align === "right" ? "right" : "left";
   const x = align === "center" ? w / 2 : align === "right" ? w - pad : pad;
-  const y = h - Math.max(6, pad * 0.22);
   ctx.strokeStyle = opts.themeBorder ?? muted;
   ctx.globalAlpha = 0.45;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(pad, y - 13);
-  ctx.lineTo(w - pad, y - 13);
+  ctx.moveTo(pad, topLineY - 13);
+  ctx.lineTo(w - pad, topLineY - 13);
   ctx.stroke();
   ctx.globalAlpha = 1;
-  ctx.fillText(fitTextEllipsis(ctx, line, maxW), x, y);
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(fitTextEllipsis(ctx, lines[i]!, maxW), x, topLineY + i * lineH);
+  }
   ctx.restore();
 }

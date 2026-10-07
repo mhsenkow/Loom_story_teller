@@ -5,11 +5,15 @@
 import { describe, expect, it } from "vitest";
 import {
   applyChartTimeWindow,
+  chartDataTimeSpan,
   chartTimeAnchorMode,
   chartTimeRangeOptions,
   chartTimeWindowLabel,
   columnLooksTemporal,
+  composeChartFootnote,
   fieldLooksFutureDated,
+  formatChartTimeFootnote,
+  formatChartTimeSpanRange,
   parseChartTime,
   suggestedChartTimeWindows,
   timeColumnSpanMs,
@@ -117,5 +121,53 @@ describe("chartTime", () => {
     expect(chartTimeAnchorMode(now - 3_600_000, now)).toBe("wall");
     expect(chartTimeAnchorMode(now - 40 * 86_400_000, now)).toBe("sample");
     expect(chartTimeAnchorMode(now + 86_400_000, now)).toBe("forward");
+  });
+
+  it("formats multi-year and same-day spans for footnotes", () => {
+    expect(formatChartTimeSpanRange(Date.UTC(2020, 0, 8), Date.UTC(2026, 9, 6))).toBe(
+      "Jan 2020 – Oct 2026",
+    );
+    expect(formatChartTimeSpanRange(Date.UTC(2026, 9, 6), Date.UTC(2026, 9, 6))).toBe(
+      "Oct 6, 2026",
+    );
+    const a = Date.parse("2026-10-06T08:00:00Z");
+    const b = Date.parse("2026-10-06T18:30:00Z");
+    expect(formatChartTimeSpanRange(a, b)).toBe("Oct 6, 2026 · 08:00–18:30 UTC");
+  });
+
+  it("builds a time footnote from Encoding Time even when Window is All", () => {
+    const rows = [
+      ["2020-01-08T00:00:00Z", "Flood"],
+      ["2026-10-06T00:00:00Z", "Fire"],
+    ];
+    const line = formatChartTimeFootnote(
+      rows,
+      ["declarationDate", "incident_type"],
+      { timeWindowField: "declarationDate", timeWindow: "all" },
+    );
+    expect(line).toBe("Jan 2020 – Oct 2026");
+    expect(chartDataTimeSpan(rows, ["declarationDate", "incident_type"], "declarationDate")?.count).toBe(2);
+  });
+
+  it("prefixes the window label when a recent slice is active", () => {
+    const now = Date.parse("2026-10-06T12:00:00Z");
+    const rows = [
+      [new Date(now - 2 * 86_400_000).toISOString(), "a"],
+      [new Date(now - 3_600_000).toISOString(), "b"],
+    ];
+    const line = formatChartTimeFootnote(
+      rows,
+      ["ts", "label"],
+      { timeWindowField: "ts", timeWindow: "7d" },
+    );
+    expect(line).toMatch(/^Last 7 days · /);
+  });
+
+  it("composeChartFootnote stacks source over time", () => {
+    expect(composeChartFootnote("FEMA · OpenFEMA", "Jan 2020 – Oct 2026")).toBe(
+      "FEMA · OpenFEMA\nJan 2020 – Oct 2026",
+    );
+    expect(composeChartFootnote(null, "Oct 6, 2026")).toBe("Oct 6, 2026");
+    expect(composeChartFootnote("FEMA", null)).toBe("FEMA");
   });
 });

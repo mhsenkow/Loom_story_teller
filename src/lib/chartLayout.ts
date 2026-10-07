@@ -100,8 +100,9 @@ export function resolveChartMargins(args: {
     : Math.max(base * 0.55, 20);
   let right = Math.max(base * 0.55, cartesian ? 20 : 18);
 
+  // Credit + optional time span (two lines) under the plot
   if (sourceFootnote) {
-    bottom = Math.max(bottom, bottom + 16);
+    bottom += 28;
   }
 
   // Legend floats inside the plot; only nudge when it would crowd the edge
@@ -109,7 +110,7 @@ export function resolveChartMargins(args: {
     right = Math.max(right, 28);
   }
   if (legendPosition === "bottom") {
-    bottom = Math.max(bottom, 14 + tickBand + fieldBand + 8 + (sourceFootnote ? 14 : 0));
+    bottom = Math.max(bottom, 14 + tickBand + fieldBand + 8 + (sourceFootnote ? 28 : 0));
   }
 
   // Keep a usable plot (≥40% of short side); shrink gutters proportionally if needed

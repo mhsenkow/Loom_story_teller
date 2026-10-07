@@ -25,6 +25,19 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-07",
+    date: "2026-10-07",
+    title: "When the data happened",
+    summary: "Charts footnote the date range of the rows on screen whenever a timestamp is available.",
+    items: [
+      {
+        title: "Time span under the chart",
+        detail:
+          "When Encoding Time (or another date column) is present, the footer shows the span — e.g. “Jan 8, 2020 – Oct 6, 2026” — under the source credit so “OMG earthquakes” answers when.",
+      },
+    ],
+  },
+  {
     id: "2026-10-06c",
     date: "2026-10-06",
     title: "Honest clocks and clearer type",
