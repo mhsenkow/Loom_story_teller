@@ -19,6 +19,7 @@ import {
   discreteSeriesColors,
   getThemeUiColors,
   hexToRgb01,
+  formatChartColorStatus,
   resolveChartColors,
   sampleContinuous,
 } from "@/lib/chartPalettes";
@@ -296,6 +297,33 @@ export function ChartView() {
   ]);
   const opacity = chartVisualOverrides.opacity ?? 0.7;
   const pointSize = chartVisualOverrides.pointSize ?? 12;
+
+  const chartColorStatus = useMemo(() => {
+    if (!activeChart) return null;
+    const colorField = activeChart.colorField;
+    const col = colorField ? columnStats.find((c) => c.name === colorField) : undefined;
+    const colorFieldType = col
+      ? isNumericType(col.data_type)
+        ? ("quantitative" as const)
+        : ("nominal" as const)
+      : null;
+    return formatChartColorStatus(activeChart, {
+      paletteId: chartVisualOverrides.colorPalette ?? "auto",
+      scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
+      reverse: !!chartVisualOverrides.colorPaletteReverse,
+      theme: appSettings.theme,
+      colorblind: !!appSettings.colorblindCharts,
+      colorFieldType,
+    });
+  }, [
+    activeChart,
+    columnStats,
+    chartVisualOverrides.colorPalette,
+    chartVisualOverrides.colorScaleKind,
+    chartVisualOverrides.colorPaletteReverse,
+    appSettings.theme,
+    appSettings.colorblindCharts,
+  ]);
 
   const chartSampleRows = useMemo(() => {
     if (!sampleRows || !activeChart) return sampleRows;
@@ -3481,6 +3509,12 @@ export function ChartView() {
             <span>Vega-Lite spec: {activeChart.kind}</span>
             <span className="text-loom-border">|</span>
             <span>{activeChart.xField}{activeChart.yField ? ` × ${activeChart.yField}` : ""}</span>
+            {chartColorStatus && (
+              <>
+                <span className="text-loom-border">|</span>
+                <span title="How color is encoded on this chart">{chartColorStatus}</span>
+              </>
+            )}
             <span className="text-loom-border">|</span>
             <span title="Press L while hovering a point to lock/unlock tooltip filter across charts">
               Tooltip L = link
@@ -6318,6 +6352,7 @@ function squarify(items: TreemapItem[], x: number, y: number, w: number, h: numb
 
 function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   const palette = opts?.colors ?? DEFAULT_COLORS;
+  const ramp = opts?.continuousStops;
   const alpha = opts?.opacity ?? 0.85;
   const fontFamily = opts?.fontFamily ?? "Inter";
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
@@ -6338,13 +6373,24 @@ function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi:
 
   const catMap = new Map<string, number>();
   if (ci >= 0 && ci !== xi) for (const e of entries) if (!catMap.has(e.cat)) catMap.set(e.cat, catMap.size);
+  const rampByValue = !!ramp && ramp.length >= 2 && catMap.size === 0;
+  const vMin = rampByValue ? Math.min(...entries.map((e) => e.value)) : 0;
+  const vMax = rampByValue ? Math.max(...entries.map((e) => e.value)) : 1;
   const total = entries.reduce((s, e) => s + e.value, 0);
   const rects = squarify(entries, pad, pad, w - 2 * pad, h - 2 * pad);
   const xName = fieldLabel(opts, xi);
   const vTitle = valueTitle(opts, yi);
 
   for (const rect of rects) {
-    const fill = catMap.size ? palette[(catMap.get(rect.cat) ?? 0) % palette.length]! : palette[0]!;
+    let fill: string;
+    if (rampByValue) {
+      const t = vMax > vMin ? (rect.value - vMin) / (vMax - vMin) : 0.5;
+      fill = sampleContinuous(ramp!, t);
+    } else if (catMap.size) {
+      fill = palette[(catMap.get(rect.cat) ?? 0) % palette.length]!;
+    } else {
+      fill = palette[0]!;
+    }
     ctx.fillStyle = fill;
     ctx.globalAlpha = alpha;
     ctx.fillRect(rect.x, rect.y, rect.w, rect.h);

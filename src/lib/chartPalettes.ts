@@ -385,7 +385,16 @@ function pickAutoPaletteId(
   colorFieldType?: string | null,
 ): string {
   const kind = chartKind ?? "";
-  if (kind === "heatmap" || kind === "choropleth" || kind === "dataCube") return "seq-blue";
+  if (
+    kind === "heatmap" ||
+    kind === "choropleth" ||
+    kind === "dataCube" ||
+    kind === "treemap" ||
+    kind === "sunburst" ||
+    kind === "forceBubble"
+  ) {
+    return "seq-blue";
+  }
   if (kind === "waterfall") return "semantic";
   if (colorFieldType === "quantitative" || colorFieldType === "ordinal") return "seq-blue";
   return "categorical";
@@ -437,7 +446,10 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
     isContinuousKind(palette.kind) ||
     opts.chartKind === "heatmap" ||
     opts.chartKind === "choropleth" ||
-    opts.chartKind === "dataCube";
+    opts.chartKind === "dataCube" ||
+    opts.chartKind === "treemap" ||
+    opts.chartKind === "sunburst" ||
+    opts.chartKind === "forceBubble";
 
   if (!continuous && colors.length < 8) {
     colors = sampleCategorical(colors, 8, false);
@@ -455,6 +467,78 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
 export function discreteSeriesColors(resolved: ResolvedChartColors, n = 8): string[] {
   if (resolved.continuous) return discretizeContinuous(resolved.colors, n);
   return sampleCategorical(resolved.colors, n);
+}
+
+/** Chart kinds that paint a continuous ramp from the measure when Color isn’t set. */
+const VALUE_RAMP_KINDS = new Set([
+  "treemap",
+  "sunburst",
+  "heatmap",
+  "hexbin",
+  "choropleth",
+  "dataCube",
+  "forceBubble",
+  "geoBubbles",
+  "geoHex",
+]);
+
+export type ChartColorStatusHints = {
+  kind: string;
+  colorField?: string | null;
+  yField?: string | null;
+  sizeField?: string | null;
+  xField?: string | null;
+};
+
+/**
+ * Status-bar label for what color is doing — e.g. `color: views · Diverging Hot–Cold`.
+ * Null when color isn’t meaningfully in play (default auto categorical, no Color field).
+ */
+export function formatChartColorStatus(
+  chart: ChartColorStatusHints | null | undefined,
+  opts: {
+    paletteId?: string | null;
+    scaleKind?: ResolveChartColorsOpts["scaleKind"];
+    reverse?: boolean;
+    theme?: string | null;
+    colorblind?: boolean;
+    colorFieldType?: "quantitative" | "nominal" | "ordinal" | null;
+  } = {},
+): string | null {
+  if (!chart?.kind) return null;
+  const paletteId = opts.paletteId ?? "auto";
+  const scaleKind = opts.scaleKind ?? "auto";
+  const userPicked =
+    (paletteId !== "auto" && paletteId !== "theme") || (scaleKind != null && scaleKind !== "auto");
+
+  const field =
+    (chart.colorField && chart.colorField.trim()) ||
+    (VALUE_RAMP_KINDS.has(chart.kind)
+      ? chart.yField || chart.sizeField || null
+      : null);
+
+  const resolved = resolveChartColors({
+    paletteId,
+    theme: opts.theme,
+    colorblind: opts.colorblind,
+    chartKind: chart.kind,
+    colorFieldType: opts.colorFieldType ?? (field && !chart.colorField ? "quantitative" : null),
+    reverse: opts.reverse,
+    scaleKind,
+  });
+
+  const atPlay =
+    !!chart.colorField ||
+    resolved.continuous ||
+    VALUE_RAMP_KINDS.has(chart.kind) ||
+    userPicked;
+  if (!atPlay) return null;
+
+  const palette = getPaletteById(resolved.paletteId);
+  const name = palette?.name ?? resolved.paletteId;
+  const rev = opts.reverse ? " ↺" : "";
+  if (field) return `color: ${field} · ${name}${rev}`;
+  return `color · ${name}${rev}`;
 }
 
 /** Back-compat: discrete color list for a palette id (theme-aware). */

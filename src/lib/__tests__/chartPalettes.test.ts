@@ -3,6 +3,7 @@ import {
   COLOR_PALETTES,
   VIZ_CATEGORICAL,
   discretizeContinuous,
+  formatChartColorStatus,
   getPaletteById,
   resolveChartColors,
   sampleContinuous,
@@ -38,6 +39,33 @@ describe("chartPalettes catalog", () => {
     expect(r.paletteId).toBe("seq-blue");
     expect(r.continuous).toBe(true);
     expect(r.kind).toBe("sequential");
+  });
+
+  it("auto treemap → sequential continuous (value ramp)", () => {
+    const r = resolveChartColors({ paletteId: "auto", chartKind: "treemap" });
+    expect(r.paletteId).toBe("seq-blue");
+    expect(r.continuous).toBe(true);
+  });
+
+  it("formatChartColorStatus names field + palette when color is in play", () => {
+    expect(
+      formatChartColorStatus(
+        { kind: "treemap", xField: "article", yField: "views" },
+        { paletteId: "div-hot-cold" },
+      ),
+    ).toBe("color: views · Diverging Hot–Cold");
+    expect(
+      formatChartColorStatus(
+        { kind: "scatter", xField: "a", yField: "b", colorField: "region" },
+        { paletteId: "categorical" },
+      ),
+    ).toBe("color: region · Categorical");
+    expect(
+      formatChartColorStatus(
+        { kind: "bar", xField: "a", yField: "b" },
+        { paletteId: "auto" },
+      ),
+    ).toBeNull();
   });
 
   it("auto waterfall → semantic", () => {

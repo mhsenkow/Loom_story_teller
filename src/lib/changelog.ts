@@ -25,6 +25,24 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-07d",
+    date: "2026-10-07",
+    title: "Color named in the status bar",
+    summary: "When color drives the chart, the footer spells out the field and palette — and treemaps actually use continuous ramps.",
+    items: [
+      {
+        title: "Color status next to the encoding line",
+        detail:
+          "The chart footer shows labels like “color: views · Diverging Hot–Cold” whenever Color or a continuous palette is in play — not just X × Y.",
+      },
+      {
+        title: "Treemaps respect continuous palettes",
+        detail:
+          "Picking Diverging / Sequential now ramps tile color by the measure instead of painting every cell the same stop.",
+      },
+    ],
+  },
+  {
     id: "2026-10-07c",
     date: "2026-10-07",
     title: "What’s interesting, clearer",
