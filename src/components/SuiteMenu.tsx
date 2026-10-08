@@ -36,6 +36,18 @@ const GROUPS: SuiteGroup[] = [
         current: true,
       },
       {
+        id: "bruh",
+        label: "bruh",
+        blurb: "ideas · paper",
+        href: "https://bruh.ibm.io/",
+      },
+      {
+        id: "notebook",
+        label: "notebook",
+        blurb: "cells · teach",
+        href: "https://ibm.io/notebook/",
+      },
+      {
         id: "wordcount",
         label: "words",
         blurb: "count · draft",
