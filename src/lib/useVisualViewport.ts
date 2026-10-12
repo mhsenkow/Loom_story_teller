@@ -30,28 +30,48 @@ export type VisualViewportMetrics = {
   height: number;
 };
 
-function readMetrics(): VisualViewportMetrics {
+const EMPTY: VisualViewportMetrics = { bottomInset: 0, height: 800 };
+
+/** Cached so useSyncExternalStore Object.is stays stable when values unchanged. */
+let cachedMetrics: VisualViewportMetrics = EMPTY;
+
+export function readVisualViewportMetrics(): VisualViewportMetrics {
   if (typeof window === "undefined") {
-    return { bottomInset: 0, height: 800 };
+    return EMPTY;
   }
   const vv = window.visualViewport;
-  if (!vv) {
-    return { bottomInset: 0, height: window.innerHeight };
+  const next: VisualViewportMetrics = !vv
+    ? { bottomInset: 0, height: window.innerHeight }
+    : {
+        bottomInset: Math.max(0, window.innerHeight - vv.height - vv.offsetTop),
+        height: vv.height,
+      };
+  if (
+    cachedMetrics.bottomInset === next.bottomInset &&
+    cachedMetrics.height === next.height
+  ) {
+    return cachedMetrics;
   }
-  const bottomInset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
-  return { bottomInset, height: vv.height };
+  cachedMetrics = next;
+  return cachedMetrics;
 }
 
-const EMPTY: VisualViewportMetrics = { bottomInset: 0, height: 800 };
+/** Test helper — reset cache between cases. */
+export function resetVisualViewportMetricsCacheForTests(): void {
+  cachedMetrics = EMPTY;
+}
 
 export function useVisualViewport(): VisualViewportMetrics {
   const subscribe = useCallback((onStoreChange: () => void) => subscribeVisualViewport(onStoreChange), []);
-  const getSnapshot = useCallback(() => readMetrics(), []);
+  const getSnapshot = useCallback(() => readVisualViewportMetrics(), []);
   const getServerSnapshot = useCallback(() => EMPTY, []);
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 /** Bottom padding/margin to keep sheet content above the keyboard. */
 export function useKeyboardBottomInset(): number {
-  return useVisualViewport().bottomInset;
+  const subscribe = useCallback((onStoreChange: () => void) => subscribeVisualViewport(onStoreChange), []);
+  const getSnapshot = useCallback(() => readVisualViewportMetrics().bottomInset, []);
+  const getServerSnapshot = useCallback(() => 0, []);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }

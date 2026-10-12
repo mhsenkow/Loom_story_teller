@@ -33,9 +33,12 @@ describe("allowedOrigins (LOOM-654)", () => {
   it("static _headers CSP and MCP link only to hosts in the shared list", () => {
     const headers = read("public/_headers");
     const csp = headers.match(/connect-src ([^;]+)/)?.[1] ?? "";
+    // Analytics beacons are CSP-only (not app CORS origins).
+    const cspOnly = new Set(["static.cloudflareinsights.com", "cloudflareinsights.com"]);
     for (const m of csp.matchAll(/https:\/\/([a-z0-9.*-]+)/gi)) {
       const host = m[1]!.replace(/^\*\./, "");
       if (host === "workers.dev") continue; // wildcard for the workers.dev deploy host
+      if (cspOnly.has(host)) continue;
       expect(originAllowed(`https://${host}`, DEFAULT_ALLOWED_ORIGIN_HOSTS), host).toBe(true);
     }
     const mcpUrl = read("mcp/src/index.ts").match(/const LOOM_URL = "(https:\/\/[^"]+)"/)?.[1];

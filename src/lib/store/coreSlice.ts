@@ -7,7 +7,6 @@ import type { ChartChromeSection, ChartChromeFocus } from "../chartChromeLink";
 import type { DiveLink, DiveQuery } from "../dive";
 import type { ChartLink } from "../chartLink";
 import type { LoomState, ViewMode, PanelTab, FileEntry, ColumnInfo, QueryResult, ChartVisualOverrides } from "./types";
-import { readInitialShellDrawers } from "../shellBootstrap";
 
 export function chartActivationPatch(rec: ChartRecommendation): Partial<LoomState> {
   return {
@@ -101,7 +100,10 @@ export function coreInitialState() {
     panelTab: "chart" as PanelTab,
     chartPanelSection: "encoding" as ChartChromeSection,
     chartChromeFocus: null as ChartChromeFocus | null,
-    ...readInitialShellDrawers(),
+    // SSR-safe defaults — page shell effect applies real drawers after mount
+    // (readInitialShellDrawers() used window and mismatched the static HTML).
+    sidebarOpen: false,
+    panelOpen: false,
     dataRegionOpen: false,
     dataSourcesExpanded: false,
   };

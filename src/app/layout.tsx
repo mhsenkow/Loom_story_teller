@@ -9,7 +9,6 @@ import type { Metadata, Viewport } from "next";
 import "@/styles/globals.css";
 import { SHELL_BOOTSTRAP_SCRIPT } from "@/lib/shellBootstrap";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/themeBootstrap";
-import { APP_CSP_REPORT_ONLY } from "@/lib/appCsp";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://loom.ibm.io"),
@@ -66,7 +65,6 @@ export default function RootLayout({
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: SHELL_BOOTSTRAP_SCRIPT }} />
-        <meta httpEquiv="Content-Security-Policy-Report-Only" content={APP_CSP_REPORT_ONLY} />
       </head>
       <body className="antialiased min-h-dvh overflow-x-hidden overflow-y-auto md:overflow-hidden">{children}</body>
     </html>

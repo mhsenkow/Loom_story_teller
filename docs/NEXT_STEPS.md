@@ -6,6 +6,8 @@ Left behind after the 2026-10-12 backlog close (699/700 Done-when met). Update t
 
 ## Must-do for code health
 
+0. **Live crash (fixed 2026-10-12)** — `useVisualViewport` returned a new object every `getSnapshot` → React #185 via always-mounted `Dialog`; store `readInitialShellDrawers()` mismatched SSR → #418. CSP Report-Only removed from `<meta>` (invalid) and kept on `_headers` with Cloudflare Insights hosts.
+
 1. **LOOM-141 — Finish ChartView split**  
    `ChartView.tsx` is ~4,240 lines after `canvasCharts/*` extraction. Still need hooks (`useChartStage`, `useGpuRenderers`, `useScatterInteractions`, `useChartExport`, `useChartShortcuts`) plus `ChartToolbar` / suggestion rail / tooltip, with render-parity gates, until the file is **&lt;1,000 lines**.
 
