@@ -8,9 +8,14 @@ export function WebServiceWorker() {
   useEffect(() => {
     if (isTauri()) return;
     if (!("serviceWorker" in navigator)) return;
-    void navigator.serviceWorker.register("/sw.js").catch(() => {
-      /* unsupported or blocked */
-    });
+    void (async () => {
+      try {
+        const reg = await navigator.serviceWorker.register("/sw.js");
+        await reg.update();
+      } catch {
+        /* unsupported or blocked */
+      }
+    })();
   }, []);
   return null;
 }

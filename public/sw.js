@@ -1,7 +1,9 @@
 /* Loom minimal service worker — app shell + source snapshot cache (LOOM-457, LOOM-459) */
-const SHELL = "loom-shell-v1";
+/* BUILD_ID is rewritten on each `next build` by scripts/write-build-id.mjs */
+const BUILD_ID = "dev";
+const SHELL = `loom-shell-${BUILD_ID}`;
 const SOURCE = "loom-source-v1";
-const STATIC = "loom-static-v1";
+const STATIC = `loom-static-${BUILD_ID}`;
 const SHELL_PATHS = ["/", "/index.html"];
 
 self.addEventListener("install", (event) => {
@@ -12,7 +14,18 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      const keep = new Set([SHELL, SOURCE, STATIC]);
+      const keys = await caches.keys();
+      await Promise.all(
+        keys
+          .filter((key) => key.startsWith("loom-") && !keep.has(key))
+          .map((key) => caches.delete(key)),
+      );
+      await self.clients.claim();
+    })(),
+  );
 });
 
 async function cacheSourceResponse(request, response) {
@@ -68,7 +81,7 @@ self.addEventListener("fetch", (event) => {
         (async () => {
           const cache = await caches.open(SHELL);
           try {
-            const res = await fetch(event.request);
+            const res = await fetch(event.request, { cache: "no-store" });
             if (res.ok) event.waitUntil(cache.put("/", res.clone()));
             return res;
           } catch {
