@@ -18,7 +18,7 @@ Left behind after the 2026-10-12 backlog close (699/700 Done-when met). Update t
 ## Product / platform follow-ups
 
 4. **iOS App Store** — Keep TestFlight / Archive on the Capacitor shell path (`docs/MOBILE_ACCEPTANCE.md`); do not commit `.mobileprovision` or `.ipa`.
-5. **MCP Worker** — Deploy separately with `make loft-mcp` when MCP/widget changes need production.
+5. **MCP Worker** — `make loft-mcp` / `check-mcp` currently fails typecheck because MCP imports `src/lib/recommendations`, which pulls `store` → `webDataFolder` (DOM APIs) into the Worker `tsc`. Deploy with `cd mcp && npm run deploy` until there is a Worker-safe recs entry (no store/DOM).
 6. **Desktop Tauri release** — Not covered by web `make loft`; use the Tauri release workflow when shipping native.
 
 ## Honest deferrals (from backlog notes)
