@@ -584,9 +584,9 @@ export function Onboarding() {
       describedBy="onboarding-desc"
       initialFocusRef={closeRef}
       zIndex={200}
-      panelClassName="max-w-5xl p-2.5 sm:p-5 space-y-0 h-[min(96dvh,100%)] sm:h-[min(88dvh,860px)] flex flex-col overflow-hidden"
+      panelClassName="w-full max-w-3xl sm:max-w-4xl p-2.5 sm:p-5 space-y-0 max-h-[min(85dvh,720px)] flex flex-col overflow-hidden"
     >
-      <div className="flex flex-col h-full min-h-0 space-y-0">
+      <div className="flex flex-col min-h-0 max-h-full space-y-0">
         {/* order: phone = title → stories → filters → footer; desktop = title → filters → stories → footer */}
         <header className="order-1 shrink-0 pb-1.5 sm:pb-3 mb-1 sm:mb-3 border-b border-loom-border/50">
           <div className="flex items-start gap-2 sm:gap-3">

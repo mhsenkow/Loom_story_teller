@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  consumeOneShotReload,
   deployMismatchFromError,
   fetchDeployBuildId,
   installDeployMismatchListeners,
@@ -13,13 +14,20 @@ import {
 
 export function DeployMismatchBanner() {
   const [state, setState] = useState<DeployMismatchState | null>(null);
+  const pendingBuildId = useRef<string | null>(null);
 
   useEffect(() => {
     void (async () => {
       const remote = await fetchDeployBuildId();
       if (!remote) return;
+      // After "Reload Loom", accept the new id so the banner does not return.
+      if (consumeOneShotReload() || !readStoredBuildId()) {
+        storeBuildId(remote);
+        return;
+      }
       const local = readStoredBuildId();
       if (local && local !== remote) {
+        pendingBuildId.current = remote;
         setState({
           message:
             "A new version of Loom is available. Reload once to continue — uploads and settings on this device are kept.",
@@ -45,6 +53,8 @@ export function DeployMismatchBanner() {
           type="button"
           className="loom-btn-primary text-xs"
           onClick={() => {
+            const next = pendingBuildId.current;
+            if (next) storeBuildId(next);
             markReloadOnce();
             window.location.reload();
           }}

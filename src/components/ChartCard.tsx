@@ -286,12 +286,12 @@ export function ChartCard({
         ref={containerRef}
         className={`relative w-full bg-loom-bg ${
           hero
-            ? "aspect-[4/3] min-h-[200px] sm:min-h-[260px] rounded-t-xl"
+            ? "aspect-[4/3] min-h-[180px] max-h-[42vh] sm:min-h-[220px] sm:max-h-[280px] rounded-t-xl"
             : micro
-              ? "aspect-[5/4] min-h-[104px] sm:min-h-[112px]"
+              ? "aspect-[5/4] min-h-[88px] max-h-[140px] sm:min-h-[96px] sm:max-h-[120px]"
               : compact
-                ? "aspect-[5/3] min-h-[72px] rounded-t-md"
-                : "aspect-[4/3] min-h-[80px]"
+                ? "aspect-[5/3] min-h-[72px] max-h-[96px] rounded-t-md"
+                : "aspect-[4/3] min-h-[80px] max-h-[160px]"
         }`}
       >
         <canvas
