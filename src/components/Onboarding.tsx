@@ -437,19 +437,19 @@ export function Onboarding() {
   const showFilters = phase === "ready" || stories.length > 0;
 
   const filterRows = showFilters ? (
-    <div className="space-y-1.5 sm:space-y-2">
+    <div className="space-y-1.5 sm:space-y-2 min-w-0 overflow-hidden">
       <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
         <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
           Explore
         </span>
         <div
-          className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5"
+          className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           ref={topicFade.ref}
           style={topicFade.style}
           role="group"
           aria-label="Topic"
         >
-          <div className="flex items-center gap-1 sm:gap-0.5 w-max">
+          <div className="flex items-center gap-1 sm:gap-0.5 w-max pr-1">
             <FilterChip
               label="All"
               pressed={categoryFilter === "all"}
@@ -506,13 +506,13 @@ export function Onboarding() {
             From
           </span>
           <div
-            className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5"
+            className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             ref={sourceFade.ref}
             style={sourceFade.style}
             role="group"
             aria-label="Source"
           >
-            <div className="flex items-center gap-1 sm:gap-0.5 w-max">
+            <div className="flex items-center gap-1 sm:gap-0.5 w-max pr-1">
               <FilterChip
                 label="All"
                 pressed={sourceFilter === "all"}
@@ -541,7 +541,7 @@ export function Onboarding() {
             ref={kindFade.ref}
             style={kindFade.style}
           >
-            <div className="flex items-center gap-x-1.5 sm:gap-x-1.5 w-max text-xs sm:text-2xs text-loom-muted">
+            <div className="flex items-center gap-x-1.5 sm:gap-x-1.5 w-max pr-1 text-xs sm:text-2xs text-loom-muted">
               <ChartLink
                 label="Any"
                 pressed={chartFilter === "all"}
@@ -584,9 +584,9 @@ export function Onboarding() {
       describedBy="onboarding-desc"
       initialFocusRef={closeRef}
       zIndex={200}
-      panelClassName="w-full max-w-3xl sm:max-w-4xl p-2.5 sm:p-5 space-y-0 max-h-[min(85dvh,720px)] flex flex-col overflow-hidden"
+      panelClassName="max-w-5xl p-3 sm:p-5 space-y-0 max-h-[min(85dvh,720px)] flex flex-col"
     >
-      <div className="flex flex-col min-h-0 max-h-full space-y-0">
+      <div className="flex flex-col min-w-0 min-h-0 max-h-full space-y-0">
         {/* order: phone = title → stories → filters → footer; desktop = title → filters → stories → footer */}
         <header className="order-1 shrink-0 pb-1.5 sm:pb-3 mb-1 sm:mb-3 border-b border-loom-border/50">
           <div className="flex items-start gap-2 sm:gap-3">
@@ -666,9 +666,9 @@ export function Onboarding() {
           )}
 
           {showFilters && visible.length > 0 && (
-            <ul id="onboarding-stories" className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 content-start gap-2 list-none m-0 p-0 pb-2">
+            <ul id="onboarding-stories" className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 content-start gap-2 list-none m-0 p-0 pb-2 min-w-0 w-full">
               {visible.map((s) => (
-                <li key={s.id} className="min-w-0 animate-fade-in">
+                <li key={s.id} className="min-w-0 max-w-full animate-fade-in">
                   <div className="relative">
                     <span className="absolute top-1.5 left-1.5 z-10 text-[9px] uppercase tracking-wider font-medium text-loom-muted bg-loom-bg/85 border border-loom-border/70 rounded px-1 py-px max-w-[70%] truncate pointer-events-none">
                       {s.category}

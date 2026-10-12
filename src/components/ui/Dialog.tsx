@@ -101,14 +101,21 @@ export function Dialog({
 
   if (!open) return null;
 
-  const sheet =
+  // Overlay owns viewport padding / alignment. Panel owns shape only —
+  // never put `p-0` on the panel (it fights caller `panelClassName` padding
+  // in the Tailwind cascade and clips content under the rounded corners).
+  const overlayPad =
     sheetOnMobile !== false
-      ? "items-end sm:items-center p-0 sm:p-4 rounded-t-2xl sm:rounded-xl mb-[var(--safe-bottom)] sm:mb-0 animate-slide-up"
-      : "items-center p-4 rounded-xl";
+      ? "items-end sm:items-center p-0 sm:p-4"
+      : "items-center p-4";
+  const panelShape =
+    sheetOnMobile !== false
+      ? "rounded-t-2xl sm:rounded-xl mb-[var(--safe-bottom)] sm:mb-0 animate-slide-up"
+      : "rounded-xl";
 
   return (
     <div
-      className={`fixed inset-0 flex items-end sm:items-center justify-center loom-overlay animate-fade-in overflow-hidden ${className}`}
+      className={`fixed inset-0 flex justify-center loom-overlay animate-fade-in overflow-hidden ${overlayPad} ${className}`}
       style={{ zIndex }}
       onClick={onClose}
       role="dialog"
@@ -121,16 +128,18 @@ export function Dialog({
           Dialog
         </span>
       )}
-      <div
-        ref={panelRef}
-        className={`loom-card w-full shadow-loom-lg border border-loom-border bg-loom-surface ${sheet} ${panelClassName}`}
-        style={{
-          marginBottom: keyboardInset > 0 ? `max(var(--safe-bottom), ${keyboardInset}px)` : undefined,
-        }}
-        onClick={(e) => e.stopPropagation()}
-        tabIndex={-1}
-      >
-        {children}
+      <div className="w-full min-w-0 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] flex justify-center pointer-events-none">
+        <div
+          ref={panelRef}
+          className={`loom-card w-full min-w-0 pointer-events-auto shadow-loom-lg border border-loom-border bg-loom-surface overflow-hidden ${panelShape} ${panelClassName}`}
+          style={{
+            marginBottom: keyboardInset > 0 ? `max(var(--safe-bottom), ${keyboardInset}px)` : undefined,
+          }}
+          onClick={(e) => e.stopPropagation()}
+          tabIndex={-1}
+        >
+          {children}
+        </div>
       </div>
     </div>
   );
