@@ -106,6 +106,30 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
+/** Accept only https permalinks on the dataset portal; reject javascript: and off-domain links. */
+export function sanitizeSocrataPermalink(
+  raw: string | undefined,
+  domain: string,
+  id: string,
+): string {
+  const fallback = `https://${domain}/d/${id}`;
+  if (!raw?.trim()) return fallback;
+  try {
+    const u = new URL(raw.trim());
+    if (u.protocol !== "https:") return fallback;
+    if (!hostnameMatchesPortal(u.hostname, domain)) return fallback;
+    return u.href;
+  } catch {
+    return fallback;
+  }
+}
+
+function hostnameMatchesPortal(linkHost: string, portalDomain: string): boolean {
+  const h = linkHost.toLowerCase();
+  const d = portalDomain.toLowerCase();
+  return h === d || h.endsWith(`.${d}`);
+}
+
 /** Parse a Discovery API body into tabular, CSV-exportable datasets. */
 export function parseSocrataSearch(body: unknown): SocrataDataset[] {
   const results = (body as { results?: unknown })?.results;
@@ -143,7 +167,7 @@ export function parseSocrataSearch(body: unknown): SocrataDataset[] {
       attribution: str(res.attribution),
       category: str(cls?.domain_category),
       pageViewsLastMonth: typeof pv?.page_views_last_month === "number" ? pv.page_views_last_month : undefined,
-      permalink: str(r.permalink) ?? `https://${domain}/d/${id}`,
+      permalink: sanitizeSocrataPermalink(str(r.permalink), domain, id),
     });
   }
   return out;

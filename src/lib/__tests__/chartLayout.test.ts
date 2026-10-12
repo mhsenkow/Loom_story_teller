@@ -74,7 +74,7 @@ describe("chartLayout", () => {
   });
 
   it("contrastingInk picks dark ink on light fills", () => {
-    expect(contrastingInk("#f5f5f0")).toBe("#1a1a1a");
+    expect(contrastingInk("#f5f5f0")).toBe("#0a0a0c");
     expect(contrastingInk("#1a1030")).toBe("#ffffff");
     expect(isLightHex("#f2f2f0")).toBe(true);
     expect(isLightHex("#0a0a0c")).toBe(false);
@@ -98,6 +98,13 @@ describe("chartLayout", () => {
     expect(dense.opacity).toBeLessThan(sparse.opacity);
     expect(dense.thinned).toBe(true);
     expect(dense.drawStroke).toBe(false);
+  });
+
+  it("subsampleRowsForDensity preserves sourceIndices", () => {
+    const rows = [10, 20, 30, 40, 50];
+    const src = [100, 101, 102, 103, 104];
+    const sub = subsampleRowsForDensity(rows, 3, 1, src);
+    expect(sub.sourceIndices).toEqual([100, 102, 103]);
   });
 
   it("subsampleRowsForDensity raises budget when zoomed", () => {

@@ -1,0 +1,1 @@
+{ "rows": [{ "country_code": "USA", "country_name": "United States", "yr": 2024, "gdp_usd": 1e13, "gdp_per_capita": 60000, "population": 330000000, "life_expectancy": 79, "co2_per_capita": 15 }] }

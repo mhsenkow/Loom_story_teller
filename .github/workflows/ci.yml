@@ -1,0 +1,124 @@
+# PR and main-branch quality gate (frontend + Worker + MCP + Rust check).
+# Local mirror: `make ci` (LOOM-697).
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Runtime preflight
+        run: npm run preflight
+
+      - name: TypeScript
+        run: npx tsc --noEmit
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Unit tests (node + dom)
+        run: npm run test:run
+
+      - name: Static export build
+        run: npm run build
+
+      - name: First-load JS budget
+        run: npm run bundle-budget
+
+  worker:
+    name: catalog-worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Worker TypeScript
+        run: npm run check:worker
+      - name: Worker dry-run package
+        run: npm run deploy:dry
+
+  mcp:
+    name: mcp-worker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: MCP TypeScript
+        run: npm run check:mcp
+      - name: MCP dry-run package
+        run: cd mcp && npm ci && npx wrangler deploy --dry-run
+
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux dependencies (Tauri)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: cargo fmt, clippy, test
+        run: cargo fmt --check && cargo clippy -- -D warnings && cargo test
+        working-directory: src-tauri
+
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    needs: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build
+      - name: Playwright smoke
+        run: LOOM_E2E=1 npm run test:e2e
+        env:
+          LOOM_E2E_BASE_URL: http://127.0.0.1:3000
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

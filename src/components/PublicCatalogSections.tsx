@@ -216,15 +216,14 @@ export function SocrataCatalogSection({
         </div>
       </div>
 
-      <div aria-live="polite">
+      <div aria-live="polite" aria-atomic="true" className="min-h-[1.25rem]">
         {loading && <p className="text-2xs text-loom-muted px-1 py-2">Searching portals…</p>}
-        {error && (
-          <p className="text-2xs text-loom-warning px-1 py-1" role="alert">
-            {error}
-          </p>
-        )}
+        {!loading && error && <p className="text-2xs text-loom-warning px-1 py-1">{error}</p>}
         {!loading && !error && datasets.length === 0 && (
           <p className="text-2xs text-loom-muted px-1 py-2">No tables matched. Try fewer or different words.</p>
+        )}
+        {!loading && !error && datasets.length > 0 && (
+          <p className="sr-only">{datasets.length} datasets found</p>
         )}
       </div>
       <ul className={expanded ? "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 content-start" : "space-y-2.5"}>
@@ -443,10 +442,10 @@ export function TidyTuesdaySection({
         />
       </div>
 
-      <div aria-live="polite">
+      <div aria-live="polite" aria-atomic="true">
         {loading && <p className="text-2xs text-loom-muted px-1 py-2">Loading weeks…</p>}
-        {error && (
-          <p className="text-2xs text-loom-warning px-1 py-1" role="alert">
+        {!loading && error && (
+          <p className="text-2xs text-loom-warning px-1 py-1">
             {error}{" "}
             <button type="button" onClick={() => setReload((n) => n + 1)} className="underline hover:text-loom-text">
               Retry

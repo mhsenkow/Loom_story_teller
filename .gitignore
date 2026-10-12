@@ -26,6 +26,9 @@ dist/
 # Loom data
 .loom-data/
 
+# Local agent launch configs (keep out of release artifacts)
+.claude/
+
 # Debug / test
 coverage/
 .nyc_output/

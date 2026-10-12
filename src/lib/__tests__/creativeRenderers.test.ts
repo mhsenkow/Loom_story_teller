@@ -7,6 +7,7 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { ODD_CHART_KINDS, renderOddChart } from "../oddCharts";
 import { GEO_MAP_KINDS, renderGeoMapCanvas } from "../geoMaps";
+import { loadAtlas } from "../geoAtlas";
 import { GPU_SCENE_KINDS, extractGpuScenePoints, renderGpuSceneCanvas } from "../gpuScenes";
 import { sequentialStops, resolveChartInk, relativeLuminance } from "../chartInk";
 
@@ -37,9 +38,11 @@ function mockCtx(): { ctx: CanvasRenderingContext2D; rec: Rec } {
   return { ctx: new Proxy({}, handler) as CanvasRenderingContext2D, rec };
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   const g = globalThis as unknown as { Path2D?: unknown };
   if (!g.Path2D) g.Path2D = class {};
+  await loadAtlas("world");
+  await loadAtlas("us");
 });
 
 const columns = ["region", "group", "value", "other", "third", "longitude", "latitude", "when"];

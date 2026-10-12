@@ -12,11 +12,18 @@ export function formatBytes(bytes: number): string {
   return `${val.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+const compactNumber = new Intl.NumberFormat("en", {
+  notation: "compact",
+  compactDisplay: "short",
+  maximumFractionDigits: 1,
+});
+
 export function formatNumber(n: number): string {
-  if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return n.toLocaleString();
+  if (!Number.isFinite(n)) return String(n);
+  if (Math.abs(n) < 1000) return n.toLocaleString();
+  const sign = n < 0 ? "-" : "";
+  const compact = compactNumber.format(Math.abs(n));
+  return sign + compact.replace(/\.0(?=[KMBT])/, "");
 }
 
 export function truncate(s: string, len: number): string {
@@ -27,6 +34,8 @@ export function extensionIcon(ext: string): string {
   switch (ext) {
     case "parquet": return "PQ";
     case "csv": return "CSV";
+    case "tsv":
+    case "tab": return "TSV";
     case "json": return "JSON";
     case "ndjson": return "NDJSON";
     case "jsonl": return "JSONL";

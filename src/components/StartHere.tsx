@@ -10,7 +10,7 @@
 import { useEffect, useState } from "react";
 import { useLoomStore } from "@/lib/store";
 import { requestDiscoverScan } from "@/lib/discoverStories";
-import { isTauri } from "@/lib/tauri";
+import { isDesktop } from "@/lib/tauri";
 
 export function openDataSources(): void {
   const s = useLoomStore.getState();
@@ -32,7 +32,7 @@ export function StartHere({
   const setToast = useLoomStore((s) => s.setToast);
   // Desktop-only copy is decided after mount so SSR and first paint match.
   const [desktop, setDesktop] = useState(false);
-  useEffect(() => setDesktop(isTauri()), []);
+  useEffect(() => setDesktop(isDesktop()), []);
 
   return (
     <div className="flex flex-col items-center justify-center h-full gap-5 px-6 py-8 animate-fade-in overflow-y-auto">

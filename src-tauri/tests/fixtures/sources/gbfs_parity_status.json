@@ -1,0 +1,28 @@
+{
+  "last_updated": 1790974027,
+  "ttl": 60,
+  "data": {
+    "stations": [
+      { "station_id": "full", "num_bikes_available": 15, "num_ebikes_available": 4, "num_docks_available": 5, "is_renting": 1, "is_installed": 1, "last_reported": 1790973900 },
+      { "station_id": "zero-cap", "num_bikes_available": 3, "num_ebikes_available": 0, "num_docks_available": 0, "is_renting": 0, "is_installed": 1, "last_reported": 1790973910 },
+      { "station_id": "no-coords", "num_bikes_available": 1, "num_ebikes_available": 0, "num_docks_available": 9, "is_renting": 1, "is_installed": 1, "last_reported": 1790973920 },
+      {
+        "station_id": "vehicle-types",
+        "num_bikes_available": 7,
+        "num_docks_available": 3,
+        "is_renting": true,
+        "is_installed": true,
+        "last_reported": 1790973930,
+        "vehicle_types_available": [
+          { "vehicle_type_id": "1", "count": 5 },
+          { "vehicle_type_id": "ebike", "count": 2 }
+        ]
+      },
+      { "station_id": "sparse", "is_renting": 1, "is_installed": 1, "last_reported": 1790973940 },
+      { "station_id": "stale", "num_bikes_available": 2, "num_ebikes_available": 1, "num_docks_available": 6, "is_renting": 1, "is_installed": 1, "last_reported": 86400 },
+      { "station_id": "overfull", "num_bikes_available": 25, "num_ebikes_available": 0, "num_docks_available": 0, "is_renting": 1, "is_installed": 1, "last_reported": 1790973950 },
+      { "station_id": "uninstalled", "num_bikes_available": 0, "num_ebikes_available": 0, "num_docks_available": 0, "is_renting": 0, "is_installed": false, "last_reported": 1790973960 },
+      { "station_id": "not-in-info", "num_bikes_available": 3, "is_renting": 1, "is_installed": 1, "last_reported": 1790973970 }
+    ]
+  }
+}

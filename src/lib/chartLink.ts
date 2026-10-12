@@ -19,6 +19,7 @@ import {
 } from "./recommendations";
 import { CHART_ASPECTS, type ChartAspectId, type ChartDeviceId } from "./chartViewport";
 import type { AppSettings, ChartVisualOverrides, ColumnInfo, FileEntry } from "./store";
+import { sanitizeChartVisualOverrides } from "./chartVisualSanitize";
 
 export const CHART_LINK_VERSION = 1;
 
@@ -53,6 +54,8 @@ export interface ChartLinkChart {
   timeWindow?: "all" | "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
   tooltipFields?: string[];
   tooltipKeyField?: string;
+  /** Measure grows up / down / left / right (omit = auto). */
+  layoutDirection?: "up" | "down" | "right" | "left";
   /** The recommendation's own title / subtitle (story recs carry hand-written ones). */
   title?: string;
   subtitle?: string;
@@ -120,11 +123,13 @@ export function chartLinkDatasetLabel(link: Pick<ChartLink, "src">): string {
 }
 
 function cleanVisual(v: ChartVisualOverrides | undefined): Record<string, Primitive> | undefined {
-  if (!v) return undefined;
+  const sanitized = sanitizeChartVisualOverrides(v);
+  if (!sanitized) return undefined;
   const out: Record<string, Primitive> = {};
-  for (const [k, val] of Object.entries(v)) {
-    if (!/^[A-Za-z][A-Za-z0-9]{0,40}$/.test(k)) continue;
-    if (typeof val === "string" || typeof val === "boolean" || (typeof val === "number" && Number.isFinite(val))) out[k] = val;
+  for (const [k, val] of Object.entries(sanitized)) {
+    if (typeof val === "string" || typeof val === "boolean" || (typeof val === "number" && Number.isFinite(val))) {
+      out[k] = val;
+    }
   }
   return Object.keys(out).length ? out : undefined;
 }
@@ -162,6 +167,13 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     timeWindow: rec.timeWindow && rec.timeWindow !== "all" ? rec.timeWindow : undefined,
     tooltipFields: rec.tooltipFields?.length ? [...rec.tooltipFields] : undefined,
     tooltipKeyField: str(rec.tooltipKeyField),
+    layoutDirection:
+      rec.layoutDirection === "up" ||
+      rec.layoutDirection === "down" ||
+      rec.layoutDirection === "right" ||
+      rec.layoutDirection === "left"
+        ? rec.layoutDirection
+        : undefined,
     title: str(rec.title),
     subtitle: str(rec.subtitle),
   };
@@ -212,6 +224,7 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["timeWindow", "tw"],
   ["tooltipFields", "tf"],
   ["tooltipKeyField", "tk"],
+  ["layoutDirection", "ld"],
   ["title", "ti"],
   ["subtitle", "st"],
 ];
@@ -251,6 +264,7 @@ const ASPECTS = new Set<string>(CHART_ASPECTS.map((a) => a.id));
 const DEVICES = new Set<string>(["auto", "mobile", "tablet", "desktop"]);
 const STACKS = new Set<string>(["grouped", "stacked", "percent"]);
 const TIME_WINDOWS = new Set<string>(["all", "1h", "6h", "24h", "7d", "30d", "90d", "1y"]);
+const LAYOUT_DIRS = new Set<string>(["up", "down", "right", "left"]);
 
 const field = (v: unknown, max = 200): string | undefined => (typeof v === "string" && v.length > 0 && v.length <= max ? v : undefined);
 
@@ -290,7 +304,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
       f === "residualOverlay" ||
       f === "anomalyHighlight" ||
       f === "bumpMode" ||
-      f === "timeWindow"
+      f === "timeWindow" ||
+      f === "layoutDirection"
     ) {
       continue;
     }
@@ -308,6 +323,9 @@ export function decodeChartLink(hash: string): ChartLink | null {
   if (cr.bm === "delta" || cr.bm === "rank") chart.bumpMode = cr.bm;
   if (typeof cr.tw === "string" && TIME_WINDOWS.has(cr.tw) && cr.tw !== "all") {
     chart.timeWindow = cr.tw as ChartLinkChart["timeWindow"];
+  }
+  if (typeof cr.ld === "string" && LAYOUT_DIRS.has(cr.ld)) {
+    chart.layoutDirection = cr.ld as ChartLinkChart["layoutDirection"];
   }
   if (Array.isArray(cr.tf)) {
     const tf = cr.tf.filter((t): t is string => typeof t === "string" && t.length > 0 && t.length <= 200).slice(0, 40);
@@ -401,6 +419,7 @@ export function restoreChartRec(
       timeWindow: c.timeWindow ?? null,
       tooltipFields: c.tooltipFields ?? null,
       tooltipKeyField: c.tooltipKeyField ?? null,
+      layoutDirection: c.layoutDirection ?? null,
       barStackMode: link.barStackMode ?? "grouped",
     });
   }
@@ -428,6 +447,7 @@ export function restoreChartRec(
   if (c.yAggregate) out.yAggregate = c.yAggregate;
   if (c.tooltipFields) out.tooltipFields = c.tooltipFields;
   if (c.tooltipKeyField) out.tooltipKeyField = c.tooltipKeyField;
+  if (c.layoutDirection) out.layoutDirection = c.layoutDirection;
   if (c.title) out.title = c.title;
   if (c.subtitle !== undefined) out.subtitle = c.subtitle;
   if (c.timeWindow) out.timeWindow = c.timeWindow;

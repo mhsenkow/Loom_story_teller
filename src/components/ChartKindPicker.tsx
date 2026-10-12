@@ -46,9 +46,13 @@ export function ChartKindPicker({
 
   const supportMap = useMemo(() => {
     const m = new Map<string, Support>();
+    if (!open) {
+      m.set(value, support(value));
+      return m;
+    }
     for (const e of CHART_KIND_CATALOG) m.set(e.value, support(e.value));
     return m;
-  }, [support]);
+  }, [support, open, value]);
 
   const results = useMemo(() => {
     const found = searchChartKinds(query);
@@ -93,8 +97,8 @@ export function ChartKindPicker({
     const onDown = (e: MouseEvent) => {
       if (!rootRef.current?.contains(e.target as Node)) close(false);
     };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    document.addEventListener("pointerdown", onDown);
+    return () => document.removeEventListener("pointerdown", onDown);
   }, [open]);
 
   // Fixed-position popover: escapes the card's overflow-hidden and spans the whole
@@ -106,17 +110,33 @@ export function ChartKindPicker({
       const row = rootRef.current?.parentElement?.parentElement ?? rootRef.current;
       if (!row) return;
       const r = row.getBoundingClientRect();
-      const width = Math.min(Math.max(r.width, 260), window.innerWidth - 16);
-      const left = Math.max(8, Math.min(r.left, window.innerWidth - width - 8));
+      const vv = window.visualViewport;
+      const viewW = vv?.width ?? window.innerWidth;
+      const viewH = vv?.height ?? window.innerHeight;
+      const offsetTop = vv?.offsetTop ?? 0;
+      const width = Math.min(Math.max(r.width, 260), viewW - 16);
+      const left = Math.max(8, Math.min(r.left, viewW - width - 8));
       const top = r.bottom + 4;
-      setPos({ left, top, width, maxH: Math.max(160, window.innerHeight - top - 110) });
+      const bottomPad = 24;
+      const visibleBottom = offsetTop + viewH;
+      setPos({
+        left,
+        top,
+        width,
+        maxH: Math.max(160, visibleBottom - top - bottomPad),
+      });
     };
     place();
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
+    const vv = window.visualViewport;
+    vv?.addEventListener("resize", place);
+    vv?.addEventListener("scroll", place);
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
+      vv?.removeEventListener("resize", place);
+      vv?.removeEventListener("scroll", place);
     };
   }, [open]);
 
@@ -229,16 +249,17 @@ export function ChartKindPicker({
               const header = !searching && (i === 0 || ordered[i - 1]!.group !== entry.group);
               const isActive = i === active;
               const isCurrent = entry.value === value;
+              const groupId = `${listId}-group-${entry.group.replace(/\s+/g, "-")}`;
               return (
-                <div key={entry.value}>
+                <div key={entry.value} role="group" aria-labelledby={header ? groupId : undefined}>
                   {header && (
-                    <div className="px-3 pt-2 pb-1 text-2xs uppercase tracking-wide text-loom-muted">{entry.group}</div>
+                    <div id={groupId} className="px-3 pt-2 pb-1 text-2xs uppercase tracking-wide text-loom-muted">{entry.group}</div>
                   )}
                   <div
                     id={`${listId}-${entry.value}`}
                     role="option"
                     data-idx={i}
-                    aria-selected={isCurrent}
+                    aria-selected={isActive && sup.ok}
                     aria-disabled={!sup.ok}
                     title={sup.ok ? undefined : sup.reason}
                     onMouseMove={() => sup.ok && active !== i && setActive(i)}

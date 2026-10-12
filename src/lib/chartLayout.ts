@@ -21,16 +21,16 @@ const NON_CARTESIAN = new Set<ChartKind>([
 export function titleBandBottom(layout?: string): number {
   switch (layout) {
     case "ticket":
-      return 58;
+      return 62;
     case "slab":
-      return 48;
+      return 52;
     case "stack":
     case "spine":
-      return 56;
+      return 60;
     case "caption":
-      return 48;
+      return 52;
     default:
-      return 52; // pair — title + subtitle with breathing room
+      return 58; // pair — room for a wrapped title + subtitle
   }
 }
 
@@ -74,7 +74,7 @@ export function resolveChartMargins(args: {
     chartFrame = "focus",
     isCompact = false,
     legendPosition,
-    axisFontSize = 10,
+    axisFontSize = 11,
     sourceFootnote = false,
   } = args;
 
@@ -84,7 +84,7 @@ export function resolveChartMargins(args: {
   if (isCompact) base = Math.min(Math.max(base, 36), 40);
 
   const cartesian = isCartesianKind(kind);
-  const fs = Math.max(10, axisFontSize);
+  const fs = Math.max(isCompact ? 10 : 11, axisFontSize);
   const rot = Math.abs(tickRotation);
   // Tick stubs + label + axis field name below / beside the plot
   const tickBand = fs + 6;
@@ -281,21 +281,31 @@ export function subsampleRowsForDensity<T>(
   rows: T[],
   maxPoints = 3500,
   zoomScale = 1,
-): { rows: T[]; sampled: boolean; shown: number; total: number } {
+  sourceIndices?: number[],
+): { rows: T[]; sourceIndices?: number[]; sampled: boolean; shown: number; total: number } {
   const total = rows.length;
   const budget = Math.min(
     total,
     Math.round(maxPoints * Math.min(6, Math.max(1, zoomScale * zoomScale))),
   );
   if (total <= budget) {
-    return { rows, sampled: false, shown: total, total };
+    return {
+      rows,
+      sourceIndices: sourceIndices ? [...sourceIndices] : undefined,
+      sampled: false,
+      shown: total,
+      total,
+    };
   }
   const stride = total / budget;
   const out: T[] = new Array(budget);
+  const outIdx = sourceIndices ? new Array<number>(budget) : undefined;
   for (let i = 0; i < budget; i++) {
-    out[i] = rows[Math.min(total - 1, Math.floor(i * stride + 0.5))]!;
+    const j = Math.min(total - 1, Math.floor(i * stride + 0.5));
+    out[i] = rows[j]!;
+    if (outIdx) outIdx[i] = sourceIndices![j]!;
   }
-  return { rows: out, sampled: true, shown: budget, total };
+  return { rows: out, sourceIndices: outIdx, sampled: true, shown: budget, total };
 }
 
 /** Title baseline Y positions that stay inside the top pad band. */
@@ -333,15 +343,20 @@ export function titlePositions(pad: number, layout?: string): { titleY: number; 
   }
 }
 
-/** Pick black or white ink for labels drawn on a fill color. */
+/** Pick black or white ink for labels on a fill (WCAG-ish relative luminance). */
 export function contrastingInk(hex: string): string {
   const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!m) return "#ffffff";
-  const r = parseInt(m[1], 16);
-  const g = parseInt(m[2], 16);
-  const b = parseInt(m[3], 16);
-  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-  return lum > 0.55 ? "#1a1a1a" : "#ffffff";
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const L =
+    0.2126 * lin(parseInt(m[1], 16)) +
+    0.7152 * lin(parseInt(m[2], 16)) +
+    0.0722 * lin(parseInt(m[3], 16));
+  // Prefer near-black on mid/light fills so terracotta / amber cells stay readable
+  return L > 0.42 ? "#0a0a0c" : "#ffffff";
 }
 
 /** Soften or deepen a theme bg for radial chart atmospheres. */
@@ -359,8 +374,13 @@ export function blendToward(hex: string, amount: number, toward: "black" | "whit
 export function isLightHex(hex: string): boolean {
   const m = hex.match(/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
   if (!m) return false;
-  const r = parseInt(m[1], 16);
-  const g = parseInt(m[2], 16);
-  const b = parseInt(m[3], 16);
-  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 > 0.55;
+  const lin = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+  };
+  const L =
+    0.2126 * lin(parseInt(m[1], 16)) +
+    0.7152 * lin(parseInt(m[2], 16)) +
+    0.0722 * lin(parseInt(m[3], 16));
+  return L > 0.42;
 }

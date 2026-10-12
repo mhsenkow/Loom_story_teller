@@ -97,6 +97,11 @@ export function DataCubePivotBar({
       className="absolute top-2 left-2 z-[7] flex flex-col gap-1.5 items-start max-w-[calc(100%-1rem)] pointer-events-none"
       {...shield}
     >
+      {picked != null && (
+        <p className="pointer-events-none text-2xs text-loom-accent px-1" role="status" aria-live="polite">
+          Picked {SLOT_LABEL[picked]} — click another axis to swap
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-1 pointer-events-auto" role="group" aria-label="Pivot axes">
         {(["x", "y", "z"] as const).map((slot) => (
           <button
@@ -114,10 +119,12 @@ export function DataCubePivotBar({
             onDragLeave={() => setDropOn((d) => (d === slot ? null : d))}
             onDrop={onDrop(slot)}
             onClick={() => onChipClick(slot)}
+            aria-pressed={picked === slot}
+            aria-keyshortcuts="BracketLeft BracketRight Escape"
             title={
               picked && picked !== slot
                 ? `Swap ${SLOT_LABEL[picked]} ↔ ${SLOT_LABEL[slot]}`
-                : "Drag onto another axis (or click two) to pivot · drop a column here to replace"
+                : "Drag onto another axis (or click two) to pivot · drop a column here to replace · [ ] swap · Esc cancel"
             }
             className={`flex items-center gap-1 max-w-[11rem] px-2 py-1 rounded-md border text-2xs backdrop-blur-sm cursor-grab active:cursor-grabbing transition-colors ${
               dropOn === slot || picked === slot

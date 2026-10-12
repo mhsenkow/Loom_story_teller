@@ -1,3 +1,5 @@
+export { downloadBlob } from "./download";
+
 // =================================================================
 // Minimal ZIP (store / no compression) for social export packs
 // =================================================================
@@ -5,13 +7,22 @@
 // Fine for PNGs and small text/JSON sidecar files.
 // =================================================================
 
-function crc32(data: Uint8Array): number {
-  let c = 0xffffffff;
-  for (let i = 0; i < data.length; i++) {
-    c ^= data[i]!;
+const CRC32_TABLE = (() => {
+  const table = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
     for (let k = 0; k < 8; k++) {
       c = c & 1 ? (c >>> 1) ^ 0xedb88320 : c >>> 1;
     }
+    table[i] = c >>> 0;
+  }
+  return table;
+})();
+
+function crc32(data: Uint8Array): number {
+  let c = 0xffffffff;
+  for (let i = 0; i < data.length; i++) {
+    c = CRC32_TABLE[(c ^ data[i]!) & 0xff]! ^ (c >>> 8);
   }
   return (c ^ 0xffffffff) >>> 0;
 }
@@ -43,13 +54,25 @@ function concat(parts: Uint8Array[]): Uint8Array {
   return out;
 }
 
+/** DOS date/time for ZIP local/central headers (local wall clock). */
+export function zipDosDateTime(d = new Date()): { dosTime: number; dosDate: number } {
+  const year = Math.min(2107, Math.max(1980, d.getFullYear()));
+  const dosTime = (d.getHours() << 11) | (d.getMinutes() << 5) | Math.floor(d.getSeconds() / 2);
+  const dosDate = ((year - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  return { dosTime, dosDate };
+}
+
+/** ZIP general-purpose bit 11 — UTF-8 file names. */
+export const ZIP_UTF8_FLAG = 0x0800;
+
 export interface ZipEntry {
   name: string;
   data: Uint8Array;
 }
 
 /** Build an uncompressed ZIP archive from named file entries. */
-export function buildZip(entries: ZipEntry[]): Uint8Array {
+export function buildZip(entries: ZipEntry[], now = new Date()): Uint8Array {
+  const { dosTime, dosDate } = zipDosDateTime(now);
   const localParts: Uint8Array[] = [];
   const centralParts: Uint8Array[] = [];
   let offset = 0;
@@ -61,10 +84,10 @@ export function buildZip(entries: ZipEntry[]): Uint8Array {
     const localHeader = concat([
       u32(0x04034b50),
       u16(20),
+      u16(ZIP_UTF8_FLAG),
       u16(0),
-      u16(0),
-      u16(0),
-      u16(0),
+      u16(dosTime),
+      u16(dosDate),
       u32(crc),
       u32(data.length),
       u32(data.length),
@@ -78,10 +101,10 @@ export function buildZip(entries: ZipEntry[]): Uint8Array {
       u32(0x02014b50),
       u16(20),
       u16(20),
+      u16(ZIP_UTF8_FLAG),
       u16(0),
-      u16(0),
-      u16(0),
-      u16(0),
+      u16(dosTime),
+      u16(dosDate),
       u32(crc),
       u32(data.length),
       u32(data.length),
@@ -111,13 +134,4 @@ export function buildZip(entries: ZipEntry[]): Uint8Array {
     u16(0),
   ]);
   return concat([local, centralDir, end]);
-}
-
-export function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
 }

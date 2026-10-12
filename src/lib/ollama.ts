@@ -25,7 +25,7 @@ export async function listOllamaModels(): Promise<{ name: string }[]> {
   if (!res.ok) throw new Error(`Ollama tags failed: ${res.status}`);
   const data = (await res.json()) as { models?: { name: string }[] };
   const models = data.models ?? [];
-  return models.map((m) => ({ name: m.name.split(":")[0] ?? m.name }));
+  return models.map((m) => ({ name: m.name }));
 }
 
 /** Pick model: env > first available > default. */
@@ -93,23 +93,43 @@ function extractJson(text: string): string {
   return trimmed;
 }
 
-function parseSuggestion(jsonStr: string, columns: ColumnInfo[]): OllamaChartSuggestion | null {
+function resolveChartKind(raw: string): ChartKind | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const direct = CHART_KINDS.find((k) => k === trimmed);
+  if (direct) return direct;
+  const lower = trimmed.toLowerCase();
+  const ci = CHART_KINDS.find((k) => k.toLowerCase() === lower);
+  if (ci) return ci;
+  const norm = lower.replace(/[-_\s]/g, "");
+  return CHART_KINDS.find((k) => k.toLowerCase().replace(/[-_\s]/g, "") === norm) ?? null;
+}
+
+function resolveColumnName(name: string, columns: ColumnInfo[]): string | null {
+  const exact = columns.find((c) => c.name === name);
+  if (exact) return exact.name;
+  const lower = name.toLowerCase();
+  return columns.find((c) => c.name.toLowerCase() === lower)?.name ?? null;
+}
+
+export function parseSuggestion(jsonStr: string, columns: ColumnInfo[]): OllamaChartSuggestion | null {
   try {
     const raw = JSON.parse(jsonStr) as Record<string, unknown>;
-    const chartKind = String(raw.chartKind ?? "").toLowerCase();
-    if (!CHART_KINDS.includes(chartKind as ChartKind)) return null;
-    const xField = String(raw.xField ?? "").trim();
-    const yField = raw.yField == null || raw.yField === "" ? null : String(raw.yField).trim();
-    const colorField = raw.colorField == null || raw.colorField === "" ? null : String(raw.colorField).trim();
+    const chartKind = resolveChartKind(String(raw.chartKind ?? ""));
+    if (!chartKind) return null;
+    const xField = resolveColumnName(String(raw.xField ?? "").trim(), columns);
+    const yFieldRaw = raw.yField == null || raw.yField === "" ? null : String(raw.yField).trim();
+    const yField = yFieldRaw ? resolveColumnName(yFieldRaw, columns) : null;
+    const colorRaw = raw.colorField == null || raw.colorField === "" ? null : String(raw.colorField).trim();
+    const colorField = colorRaw ? resolveColumnName(colorRaw, columns) : null;
     const reason = String(raw.reason ?? "Suggested by local model.").trim();
 
-    const names = new Set(columns.map((c) => c.name));
-    if (!xField || !names.has(xField)) return null;
-    if (yField !== null && !names.has(yField)) return null;
-    if (colorField !== null && !names.has(colorField)) return null;
+    if (!xField) return null;
+    if (yFieldRaw && !yField) return null;
+    if (colorRaw && !colorField) return null;
 
     return {
-      chartKind: chartKind as ChartKind,
+      chartKind,
       xField,
       yField: yField || null,
       colorField: colorField || null,
@@ -148,6 +168,7 @@ export async function suggestChartFromOllama(
           top_p: 0.9,
         },
       }),
+      signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { response?: string };

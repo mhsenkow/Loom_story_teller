@@ -11,6 +11,7 @@ import {
   runTrend,
   runReferenceLines,
   runClustering,
+  runCorrelationMatrix,
 } from "../smartAnalytics";
 
 describe("smartAnalytics", () => {
@@ -38,6 +39,15 @@ describe("smartAnalytics", () => {
       const out = anomalyZScore(rows, 0, 1.5);
       expect(out).toContain(4);
     });
+    it("uses real row indices when leading cells are null", () => {
+      const rows = [[null], [null], [3], [4], [5], [6], [7], [8], [9], [200]];
+      const z = anomalyZScore(rows, 0, 1.5);
+      const iqr = anomalyIQR(rows, 0, 1.5);
+      const mad = anomalyMAD(rows, 0, 3);
+      expect(z).toContain(9);
+      expect(iqr).toContain(9);
+      expect(mad).toContain(9);
+    });
   });
 
   describe("anomalyIQR", () => {
@@ -60,6 +70,10 @@ describe("smartAnalytics", () => {
       const rows = [[1], [2], [2], [2], [2], [2], [2], [2], [2], [50]];
       const out = anomalyMAD(rows, 0, 3);
       expect(out).toContain(9);
+    });
+    it("returns empty when MAD is zero (identical values)", () => {
+      const rows = [[5], [5], [5], [5], [null], [""]];
+      expect(anomalyMAD(rows, 0, 3)).toEqual([]);
     });
   });
 
@@ -142,6 +156,35 @@ describe("smartAnalytics", () => {
       expect(types).toContain("median");
       expect(types).toContain("q1");
       expect(types).toContain("q3");
+    });
+  });
+
+  describe("runCorrelationMatrix (LOOM-480)", () => {
+    it("returns null when fewer than two numeric columns", () => {
+      expect(runCorrelationMatrix([[1], [2]], ["a"], 8)).toBeNull();
+    });
+    it("yields r=1 on diagonal and r=-1 for perfect inverse", () => {
+      const rows: unknown[][] = [
+        [1, 10],
+        [2, 9],
+        [3, 8],
+        [4, 7],
+        [5, 6],
+      ];
+      const out = runCorrelationMatrix(rows, ["x", "y"], 8);
+      expect(out).not.toBeNull();
+      expect(out!.matrix[0]![0]).toBe(1);
+      expect(out!.matrix[0]![1]).toBeLessThan(-0.99);
+    });
+    it("marks NaN when a column has no variance", () => {
+      const rows: unknown[][] = [
+        [1, 5],
+        [2, 5],
+        [3, 5],
+      ];
+      const out = runCorrelationMatrix(rows, ["x", "flat"], 8);
+      expect(out).not.toBeNull();
+      expect(Number.isNaN(out!.matrix[0]![1])).toBe(true);
     });
   });
 

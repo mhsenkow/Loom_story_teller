@@ -12,9 +12,9 @@
 // writes (replace / upsert / append per the spec), and reports counts.
 // =================================================================
 
-use crate::db::{duckdb_value_to_json, ColumnInfo, LoomDb, QueryResult};
+use crate::db::{ColumnInfo, LoomDb, QueryResult};
 use duckdb::types::{ToSql, ToSqlOutput, Value as DbValue};
-use duckdb::{params, params_from_iter, Connection};
+use duckdb::{appender_params_from_iter, params, params_from_iter, Connection};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -24,8 +24,8 @@ use tokio::sync::Mutex as TokioMutex;
 
 /// Row cap for append / upsert tables (oldest rows are trimmed).
 const MAX_ROWS: usize = 50_000;
-/// Aircraft kept per poll (OpenSky or ADSB.lol).
-const MAX_AIRCRAFT: usize = 1500;
+/// Aircraft kept per poll (OpenSky / ADSB.lol / adsb.fi) — matches Worker cap.
+const MAX_AIRCRAFT: usize = 2000;
 /// Newest NWS alerts kept per poll.
 const NWS_MAX_ALERTS: usize = 150;
 /// Pageviews rows kept after filtering.
@@ -74,8 +74,18 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "usgs",
         table: "usgs_quakes",
         columns: &[
-            ("id", V), ("magnitude", D), ("place", V), ("ts", TS), ("latitude", D), ("longitude", D),
-            ("depth", D), ("mag_type", V), ("status", V), ("tsunami", B), ("sig", I), ("net", V),
+            ("id", V),
+            ("magnitude", D),
+            ("place", V),
+            ("ts", TS),
+            ("latitude", D),
+            ("longitude", D),
+            ("depth", D),
+            ("mag_type", V),
+            ("status", V),
+            ("tsunami", B),
+            ("sig", I),
+            ("net", V),
         ],
         order_by: "ts DESC",
         poll_secs: 60,
@@ -85,8 +95,16 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "eonet",
         table: "natural_events",
         columns: &[
-            ("id", V), ("title", V), ("category", V), ("source", V), ("ts", TS), ("latitude", D),
-            ("longitude", D), ("magnitude", D), ("magnitude_unit", V), ("status", V),
+            ("id", V),
+            ("title", V),
+            ("category", V),
+            ("source", V),
+            ("ts", TS),
+            ("latitude", D),
+            ("longitude", D),
+            ("magnitude", D),
+            ("magnitude_unit", V),
+            ("status", V),
         ],
         order_by: "ts DESC",
         poll_secs: 600,
@@ -96,9 +114,18 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "gdacs",
         table: "disaster_alerts",
         columns: &[
-            ("id", V), ("event_type", V), ("title", V), ("alert_level", V), ("alert_score", D),
-            ("country", V), ("latitude", D), ("longitude", D), ("start_ts", TS), ("end_ts", TS),
-            ("severity", D), ("severity_unit", V),
+            ("id", V),
+            ("event_type", V),
+            ("title", V),
+            ("alert_level", V),
+            ("alert_score", D),
+            ("country", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("start_ts", TS),
+            ("end_ts", TS),
+            ("severity", D),
+            ("severity_unit", V),
         ],
         order_by: "start_ts DESC",
         poll_secs: 900,
@@ -108,8 +135,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "nws",
         table: "nws_alerts",
         columns: &[
-            ("id", V), ("event", V), ("headline", V), ("severity", V), ("certainty", V), ("urgency", V),
-            ("area_desc", V), ("sender_name", V), ("effective", TS), ("expires", TS), ("status", V),
+            ("id", V),
+            ("event", V),
+            ("headline", V),
+            ("severity", V),
+            ("certainty", V),
+            ("urgency", V),
+            ("area_desc", V),
+            ("sender_name", V),
+            ("effective", TS),
+            ("expires", TS),
+            ("status", V),
             ("category", V),
         ],
         order_by: "effective DESC",
@@ -120,8 +156,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "meteo",
         table: "meteo_weather",
         columns: &[
-            ("ts", TS), ("city", V), ("latitude", D), ("longitude", D), ("temperature", D), ("humidity", D),
-            ("wind_speed", D), ("precipitation", D), ("weather_code", I), ("pressure", D), ("cloud_cover", D),
+            ("ts", TS),
+            ("city", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("temperature", D),
+            ("humidity", D),
+            ("wind_speed", D),
+            ("precipitation", D),
+            ("weather_code", I),
+            ("pressure", D),
+            ("cloud_cover", D),
         ],
         order_by: "ts DESC",
         poll_secs: 300,
@@ -131,8 +176,15 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "aq",
         table: "air_quality",
         columns: &[
-            ("ts", TS), ("city", V), ("latitude", D), ("longitude", D), ("pm2_5", D), ("pm10", D),
-            ("ozone", D), ("nitrogen_dioxide", D), ("european_aqi", D),
+            ("ts", TS),
+            ("city", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("pm2_5", D),
+            ("pm10", D),
+            ("ozone", D),
+            ("nitrogen_dioxide", D),
+            ("european_aqi", D),
         ],
         order_by: "pm2_5 DESC",
         poll_secs: 300,
@@ -141,7 +193,12 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
     SourceSpec {
         kind: "ukcarbon",
         table: "uk_carbon",
-        columns: &[("ts", TS), ("forecast", I), ("actual", I), ("intensity_index", V)],
+        columns: &[
+            ("ts", TS),
+            ("forecast", I),
+            ("actual", I),
+            ("intensity_index", V),
+        ],
         order_by: "ts DESC",
         poll_secs: 1800,
         mode: WriteMode::Replace,
@@ -158,9 +215,18 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "buoys",
         table: "ocean_buoys",
         columns: &[
-            ("station", V), ("latitude", D), ("longitude", D), ("ts", TS), ("wind_dir", D),
-            ("wind_speed_ms", D), ("gust_ms", D), ("wave_height_m", D), ("wave_period_s", D),
-            ("pressure_hpa", D), ("air_temp_c", D), ("water_temp_c", D),
+            ("station", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("ts", TS),
+            ("wind_dir", D),
+            ("wind_speed_ms", D),
+            ("gust_ms", D),
+            ("wave_height_m", D),
+            ("wave_period_s", D),
+            ("pressure_hpa", D),
+            ("air_temp_c", D),
+            ("water_temp_c", D),
         ],
         order_by: "wave_height_m DESC",
         poll_secs: 1800,
@@ -170,8 +236,16 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "firms",
         table: "firms_fires",
         columns: &[
-            ("id", V), ("latitude", D), ("longitude", D), ("bright_ti4", D), ("bright_ti5", D),
-            ("frp", D), ("confidence", V), ("satellite", V), ("acq_ts", TS), ("daynight", V),
+            ("id", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("bright_ti4", D),
+            ("bright_ti5", D),
+            ("frp", D),
+            ("confidence", V),
+            ("satellite", V),
+            ("acq_ts", TS),
+            ("daynight", V),
         ],
         order_by: "frp DESC",
         poll_secs: 600,
@@ -181,8 +255,13 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "nwis",
         table: "nwis_gauges",
         columns: &[
-            ("site_id", V), ("site_name", V), ("ts", TS), ("latitude", D), ("longitude", D),
-            ("discharge_cfs", D), ("gage_height_ft", D),
+            ("site_id", V),
+            ("site_name", V),
+            ("ts", TS),
+            ("latitude", D),
+            ("longitude", D),
+            ("discharge_cfs", D),
+            ("gage_height_ft", D),
         ],
         order_by: "ts DESC",
         poll_secs: 300,
@@ -192,8 +271,16 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "opensky",
         table: "opensky_aircraft",
         columns: &[
-            ("icao24", V), ("callsign", V), ("origin_country", V), ("longitude", D), ("latitude", D),
-            ("baro_altitude", D), ("velocity", D), ("true_track", D), ("on_ground", B), ("ts", TS),
+            ("icao24", V),
+            ("callsign", V),
+            ("origin_country", V),
+            ("longitude", D),
+            ("latitude", D),
+            ("baro_altitude", D),
+            ("velocity", D),
+            ("true_track", D),
+            ("on_ground", B),
+            ("ts", TS),
         ],
         order_by: "baro_altitude DESC",
         poll_secs: 30,
@@ -204,9 +291,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "citibike",
         table: "citibike_stations",
         columns: &[
-            ("station_id", V), ("name", V), ("latitude", D), ("longitude", D), ("capacity", I),
-            ("bikes_available", I), ("ebikes_available", I), ("docks_available", I), ("pct_full", D),
-            ("is_renting", B), ("ts", TS),
+            ("station_id", V),
+            ("name", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("capacity", I),
+            ("bikes_available", I),
+            ("ebikes_available", I),
+            ("docks_available", I),
+            ("pct_full", D),
+            ("is_renting", B),
+            ("ts", TS),
         ],
         order_by: "bikes_available DESC",
         poll_secs: 60,
@@ -216,8 +311,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "mbta",
         table: "mbta_vehicles",
         columns: &[
-            ("id", V), ("label", V), ("route", V), ("route_type", V), ("latitude", D), ("longitude", D),
-            ("bearing", D), ("speed_mph", D), ("status", V), ("occupancy", V), ("ts", TS),
+            ("id", V),
+            ("label", V),
+            ("route", V),
+            ("route_type", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("bearing", D),
+            ("speed_mph", D),
+            ("status", V),
+            ("occupancy", V),
+            ("ts", TS),
         ],
         order_by: "route, label",
         poll_secs: 30,
@@ -227,8 +331,16 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "nyc311",
         table: "nyc_311",
         columns: &[
-            ("unique_key", V), ("created_date", TS), ("complaint_type", V), ("descriptor", V),
-            ("borough", V), ("city", V), ("latitude", D), ("longitude", D), ("status", V), ("agency", V),
+            ("unique_key", V),
+            ("created_date", TS),
+            ("complaint_type", V),
+            ("descriptor", V),
+            ("borough", V),
+            ("city", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("status", V),
+            ("agency", V),
         ],
         order_by: "created_date DESC",
         poll_secs: 300,
@@ -238,7 +350,11 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "iss",
         table: "iss_track",
         columns: &[
-            ("ts", TS), ("latitude", D), ("longitude", D), ("altitude_km", D), ("velocity_kmh", D),
+            ("ts", TS),
+            ("latitude", D),
+            ("longitude", D),
+            ("altitude_km", D),
+            ("velocity_kmh", D),
             ("visibility", V),
         ],
         order_by: "ts DESC",
@@ -249,8 +365,15 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "launches",
         table: "space_launches",
         columns: &[
-            ("id", V), ("name", V), ("net", TS), ("status", V), ("pad", V), ("location", V),
-            ("agency", V), ("rocket", V), ("orbital", B),
+            ("id", V),
+            ("name", V),
+            ("net", TS),
+            ("status", V),
+            ("pad", V),
+            ("location", V),
+            ("agency", V),
+            ("rocket", V),
+            ("orbital", B),
         ],
         order_by: "net ASC",
         poll_secs: 1800,
@@ -260,8 +383,14 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "spacex",
         table: "spacex_launches",
         columns: &[
-            ("id", V), ("name", V), ("date_utc", TS), ("success", B), ("upcoming", B), ("rocket", V),
-            ("flight_number", I), ("details", V),
+            ("id", V),
+            ("name", V),
+            ("date_utc", TS),
+            ("success", B),
+            ("upcoming", B),
+            ("rocket", V),
+            ("flight_number", I),
+            ("details", V),
         ],
         order_by: "date_utc DESC",
         poll_secs: 3600,
@@ -270,7 +399,13 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
     SourceSpec {
         kind: "spaceweather",
         table: "space_weather",
-        columns: &[("ts", TS), ("kp", D), ("a_running", I), ("station_count", I), ("storm_level", V)],
+        columns: &[
+            ("ts", TS),
+            ("kp", D),
+            ("a_running", I),
+            ("station_count", I),
+            ("storm_level", V),
+        ],
         order_by: "ts DESC",
         poll_secs: 900,
         mode: WriteMode::Replace,
@@ -278,7 +413,12 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
     SourceSpec {
         kind: "aurora",
         table: "aurora_forecast",
-        columns: &[("longitude", D), ("latitude", D), ("probability", I), ("ts", TS)],
+        columns: &[
+            ("longitude", D),
+            ("latitude", D),
+            ("probability", I),
+            ("ts", TS),
+        ],
         order_by: "probability DESC",
         poll_secs: 900,
         mode: WriteMode::Replace,
@@ -287,8 +427,14 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "asteroids",
         table: "asteroid_approaches",
         columns: &[
-            ("designation", V), ("name", V), ("approach_ts", TS), ("distance_ld", D), ("distance_km", D),
-            ("velocity_kms", D), ("abs_magnitude", D), ("diameter_m", D),
+            ("designation", V),
+            ("name", V),
+            ("approach_ts", TS),
+            ("distance_ld", D),
+            ("distance_km", D),
+            ("velocity_kms", D),
+            ("abs_magnitude", D),
+            ("diameter_m", D),
         ],
         order_by: "approach_ts ASC",
         poll_secs: 21_600,
@@ -298,9 +444,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "starlink",
         table: "starlink_sats",
         columns: &[
-            ("norad_cat_id", I), ("object_name", V), ("object_id", V), ("epoch", TS),
-            ("inclination", D), ("eccentricity", D), ("mean_motion", D), ("raan", D),
-            ("arg_perigee", D), ("mean_anomaly", D), ("bstar", D),
+            ("norad_cat_id", I),
+            ("object_name", V),
+            ("object_id", V),
+            ("epoch", TS),
+            ("inclination", D),
+            ("eccentricity", D),
+            ("mean_motion", D),
+            ("raan", D),
+            ("arg_perigee", D),
+            ("mean_anomaly", D),
+            ("bstar", D),
         ],
         order_by: "mean_motion DESC",
         poll_secs: 7200,
@@ -310,7 +464,12 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "hn",
         table: "hn_stories",
         columns: &[
-            ("id", V), ("title", V), ("author", V), ("points", I), ("num_comments", I), ("url", V),
+            ("id", V),
+            ("title", V),
+            ("author", V),
+            ("points", I),
+            ("num_comments", I),
+            ("url", V),
             ("created_at", TS),
         ],
         order_by: "points DESC",
@@ -321,8 +480,14 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "lobsters",
         table: "lobsters_stories",
         columns: &[
-            ("id", V), ("title", V), ("author", V), ("score", I), ("comment_count", I), ("url", V),
-            ("tags", V), ("created_at", TS),
+            ("id", V),
+            ("title", V),
+            ("author", V),
+            ("score", I),
+            ("comment_count", I),
+            ("url", V),
+            ("tags", V),
+            ("created_at", TS),
         ],
         order_by: "score DESC",
         poll_secs: 120,
@@ -340,8 +505,16 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "steam",
         table: "steam_games",
         columns: &[
-            ("appid", V), ("name", V), ("developer", V), ("peak_players", I), ("positive", I),
-            ("negative", I), ("positive_pct", D), ("owners_min", BI), ("price_usd", D), ("discount_pct", D),
+            ("appid", V),
+            ("name", V),
+            ("developer", V),
+            ("peak_players", I),
+            ("positive", I),
+            ("negative", I),
+            ("positive_pct", D),
+            ("owners_min", BI),
+            ("price_usd", D),
+            ("discount_pct", D),
         ],
         order_by: "peak_players DESC",
         poll_secs: 21_600,
@@ -351,8 +524,14 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "crypto",
         table: "crypto_markets",
         columns: &[
-            ("id", V), ("symbol", V), ("name", V), ("price_usd", D), ("market_cap", D),
-            ("volume_24h", D), ("change_24h_pct", D), ("rank", I),
+            ("id", V),
+            ("symbol", V),
+            ("name", V),
+            ("price_usd", D),
+            ("market_cap", D),
+            ("volume_24h", D),
+            ("change_24h_pct", D),
+            ("rank", I),
         ],
         order_by: "rank ASC",
         poll_secs: 60,
@@ -362,8 +541,14 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "bitcoin",
         table: "bitcoin_blocks",
         columns: &[
-            ("height", I), ("ts", TS), ("tx_count", I), ("size_mb", D), ("median_fee_sat_vb", D),
-            ("total_fees_btc", D), ("reward_btc", D), ("pool", V),
+            ("height", I),
+            ("ts", TS),
+            ("tx_count", I),
+            ("size_mb", D),
+            ("median_fee_sat_vb", D),
+            ("total_fees_btc", D),
+            ("reward_btc", D),
+            ("pool", V),
         ],
         order_by: "height DESC",
         poll_secs: 120,
@@ -372,7 +557,13 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
     SourceSpec {
         kind: "fx",
         table: "fx_rates",
-        columns: &[("as_of", DT), ("base", V), ("quote", V), ("rate", D), ("change_pct", D)],
+        columns: &[
+            ("as_of", DT),
+            ("base", V),
+            ("quote", V),
+            ("rate", D),
+            ("change_pct", D),
+        ],
         order_by: "as_of DESC, quote",
         poll_secs: 3600,
         mode: WriteMode::Replace,
@@ -380,7 +571,12 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
     SourceSpec {
         kind: "debt",
         table: "us_debt",
-        columns: &[("record_date", DT), ("total_debt", D), ("held_by_public", D), ("intragovernmental", D)],
+        columns: &[
+            ("record_date", DT),
+            ("total_debt", D),
+            ("held_by_public", D),
+            ("intragovernmental", D),
+        ],
         order_by: "record_date ASC",
         poll_secs: 0,
         mode: WriteMode::Replace,
@@ -389,9 +585,15 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "fema",
         table: "fema_disasters",
         columns: &[
-            ("id", V), ("disaster_number", I), ("state", V), ("declaration_type", V),
-            ("declaration_title", V), ("incident_type", V), ("declaration_date", TS),
-            ("incident_begin", TS), ("fy_declared", I),
+            ("id", V),
+            ("disaster_number", I),
+            ("state", V),
+            ("declaration_type", V),
+            ("declaration_title", V),
+            ("incident_type", V),
+            ("declaration_date", TS),
+            ("incident_begin", TS),
+            ("fy_declared", I),
         ],
         order_by: "declaration_date DESC",
         poll_secs: 600,
@@ -401,9 +603,17 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "covid",
         table: "covid_countries",
         columns: &[
-            ("country", V), ("cases", BI), ("today_cases", BI), ("deaths", BI), ("today_deaths", BI),
-            ("recovered", BI), ("active", BI), ("cases_per_million", D), ("deaths_per_million", D),
-            ("population", BI), ("continent", V),
+            ("country", V),
+            ("cases", BI),
+            ("today_cases", BI),
+            ("deaths", BI),
+            ("today_deaths", BI),
+            ("recovered", BI),
+            ("active", BI),
+            ("cases_per_million", D),
+            ("deaths_per_million", D),
+            ("population", BI),
+            ("continent", V),
         ],
         order_by: "cases DESC",
         poll_secs: 1800,
@@ -413,8 +623,15 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "countries",
         table: "world_countries",
         columns: &[
-            ("name", V), ("cca3", V), ("region", V), ("subregion", V), ("population", BI), ("area", D),
-            ("density", D), ("capital", V), ("independent", B),
+            ("name", V),
+            ("cca3", V),
+            ("region", V),
+            ("subregion", V),
+            ("population", BI),
+            ("area", D),
+            ("density", D),
+            ("capital", V),
+            ("independent", B),
         ],
         order_by: "population DESC",
         poll_secs: 0,
@@ -424,8 +641,14 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         kind: "world_bank",
         table: "world_bank",
         columns: &[
-            ("country_code", V), ("country_name", V), ("yr", I), ("gdp_usd", D), ("gdp_per_capita", D),
-            ("population", BI), ("life_expectancy", D), ("co2_per_capita", D),
+            ("country_code", V),
+            ("country_name", V),
+            ("yr", I),
+            ("gdp_usd", D),
+            ("gdp_per_capita", D),
+            ("population", BI),
+            ("life_expectancy", D),
+            ("co2_per_capita", D),
         ],
         order_by: "yr DESC, country_code",
         poll_secs: 0,
@@ -454,8 +677,14 @@ pub struct SourceInstance {
     pub running: Arc<AtomicBool>,
     pub total_events: Arc<AtomicU64>,
     pub started_at: Arc<TokioMutex<Option<i64>>>,
-    pub cancel_token: Arc<TokioMutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    cancel_token: Arc<TokioMutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     eps_state: Arc<TokioMutex<(u64, std::time::Instant)>>,
+    poll_generation: Arc<std::sync::atomic::AtomicU64>,
+    poll_worker: Arc<TokioMutex<Option<(u64, tokio::task::JoinHandle<()>)>>>,
+    last_ok_at: Arc<TokioMutex<Option<i64>>>,
+    last_error: Arc<TokioMutex<Option<String>>>,
+    consecutive_failures: Arc<std::sync::atomic::AtomicU32>,
+    next_poll_at: Arc<TokioMutex<Option<i64>>>,
 }
 
 impl Default for SourceInstance {
@@ -472,6 +701,12 @@ impl SourceInstance {
             started_at: Arc::new(TokioMutex::new(None)),
             cancel_token: Arc::new(TokioMutex::new(None)),
             eps_state: Arc::new(TokioMutex::new((0, std::time::Instant::now()))),
+            poll_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            poll_worker: Arc::new(TokioMutex::new(None)),
+            last_ok_at: Arc::new(TokioMutex::new(None)),
+            last_error: Arc::new(TokioMutex::new(None)),
+            consecutive_failures: Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            next_poll_at: Arc::new(TokioMutex::new(None)),
         }
     }
 
@@ -505,6 +740,10 @@ impl SourceInstance {
             buffer_rows,
             started_at: started,
             uptime_secs: uptime,
+            last_ok_at: *self.last_ok_at.lock().await,
+            last_error: self.last_error.lock().await.clone(),
+            consecutive_failures: self.consecutive_failures.load(Ordering::Relaxed),
+            next_poll_at: *self.next_poll_at.lock().await,
         }
     }
 
@@ -528,10 +767,18 @@ pub struct SourceStatus {
     pub buffer_rows: u64,
     pub started_at: Option<i64>,
     pub uptime_secs: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_ok_at: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    pub consecutive_failures: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_poll_at: Option<i64>,
 }
 
 /// One `SourceInstance` per kind in `SOURCE_SPECS`.
 pub struct SourcesState {
+    client: reqwest::Client,
     instances: HashMap<&'static str, SourceInstance>,
 }
 
@@ -543,7 +790,13 @@ impl Default for SourcesState {
 
 impl SourcesState {
     pub fn new() -> Self {
+        let client = build_client().expect("source HTTP client");
+        Self::new_with_client(client)
+    }
+
+    pub fn new_with_client(client: reqwest::Client) -> Self {
         Self {
+            client,
             instances: SOURCE_SPECS
                 .iter()
                 .map(|s| (s.kind, SourceInstance::new()))
@@ -553,6 +806,10 @@ impl SourcesState {
 
     pub fn get(&self, kind: &str) -> Option<&SourceInstance> {
         self.instances.get(kind)
+    }
+
+    pub fn client(&self) -> reqwest::Client {
+        self.client.clone()
     }
 }
 
@@ -566,7 +823,11 @@ fn create_table_sql(spec: &SourceSpec) -> String {
         .iter()
         .map(|(name, ty)| format!("{} {}", name, ty))
         .collect();
-    format!("CREATE TABLE IF NOT EXISTS {} ({})", spec.table, cols.join(", "))
+    format!(
+        "CREATE TABLE IF NOT EXISTS {} ({})",
+        spec.table,
+        cols.join(", ")
+    )
 }
 
 fn existing_columns(conn: &Connection, table: &str) -> Result<Vec<(String, String)>, String> {
@@ -577,7 +838,9 @@ fn existing_columns(conn: &Connection, table: &str) -> Result<Vec<(String, Strin
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
-        .query_map(params![table], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .query_map(params![table], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+        })
         .map_err(|e| e.to_string())?;
     Ok(rows.flatten().collect())
 }
@@ -592,10 +855,10 @@ fn schema_matches(existing: &[(String, String)], spec: &SourceSpec) -> bool {
             })
 }
 
-/// Create every source table; a table whose columns no longer match the
-/// registry (e.g. the old long-format `world_bank`) is dropped and recreated.
+/// Create every source table at app startup. In-memory DuckDB resets on quit,
+/// so drift repair only matters within a session (see DOCS.md — poll sources).
 pub fn ensure_tables(db: &LoomDb) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_connection();
     for spec in SOURCE_SPECS {
         let existing = existing_columns(&conn, spec.table)?;
         if !existing.is_empty() && !schema_matches(&existing, spec) {
@@ -719,34 +982,62 @@ fn trimmed(v: Option<&Value>) -> Cell {
 }
 
 fn str_of<'a>(v: &'a Value, ptr: &str) -> Option<&'a str> {
-    v.pointer(ptr).and_then(Value::as_str).filter(|s| !s.is_empty())
+    v.pointer(ptr)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
 }
 
 // ---- Writes ----
 
-fn insert_sql(spec: &SourceSpec) -> String {
+fn insert_sql_table(table: &str, spec: &SourceSpec) -> String {
     let vals: Vec<String> = spec
         .columns
         .iter()
         .map(|(_, ty)| format!("TRY_CAST(? AS {})", ty))
         .collect();
-    format!("INSERT INTO {} VALUES ({})", spec.table, vals.join(", "))
+    format!("INSERT INTO {} VALUES ({})", table, vals.join(", "))
 }
 
-fn key_where(spec: &SourceSpec, keys: &[&str]) -> (String, Vec<usize>) {
-    let mut idx = Vec::new();
-    let mut parts = Vec::new();
-    for k in keys {
-        if let Some(i) = spec.columns.iter().position(|(name, _)| name == k) {
-            idx.push(i);
-            parts.push(format!("{} = CAST(? AS {})", k, spec.columns[i].1));
-        }
-    }
-    (parts.join(" AND "), idx)
+fn sql_ident(name: &str) -> String {
+    format!("\"{}\"", name.replace('"', "\"\""))
 }
 
-fn in_tx<T>(conn: &Connection, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
-    conn.execute_batch("BEGIN TRANSACTION").map_err(|e| e.to_string())?;
+fn staging_table_sql(staging: &str, spec: &SourceSpec) -> String {
+    let cols: Vec<String> = spec
+        .columns
+        .iter()
+        .map(|(name, _)| format!("{} VARCHAR", sql_ident(name)))
+        .collect();
+    format!("CREATE TABLE {} ({})", sql_ident(staging), cols.join(", "))
+}
+
+fn cast_insert_from_staging_sql(table: &str, spec: &SourceSpec, staging: &str) -> String {
+    let vals: Vec<String> = spec
+        .columns
+        .iter()
+        .map(|(name, ty)| format!("TRY_CAST({} AS {})", sql_ident(name), ty))
+        .collect();
+    format!(
+        "INSERT INTO {} SELECT {} FROM {}",
+        table,
+        vals.join(", "),
+        sql_ident(staging)
+    )
+}
+
+fn upsert_key_join(keys: &[&str], left: &str, right: &str) -> String {
+    keys.iter()
+        .map(|k| format!("{left}.\"{k}\" = {right}.\"{k}\""))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+fn in_tx<T>(
+    conn: &Connection,
+    f: impl FnOnce(&Connection) -> Result<T, String>,
+) -> Result<T, String> {
+    conn.execute_batch("BEGIN TRANSACTION")
+        .map_err(|e| e.to_string())?;
     match f(conn) {
         Ok(v) => {
             conn.execute_batch("COMMIT").map_err(|e| e.to_string())?;
@@ -757,6 +1048,51 @@ fn in_tx<T>(conn: &Connection, f: impl FnOnce(&Connection) -> Result<T, String>)
             Err(e)
         }
     }
+}
+
+fn cell_to_staging_text(cell: &Cell) -> Option<String> {
+    match cell {
+        Cell::Null => None,
+        Cell::Str(s) => Some(s.clone()),
+        Cell::F64(f) if f.is_finite() => Some(f.to_string()),
+        Cell::F64(_) => None,
+        Cell::I64(i) => Some(i.to_string()),
+        Cell::Bool(b) => Some(b.to_string()),
+    }
+}
+
+fn append_rows_to_staging(conn: &Connection, staging: &str, rows: &[Row]) -> Result<(), String> {
+    let mut appender = conn.appender(staging).map_err(|e| e.to_string())?;
+    for row in rows {
+        appender
+            .append_row(appender_params_from_iter(
+                row.iter().map(cell_to_staging_text),
+            ))
+            .map_err(|e| e.to_string())?;
+    }
+    appender.flush().map_err(|e| e.to_string())
+}
+
+fn write_replace_or_append_rows(
+    conn: &Connection,
+    spec: &SourceSpec,
+    rows: &[Row],
+) -> Result<u64, String> {
+    let staging = format!("loom_stage_{}", spec.table);
+    conn.execute_batch(&format!("DROP TABLE IF EXISTS {}", sql_ident(&staging)))
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch(&staging_table_sql(&staging, spec))
+        .map_err(|e| e.to_string())?;
+    append_rows_to_staging(conn, &staging, rows)?;
+    if spec.mode == WriteMode::Replace {
+        conn.execute_batch(&format!("DELETE FROM {}", spec.table))
+            .map_err(|e| e.to_string())?;
+    }
+    conn.execute_batch(&cast_insert_from_staging_sql(spec.table, spec, &staging))
+        .map_err(|e| e.to_string())?;
+    conn.execute_batch(&format!("DROP TABLE {}", sql_ident(&staging)))
+        .map_err(|e| e.to_string())?;
+    Ok(rows.len() as u64)
 }
 
 /// Write one poll's rows per the spec's mode. Returns rows written (replace /
@@ -774,55 +1110,74 @@ pub fn write_rows(db: &LoomDb, spec: &SourceSpec, rows: &[Row]) -> Result<u64, S
         // Keep the previous snapshot rather than blanking the table on a hiccup.
         return Err(format!("{}: upstream returned no rows", spec.kind));
     }
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    in_tx(&conn, |conn| {
-        let mut insert = conn.prepare(&insert_sql(spec)).map_err(|e| e.to_string())?;
-        let mut n = 0u64;
-        match spec.mode {
-            WriteMode::Replace | WriteMode::Append => {
-                if spec.mode == WriteMode::Replace {
-                    conn.execute_batch(&format!("DELETE FROM {}", spec.table))
+    db.with_cloned_conn(|conn| {
+        in_tx(conn, |conn| {
+            let n = match spec.mode {
+                WriteMode::Replace | WriteMode::Append => {
+                    write_replace_or_append_rows(conn, spec, rows)?
+                }
+                WriteMode::Upsert(keys) => {
+                    let staging = format!("loom_upsert_{}", spec.table);
+                    conn.execute_batch(&format!("DROP TABLE IF EXISTS \"{staging}\""))
                         .map_err(|e| e.to_string())?;
-                }
-                for r in rows {
-                    match insert.execute(params_from_iter(r.iter())) {
-                        Ok(_) => n += 1,
-                        Err(e) => eprintln!("[loom] {} insert skipped: {}", spec.table, e),
+                    conn.execute_batch(&format!(
+                        "CREATE TEMP TABLE \"{staging}\" AS SELECT * FROM {} WHERE 1=0",
+                        spec.table,
+                        staging = staging
+                    ))
+                    .map_err(|e| e.to_string())?;
+                    let mut staging_insert = conn
+                        .prepare(&insert_sql_table(&staging, spec))
+                        .map_err(|e| e.to_string())?;
+                    for r in rows {
+                        staging_insert
+                            .execute(params_from_iter(r.iter()))
+                            .map_err(|e| e.to_string())?;
                     }
-                }
-            }
-            WriteMode::Upsert(keys) => {
-                let (cond, idx) = key_where(spec, keys);
-                let mut exists = conn
-                    .prepare(&format!("SELECT COUNT(*) FROM {} WHERE {}", spec.table, cond))
-                    .map_err(|e| e.to_string())?;
-                let mut delete = conn
-                    .prepare(&format!("DELETE FROM {} WHERE {}", spec.table, cond))
-                    .map_err(|e| e.to_string())?;
-                for r in rows {
-                    let key: Vec<&Cell> = idx.iter().map(|&i| &r[i]).collect();
-                    let found: i64 = exists
-                        .query_row(params_from_iter(key.iter()), |row| row.get(0))
+                    let join = upsert_key_join(keys, "t", "s");
+                    let new_keys: i64 = conn
+                        .query_row(
+                            &format!(
+                                "SELECT COUNT(*) FROM \"{staging}\" s \
+                             WHERE NOT EXISTS (SELECT 1 FROM {} t WHERE {join})",
+                                spec.table,
+                                staging = staging,
+                                join = join
+                            ),
+                            params![],
+                            |row| row.get(0),
+                        )
                         .unwrap_or(0);
-                    if found > 0 {
-                        let _ = delete.execute(params_from_iter(key.iter()));
-                    }
-                    match insert.execute(params_from_iter(r.iter())) {
-                        Ok(_) if found == 0 => n += 1,
-                        Ok(_) => {}
-                        Err(e) => eprintln!("[loom] {} upsert skipped: {}", spec.table, e),
-                    }
+                    conn.execute_batch(&format!(
+                        "DELETE FROM {} WHERE rowid IN (\
+                       SELECT t.rowid FROM {} t INNER JOIN \"{staging}\" s ON {join2}\
+                     )",
+                        spec.table,
+                        spec.table,
+                        staging = staging,
+                        join2 = upsert_key_join(keys, "t", "s")
+                    ))
+                    .map_err(|e| e.to_string())?;
+                    conn.execute_batch(&format!(
+                        "INSERT INTO {} SELECT * FROM \"{staging}\"",
+                        spec.table,
+                        staging = staging
+                    ))
+                    .map_err(|e| e.to_string())?;
+                    new_keys as u64
                 }
-            }
-        }
-        Ok(n)
+            };
+            Ok(n)
+        })
     })
 }
 
 fn trim_table(db: &LoomDb, table: &str) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_connection();
     let count: i64 = conn
-        .query_row(&format!("SELECT COUNT(*) FROM {}", table), params![], |r| r.get(0))
+        .query_row(&format!("SELECT COUNT(*) FROM {}", table), params![], |r| {
+            r.get(0)
+        })
         .map_err(|e| e.to_string())?;
     if count > MAX_ROWS as i64 {
         let excess = count - MAX_ROWS as i64;
@@ -840,8 +1195,10 @@ fn table_is_empty(db: &LoomDb, table: &str) -> bool {
         .lock()
         .ok()
         .and_then(|c| {
-            c.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |r| r.get::<_, i64>(0))
-                .ok()
+            c.query_row(&format!("SELECT COUNT(*) FROM {}", table), [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .ok()
         })
         .map(|n| n == 0)
         .unwrap_or(true)
@@ -965,7 +1322,11 @@ pub(crate) fn parse_iso_with_default_offset(s: &str, default_offset_secs: i64) -
     let y = num(s, 0..4)?;
     let m = num(s, 5..7)? as u32;
     let d = num(s, 8..10)? as u32;
-    if s.get(4..5)? != "-" || s.get(7..8)? != "-" || !(1..=12).contains(&m) || !(1..=31).contains(&d) {
+    if s.get(4..5)? != "-"
+        || s.get(7..8)? != "-"
+        || !(1..=12).contains(&m)
+        || !(1..=31).contains(&d)
+    {
         return None;
     }
     let days = days_from_civil(y, m, d);
@@ -1001,7 +1362,11 @@ pub(crate) fn parse_iso_with_default_offset(s: &str, default_offset_secs: i64) -
             };
             let digits: String = tz[1..].chars().filter(|c| *c != ':').collect();
             let oh = num(&digits, 0..2)?;
-            let om = if digits.len() >= 4 { num(&digits, 2..4)? } else { 0 };
+            let om = if digits.len() >= 4 {
+                num(&digits, 2..4)?
+            } else {
+                0
+            };
             sign * (oh * 3600 + om * 60)
         }
     };
@@ -1049,12 +1414,22 @@ fn jts_nyc(v: Option<&Value>) -> Cell {
 // ================================================================
 
 fn build_client() -> Result<reqwest::Client, String> {
-    // NWS and Wikimedia require a descriptive User-Agent.
-    reqwest::Client::builder()
-        .user_agent("Loom-Data-Storyteller/1.0 (local analytics tool; contact: github.com/mhsenkow/Loom_story_teller)")
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| e.to_string())
+    Ok(crate::http_client::build_loom_http()?.client().clone())
+}
+
+const MAX_UPSTREAM_BODY: usize = 20 * 1024 * 1024;
+
+async fn response_bytes_limited(res: reqwest::Response, max: usize) -> Result<Vec<u8>, String> {
+    if let Some(len) = res.content_length() {
+        if len as usize > max {
+            return Err(format!("response too large ({} bytes)", len));
+        }
+    }
+    let bytes = res.bytes().await.map_err(|e| format!("read body: {}", e))?;
+    if bytes.len() > max {
+        return Err(format!("response too large ({} bytes)", bytes.len()));
+    }
+    Ok(bytes.to_vec())
 }
 
 async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, String> {
@@ -1067,7 +1442,8 @@ async fn get_json(client: &reqwest::Client, url: &str) -> Result<Value, String> 
     if !status.is_success() {
         return Err(format!("{}: HTTP {}", url, status));
     }
-    res.json::<Value>().await.map_err(|e| format!("{}: {}", url, e))
+    let bytes = response_bytes_limited(res, MAX_UPSTREAM_BODY).await?;
+    serde_json::from_slice(&bytes).map_err(|e| format!("{}: {}", url, e))
 }
 
 async fn get_text(client: &reqwest::Client, url: &str) -> Result<String, String> {
@@ -1080,7 +1456,8 @@ async fn get_text(client: &reqwest::Client, url: &str) -> Result<String, String>
     if !status.is_success() {
         return Err(format!("{}: HTTP {}", url, status));
     }
-    res.text().await.map_err(|e| format!("{}: {}", url, e))
+    let bytes = response_bytes_limited(res, MAX_UPSTREAM_BODY).await?;
+    String::from_utf8(bytes).map_err(|e| format!("{}: invalid utf-8: {}", url, e))
 }
 
 // ================================================================
@@ -1100,7 +1477,10 @@ pub(crate) fn usgs_rows(body: &Value) -> Result<Vec<Row>, String> {
         .iter()
         .filter_map(|feat| {
             let p = feat.get("properties")?;
-            let id = feat.get("id").and_then(Value::as_str).filter(|s| !s.is_empty())?;
+            let id = feat
+                .get("id")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())?;
             let c = feat.pointer("/geometry/coordinates");
             let coord = |i: usize| jf(c.and_then(|c| c.get(i)));
             let time = p.get("time").and_then(as_i64_loose);
@@ -1108,7 +1488,8 @@ pub(crate) fn usgs_rows(body: &Value) -> Result<Vec<Row>, String> {
                 Cell::str(id),
                 jf(p.get("mag")),
                 js(p.get("place")),
-                time.map(|ms| epoch_secs_cell(ms.div_euclid(1000))).unwrap_or(Cell::Null),
+                time.map(|ms| epoch_secs_cell(ms.div_euclid(1000)))
+                    .unwrap_or(Cell::Null),
                 coord(1),
                 coord(0),
                 coord(2),
@@ -1245,18 +1626,66 @@ pub(crate) struct CityDef {
 }
 
 pub(crate) const CITIES: &[CityDef] = &[
-    CityDef { name: "New York", lat: 40.71, lon: -74.01 },
-    CityDef { name: "London", lat: 51.51, lon: -0.13 },
-    CityDef { name: "Tokyo", lat: 35.68, lon: 139.69 },
-    CityDef { name: "Sydney", lat: -33.87, lon: 151.21 },
-    CityDef { name: "São Paulo", lat: -23.55, lon: -46.63 },
-    CityDef { name: "Mumbai", lat: 19.08, lon: 72.88 },
-    CityDef { name: "Lagos", lat: 6.52, lon: 3.38 },
-    CityDef { name: "Cairo", lat: 30.04, lon: 31.24 },
-    CityDef { name: "Mexico City", lat: 19.43, lon: -99.13 },
-    CityDef { name: "Los Angeles", lat: 34.05, lon: -118.24 },
-    CityDef { name: "Moscow", lat: 55.76, lon: 37.62 },
-    CityDef { name: "Beijing", lat: 39.90, lon: 116.41 },
+    CityDef {
+        name: "New York",
+        lat: 40.71,
+        lon: -74.01,
+    },
+    CityDef {
+        name: "London",
+        lat: 51.51,
+        lon: -0.13,
+    },
+    CityDef {
+        name: "Tokyo",
+        lat: 35.68,
+        lon: 139.69,
+    },
+    CityDef {
+        name: "Sydney",
+        lat: -33.87,
+        lon: 151.21,
+    },
+    CityDef {
+        name: "São Paulo",
+        lat: -23.55,
+        lon: -46.63,
+    },
+    CityDef {
+        name: "Mumbai",
+        lat: 19.08,
+        lon: 72.88,
+    },
+    CityDef {
+        name: "Lagos",
+        lat: 6.52,
+        lon: 3.38,
+    },
+    CityDef {
+        name: "Cairo",
+        lat: 30.04,
+        lon: 31.24,
+    },
+    CityDef {
+        name: "Mexico City",
+        lat: 19.43,
+        lon: -99.13,
+    },
+    CityDef {
+        name: "Los Angeles",
+        lat: 34.05,
+        lon: -118.24,
+    },
+    CityDef {
+        name: "Moscow",
+        lat: 55.76,
+        lon: 37.62,
+    },
+    CityDef {
+        name: "Beijing",
+        lat: 39.90,
+        lon: 116.41,
+    },
 ];
 
 fn city_coord_params() -> String {
@@ -1301,8 +1730,12 @@ pub(crate) fn meteo_rows(body: &Value, cities: &[CityDef]) -> Result<Vec<Row>, S
     }
     let mut rows = Vec::new();
     for (loc, city) in locs.into_iter().zip(cities) {
-        let Some(hourly) = loc.get("hourly") else { continue };
-        let Some(times) = hourly.get("time").and_then(Value::as_array) else { continue };
+        let Some(hourly) = loc.get("hourly") else {
+            continue;
+        };
+        let Some(times) = hourly.get("time").and_then(Value::as_array) else {
+            continue;
+        };
         let series = |k: &str| hourly.get(k).and_then(Value::as_array);
         let (temp, hum, wind, precip, code, press, cloud) = (
             series("temperature_2m"),
@@ -1366,9 +1799,13 @@ pub(crate) fn aq_rows(body: &Value, cities: &[CityDef]) -> Result<Vec<Row>, Stri
 pub(crate) fn ukcarbon_rows(bodies: &[Value]) -> Result<Vec<Row>, String> {
     let mut by_ts: BTreeMap<String, Row> = BTreeMap::new();
     for body in bodies {
-        let Some(data) = body.get("data").and_then(Value::as_array) else { continue };
+        let Some(data) = body.get("data").and_then(Value::as_array) else {
+            continue;
+        };
         for entry in data {
-            let Cell::Str(ts) = jts(entry.get("from")) else { continue };
+            let Cell::Str(ts) = jts(entry.get("from")) else {
+                continue;
+            };
             let actual = ji(entry.pointer("/intensity/actual"));
             // Prefer a half-hour that already has an actual reading.
             if actual == Cell::Null && by_ts.contains_key(&ts) {
@@ -1421,7 +1858,12 @@ pub(crate) fn climate_rows(body: &Value) -> Result<Vec<Row>, String> {
             let ts = format!("{:04}-{:02}-01", year, month);
             Some((
                 ts.clone(),
-                vec![Cell::Str(ts), Cell::I64(year), Cell::I64(month), Cell::F64(anomaly)],
+                vec![
+                    Cell::Str(ts),
+                    Cell::I64(year),
+                    Cell::I64(month),
+                    Cell::F64(anomaly),
+                ],
             ))
         })
         .collect();
@@ -1439,8 +1881,8 @@ const OPENSKY_URL: &str =
 const ADSB_POINTS: &[(f64, f64)] = &[
     (40.7, -74.0),  // New York
     (41.9, -87.6),  // Chicago
-    (33.7, -84.4),  // Atlanta
     (32.9, -97.0),  // Dallas
+    (39.7, -104.9), // Denver
     (34.0, -118.2), // Los Angeles
 ];
 
@@ -1454,7 +1896,10 @@ pub(crate) fn opensky_rows(body: &Value) -> Result<Vec<Row>, String> {
         .get("states")
         .and_then(Value::as_array)
         .ok_or("OpenSky: no states")?;
-    let time = body.get("time").and_then(as_i64_loose).unwrap_or_else(now_secs);
+    let time = body
+        .get("time")
+        .and_then(as_i64_loose)
+        .unwrap_or_else(now_secs);
     Ok(states
         .iter()
         .filter_map(|st| {
@@ -1484,48 +1929,83 @@ pub(crate) fn opensky_rows(body: &Value) -> Result<Vec<Row>, String> {
         .collect())
 }
 
-/// ADSB.lol `/v2/point` responses → opensky_aircraft rows (deduped by hex;
-/// feet → m, knots → m/s, "ground" → on_ground).
+fn normalize_adsb_body(mut body: Value) -> Value {
+    if body.get("ac").is_none() {
+        if let Some(aircraft) = body.get("aircraft").cloned() {
+            if let Some(obj) = body.as_object_mut() {
+                obj.insert("ac".to_string(), aircraft);
+            }
+        }
+    }
+    body
+}
+
+fn push_adsb_aircraft(ac: &Value, now_secs: i64, seen: &mut HashSet<String>, rows: &mut Vec<Row>) {
+    let Some(hex) = ac.get("hex").and_then(Value::as_str) else {
+        return;
+    };
+    let (Some(lat), Some(lon)) = (
+        ac.get("lat").and_then(as_f64_loose),
+        ac.get("lon").and_then(as_f64_loose),
+    ) else {
+        return;
+    };
+    if !seen.insert(hex.to_ascii_lowercase()) {
+        return;
+    }
+    let (alt, on_ground) = match ac.get("alt_baro") {
+        Some(Value::String(s)) if s == "ground" => (Cell::F64(0.0), true),
+        Some(v) => (
+            Cell::opt_f64(as_f64_loose(v).map(|ft| ft * FEET_TO_M)),
+            false,
+        ),
+        None => (Cell::Null, false),
+    };
+    let seen_secs = ac.get("seen").and_then(as_f64_loose).unwrap_or(0.0);
+    let contact = (now_secs as f64 - seen_secs).round() as i64;
+    rows.push(vec![
+        Cell::str(hex),
+        trimmed(ac.get("flight")),
+        Cell::Null,
+        Cell::F64(lon),
+        Cell::F64(lat),
+        alt,
+        Cell::opt_f64(
+            ac.get("gs")
+                .and_then(as_f64_loose)
+                .map(|kt| kt * KNOTS_TO_MS),
+        ),
+        jf(ac.get("track")),
+        Cell::Bool(on_ground),
+        epoch_secs_cell(contact.max(0)),
+    ]);
+}
+
+/// ADSB `/v2/point` responses → opensky_aircraft rows (round-robin across points;
+/// deduped by hex; feet → m, knots → m/s).
 pub(crate) fn adsb_rows(bodies: &[Value]) -> Vec<Row> {
-    let mut seen = HashSet::new();
-    let mut rows = Vec::new();
+    let mut lists: Vec<(i64, Vec<Value>)> = Vec::new();
     for body in bodies {
-        let now = body
+        let b = normalize_adsb_body(body.clone());
+        let now = b
             .get("now")
             .and_then(as_i64_loose)
             .map(|ms| ms.div_euclid(1000))
             .unwrap_or_else(now_secs);
-        let Some(list) = body.get("ac").and_then(Value::as_array) else { continue };
-        for ac in list {
-            let Some(hex) = ac.get("hex").and_then(Value::as_str) else { continue };
-            let (Some(lat), Some(lon)) = (
-                ac.get("lat").and_then(as_f64_loose),
-                ac.get("lon").and_then(as_f64_loose),
-            ) else {
-                continue;
-            };
-            if !seen.insert(hex.to_string()) {
-                continue;
-            }
-            let (alt, on_ground) = match ac.get("alt_baro") {
-                Some(Value::String(s)) if s == "ground" => (Cell::F64(0.0), true),
-                Some(v) => (Cell::opt_f64(as_f64_loose(v).map(|ft| ft * FEET_TO_M)), false),
-                None => (Cell::Null, false),
-            };
-            rows.push(vec![
-                Cell::str(hex),
-                trimmed(ac.get("flight")),
-                Cell::Null,
-                Cell::F64(lon),
-                Cell::F64(lat),
-                alt,
-                Cell::opt_f64(ac.get("gs").and_then(as_f64_loose).map(|kt| kt * KNOTS_TO_MS)),
-                jf(ac.get("track")),
-                Cell::Bool(on_ground),
-                epoch_secs_cell(now),
-            ]);
-            if rows.len() >= MAX_AIRCRAFT {
-                return rows;
+        if let Some(list) = b.get("ac").and_then(Value::as_array) {
+            lists.push((now, list.clone()));
+        }
+    }
+    let mut seen = HashSet::new();
+    let mut rows = Vec::new();
+    let longest = lists.iter().map(|(_, l)| l.len()).max().unwrap_or(0);
+    for i in 0..longest {
+        for (now, list) in &lists {
+            if i < list.len() {
+                push_adsb_aircraft(&list[i], *now, &mut seen, &mut rows);
+                if rows.len() >= MAX_AIRCRAFT {
+                    return rows;
+                }
             }
         }
     }
@@ -1567,29 +2047,75 @@ pub(crate) fn citibike_info(body: &Value) -> Result<HashMap<String, CitiStation>
         .collect())
 }
 
-pub(crate) fn citibike_rows(status: &Value, info: &HashMap<String, CitiStation>) -> Result<Vec<Row>, String> {
+pub(crate) fn citibike_rows(
+    status: &Value,
+    info: &HashMap<String, CitiStation>,
+) -> Result<Vec<Row>, String> {
     let stations = status
         .pointer("/data/stations")
         .and_then(Value::as_array)
         .ok_or("GBFS: no station_status")?;
-    let ts = status
+    // Parity contract (LOOM-435) — keep in lockstep with `joinCitibike` in
+    // workers/sourceTransforms.ts; shared fixtures: gbfs_parity_*.json.
+    let feed_updated = status
         .get("last_updated")
         .and_then(as_i64_loose)
-        .unwrap_or_else(now_secs);
+        .filter(|t| *t > 1_000_000_000);
     Ok(stations
         .iter()
         .filter_map(|s| {
             let id = s.get("station_id").and_then(Value::as_str)?;
             let st = info.get(id)?;
             // Decommissioned / not-yet-installed docks are noise on a map.
-            if s.get("is_installed").and_then(as_i64_loose) == Some(0) {
+            if gbfs_flag(s.get("is_installed")) == Some(false) {
+                return None;
+            }
+            // A station without coordinates can't be mapped — dropped like the Worker.
+            if matches!(st.lat, Cell::Null) || matches!(st.lon, Cell::Null) {
                 return None;
             }
             let bikes = s.get("num_bikes_available").and_then(as_i64_loose);
+            let ebikes = s
+                .get("num_ebikes_available")
+                .and_then(as_i64_loose)
+                .or_else(|| {
+                    let ebike_types: Vec<&Value> = s
+                        .get("vehicle_types_available")
+                        .and_then(Value::as_array)
+                        .map(|a| {
+                            a.iter()
+                                .filter(|v| {
+                                    is_ebike_vehicle_type(
+                                        v.get("vehicle_type_id")
+                                            .and_then(Value::as_str)
+                                            .unwrap_or(""),
+                                    )
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    if ebike_types.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            ebike_types
+                                .iter()
+                                .map(|v| v.get("count").and_then(as_i64_loose).unwrap_or(0))
+                                .sum(),
+                        )
+                    }
+                });
             let pct_full = match (bikes, st.capacity) {
-                (Some(b), Some(c)) if c > 0 => Cell::F64((b as f64 / c as f64 * 1000.0).round() / 10.0),
+                (Some(b), Some(c)) if c > 0 => {
+                    Cell::F64(((b as f64 / c as f64 * 1000.0).round() / 10.0).min(100.0))
+                }
                 _ => Cell::Null,
             };
+            let reported = s
+                .get("last_reported")
+                .and_then(as_i64_loose)
+                .filter(|t| *t > 1_000_000_000)
+                .or(feed_updated);
             Some(vec![
                 Cell::str(id),
                 st.name.clone(),
@@ -1597,14 +2123,34 @@ pub(crate) fn citibike_rows(status: &Value, info: &HashMap<String, CitiStation>)
                 st.lon.clone(),
                 Cell::opt_i64(st.capacity),
                 Cell::opt_i64(bikes),
-                ji(s.get("num_ebikes_available")),
+                Cell::opt_i64(ebikes),
                 ji(s.get("num_docks_available")),
                 pct_full,
-                Cell::Bool(s.get("is_renting").and_then(as_i64_loose).unwrap_or(0) == 1),
-                epoch_secs_cell(ts),
+                Cell::Bool(gbfs_flag(s.get("is_renting")) == Some(true)),
+                reported.map(epoch_secs_cell).unwrap_or(Cell::Null),
             ])
         })
         .collect())
+}
+
+/// GBFS booleans arrive as 0/1 or true/false; anything else is unknown.
+fn gbfs_flag(v: Option<&Value>) -> Option<bool> {
+    match v? {
+        Value::Bool(b) => Some(*b),
+        Value::Number(n) => n.as_f64().map(|f| f != 0.0),
+        Value::String(s) => match s.trim() {
+            "1" | "true" => Some(true),
+            "0" | "false" => Some(false),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Mirrors `isEbikeVehicleType` in workers/sourceTransforms.ts.
+pub(crate) fn is_ebike_vehicle_type(id: &str) -> bool {
+    let l = id.to_ascii_lowercase();
+    l == "e" || l.contains("ebike") || l.contains("e-bike") || l.contains("electric")
 }
 
 // ---- NYC 311 ----
@@ -1666,7 +2212,8 @@ pub(crate) fn iss_rows(body: &Value) -> Result<Vec<Row>, String> {
 
 const LAUNCHES_URL: &str = "https://ll.thespacedevs.com/2.2.0/launch/upcoming/?limit=40&mode=list";
 // Full (non-list) mode: carries rocket.configuration and mission.description.
-const SPACEX_URL: &str = "https://ll.thespacedevs.com/2.2.0/launch/previous/?lsp__name=SpaceX&limit=100";
+const SPACEX_URL: &str =
+    "https://ll.thespacedevs.com/2.2.0/launch/previous/?lsp__name=SpaceX&limit=100";
 
 fn id_string(v: Option<&Value>) -> Cell {
     match v {
@@ -1702,7 +2249,8 @@ pub(crate) fn launches_rows(body: &Value) -> Result<Vec<Row>, String> {
             // List mode flattens pad / location / provider / orbit to strings.
             let pad = str_of(r, "/pad").or_else(|| str_of(r, "/pad/name"));
             let location = str_of(r, "/location").or_else(|| str_of(r, "/pad/location/name"));
-            let agency = str_of(r, "/lsp_name").or_else(|| str_of(r, "/launch_service_provider/name"));
+            let agency =
+                str_of(r, "/lsp_name").or_else(|| str_of(r, "/launch_service_provider/name"));
             let status = str_of(r, "/status/name").or_else(|| str_of(r, "/status/abbrev"));
             let orbit = str_of(r, "/orbit")
                 .or_else(|| str_of(r, "/mission/orbit/name"))
@@ -1745,7 +2293,8 @@ pub(crate) fn spacex_rows(body: &Value) -> Result<Vec<Row>, String> {
                 Cell::Bool(false),
                 ll2_rocket(r),
                 // Nth SpaceX launch attempt — LL2's closest thing to a flight number.
-                ji(r.get("flight_number").or_else(|| r.get("agency_launch_attempt_count"))),
+                ji(r.get("flight_number")
+                    .or_else(|| r.get("agency_launch_attempt_count"))),
                 details,
             ]
         })
@@ -1817,13 +2366,18 @@ pub(crate) fn kp_rows(body: &Value) -> Result<Vec<Row>, String> {
 const HN_URL: &str = "https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=50";
 
 pub(crate) fn hn_rows(body: &Value) -> Result<Vec<Row>, String> {
-    let hits = body.get("hits").and_then(Value::as_array).ok_or("HN: no hits")?;
+    let hits = body
+        .get("hits")
+        .and_then(Value::as_array)
+        .ok_or("HN: no hits")?;
     Ok(hits
         .iter()
         .map(|h| {
             vec![
                 js(h.get("objectID")),
-                js(h.get("title").filter(|v| !v.is_null()).or_else(|| h.get("story_title"))),
+                js(h.get("title")
+                    .filter(|v| !v.is_null())
+                    .or_else(|| h.get("story_title"))),
                 js(h.get("author")),
                 ji(h.get("points")),
                 ji(h.get("num_comments")),
@@ -1849,7 +2403,9 @@ pub(crate) fn lobsters_rows(body: &Value) -> Result<Vec<Row>, String> {
                     if let Some(s) = u.as_str() {
                         Some(s.to_string())
                     } else {
-                        u.get("username").and_then(Value::as_str).map(str::to_string)
+                        u.get("username")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
                     }
                 })
                 .unwrap_or_default();
@@ -1897,7 +2453,8 @@ pub(crate) fn firms_rows(text: &str) -> Result<Vec<Row>, String> {
     let time_i = at("acq_time");
     let dn = at("daynight");
     let num = |parts: &[&str], i: Option<usize>| {
-        i.and_then(|i| parts.get(i)).and_then(|v| v.parse::<f64>().ok())
+        i.and_then(|i| parts.get(i))
+            .and_then(|v| v.parse::<f64>().ok())
     };
     let rows: Vec<Row> = lines
         .filter_map(|line| {
@@ -1910,12 +2467,8 @@ pub(crate) fn firms_rows(text: &str) -> Result<Vec<Row>, String> {
                 .map(|t| format!("{:0>4}", t.trim()))
                 .unwrap_or_default();
             let acq_ts = if date.len() == 10 && time_raw.len() == 4 {
-                Cell::Str(format!(
-                    "{}T{}:{}:00Z",
-                    date,
-                    &time_raw[..2],
-                    &time_raw[2..]
-                ))
+                let raw = format!("{}T{}:{}:00Z", date, &time_raw[..2], &time_raw[2..]);
+                parse_iso_utc(&raw).map(Cell::Str).unwrap_or(Cell::Null)
             } else {
                 Cell::Null
             };
@@ -2016,9 +2569,16 @@ pub(crate) fn nwis_rows(body: &Value) -> Result<Vec<Row>, String> {
             if ts.is_empty() {
                 continue;
             }
+            // USGS publishes missing readings as -999999 (LOOM-498) — never a measurement.
             let n = v
                 .get("value")
-                .and_then(|x| x.as_str().and_then(|s| s.parse().ok()).or_else(|| x.as_f64()));
+                .and_then(|x| {
+                    x.as_str()
+                        .map(str::trim)
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .or_else(|| x.as_f64())
+                })
+                .filter(|n| n.is_finite() && *n > -999_998.0);
             let cell = acc.by_ts.entry(ts).or_insert((None, None));
             if var_code == "00060" {
                 cell.0 = n;
@@ -2033,10 +2593,14 @@ pub(crate) fn nwis_rows(body: &Value) -> Result<Vec<Row>, String> {
             if q.is_none() && h.is_none() {
                 continue;
             }
+            // Unparseable timestamps are dropped (matches the Worker transform).
+            let Some(ts_norm) = parse_iso_utc(&ts).map(Cell::Str) else {
+                continue;
+            };
             rows.push(vec![
                 Cell::Str(site_id.clone()),
                 Cell::Str(acc.site_name.clone()),
-                Cell::Str(ts),
+                ts_norm,
                 Cell::opt_f64(acc.lat),
                 Cell::opt_f64(acc.lon),
                 Cell::opt_f64(q),
@@ -2059,6 +2623,12 @@ pub(crate) fn nwis_rows(body: &Value) -> Result<Vec<Row>, String> {
 const STARLINK_URL: &str = "https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=json";
 const STARLINK_CAP: usize = 2500;
 
+/// Match Worker `/\bDEB\b/i` — whole token "DEB", not substring.
+pub(crate) fn is_starlink_debris_name(name: &str) -> bool {
+    name.split(|c: char| !c.is_ascii_alphanumeric())
+        .any(|w| w.eq_ignore_ascii_case("DEB"))
+}
+
 pub(crate) fn starlink_rows(body: &Value) -> Result<Vec<Row>, String> {
     let list = body.as_array().ok_or("Starlink: expected array")?;
     let mut rows = Vec::new();
@@ -2068,8 +2638,11 @@ pub(crate) fn starlink_rows(body: &Value) -> Result<Vec<Row>, String> {
         }
         let id = item.get("NORAD_CAT_ID").and_then(as_i64_loose);
         let Some(id) = id else { continue };
-        let name = item.get("OBJECT_NAME").and_then(Value::as_str).unwrap_or("");
-        if name.to_uppercase().contains("DEB") {
+        let name = item
+            .get("OBJECT_NAME")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if is_starlink_debris_name(name) {
             continue;
         }
         rows.push(vec![
@@ -2195,7 +2768,8 @@ pub(crate) fn coinpaprika_rows(body: &Value) -> Result<Vec<Row>, String> {
 // ---- FX (Frankfurter / ECB), 90-day series ----
 
 fn fx_url(today: i64) -> String {
-    format!("https://api.frankfurter.app/{}..", fmt_date(today - 90))
+    // Same host + /v1 path as the Worker (LOOM-436); the legacy .app host only redirects here.
+    format!("https://api.frankfurter.dev/v1/{}..", fmt_date(today - 90))
 }
 
 /// `{base, rates: {date: {quote: rate}}}` → one row per (as_of, quote) with
@@ -2211,15 +2785,20 @@ pub(crate) fn fx_rows(body: &Value) -> Result<Vec<Row>, String> {
     let mut prev: HashMap<&str, f64> = HashMap::new();
     let mut rows = Vec::new();
     for date in dates {
-        let Some(day) = rates.get(date).and_then(Value::as_object) else { continue };
+        let Some(day) = rates.get(date).and_then(Value::as_object) else {
+            continue;
+        };
         let mut quotes: Vec<(&String, &Value)> = day.iter().collect();
         quotes.sort_by(|a, b| a.0.cmp(b.0));
         for (quote, v) in quotes {
-            let Some(rate) = as_f64_loose(v) else { continue };
+            let Some(rate) = as_f64_loose(v) else {
+                continue;
+            };
             let change = prev
                 .get(quote.as_str())
                 .filter(|p| **p != 0.0)
-                .map(|p| (rate / p - 1.0) * 100.0);
+                // Same 4-decimal rounding as the web parser (`parseFx`).
+                .map(|p| ((rate - p) / p * 100.0 * 10_000.0).round() / 10_000.0);
             prev.insert(quote.as_str(), rate);
             rows.push(vec![
                 Cell::str(date.as_str()),
@@ -2290,7 +2869,8 @@ pub(crate) fn covid_rows(body: &Value) -> Result<Vec<Row>, String> {
 
 // ---- World countries (mledoze/countries + World Bank population) ----
 
-const COUNTRIES_URL: &str = "https://raw.githubusercontent.com/mledoze/countries/master/countries.json";
+const COUNTRIES_URL: &str =
+    "https://raw.githubusercontent.com/mledoze/countries/master/countries.json";
 const WB_POP_LATEST_URL: &str =
     "https://api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL?format=json&per_page=400&mrnev=1";
 
@@ -2318,7 +2898,10 @@ fn wb_code_for(cca3: &str) -> &str {
     }
 }
 
-pub(crate) fn countries_rows(body: &Value, population: &HashMap<String, f64>) -> Result<Vec<Row>, String> {
+pub(crate) fn countries_rows(
+    body: &Value,
+    population: &HashMap<String, f64>,
+) -> Result<Vec<Row>, String> {
     let list = body.as_array().ok_or("countries: expected array")?;
     Ok(list
         .iter()
@@ -2361,10 +2944,16 @@ const WB_INDICATORS: [&str; 5] = [
 ];
 const WB_POPULATION_IDX: usize = 2;
 
+fn wb_year_range() -> String {
+    let (year, _, _) = civil_from_days(today_days());
+    format!("2000:{}", (year - 1).max(2000))
+}
+
 fn wb_indicator_url(id: &str) -> String {
     format!(
-        "https://api.worldbank.org/v2/country/all/indicator/{}?format=json&per_page=20000&date=2000:2023",
-        id
+        "https://api.worldbank.org/v2/country/all/indicator/{}?format=json&per_page=20000&date={}",
+        id,
+        wb_year_range()
     )
 }
 
@@ -2386,12 +2975,19 @@ pub(crate) fn wb_country_names(body: &Value) -> Result<HashMap<String, String>, 
 }
 
 /// Pivot indicator series (`(column index, response)`) into wide rows for real countries.
-pub(crate) fn wb_wide_rows(countries: &HashMap<String, String>, series: &[(usize, Value)]) -> Vec<Row> {
+pub(crate) fn wb_wide_rows(
+    countries: &HashMap<String, String>,
+    series: &[(usize, Value)],
+) -> Vec<Row> {
     let mut grid: BTreeMap<(String, i64), [Option<f64>; 5]> = BTreeMap::new();
     for (col, body) in series {
-        let Some(list) = body.get(1).and_then(Value::as_array) else { continue };
+        let Some(list) = body.get(1).and_then(Value::as_array) else {
+            continue;
+        };
         for e in list {
-            let Some(code) = e.get("countryiso3code").and_then(Value::as_str) else { continue };
+            let Some(code) = e.get("countryiso3code").and_then(Value::as_str) else {
+                continue;
+            };
             if !countries.contains_key(code) {
                 continue;
             }
@@ -2406,7 +3002,11 @@ pub(crate) fn wb_wide_rows(countries: &HashMap<String, String>, series: &[(usize
     }
     grid.into_iter()
         .map(|((code, yr), vals)| {
-            let name = countries.get(&code).cloned().map(Cell::Str).unwrap_or(Cell::Null);
+            let name = countries
+                .get(&code)
+                .cloned()
+                .map(Cell::Str)
+                .unwrap_or(Cell::Null);
             let mut row = vec![Cell::Str(code), name, Cell::I64(yr)];
             for (i, v) in vals.iter().enumerate() {
                 row.push(if i == WB_POPULATION_IDX {
@@ -2444,7 +3044,11 @@ fn gdacs_lat_lon(feat: &Value) -> Option<(f64, f64)> {
             return Some(p);
         }
     }
-    if let Some(b) = feat.get("bbox").and_then(Value::as_array).filter(|b| b.len() >= 4) {
+    if let Some(b) = feat
+        .get("bbox")
+        .and_then(Value::as_array)
+        .filter(|b| b.len() >= 4)
+    {
         let n: Vec<f64> = b.iter().take(4).filter_map(as_f64_loose).collect();
         if n.len() == 4 {
             return Some(((n[1] + n[3]) / 2.0, (n[0] + n[2]) / 2.0));
@@ -2463,9 +3067,15 @@ pub(crate) fn gdacs_rows(body: &Value) -> Result<Vec<Row>, String> {
     let mut order: Vec<String> = Vec::new();
     let mut best: HashMap<String, ((Option<String>, i64), Row)> = HashMap::new();
     for feat in features {
-        let Some(p) = feat.get("properties") else { continue };
-        let Some(code) = str_of(p, "/eventtype") else { continue };
-        let Cell::Str(eid) = id_string(p.get("eventid")) else { continue };
+        let Some(p) = feat.get("properties") else {
+            continue;
+        };
+        let Some(code) = str_of(p, "/eventtype") else {
+            continue;
+        };
+        let Cell::Str(eid) = id_string(p.get("eventid")) else {
+            continue;
+        };
         let id = format!("{}{}", code, eid);
         let (lat, lon) = match gdacs_lat_lon(feat) {
             Some((lat, lon)) => (Cell::F64(lat), Cell::F64(lon)),
@@ -2476,7 +3086,9 @@ pub(crate) fn gdacs_rows(body: &Value) -> Result<Vec<Row>, String> {
             .map(Cell::str)
             .unwrap_or(Cell::Null);
         let rank = (
-            p.get("todate").and_then(Value::as_str).and_then(parse_iso_utc),
+            p.get("todate")
+                .and_then(Value::as_str)
+                .and_then(parse_iso_utc),
             p.get("episodeid").and_then(as_i64_loose).unwrap_or(0),
         );
         let row = vec![
@@ -2515,8 +3127,8 @@ pub(crate) fn gdacs_rows(body: &Value) -> Result<Vec<Row>, String> {
 const BUOYS_URL: &str = "https://www.ndbc.noaa.gov/data/latest_obs/latest_obs.txt";
 
 const BUOYS_DEFAULT_HEADER: &[&str] = &[
-    "STN", "LAT", "LON", "YYYY", "MM", "DD", "hh", "mm", "WDIR", "WSPD", "GST", "WVHT", "DPD", "APD",
-    "MWD", "PRES", "PTDY", "ATMP", "WTMP", "DEWP", "VIS", "TIDE",
+    "STN", "LAT", "LON", "YYYY", "MM", "DD", "hh", "mm", "WDIR", "WSPD", "GST", "WVHT", "DPD",
+    "APD", "MWD", "PRES", "PTDY", "ATMP", "WTMP", "DEWP", "VIS", "TIDE",
 ];
 
 /// `latest_obs.txt` → one row per station. Columns are located by the first
@@ -2525,7 +3137,12 @@ pub(crate) fn buoys_rows(text: &str) -> Result<Vec<Row>, String> {
     let header: Vec<String> = text
         .lines()
         .find(|l| l.starts_with('#'))
-        .map(|l| l.trim_start_matches('#').split_whitespace().map(str::to_string).collect())
+        .map(|l| {
+            l.trim_start_matches('#')
+                .split_whitespace()
+                .map(str::to_string)
+                .collect()
+        })
         .filter(|h: &Vec<String>| h.iter().any(|c| c == "WVHT"))
         .unwrap_or_else(|| BUOYS_DEFAULT_HEADER.iter().map(|s| s.to_string()).collect());
     let col = |name: &str| header.iter().position(|h| h == name);
@@ -2537,13 +3154,20 @@ pub(crate) fn buoys_rows(text: &str) -> Result<Vec<Row>, String> {
         .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
         .filter_map(|line| {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            let get = |i: Option<usize>| i.and_then(|i| parts.get(i)).copied().filter(|v| *v != "MM");
+            let get =
+                |i: Option<usize>| i.and_then(|i| parts.get(i)).copied().filter(|v| *v != "MM");
             let num = |i: Option<usize>| get(i).and_then(|v| v.parse::<f64>().ok());
             let station = get(stn)?;
             let (la, lo) = (num(lat)?, num(lon)?);
-            let d: Vec<i64> = date_cols.iter().filter_map(|&i| get(i)?.parse().ok()).collect();
+            let d: Vec<i64> = date_cols
+                .iter()
+                .filter_map(|&i| get(i)?.parse().ok())
+                .collect();
             let ts = if d.len() == 5 {
-                Cell::Str(format!("{:04}-{:02}-{:02} {:02}:{:02}:00", d[0], d[1], d[2], d[3], d[4]))
+                Cell::Str(format!(
+                    "{:04}-{:02}-{:02} {:02}:{:02}:00",
+                    d[0], d[1], d[2], d[3], d[4]
+                ))
             } else {
                 Cell::Null
             };
@@ -2589,7 +3213,10 @@ pub(crate) fn humanize_enum(v: Option<&Value>) -> Cell {
 }
 
 pub(crate) fn mbta_rows(body: &Value) -> Result<Vec<Row>, String> {
-    let data = body.get("data").and_then(Value::as_array).ok_or("MBTA: no data")?;
+    let data = body
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or("MBTA: no data")?;
     let routes: HashMap<&str, (Cell, Cell)> = body
         .get("included")
         .and_then(Value::as_array)
@@ -2633,7 +3260,11 @@ pub(crate) fn mbta_rows(body: &Value) -> Result<Vec<Row>, String> {
                 jf(a.get("latitude")),
                 jf(a.get("longitude")),
                 jf(a.get("bearing")),
-                Cell::opt_f64(a.get("speed").and_then(as_f64_loose).map(|ms| ms * MS_TO_MPH)),
+                Cell::opt_f64(
+                    a.get("speed")
+                        .and_then(as_f64_loose)
+                        .map(|ms| ms * MS_TO_MPH),
+                ),
                 humanize_enum(a.get("current_status")),
                 humanize_enum(a.get("occupancy_status")),
                 jts(a.get("updated_at")),
@@ -2678,7 +3309,12 @@ pub(crate) fn aurora_rows(body: &Value) -> Result<Vec<Row>, String> {
         .filter(|(_, p)| *p >= AURORA_MIN_PROB)
         .map(|((lon, lat), p)| {
             let lon = if lon > 180 { lon - 360 } else { lon };
-            vec![Cell::F64(lon as f64), Cell::F64(lat as f64), Cell::I64(p), ts.clone()]
+            vec![
+                Cell::F64(lon as f64),
+                Cell::F64(lat as f64),
+                Cell::I64(p),
+                ts.clone(),
+            ]
         })
         .collect())
 }
@@ -2694,7 +3330,9 @@ const ASTEROID_ALBEDO: f64 = 0.14;
 
 /// "2026-Oct-05 13:42" (UTC) → "2026-10-05 13:42:00".
 pub(crate) fn parse_cad_date(s: &str) -> Option<String> {
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const MONTHS: [&str; 12] = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ];
     let s = s.trim();
     let y = num(s, 0..4)?;
     let m = MONTHS.iter().position(|m| Some(*m) == s.get(5..8))? + 1;
@@ -2730,8 +3368,14 @@ pub(crate) fn asteroids_rows(body: &Value) -> Result<Vec<Row>, String> {
         return Ok(vec![]);
     };
     let idx = |k: &str| fields.iter().position(|f| *f == k);
-    let (des, full, cd, dist, v_rel, h) =
-        (idx("des"), idx("fullname"), idx("cd"), idx("dist"), idx("v_rel"), idx("h"));
+    let (des, full, cd, dist, v_rel, h) = (
+        idx("des"),
+        idx("fullname"),
+        idx("cd"),
+        idx("dist"),
+        idx("v_rel"),
+        idx("h"),
+    );
     Ok(data
         .iter()
         .filter_map(|r| {
@@ -2762,7 +3406,12 @@ const STEAM_URL: &str = "https://steamspy.com/api.php?request=top100in2weeks";
 
 /// "50,000,000 .. 100,000,000" → 50000000.
 pub(crate) fn owners_lower_bound(s: &str) -> Option<i64> {
-    let lo: String = s.split("..").next()?.chars().filter(char::is_ascii_digit).collect();
+    let lo: String = s
+        .split("..")
+        .next()?
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect();
     lo.parse().ok()
 }
 
@@ -2789,7 +3438,11 @@ pub(crate) fn steam_rows(body: &Value) -> Result<Vec<Row>, String> {
                 Cell::opt_i64(pos),
                 Cell::opt_i64(neg),
                 Cell::opt_f64(pct),
-                Cell::opt_i64(g.get("owners").and_then(Value::as_str).and_then(owners_lower_bound)),
+                Cell::opt_i64(
+                    g.get("owners")
+                        .and_then(Value::as_str)
+                        .and_then(owners_lower_bound),
+                ),
                 Cell::opt_f64(g.get("price").and_then(as_f64_loose).map(|c| c / 100.0)),
                 // average_2weeks is 0 for every top-100 game; the discount varies
                 Cell::opt_f64(g.get("discount").and_then(as_f64_loose)),
@@ -2810,16 +3463,27 @@ pub(crate) fn bitcoin_rows(pages: &[Value]) -> Result<Vec<Row>, String> {
     let mut seen = HashSet::new();
     let mut rows = Vec::new();
     for page in pages {
-        let Some(list) = page.as_array() else { continue };
+        let Some(list) = page.as_array() else {
+            continue;
+        };
         for b in list {
-            let Some(height) = b.get("height").and_then(as_i64_loose) else { continue };
+            let Some(height) = b.get("height").and_then(as_i64_loose) else {
+                continue;
+            };
             if !seen.insert(height) {
                 continue;
             }
-            let ex = |k: &str| b.get("extras").and_then(|e| e.get(k)).and_then(as_f64_loose);
+            let ex = |k: &str| {
+                b.get("extras")
+                    .and_then(|e| e.get(k))
+                    .and_then(as_f64_loose)
+            };
             rows.push(vec![
                 Cell::I64(height),
-                b.get("timestamp").and_then(as_i64_loose).map(epoch_secs_cell).unwrap_or(Cell::Null),
+                b.get("timestamp")
+                    .and_then(as_i64_loose)
+                    .map(epoch_secs_cell)
+                    .unwrap_or(Cell::Null),
                 ji(b.get("tx_count")),
                 Cell::opt_f64(b.get("size").and_then(as_f64_loose).map(|s| s / 1e6)),
                 Cell::opt_f64(ex("medianFee")),
@@ -2849,7 +3513,10 @@ const DEBT_URL: &str = "https://api.fiscaldata.treasury.gov/services/api/fiscal_
 
 /// Amounts arrive as strings ("null" when missing → NULL).
 pub(crate) fn debt_rows(body: &Value) -> Result<Vec<Row>, String> {
-    let data = body.get("data").and_then(Value::as_array).ok_or("Treasury: no data")?;
+    let data = body
+        .get("data")
+        .and_then(Value::as_array)
+        .ok_or("Treasury: no data")?;
     Ok(data
         .iter()
         .filter(|r| str_of(r, "/record_date").is_some())
@@ -2878,51 +3545,81 @@ struct PollCtx {
     adsb_next: usize,
 }
 
-async fn fetch_aircraft(ctx: &mut PollCtx) -> Result<Vec<Row>, String> {
-    let now = now_secs();
-    if now >= ctx.opensky_retry_at {
-        match get_json(&ctx.client, OPENSKY_URL).await.and_then(|b| opensky_rows(&b)) {
-            Ok(rows) if !rows.is_empty() => return Ok(rows),
-            Ok(_) => {}
-            Err(e) => {
-                eprintln!("[loom] opensky: {} — using ADSB.lol", e);
-                ctx.opensky_retry_at = now + PRIMARY_BACKOFF_SECS;
-            }
-        }
-    }
-    // ADSB.lol allows only a few calls per short window: start at a rotating
-    // point so coverage evens out across polls, and stop at the first error.
+async fn fetch_adsb_points(
+    client: &reqwest::Client,
+    provider: &str,
+    url_for: impl Fn(f64, f64) -> String,
+    start: usize,
+) -> Vec<Value> {
     let mut bodies = Vec::new();
-    let start = ctx.adsb_next;
-    ctx.adsb_next = (start + 1) % ADSB_POINTS.len();
     for i in 0..ADSB_POINTS.len() {
         let (lat, lon) = ADSB_POINTS[(start + i) % ADSB_POINTS.len()];
         if i > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(ADSB_SPACING_MS)).await;
         }
-        let url = format!("https://api.adsb.lol/v2/point/{}/{}/250", lat, lon);
-        match get_json(&ctx.client, &url).await {
+        let url = url_for(lat, lon);
+        match get_json(client, &url).await {
             Ok(b) => bodies.push(b),
             Err(e) => {
-                eprintln!("[loom] adsb.lol: {}", e);
+                log::warn!(target: "loom", "{provider}: {e}");
                 break;
             }
         }
     }
-    if bodies.is_empty() {
-        return Err("aircraft: OpenSky and ADSB.lol both failed".into());
+    bodies
+}
+
+async fn fetch_aircraft(ctx: &mut PollCtx) -> Result<Vec<Row>, String> {
+    let now = now_secs();
+    if now >= ctx.opensky_retry_at {
+        match get_json(&ctx.client, OPENSKY_URL)
+            .await
+            .and_then(|b| opensky_rows(&b))
+        {
+            Ok(rows) if !rows.is_empty() => return Ok(rows),
+            Ok(_) => {}
+            Err(e) => {
+                log::warn!(target: "loom", "opensky: {e} — using ADS-B fallbacks");
+                ctx.opensky_retry_at = now + PRIMARY_BACKOFF_SECS;
+            }
+        }
     }
-    Ok(adsb_rows(&bodies))
+    let start = ctx.adsb_next;
+    ctx.adsb_next = (start + 1) % ADSB_POINTS.len();
+    let lol = fetch_adsb_points(
+        &ctx.client,
+        "adsb.lol",
+        |lat, lon| format!("https://api.adsb.lol/v2/point/{lat}/{lon}/250"),
+        start,
+    )
+    .await;
+    if !lol.is_empty() {
+        return Ok(adsb_rows(&lol));
+    }
+    let fi = fetch_adsb_points(
+        &ctx.client,
+        "adsb.fi",
+        |lat, lon| format!("https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/250"),
+        start,
+    )
+    .await;
+    if fi.is_empty() {
+        return Err("aircraft: OpenSky and ADS-B fallbacks failed".into());
+    }
+    Ok(adsb_rows(&fi))
 }
 
 async fn fetch_crypto(ctx: &mut PollCtx) -> Result<Vec<Row>, String> {
     let now = now_secs();
     if now >= ctx.coingecko_retry_at {
-        match get_json(&ctx.client, COINGECKO_URL).await.and_then(|b| coingecko_rows(&b)) {
+        match get_json(&ctx.client, COINGECKO_URL)
+            .await
+            .and_then(|b| coingecko_rows(&b))
+        {
             Ok(rows) if !rows.is_empty() => return Ok(rows),
             Ok(_) => {}
             Err(e) => {
-                eprintln!("[loom] coingecko: {} — using CoinPaprika", e);
+                log::warn!(target: "loom", "coingecko: {e} — using CoinPaprika");
                 ctx.coingecko_retry_at = now + PRIMARY_BACKOFF_SECS;
             }
         }
@@ -2936,7 +3633,7 @@ async fn fetch_world_bank(client: &reqwest::Client) -> Result<Vec<Row>, String> 
     for (i, id) in WB_INDICATORS.iter().enumerate() {
         match get_json(client, &wb_indicator_url(id)).await {
             Ok(b) => series.push((i, b)),
-            Err(e) => eprintln!("[loom] world bank {}: {}", id, e),
+            Err(e) => log::warn!(target: "loom", "world bank {id}: {e}"),
         }
     }
     if series.is_empty() {
@@ -2948,14 +3645,16 @@ async fn fetch_world_bank(client: &reqwest::Client) -> Result<Vec<Row>, String> 
 async fn fetch_bitcoin(client: &reqwest::Client) -> Result<Vec<Row>, String> {
     let mut pages = vec![get_json(client, MEMPOOL_BLOCKS_URL).await?];
     for _ in 0..MEMPOOL_EXTRA_PAGES {
-        let Some(next) = pages.last().and_then(min_block_height).map(|h| h - 1) else { break };
+        let Some(next) = pages.last().and_then(min_block_height).map(|h| h - 1) else {
+            break;
+        };
         if next < 0 {
             break;
         }
         match get_json(client, &format!("{}/{}", MEMPOOL_BLOCKS_URL, next)).await {
             Ok(b) => pages.push(b),
             Err(e) => {
-                eprintln!("[loom] mempool.space page {}: {}", next, e);
+                log::warn!(target: "loom", "mempool.space page {next}: {e}");
                 break;
             }
         }
@@ -2975,16 +3674,20 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
         "aq" => aq_rows(&get_json(&c, &aq_url()).await?, CITIES),
         "ukcarbon" => {
             let base = "https://api.carbonintensity.org.uk/intensity/date";
-            let mut bodies = vec![get_json(&c, &format!("{}/{}", base, fmt_date(london_days_ago(1)))).await?];
+            let mut bodies =
+                vec![get_json(&c, &format!("{}/{}", base, fmt_date(london_days_ago(1)))).await?];
             match get_json(&c, base).await {
                 Ok(b) => bodies.push(b),
-                Err(e) => eprintln!("[loom] ukcarbon today: {}", e),
+                Err(e) => log::warn!(target: "loom", "ukcarbon today: {e}"),
             }
             ukcarbon_rows(&bodies)
         }
         "climate" => {
             let (year, _, _) = civil_from_days(today);
-            climate_rows(&get_json(&c, &climate_url(year)).await?)
+            match get_json(&c, &climate_url(year)).await {
+                Ok(body) => climate_rows(&body),
+                Err(_) => climate_rows(&get_json(&c, &climate_url(year - 1)).await?),
+            }
         }
         "buoys" => buoys_rows(&get_text(&c, BUOYS_URL).await?),
         "opensky" => fetch_aircraft(ctx).await,
@@ -2993,7 +3696,10 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
                 ctx.citibike_info = Some(citibike_info(&get_json(&c, GBFS_INFO_URL).await?)?);
             }
             let status = get_json(&c, GBFS_STATUS_URL).await?;
-            citibike_rows(&status, ctx.citibike_info.as_ref().ok_or("GBFS: no station info")?)
+            citibike_rows(
+                &status,
+                ctx.citibike_info.as_ref().ok_or("GBFS: no station info")?,
+            )
         }
         "mbta" => mbta_rows(&get_json(&c, MBTA_URL).await?),
         "nyc311" => nyc311_rows(&get_json(&c, NYC311_URL).await?),
@@ -3005,11 +3711,12 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
                 // wheretheiss.at allows ≤10 timestamps per request.
                 if table_is_empty(db, spec.table) {
                     let now = now_secs();
-                    let stamps: Vec<String> = (1..10).rev().map(|i| (now - i * 600).to_string()).collect();
+                    let stamps: Vec<String> =
+                        (1..10).rev().map(|i| (now - i * 600).to_string()).collect();
                     let url = format!("{}/positions?timestamps={}", ISS_URL, stamps.join(","));
                     match get_json(&c, &url).await.and_then(|b| iss_rows(&b)) {
                         Ok(seed) => rows.extend(seed),
-                        Err(e) => eprintln!("[loom] iss seed: {}", e),
+                        Err(e) => log::warn!(target: "loom", "iss seed: {e}"),
                     }
                 }
             }
@@ -3047,7 +3754,9 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
                     Err(e) => last_err = Some(e),
                 }
             }
-            pageviews_rows(&body.ok_or_else(|| last_err.unwrap_or_else(|| "Pageviews unavailable".into()))?)
+            pageviews_rows(
+                &body.ok_or_else(|| last_err.unwrap_or_else(|| "Pageviews unavailable".into()))?,
+            )
         }
         "steam" => steam_rows(&get_json(&c, STEAM_URL).await?),
         "crypto" => fetch_crypto(ctx).await,
@@ -3061,7 +3770,7 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
             let pop = match get_json(&c, WB_POP_LATEST_URL).await {
                 Ok(b) => wb_values_by_iso3(&b),
                 Err(e) => {
-                    eprintln!("[loom] countries population: {}", e);
+                    log::warn!(target: "loom", "countries population: {e}");
                     HashMap::new()
                 }
             };
@@ -3076,21 +3785,42 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
 // Start / Stop / Query (generic, dispatched by kind)
 // ================================================================
 
-pub async fn source_start(kind: &str, db: Arc<LoomDb>, state: Arc<SourcesState>) -> Result<(), String> {
+pub async fn source_start(
+    kind: &str,
+    db: Arc<LoomDb>,
+    state: Arc<SourcesState>,
+) -> Result<(), String> {
     let spec = spec_for_kind(kind).ok_or("Unknown source kind")?;
     let inst = state.get(kind).ok_or("Unknown source kind")?;
-    if inst.running.load(Ordering::Relaxed) {
+    if inst
+        .running
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+        .is_err()
+    {
         return Err(format!("{} already running", kind));
     }
-    ensure_tables(&db)?;
-    let client = build_client()?;
+
+    if let Some((_, handle)) = inst.poll_worker.lock().await.take() {
+        handle.abort();
+    }
+
+    let client = state.client();
+    let my_gen = inst.poll_generation.fetch_add(1, Ordering::AcqRel) + 1;
     let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
     *inst.cancel_token.lock().await = Some(cancel_tx);
     inst.mark_started().await;
+    *inst.last_error.lock().await = None;
+    inst.consecutive_failures.store(0, Ordering::Relaxed);
 
     let running = inst.running.clone();
     let total = inst.total_events.clone();
-    tokio::spawn(async move {
+    let last_ok = inst.last_ok_at.clone();
+    let last_error = inst.last_error.clone();
+    let consecutive_failures = inst.consecutive_failures.clone();
+    let next_poll_at = inst.next_poll_at.clone();
+    let poll_generation = inst.poll_generation.clone();
+
+    let handle = tokio::spawn(async move {
         let mut ctx = PollCtx {
             client,
             citibike_info: None,
@@ -3100,45 +3830,68 @@ pub async fn source_start(kind: &str, db: Arc<LoomDb>, state: Arc<SourcesState>)
             adsb_next: 0,
         };
         loop {
+            if poll_generation.load(Ordering::Acquire) != my_gen {
+                break;
+            }
             let result = match fetch_rows(spec, &mut ctx, &db).await {
-                Ok(rows) => write_rows(&db, spec, &rows),
+                Ok(rows) => {
+                    if poll_generation.load(Ordering::Acquire) != my_gen {
+                        break;
+                    }
+                    write_rows(&db, spec, &rows)
+                }
                 Err(e) => Err(e),
             };
             let ok = match result {
                 Ok(n) => {
+                    if poll_generation.load(Ordering::Acquire) != my_gen {
+                        break;
+                    }
                     if spec.mode == WriteMode::Replace {
                         total.store(n, Ordering::Relaxed);
                     } else {
                         total.fetch_add(n, Ordering::Relaxed);
                         let _ = trim_table(&db, spec.table);
                     }
+                    consecutive_failures.store(0, Ordering::Relaxed);
+                    *last_ok.lock().await = Some(now_secs());
+                    *last_error.lock().await = None;
                     true
                 }
                 Err(e) => {
-                    eprintln!("[loom] source {}: {}", spec.kind, e);
+                    log::warn!(target: "loom", "source {}: {}", spec.kind, e);
+                    consecutive_failures.fetch_add(1, Ordering::Relaxed);
+                    *last_error.lock().await = Some(e);
                     false
                 }
             };
+            let failures = consecutive_failures.load(Ordering::Relaxed);
             let wait = match (spec.poll_secs, ok) {
-                (0, true) => None, // loaded once; idle until stopped
+                (0, true) => None,
                 (0, false) => Some(LOAD_ONCE_RETRY_SECS),
-                (secs, _) => Some(secs),
+                (secs, true) => Some(secs),
+                (secs, false) => {
+                    let mult = 1u64 << failures.min(4);
+                    Some((secs * mult).min(secs.saturating_mul(10)).max(secs))
+                }
             };
-            match wait {
-                Some(secs) => {
-                    tokio::select! {
-                        _ = &mut cancel_rx => break,
-                        _ = tokio::time::sleep(std::time::Duration::from_secs(secs)) => {}
-                    }
+            if let Some(secs) = wait {
+                *next_poll_at.lock().await = Some(now_secs() + secs as i64);
+                tokio::select! {
+                    _ = &mut cancel_rx => break,
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(secs)) => {}
                 }
-                None => {
-                    let _ = (&mut cancel_rx).await;
-                    break;
-                }
+            } else {
+                *next_poll_at.lock().await = None;
+                let _ = (&mut cancel_rx).await;
+                break;
             }
         }
-        running.store(false, Ordering::Relaxed);
+        if poll_generation.load(Ordering::Acquire) == my_gen {
+            running.store(false, Ordering::Relaxed);
+        }
     });
+    *inst.poll_worker.lock().await = Some((my_gen, handle));
     Ok(())
 }
 
@@ -3147,103 +3900,37 @@ pub async fn source_stop(kind: &str, state: Arc<SourcesState>) -> Result<(), Str
     if let Some(tx) = inst.cancel_token.lock().await.take() {
         let _ = tx.send(());
     }
+    if let Some((_, handle)) = inst.poll_worker.lock().await.take() {
+        handle.abort();
+    }
+    inst.poll_generation.fetch_add(1, Ordering::AcqRel);
     inst.mark_stopped().await;
+    *inst.next_poll_at.lock().await = None;
     Ok(())
 }
 
 pub fn source_query(db: &LoomDb, kind: &str, sql: &str, limit: u32) -> Result<QueryResult, String> {
+    crate::sql_policy::validate_user_sql(sql)?;
     let table = table_for_kind(kind).ok_or("Unknown source kind")?;
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_connection();
     conn.execute_batch(&format!(
         "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
         table
     ))
     .map_err(|e| e.to_string())?;
-
-    let full_sql = if sql.trim().is_empty() {
-        format!("SELECT * FROM {} LIMIT {}", table, limit)
-    } else {
-        format!("{} LIMIT {}", sql.trim().trim_end_matches(';'), limit)
-    };
-    let meta_sql = format!("SELECT column_name, column_type FROM (DESCRIBE ({}))", full_sql);
-    let mut meta_stmt = conn.prepare(&meta_sql).map_err(|e| e.to_string())?;
-    let meta_rows = meta_stmt
-        .query_map(params![], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
-        .map_err(|e| e.to_string())?;
-    let mut columns = Vec::new();
-    let mut types = Vec::new();
-    for mr in meta_rows.flatten() {
-        columns.push(mr.0);
-        types.push(mr.1);
-    }
-    let col_count = columns.len();
-    let mut stmt = conn.prepare(&full_sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![], |row| {
-            let mut v = Vec::new();
-            for i in 0..col_count {
-                let val: duckdb::types::Value = row.get(i)?;
-                v.push(duckdb_value_to_json(val));
-            }
-            Ok(v)
-        })
-        .map_err(|e| e.to_string())?;
-    let out: Vec<Vec<Value>> = rows.flatten().collect();
-    let total = out.len() as u64;
-    Ok(QueryResult {
-        columns,
-        types,
-        rows: out,
-        total_rows: total,
-    })
+    let default = format!("SELECT * FROM {} LIMIT {{limit}}", table);
+    crate::query_engine::run_user_query(&conn, sql, limit, &default)
 }
 
 pub fn source_stats(db: &LoomDb, kind: &str) -> Result<Vec<ColumnInfo>, String> {
     let table = table_for_kind(kind).ok_or("Unknown source kind")?;
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let count: i64 = conn
-        .query_row(&format!("SELECT COUNT(*) FROM {}", table), params![], |r| r.get(0))
-        .unwrap_or(0);
-    if count == 0 {
-        return Ok(vec![]);
-    }
-    conn.execute_batch(&format!(
-        "CREATE OR REPLACE TEMP VIEW loom_stats AS SELECT * FROM {}",
-        table
-    ))
-    .map_err(|e| e.to_string())?;
-    let mut stmt = conn.prepare("DESCRIBE loom_stats").map_err(|e| e.to_string())?;
-    let schema_rows = stmt
-        .query_map(params![], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        .map_err(|e| e.to_string())?;
-    let mut out = Vec::new();
-    for (col_name, data_type) in schema_rows.flatten() {
-        let col_q = format!("\"{}\"", col_name.replace('"', "\"\""));
-        let sql = format!(
-            "SELECT COUNT(*) - COUNT({0}), APPROX_COUNT_DISTINCT({0}), TRY_CAST(MIN({0}) AS VARCHAR), TRY_CAST(MAX({0}) AS VARCHAR) FROM loom_stats",
-            col_q
-        );
-        if let Ok(mut s) = conn.prepare(&sql) {
-            if let Ok(info) = s.query_row(params![], |sr| {
-                Ok(ColumnInfo {
-                    name: col_name.clone(),
-                    data_type: data_type.clone(),
-                    null_count: sr.get::<_, i64>(0).unwrap_or(0) as u64,
-                    distinct_count: sr.get::<_, i64>(1).unwrap_or(0) as u64,
-                    min_value: sr.get::<_, Option<String>>(2).unwrap_or(None),
-                    max_value: sr.get::<_, Option<String>>(3).unwrap_or(None),
-                })
-            }) {
-                out.push(info);
-            }
-        }
-    }
-    Ok(out)
+    let conn = db.lock_connection();
+    crate::query_engine::column_stats_for_table(&conn, table)
 }
 
 pub fn source_clear(db: &LoomDb, kind: &str) -> Result<(), String> {
     let table = table_for_kind(kind).ok_or("Unknown source kind")?;
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_connection();
     conn.execute_batch(&format!("DELETE FROM {}", table))
         .map_err(|e| e.to_string())
 }

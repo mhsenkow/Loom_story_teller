@@ -7,7 +7,9 @@
 // =================================================================
 
 import type { ChartAspectId } from "./chartViewport";
-import { buildZip, downloadBlob } from "./zipStore";
+import { downloadBlob } from "./download";
+import { buildZip } from "./zipStore";
+import { truncateTextToWidth } from "./captureHelpers";
 
 export type SocialPresetId =
   | "current"
@@ -205,7 +207,8 @@ export function drawExportBurnIn(
   ctx.font = `${fontSize}px Inter, system-ui, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(line, w / 2, h - (barH + pad * 0.5) / 2, w - pad * 2);
+  const fitted = truncateTextToWidth(ctx, line, w - pad * 2);
+  ctx.fillText(fitted, w / 2, h - (barH + pad * 0.5) / 2);
   ctx.restore();
 }
 
@@ -249,23 +252,71 @@ export async function shareOrDownloadFile(
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* fall through to execCommand */
+    }
+  }
+  return copyTextWithExecCommand(text);
+}
+
+/**
+ * Start a clipboard write inside a user gesture with a deferred text promise
+ * (iOS Safari drops activation after awaited network work — LOOM-413).
+ */
+export function copyTextPromiseToClipboard(textPromise: Promise<string>): Promise<boolean> {
+  if (typeof navigator === "undefined" || typeof ClipboardItem === "undefined") {
+    return textPromise.then((t) => copyTextToClipboard(t)).catch(() => false);
+  }
+  const write = navigator.clipboard?.write;
+  if (!write) {
+    return textPromise.then((t) => copyTextToClipboard(t)).catch(() => false);
+  }
   try {
-    await navigator.clipboard.writeText(text);
-    return true;
+    const blobPromise = textPromise.then((t) => new Blob([t], { type: "text/plain" }));
+    void Promise.resolve(write.call(navigator.clipboard, [new ClipboardItem({ "text/plain": blobPromise })])).catch(
+      () => undefined,
+    );
+    return blobPromise.then(() => true).catch(() =>
+      textPromise.then((t) => copyTextToClipboard(t)).catch(() => false),
+    );
   } catch {
-    return false;
+    return textPromise.then((t) => copyTextToClipboard(t)).catch(() => false);
   }
 }
 
+function copyTextWithExecCommand(text: string): boolean {
+  if (typeof document === "undefined") return false;
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  }
+  document.body.removeChild(ta);
+  return ok;
+}
+
 export function slugifyFilename(name: string): string {
-  return (
-    name
-      .trim()
-      .replace(/[^\w\-]+/g, "_")
-      .replace(/_+/g, "_")
-      .replace(/^_|_$/g, "")
-      .slice(0, 80) || "loom-export"
-  );
+  const trimmed = name.trim();
+  if (!trimmed) return "loom-export";
+  const safe = trimmed
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}]+/gu, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+  return (safe || "loom-export").slice(0, 80);
 }
 
 export async function buildCarouselZip(
@@ -395,7 +446,8 @@ export async function publishStoryToWorker(input: {
   data?: unknown;
 }): Promise<PublishStoryResult | null> {
   try {
-    const res = await fetch("/api/stories", {
+    const { apiUrl } = await import("./openDataCatalog");
+    const res = await fetch(apiUrl("/api/stories"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

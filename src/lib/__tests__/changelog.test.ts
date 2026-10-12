@@ -22,4 +22,13 @@ describe("changelog", () => {
     expect(unseenReleases(second!.id)).toEqual([newest]);
     expect(unseenReleases(null)).toEqual(CHANGELOG);
   });
+
+  it("keeps user-facing detail copy (LOOM-692)", () => {
+    const devJargon = /(\b[a-z]+_[a-z]+\b|\b\d+px\b|Socrata|token at)/i;
+    for (const release of CHANGELOG.filter((r) => r.id === "2026-10-12" || r.id === "2026-10-06c")) {
+      for (const item of release.items) {
+        expect(item.detail, `${release.id} ${item.title}`).not.toMatch(devJargon);
+      }
+    }
+  });
 });

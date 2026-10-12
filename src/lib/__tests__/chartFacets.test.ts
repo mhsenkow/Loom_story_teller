@@ -4,6 +4,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  countFacetGroupsDropped,
   partitionRowsByFacet,
   layoutFacetCells,
   clampTopN,
@@ -43,6 +44,11 @@ describe("chartFacets", () => {
     expect(clampTopN(null)).toBe(20);
     expect(clampTopN(2)).toBe(3);
     expect(clampTopN(999)).toBe(50);
+  });
+
+  it("counts facet groups dropped by the panel cap", () => {
+    const rows = Array.from({ length: 12 }, (_, i) => [`g${i}`, i]);
+    expect(countFacetGroupsDropped(rows, 0, 8)).toBe(4);
   });
 });
 

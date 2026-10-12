@@ -10,7 +10,7 @@ import {
   slugifyFilename,
   LINK_PREVIEW_SIZE,
 } from "../socialExport";
-import { buildZip } from "../zipStore";
+import { buildZip, ZIP_UTF8_FLAG, zipDosDateTime } from "../zipStore";
 import { LOOM_OG_IMG_TOKEN, LOOM_SHARE_IMG_TOKEN, buildChartSharePageHtml } from "../dashboardMicrosite";
 
 describe("socialExport", () => {
@@ -57,6 +57,8 @@ describe("socialExport", () => {
   it("slugifies filenames safely", () => {
     expect(slugifyFilename("Hello World!!")).toBe("Hello_World");
     expect(slugifyFilename("")).toBe("loom-export");
+    expect(slugifyFilename("Évolution des prix")).toBe("Evolution_des_prix");
+    expect(slugifyFilename("東京")).toBe("東京");
   });
 });
 
@@ -73,5 +75,9 @@ describe("zipStore", () => {
     expect(zip[1]).toBe(0x4b);
     expect(zip[2]).toBe(0x03);
     expect(zip[3]).toBe(0x04);
+    const { dosDate } = zipDosDateTime(new Date("2026-10-07T14:05:00"));
+    expect(dosDate).toBeGreaterThan(0);
+    expect(zip[6]).toBe(ZIP_UTF8_FLAG & 0xff);
+    expect(zip[7]).toBe((ZIP_UTF8_FLAG >> 8) & 0xff);
   });
 });

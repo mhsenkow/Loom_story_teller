@@ -6,30 +6,41 @@
 
 import type { QueryResult } from "./store";
 
-function escapeCsvCell(value: string | number | boolean | null): string {
+/**
+ * Escape a CSV cell and neutralize spreadsheet formula injection.
+ * Finite numbers are written as-is; strings starting with `=`, `+`, `-`, `@`,
+ * tab, or CR are prefixed with `'` so Excel/Sheets won't execute them.
+ */
+export function escapeCsvCell(value: string | number | boolean | null): string {
   if (value === null || value === undefined) return "";
-  const s = String(value);
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false";
+  }
+  let s = String(value);
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
   if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
     return `"${s.replace(/"/g, '""')}"`;
   }
   return s;
 }
 
-export function queryResultToCsv(result: QueryResult): string {
+/** UTF-8 default; Excel adds BOM and CRLF line endings for spreadsheet tools. */
+export type CsvExportProfile = "utf8" | "excel";
+
+export function queryResultToCsv(result: QueryResult, profile: CsvExportProfile = "utf8"): string {
   const { columns, rows } = result;
   const header = columns.map(escapeCsvCell).join(",");
+  const lineEnd = profile === "excel" ? "\r\n" : "\n";
   const body = rows
     .map((row) => columns.map((_, i) => escapeCsvCell(row[i] ?? null)).join(","))
-    .join("\n");
-  return `${header}\n${body}`;
+    .join(lineEnd);
+  const csv = `${header}${lineEnd}${body}`;
+  return profile === "excel" ? `\uFEFF${csv}` : csv;
 }
 
-export function downloadCsv(csv: string, filename: string): void {
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename.endsWith(".csv") ? filename : `${filename}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+export { downloadCsv } from "./download";

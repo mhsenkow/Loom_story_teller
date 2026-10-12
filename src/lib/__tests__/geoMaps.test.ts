@@ -1,8 +1,9 @@
 /**
  * Unit tests for geographic atlas join keys and geo map kinds.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import {
+  loadAtlas,
   getWorldAtlas,
   getUsAtlas,
   findFeatureIndex,
@@ -33,6 +34,11 @@ const geoCols: ColumnInfo[] = [
 ];
 
 describe("geoAtlas", () => {
+  beforeAll(async () => {
+    await loadAtlas("world");
+    await loadAtlas("us");
+  });
+
   it("indexes world features by name and ISO codes", () => {
     const world = getWorldAtlas();
     expect(world.features.length).toBeGreaterThan(100);

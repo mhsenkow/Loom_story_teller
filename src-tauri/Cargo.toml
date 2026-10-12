@@ -1,8 +1,10 @@
 [package]
 name = "loom"
 version = "0.1.0"
-description = "Loom — Local-first data storytelling for macOS"
-authors = ["you"]
+description = "Loom — Local-first data storytelling"
+authors = ["Loom Storyteller Contributors"]
+license = "MIT"
+repository = "https://github.com/mhsenkow/Loom_story_teller"
 edition = "2021"
 
 [lib]
@@ -15,18 +17,22 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Desktop-only: DuckDB, folder FS, native dialogs, Rust poll/SSE sources
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
-serde = { version = "1", features = ["derive"] }
 opener = "0.7"
-serde_json = "1"
 duckdb = { version = "1.2", features = ["bundled"] }
-arrow = { version = "53", default-features = false, features = ["json"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
 glob = "0.3"
-thiserror = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 futures-util = "0.3"
+log = "0.4"
+tauri-plugin-log = "2"
+base64 = "0.22"
 
 [features]
 default = ["custom-protocol"]

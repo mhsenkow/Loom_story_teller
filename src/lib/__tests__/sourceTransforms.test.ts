@@ -7,6 +7,7 @@ import {
   cadDate,
   cneosApproaches,
   diameterFromH,
+  firmsViirsCsv,
   gdacsEvents,
   joinCitibike,
   ll2ToSpacex,
@@ -16,8 +17,10 @@ import {
   mempoolLowestHeight,
   mergeUkCarbon,
   ndbcLatestObs,
+  nwisIvWide,
   openMeteoCities,
   paprikaToGecko,
+  starlinkGp,
   steamTop,
   treasuryDebt,
   trimNwsAlerts,
@@ -198,7 +201,7 @@ describe("Worker source transforms (shapes the browser parsers read)", () => {
     const rows = parseSourceRows("citibike", joinCitibike(info, status));
     expect(rows).toEqual([
       ["s1", "Austin St & 76 Ave", 40.71612, -73.83735, 16, 15, 14, 0, 93.8, true, new Date(1790973816 * 1000).toISOString()],
-      ["s2", "Montrose Ave & Bushwick Ave", 40.7077, -73.9402, 0, 3, 0, 33, null, false, new Date(1790973893 * 1000).toISOString()],
+      ["s2", "Montrose Ave & Bushwick Ave", 40.7077, -73.9402, 0, 3, null, 33, null, false, new Date(1790973893 * 1000).toISOString()],
     ]);
   });
 
@@ -395,5 +398,149 @@ describe("Worker columnar transforms (new feeds) → browser rows", () => {
       ["1993-04-01", 4225873987843.44, null, null],
       ["2026-10-01", 40260641972390.03, 32433790394253.86, 7826851578136.17],
     ]);
+  });
+});
+
+// LOOM-498 — Boundary / degraded-input tests for FIRMS, NWIS, Starlink.
+// Malformed or incomplete payloads must produce documented null/degraded output
+// and never fabricate zero-valued measurements.
+describe("Worker transform boundary cases (LOOM-498)", () => {
+  const registryColumns = (kind: string) => SOURCE_DEFS.find((d) => d.kind === kind)!.columns;
+
+  // ---- FIRMS VIIRS CSV ----
+  it("firms: header-only CSV → zero rows", () => {
+    const out = firmsViirsCsv("latitude,longitude,bright_ti4,bright_ti5,frp,confidence,satellite,acq_date,acq_time,daynight\n");
+    expect(out.columns).toEqual(registryColumns("firms"));
+    expect(out.rows).toEqual([]);
+  });
+
+  it("firms: missing lat/lon rows are dropped, not zero-filled", () => {
+    const csv = [
+      "latitude,longitude,bright_ti4,bright_ti5,frp,confidence,satellite,acq_date,acq_time,daynight",
+      ",,-1,310,5.2,nominal,N20,2026-10-01,0130,D",
+      "34.5,-118.2,320,295,12.8,high,N20,2026-10-01,0145,N",
+    ].join("\n");
+    const out = firmsViirsCsv(csv);
+    expect(out.rows).toHaveLength(1);
+    expect(out.rows[0]![1]).toBe(34.5);
+    expect(out.rows[0]![2]).toBe(-118.2);
+  });
+
+  it("firms: non-numeric brightness → null, never zero", () => {
+    const csv = [
+      "latitude,longitude,bright_ti4,bright_ti5,frp,confidence,satellite,acq_date,acq_time,daynight",
+      "34.5,-118.2,N/A,,12.8,nominal,N20,2026-10-01,0130,D",
+    ].join("\n");
+    const out = firmsViirsCsv(csv);
+    expect(out.rows).toHaveLength(1);
+    expect(out.rows[0]![3]).toBeNull(); // bright_ti4 = N/A → null
+    expect(out.rows[0]![4]).toBeNull(); // bright_ti5 = empty → null
+    expect(out.rows[0]![5]).toBe(12.8); // frp parses normally
+  });
+
+  it("firms: malformed acq_date/acq_time → null timestamp", () => {
+    const csv = [
+      "latitude,longitude,bright_ti4,bright_ti5,frp,confidence,satellite,acq_date,acq_time,daynight",
+      "34.5,-118.2,320,295,12.8,nominal,N20,bad-date,9999,D",
+    ].join("\n");
+    const out = firmsViirsCsv(csv);
+    expect(out.rows).toHaveLength(1);
+    expect(out.rows[0]![8]).toBeNull();
+  });
+
+  // ---- NWIS IV ----
+  it("nwis: empty timeSeries → zero rows", () => {
+    const out = nwisIvWide({ value: { timeSeries: [] } });
+    expect(out.columns).toEqual(registryColumns("nwis"));
+    expect(out.rows).toEqual([]);
+  });
+
+  it("nwis: null-body → zero rows, no throw", () => {
+    const out = nwisIvWide(null);
+    expect(out.rows).toEqual([]);
+  });
+
+  it("nwis: site with all-null measurements skipped", () => {
+    const body = {
+      value: {
+        timeSeries: [
+          {
+            sourceInfo: { siteCode: [{ value: "01646500" }], siteName: "Potomac", geoLocation: { geogLocation: { latitude: 38.9, longitude: -77.1 } } },
+            variable: { variableCode: [{ value: "00060" }] },
+            values: [{ value: [{ value: "", dateTime: "2026-10-01T12:00:00.000-04:00" }] }],
+          },
+        ],
+      },
+    };
+    const out = nwisIvWide(body);
+    // Row with both discharge and gage_height null is skipped
+    expect(out.rows).toEqual([]);
+  });
+
+  it("nwis: discharge-only site → gage_height null, not zero", () => {
+    const body = {
+      value: {
+        timeSeries: [
+          {
+            sourceInfo: { siteCode: [{ value: "01646500" }], siteName: "Potomac", geoLocation: { geogLocation: { latitude: 38.9, longitude: -77.1 } } },
+            variable: { variableCode: [{ value: "00060" }] },
+            values: [{ value: [{ value: "12500", dateTime: "2026-10-01T12:00:00.000-04:00" }] }],
+          },
+        ],
+      },
+    };
+    const out = nwisIvWide(body);
+    expect(out.rows).toHaveLength(1);
+    expect(out.rows[0]![5]).toBe(12500); // discharge_cfs
+    expect(out.rows[0]![6]).toBeNull();  // gage_height_ft — null, not 0
+  });
+
+  // ---- Starlink GP ----
+  it("starlink: empty array → zero rows", () => {
+    const out = starlinkGp([]);
+    expect(out.columns).toEqual(registryColumns("starlink"));
+    expect(out.rows).toEqual([]);
+  });
+
+  it("starlink: non-array body → zero rows, no throw", () => {
+    const out = starlinkGp(null);
+    expect(out.rows).toEqual([]);
+  });
+
+  it("starlink: debris items filtered out", () => {
+    const out = starlinkGp([
+      { NORAD_CAT_ID: 44713, OBJECT_NAME: "STARLINK-1007", OBJECT_ID: "2019-074A", EPOCH: "2026-10-01T00:00:00", INCLINATION: 53.0, ECCENTRICITY: 0.0001, MEAN_MOTION: 15.06, RAAN: 200, ARG_OF_PERICENTER: 90, MEAN_ANOMALY: 270, BSTAR: 0.0001 },
+      { NORAD_CAT_ID: 99999, OBJECT_NAME: "STARLINK-1007 DEB", OBJECT_ID: "2019-074B", EPOCH: "2026-10-01T00:00:00", INCLINATION: 53.0 },
+    ]);
+    expect(out.rows).toHaveLength(1);
+    expect(out.rows[0]![1]).toBe("STARLINK-1007");
+  });
+
+  it("starlink: missing NORAD_CAT_ID → skipped, not zero", () => {
+    const out = starlinkGp([
+      { OBJECT_NAME: "STARLINK-X", OBJECT_ID: "2019-074X" },
+    ]);
+    expect(out.rows).toEqual([]);
+  });
+
+  it("starlink: null orbital elements → null, not zero", () => {
+    const out = starlinkGp([
+      { NORAD_CAT_ID: 44713, OBJECT_NAME: "STARLINK-1007", OBJECT_ID: "2019-074A", EPOCH: "2026-10-01T00:00:00" },
+    ]);
+    expect(out.rows).toHaveLength(1);
+    expect(out.rows[0]![4]).toBeNull(); // INCLINATION
+    expect(out.rows[0]![5]).toBeNull(); // ECCENTRICITY
+    expect(out.rows[0]![6]).toBeNull(); // MEAN_MOTION
+    expect(out.rows[0]![10]).toBeNull(); // BSTAR
+  });
+
+  it("starlink: capped at 2500 entries", () => {
+    const items = Array.from({ length: 3000 }, (_, i) => ({
+      NORAD_CAT_ID: 44713 + i,
+      OBJECT_NAME: `STARLINK-${i}`,
+      OBJECT_ID: `ID-${i}`,
+    }));
+    const out = starlinkGp(items);
+    expect(out.rows).toHaveLength(2500);
   });
 });

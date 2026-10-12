@@ -15,7 +15,7 @@
 # =================================================================
 
 .DEFAULT_GOAL := help
-SHELL := /bin/zsh
+SHELL := /bin/bash
 
 # --- Colors for pretty output ---
 PURPLE := \033[0;35m
@@ -109,6 +109,25 @@ weave: ## 📦 Production build → .app bundle
 	npm run tauri build
 	@echo "$(GREEN)✓ Bundle at src-tauri/target/release/bundle/$(RESET)"
 
+.PHONY: tablet
+tablet: ## 🔧 iOS simulator / device dev (web-parity shell)
+	@echo "$(PURPLE)🧵 Threading the tablet loom...$(RESET)"
+	npm run tauri ios dev
+
+.PHONY: tablet-weave
+tablet-weave: ## 📦 iOS App Store IPA (TestFlight / App Store Connect)
+	@echo "$(PURPLE)🧵 Weaving the iPad fabric...$(RESET)"
+	@test -d src-tauri/gen/apple || (echo "Run: npm run tauri ios init -- --ci" && exit 1)
+	npm run tauri ios build -- --export-method app-store-connect
+	@echo "$(GREEN)✓ IPA under src-tauri/gen/apple/build/$(RESET)"
+	@echo "  Upload: xcrun altool --upload-app --type ios --file <ipa> --apiKey \$$APPLE_API_KEY_ID --apiIssuer \$$APPLE_API_ISSUER"
+	@echo "  Or open Xcode: npm run tablet:xcode → Product → Archive → Distribute"
+
+.PHONY: tablet-xcode
+tablet-xcode: ## 📦 Open iOS project in Xcode for Archive / TestFlight
+	@echo "$(PURPLE)🧵 Opening Xcode…$(RESET)"
+	npm run tauri ios build -- --open
+
 .PHONY: weave-web
 weave-web: ## 📦 Static web export only (no Tauri shell)
 	@echo "$(PURPLE)🧵 Weaving web export...$(RESET)"
@@ -175,13 +194,13 @@ shuttle-shell: ## 🐳 Shell into running container
 # =================================================================
 
 .PHONY: loft
-loft: ## ☁️ Build + deploy web UI to Cloudflare Workers
+loft: check-ts check-worker test ## ☁️ Build + deploy web UI to Cloudflare Workers
 	@echo "$(PURPLE)🧵 Lofting the web UI to Cloudflare...$(RESET)"
 	npm run deploy
 	@echo "$(GREEN)✓ Deployed → https://loom.ibm.io/ (also workers.dev)$(RESET)"
 
 .PHONY: loft-mcp
-loft-mcp: ## ☁️ Deploy Loom MCP / ChatGPT plugin Worker
+loft-mcp: check-mcp ## ☁️ Deploy Loom MCP / ChatGPT plugin Worker
 	@echo "$(PURPLE)🧵 Lofting the Loom MCP server...$(RESET)"
 	cd mcp && npm install && npm run deploy
 	@echo "$(GREEN)✓ MCP → https://loom-mcp.mhsenkow.workers.dev/mcp$(RESET)"
@@ -201,13 +220,42 @@ loft-dry: ## ☁️ Dry-run Cloudflare deploy (no upload)
 # =================================================================
 
 .PHONY: check
-check: check-ts check-rust ## ✅ Run all checks (TS + Rust)
+check: check-ts check-worker check-rust test ## ✅ TS + Worker + Rust + Vitest (LOOM-510)
 	@echo "$(GREEN)✓ All checks passed$(RESET)"
 
+.PHONY: ci
+ci: preflight check-ts check-worker check-mcp test build bundle-budget check-rust ## ✅ Full gate (mirrors GitHub CI + Workers + MCP)
+	@echo "$(GREEN)✓ CI gate passed$(RESET)"
+
+.PHONY: preflight
+preflight: ## ✅ Node/Rust version preflight (LOOM-663)
+	@scripts/preflight-runtimes.sh
+
+.PHONY: check-worker
+check-worker: ## ✅ Catalog Worker TypeScript (LOOM-470)
+	@echo "$(CYAN)Checking catalog Worker...$(RESET)"
+	npx tsc --noEmit -p workers/tsconfig.json
+
+.PHONY: check-mcp
+check-mcp: ## ✅ Loom MCP Worker TypeScript (LOOM-471)
+	@echo "$(CYAN)Checking MCP Worker...$(RESET)"
+	cd mcp && npm ci && npx tsc --noEmit -p tsconfig.json
+
+.PHONY: ios-preflight
+ios-preflight: ## ✅ iOS identity + CLI flag sanity (LOOM-669, LOOM-666)
+	@scripts/ios-version-check.sh
+	@scripts/ios-cli-check.sh
+
+.PHONY: ios-release-preflight
+ios-release-preflight: ## ✅ Mobile RC provenance + signing preflight (LOOM-650)
+	@chmod +x scripts/ios-release-preflight.sh
+	@scripts/ios-release-preflight.sh
+
 .PHONY: test
-test: ## ✅ Run unit tests (Vitest)
+test: ## ✅ Run unit tests (Vitest + Rust lib tests)
 	@echo "$(CYAN)Running tests...$(RESET)"
 	npm run test:run
+	cd src-tauri && cargo test --lib
 
 .PHONY: check-ts
 check-ts: ## ✅ TypeScript type-check + lint
@@ -219,7 +267,7 @@ check-ts: ## ✅ TypeScript type-check + lint
 check-rust: ## ✅ Rust type-check + clippy
 	@echo "$(CYAN)Checking Rust...$(RESET)"
 	cd src-tauri && cargo check
-	cd src-tauri && cargo clippy --all-targets 2>/dev/null || true
+	cd src-tauri && cargo clippy --all-targets -- -D warnings
 
 .PHONY: fmt
 fmt: ## ✅ Format all code (Prettier + rustfmt)

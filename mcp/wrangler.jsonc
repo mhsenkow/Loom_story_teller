@@ -12,5 +12,7 @@
   ],
   "observability": {
     "enabled": true
-  }
+  },
+  // LOOM-509: upload maps to Cloudflare observability (never into the Worker bundle's public surface).
+  "upload_source_maps": true
 }

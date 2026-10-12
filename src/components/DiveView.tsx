@@ -12,11 +12,11 @@
 // columns in diveExpr.ts); rows: diveSource.ts.
 // =================================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { StartHere } from "@/components/StartHere";
 import { useLoomStore } from "@/lib/store";
 import { createChartRec, type YAggregateOption } from "@/lib/recommendations";
-import { isTauri } from "@/lib/tauri";
+import { isDesktop } from "@/lib/tauri";
 import {
   DIVE_AGGS,
   DIVE_BUCKETS,
@@ -57,6 +57,12 @@ const KIND_ICON: Record<DiveColumnProfile["kind"], string> = { time: "◷", numb
 const NO_DERIVED: DiveDerived[] = [];
 const SIDEBAR_KEY = "loom-dive-sidebar";
 
+/** Keep the builder usable when Split View / Stage Manager shrinks Dive. */
+function clampDiveSidebarWidth(desired: number, hostW: number): number {
+  const maxByHost = Math.max(200, Math.floor(hostW * 0.45));
+  return Math.max(200, Math.min(560, desired, maxByHost));
+}
+
 function Section({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
     <section className="space-y-1.5">
@@ -91,7 +97,8 @@ export function DiveView() {
   const columnStats = useLoomStore((s) => s.columnStats);
   const diveQuery = useLoomStore((s) => s.diveQuery);
   const diveLink = useLoomStore((s) => s.diveLink);
-  const { setDiveQuery, setDiveLink, setToast, setActiveChart, setViewMode, setSampleRows, setQuerySql } = useLoomStore.getState();
+  const { setDiveQuery, setDiveLink, setToast, setActiveChart, setViewMode, setSampleRows, setQuerySql } =
+    useLoomStore.getState();
 
   const path = selectedFile?.path ?? null;
   const [dataset, setDataset] = useState<DiveDataset | null>(null);
@@ -115,7 +122,12 @@ export function DiveView() {
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => e && setWide(e.contentRect.width >= 720));
+    const ro = new ResizeObserver(([e]) => {
+      if (!e) return;
+      const hostW = e.contentRect.width;
+      setWide(hostW >= 720);
+      setSideW((prev) => clampDiveSidebarWidth(prev, hostW));
+    });
     ro.observe(el);
     return () => ro.disconnect();
     // Root only exists once a file is open.
@@ -123,7 +135,10 @@ export function DiveView() {
   useEffect(() => {
     try {
       const v = Number(localStorage.getItem(SIDEBAR_KEY));
-      if (v >= 240 && v <= 560) setSideW(v);
+      if (v >= 240 && v <= 560) {
+        const hostW = rootRef.current?.clientWidth ?? window.innerWidth;
+        setSideW(clampDiveSidebarWidth(v, hostW));
+      }
     } catch {
       /* private mode — keep the default */
     }
@@ -157,7 +172,10 @@ export function DiveView() {
   // Live streams keep growing — re-pull rows on an interval while Live is on.
   useEffect(() => {
     if (!path || !live || !isLiveDivePath(path)) return;
-    const id = window.setInterval(() => void load(path, true), isTauri() ? 10_000 : 5_000);
+    const id = window.setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void load(path, true);
+    }, isDesktop() ? 10_000 : 5_000);
     return () => window.clearInterval(id);
   }, [path, live, load]);
 
@@ -199,7 +217,16 @@ export function DiveView() {
     [query, path, setDiveQuery],
   );
 
-  const result = useMemo(() => (data && query ? runDive(data, query, profiles) : null), [data, query, profiles]);
+  const deferredData = useDeferredValue(data);
+  const deferredQuery = useDeferredValue(query);
+  const deferredProfiles = useDeferredValue(profiles);
+  const result = useMemo(
+    () =>
+      deferredData && deferredQuery
+        ? runDive(deferredData, deferredQuery, deferredProfiles)
+        : null,
+    [deferredData, deferredQuery, deferredProfiles],
+  );
 
   // The whole query rides in the hash. Deliberate changes push a history
   // entry (Back = previous query, like Scuba); rapid edits such as typing
@@ -298,9 +325,24 @@ export function DiveView() {
   }, [query, zoomStack, update]);
 
   const copyLink = useCallback(async () => {
+    const url = window.location.href;
+    const portable = isLiveDivePath(path) || !!path?.startsWith("mock://");
+    const nav = typeof navigator !== "undefined" ? navigator : null;
+    if (nav && typeof nav.share === "function") {
+      try {
+        if (!portable) {
+          setToast("This dive link needs the same file open for recipients");
+        }
+        await nav.share({ title: "Loom dive", url });
+        return;
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return;
+        // Fall through to clipboard when share is unavailable/rejected.
+      }
+    }
     try {
-      await navigator.clipboard.writeText(window.location.href);
-      setToast(isLiveDivePath(path) || path?.startsWith("mock://") ? "Dive link copied" : "Link copied — recipients need the same file open");
+      await navigator.clipboard.writeText(url);
+      setToast(portable ? "Dive link copied" : "Link copied — recipients need the same file open");
     } catch {
       setToast("Couldn’t copy link");
     }
@@ -324,6 +366,14 @@ export function DiveView() {
   const openCube = useCallback(() => {
     if (!cubePlan || !data || !result || !selectedFile) return;
     const rows = result.matchedIndices.slice(0, 20_000).map((i) => data.rows[i]!);
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Open as cube replaces the Chart/Explorer sample with ${rows.length.toLocaleString()} filtered rows. Continue?`,
+      )
+    ) {
+      return;
+    }
     setSampleRows({ columns: data.columns, types: data.types ?? data.columns.map(() => "VARCHAR"), rows, total_rows: rows.length });
     const rec = createChartRec("dataCube", columnStats, cubePlan.x, cubePlan.y, null, selectedFile.name.replace(/\.\w+$/, ""), {
       zField: cubePlan.z,
@@ -345,7 +395,8 @@ export function DiveView() {
     el.setPointerCapture(e.pointerId);
     let w = sideW;
     const move = (ev: PointerEvent) => {
-      w = Math.max(240, Math.min(560, ev.clientX - left));
+      const hostW = rootRef.current?.clientWidth ?? window.innerWidth;
+      w = clampDiveSidebarWidth(ev.clientX - left, hostW);
       setSideW(w);
     };
     const up = () => {
@@ -424,7 +475,7 @@ export function DiveView() {
             <p className="text-2xs text-loom-muted">
               {ready.data.rows.length.toLocaleString()} rows loaded
               {ready.sampled ? ` · sample of ${ready.totalRows.toLocaleString()}` : ""}
-              {!isTauri() && !ready.live && !path?.startsWith("mock://") && ready.sampled ? " (web keeps a sample)" : ""}
+              {!isDesktop() && !ready.live && !path?.startsWith("mock://") && ready.sampled ? " (web keeps a sample)" : ""}
             </p>
           )}
         </div>
@@ -743,7 +794,7 @@ export function DiveView() {
 
             <div className="flex flex-wrap gap-1.5 pt-1">
               <button type="button" onClick={copyLink} className="loom-btn-ghost text-2xs px-2 py-1">
-                🔗 Copy link
+                Share link
               </button>
               <button type="button" onClick={() => setShowSql((s) => !s)} className="loom-btn-ghost text-2xs px-2 py-1" aria-pressed={showSql}>
                 {"</>"} SQL
@@ -827,7 +878,7 @@ export function DiveView() {
               <button type="button" className={smallBtn} onClick={() => navigator.clipboard.writeText(sql).then(() => setToast("SQL copied"))}>
                 Copy
               </button>
-              {isTauri() && (
+              {isDesktop() && (
                 <button
                   type="button"
                   className={smallBtn}
@@ -839,7 +890,7 @@ export function DiveView() {
                   Open in Query
                 </button>
               )}
-              {!isTauri() && <span className="text-2xs text-loom-muted">DuckDB SQL — runs in the desktop app</span>}
+              {!isDesktop() && <span className="text-2xs text-loom-muted">DuckDB SQL — runs in the desktop app</span>}
             </div>
           </div>
         )}

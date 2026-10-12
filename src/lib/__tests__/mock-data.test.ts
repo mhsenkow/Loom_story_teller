@@ -4,12 +4,38 @@
 import { describe, it, expect } from "vitest";
 import {
   parseCsvRecords,
+  sniffCsvDelimiter,
   coerceCsvNumber,
   parseCsvToInspectResult,
   looksLikeSpreadsheetBinary,
+  inspectFromTabular,
+  inferTabularColumnTypes,
+  normalizeTabularCells,
+  parseTabularLexemes,
+  looksLikeIdentifierString,
+  normalizeTabularHeaders,
 } from "../mock-data";
 
 describe("mock-data CSV", () => {
+  describe("normalizeTabularHeaders", () => {
+    it("names blank columns col_1, col_2 by position", () => {
+      expect(normalizeTabularHeaders(["", "  ", "\t"])).toEqual([
+        "col_1",
+        "col_2",
+        "col_3",
+      ]);
+    });
+
+    it("suffixes duplicate names and avoids colliding with existing _2", () => {
+      expect(normalizeTabularHeaders(["value", "value", "value_2", "value"])).toEqual([
+        "value",
+        "value_2",
+        "value_2_2",
+        "value_3",
+      ]);
+    });
+  });
+
   describe("coerceCsvNumber", () => {
     it("parses US thousands separators", () => {
       expect(coerceCsvNumber(" 1,203,514 ")).toBe(1203514);
@@ -29,6 +55,29 @@ describe("mock-data CSV", () => {
     it("returns null for non-numeric text", () => {
       expect(coerceCsvNumber("North East")).toBeNull();
       expect(coerceCsvNumber("")).toBeNull();
+      expect(coerceCsvNumber("0x1A")).toBeNull();
+    });
+
+    it("parses accounting negatives in parentheses", () => {
+      expect(coerceCsvNumber("(1,234)")).toBe(-1234);
+    });
+  });
+
+  describe("null tokens in numeric columns", () => {
+    it("treats N/A as null for typing", () => {
+      const csv = [
+        "value",
+        "10",
+        "20",
+        "N/A",
+        "30",
+        "40",
+        "50",
+        "60",
+      ].join("\n");
+      const { stats, sample } = parseCsvToInspectResult("nulls.csv", csv, 100);
+      expect(stats[0]?.data_type).toMatch(/DOUBLE|INTEGER|FLOAT/i);
+      expect(sample.rows.some((r) => r[0] === null)).toBe(true);
     });
   });
 
@@ -96,6 +145,76 @@ North West," 3,242,792 ", 14.1
       expect(sample.rows).toHaveLength(1);
       expect(sample.rows[0]![0]).toBe(34.4);
       expect(sample.rows[0]![1]).toBe(-119.8);
+    });
+
+    it("CSV import keeps distinct values under duplicate and blank headers", () => {
+      const text = `value,,value
+a,only-b,b
+c,only-d,d
+`;
+      const { sample } = parseCsvToInspectResult("dup.csv", text);
+      expect(sample.columns).toEqual(["value", "col_2", "value_2"]);
+      expect(sample.rows[0]).toEqual(["a", "only-b", "b"]);
+      expect(sample.rows[1]).toEqual(["c", "only-d", "d"]);
+    });
+
+    it("reports incompatible cells in DOUBLE columns instead of silent coercion", () => {
+      const columns = ["amount"];
+      const rawRows = [["10"], ["not-a-number"], ["20"]];
+      const lexemes = parseTabularLexemes(columns, rawRows);
+      const types = inferTabularColumnTypes(columns, lexemes);
+      expect(types[0]).toBe("DOUBLE");
+      const { rows, diagnostics } = normalizeTabularCells(columns, lexemes, types);
+      expect(rows[1]![0]).toBe("not-a-number");
+      expect(diagnostics.incompatible_count).toBe(1);
+      const full = inspectFromTabular(columns, rawRows);
+      expect(full.diagnostics.incompatible_count).toBe(1);
+    });
+
+    it("infers ISO date columns without name heuristics", () => {
+      const columns = ["when"];
+      const rawRows = [["2026-10-12"], ["2026-01-01"], ["not-a-date"]];
+      const lexemes = parseTabularLexemes(columns, rawRows);
+      const types = inferTabularColumnTypes(columns, lexemes);
+      expect(types[0]).toBe("VARCHAR");
+      const clean = [["2026-10-12"], ["2026-01-01"], ["2026-01-02"]];
+      const lex2 = parseTabularLexemes(columns, clean);
+      expect(inferTabularColumnTypes(columns, lex2)[0]).toBe("DATE");
+    });
+
+    it("normalizes booleans to 0/1 consistently across formats", () => {
+      const { sample } = inspectFromTabular(
+        ["flag"],
+        [[true], [false], ["true"]],
+      );
+      expect(sample.types[0]).toBe("DOUBLE");
+      expect(sample.rows[0]![0]).toBe(1);
+      expect(sample.rows[1]![0]).toBe(0);
+    });
+
+    it("preserves ZIP, FIPS, and long digit identifiers as strings", () => {
+      expect(looksLikeIdentifierString("02134")).toBe(true);
+      expect(looksLikeIdentifierString("00123")).toBe(true);
+      expect(looksLikeIdentifierString("1234567890123456789")).toBe(true);
+      const { sample } = inspectFromTabular(
+        ["zip", "fips", "record_id", "amount"],
+        [["02134", "00123", "1234567890123456789", "10.5"]],
+      );
+      expect(sample.types[0]).toBe("VARCHAR");
+      expect(sample.types[1]).toBe("VARCHAR");
+      expect(sample.types[2]).toBe("VARCHAR");
+      expect(sample.rows[0]![0]).toBe("02134");
+      expect(sample.rows[0]![1]).toBe("00123");
+      expect(sample.rows[0]![2]).toBe("1234567890123456789");
+      expect(sample.rows[0]![3]).toBe(10.5);
+    });
+  });
+
+  describe("sniffCsvDelimiter (LOOM-493)", () => {
+    it("detects tab and semicolon headers", () => {
+      expect(sniffCsvDelimiter("a\tb\tc\n1\t2\t3")).toBe("\t");
+      expect(sniffCsvDelimiter("a;b;c\n1;2;3")).toBe(";");
+      expect(sniffCsvDelimiter("a,b,c\n1,2,3")).toBe(",");
     });
   });
 });

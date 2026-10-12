@@ -25,5 +25,11 @@
   "preview_urls": true,
   "observability": {
     "enabled": true
-  }
+  },
+  // LOOM-509: upload maps to Cloudflare observability (not into public ASSETS/`out`).
+  "upload_source_maps": true,
+  // LOOM-654: browser-origin allowlist is defined once in workers/allowedOrigins.ts
+  // (DEFAULT_ALLOWED_ORIGIN_HOSTS). Set `vars.ALLOWED_ORIGIN_HOSTS` here ONLY to override it
+  // for a staging deploy — do not paste a second copy of the default list.
+  // Story/feedback rate limits use LOOM_STORIES KV keys `rl:*` (LOOM-102) for cross-colo caps.
 }

@@ -3,10 +3,7 @@
 // =================================================================
 
 import { useLoomStore } from "./store";
-import {
-  capturePlatformPng,
-  looksLikeFailedCapture,
-} from "./capturePlatformPng";
+import { capturePlatformPng, looksLikeFailedCapture } from "./capturePlatformPng";
 import {
   buildCarouselZip,
   buildSocialCaption,
@@ -16,18 +13,6 @@ import {
 } from "./socialExport";
 import { getRecommendationReason } from "./recommendations";
 
-function afterPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
-    });
-  });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 /**
  * Export every chart slot in a dashboard as numbered PNGs at a platform size,
  * then return a ZIP blob (PNGs + caption.txt).
@@ -35,13 +20,14 @@ function sleep(ms: number): Promise<void> {
 export async function exportStoryCarouselZip(
   dashboardId: string,
   presetId: SocialPresetId,
-): Promise<{ blob: Blob; count: number } | null> {
+): Promise<{ blob: Blob; count: number; skipped: string[] } | null> {
   const getState = useLoomStore.getState;
   const dashboard = getState().dashboards.find((d) => d.id === dashboardId);
   const chartIds =
     dashboard?.slots.filter((s) => s.viewType === "chart").map((s) => s.viewId) ?? [];
   if (chartIds.length === 0) return null;
 
+  const prevViewId = getState().activeChart?.id ?? getState().chartViews[0]?.id ?? null;
   const preset = getSocialPreset(presetId);
   getState().setPreviewCapture({
     dashboardId,
@@ -52,6 +38,7 @@ export async function exportStoryCarouselZip(
 
   const slides: { filename: string; blob: Blob }[] = [];
   const captionParts: string[] = [];
+  const skipped: string[] = [];
 
   try {
     for (let i = 0; i < chartIds.length; i++) {
@@ -65,13 +52,14 @@ export async function exportStoryCarouselZip(
         label: `Slide ${i + 1}/${chartIds.length}: ${name}`,
       });
       getState().applyChartView(cid);
-      await sleep(200);
-      await afterPaint();
 
       const blob = await capturePlatformPng(presetId, { attempts: 3 });
-      if (!blob || (await looksLikeFailedCapture(blob))) continue;
+      if (!blob || (await looksLikeFailedCapture(blob))) {
+        skipped.push(name);
+        continue;
+      }
 
-      const pad = String(i + 1).padStart(2, "0");
+      const pad = String(slides.length + 1).padStart(2, "0");
       const fileBase = slugifyFilename(name);
       slides.push({ filename: `${pad}-${fileBase}.png`, blob });
 
@@ -82,7 +70,7 @@ export async function exportStoryCarouselZip(
         name;
       captionParts.push(
         buildSocialCaption({
-          title: `${i + 1}. ${title}`,
+          title: `${slides.length}. ${title}`,
           subtitle: chart?.subtitle,
           reason: chart ? getRecommendationReason(chart) : null,
           source: view?.fileName ?? getState().selectedFile?.name,
@@ -91,6 +79,10 @@ export async function exportStoryCarouselZip(
     }
 
     if (slides.length === 0) return null;
+
+    if (skipped.length > 0) {
+      getState().setToast(`${skipped.length} slide(s) failed: ${skipped.slice(0, 3).join(", ")}${skipped.length > 3 ? "…" : ""}`);
+    }
 
     const zip = await buildCarouselZip(slides, [
       {
@@ -102,8 +94,9 @@ export async function exportStoryCarouselZip(
         text: `Loom story pack — ${preset.label}\n${slides.length} slides\nDrop into Instagram carousel or Stories in order.\n`,
       },
     ]);
-    return { blob: zip, count: slides.length };
+    return { blob: zip, count: slides.length, skipped };
   } finally {
     getState().setPreviewCapture(null);
+    if (prevViewId) getState().applyChartView(prevViewId);
   }
 }

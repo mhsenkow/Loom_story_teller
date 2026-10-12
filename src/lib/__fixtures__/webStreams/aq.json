@@ -1,0 +1,17 @@
+{
+  "cities": [
+    {
+      "name": "Oakland",
+      "lat": 37.8,
+      "lon": -122.2,
+      "current": {
+        "time": "2026-06-01T12:00",
+        "pm2_5": 12.3,
+        "pm10": 20.1,
+        "ozone": 40,
+        "nitrogen_dioxide": 8,
+        "european_aqi": 25
+      }
+    }
+  ]
+}

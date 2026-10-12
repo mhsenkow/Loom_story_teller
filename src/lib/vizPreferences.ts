@@ -6,6 +6,7 @@
 // =================================================================
 
 import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
+import { inferColumnType } from "./columnClassify";
 
 export type VizSwipeAction = "like" | "dislike";
 
@@ -65,17 +66,17 @@ function isIdLike(name: string): boolean {
 
 function inferFieldType(
   field: string | null | undefined,
-  columns: { name: string; data_type: string }[] | null | undefined,
+  columns: { name: string; data_type: string; min_value?: string | null; max_value?: string | null }[] | null | undefined,
 ): ColTypeHint {
   if (!field) return "unknown";
   const col = columns?.find((c) => c.name === field);
-  const t = (col?.data_type ?? "").toUpperCase();
-  if (["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL", "HUGEINT", "TINYINT", "SMALLINT"].some((n) => t.includes(n))) {
-    return "quantitative";
+  if (col) {
+    const t = inferColumnType(col.data_type, col.name, col.min_value, col.max_value);
+    if (t === "quantitative") return "quantitative";
+    if (t === "temporal") return "temporal";
+    return "nominal";
   }
-  if (["DATE", "TIMESTAMP", "TIME", "INTERVAL"].some((n) => t.includes(n))) return "temporal";
   if (isTemporalLike(field)) return "temporal";
-  if (col) return "nominal";
   return "unknown";
 }
 

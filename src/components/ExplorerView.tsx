@@ -11,11 +11,25 @@ import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLoomStore } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
+import {
+  applyVisibleColumnOrder,
+  cellMatchesExplorerNumericFilter,
+  formatExplorerColumnNumber,
+  numericMinMaxForColumn,
+  parseExplorerNumericFilter,
+  remapSelectedRowIndices,
+} from "@/lib/tableExplorer";
+import { compareExplorerCells } from "@/lib/tableSort";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { isDateColumn, formatDateCell } from "@/lib/dateFormat";
 import { TableSkeleton } from "@/components/Skeleton";
 import { StartHere } from "@/components/StartHere";
 import { useIsMobile } from "@/lib/useMediaQuery";
+import { Dialog } from "@/components/ui/Dialog";
+
+function colWidthStorageKey(filePath: string): string {
+  return `loom-col-widths:${filePath}`;
+}
 
 const ROW_HEIGHT = 28;
 const VIRTUALIZE_THRESHOLD = 30;
@@ -26,14 +40,14 @@ type SparklineViz = "line" | "histogram";
 const NUMERIC_TYPES = new Set(["INTEGER", "BIGINT", "DOUBLE", "FLOAT", "REAL", "DECIMAL", "TINYINT", "SMALLINT"]);
 
 function isNumericCol(
-  colIndex: number,
-  columns: string[],
+  colName: string,
+  allColumns: string[],
   types: string[] | undefined,
   columnStats: { name: string; data_type: string }[]
 ): boolean {
-  const t = types?.[colIndex]?.toUpperCase() ?? "";
+  const rawIdx = allColumns.indexOf(colName);
+  const t = rawIdx >= 0 ? types?.[rawIdx]?.toUpperCase() ?? "" : "";
   if (NUMERIC_TYPES.has(t) || /INT|FLOAT|DOUBLE|DECIMAL|REAL/.test(t)) return true;
-  const colName = columns[colIndex];
   const stat = columnStats.find((c) => c.name === colName);
   return stat ? NUMERIC_TYPES.has(stat.data_type.toUpperCase()) || /int|float|double|decimal|real/i.test(stat.data_type) : false;
 }
@@ -129,27 +143,18 @@ function trendDirection(values: number[]): 1 | -1 | 0 {
 
 function useNumericColumnData(
   rows: (string | number | boolean | null)[][] | undefined,
-  columns: string[] | undefined,
-  columnStats: { name: string; data_type: string }[]
+  displayColumns: string[] | undefined,
+  allColumns: string[],
 ) {
   return useMemo(() => {
-    if (!rows?.length || !columns?.length) return null;
+    if (!rows?.length || !displayColumns?.length) return null;
     const byCol: Record<number, { min: number; max: number; values: number[] }> = {};
-    columns.forEach((_, ci) => {
-      const values: number[] = [];
-      for (const row of rows) {
-        const v = Number(row[ci]);
-        if (!Number.isNaN(v)) values.push(v);
-      }
-      if (values.length === 0) return;
-      byCol[ci] = {
-        min: Math.min(...values),
-        max: Math.max(...values),
-        values,
-      };
+    displayColumns.forEach((colName, ci) => {
+      const stats = numericMinMaxForColumn(rows, colName, allColumns);
+      if (stats) byCol[ci] = stats;
     });
     return byCol;
-  }, [rows, columns]);
+  }, [rows, displayColumns, allColumns]);
 }
 
 const DEFAULT_TABLE_ENHANCE = {
@@ -168,30 +173,81 @@ export function ExplorerView() {
   /** Column filter row is opt-in on phones so the grid gets more vertical room. */
   const [showColumnFilters, setShowColumnFilters] = useState(false);
   const [profilingCol, setProfilingCol] = useState<string | null>(null);
+  const [columnWidths, setColumnWidths] = useState<Record<string, number>>({});
+  const [cellDetail, setCellDetail] = useState<{ column: string; value: string } | null>(null);
+  const resizeRef = useRef<{ col: string; startX: number; startW: number } | null>(null);
+
+  useEffect(() => {
+    if (!selectedFile?.path) {
+      setColumnWidths({});
+      return;
+    }
+    try {
+      const raw = localStorage.getItem(colWidthStorageKey(selectedFile.path));
+      setColumnWidths(raw ? (JSON.parse(raw) as Record<string, number>) : {});
+    } catch {
+      setColumnWidths({});
+    }
+  }, [selectedFile?.path]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      const r = resizeRef.current;
+      if (!r || !selectedFile?.path) return;
+      const w = Math.max(80, Math.min(520, r.startW + (e.clientX - r.startX)));
+      setColumnWidths((prev) => {
+        const next = { ...prev, [r.col]: w };
+        try {
+          localStorage.setItem(colWidthStorageKey(selectedFile.path), JSON.stringify(next));
+        } catch {
+          /* ignore */
+        }
+        return next;
+      });
+    };
+    const onUp = () => {
+      resizeRef.current = null;
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [selectedFile?.path]);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressFiredRef = useRef(false);
   const selectedSet = useMemo(() => new Set(selectedRowIndices), [selectedRowIndices]);
+  const prevSampleRef = useRef<typeof sampleRows>(null);
+  useEffect(() => {
+    const prev = prevSampleRef.current;
+    prevSampleRef.current = sampleRows;
+    if (!prev?.rows || !sampleRows?.rows || prev.rows === sampleRows.rows) return;
+    if (selectedRowIndices.length === 0) return;
+    const remapped = remapSelectedRowIndices(
+      prev.columns,
+      prev.rows,
+      selectedRowIndices,
+      sampleRows.columns,
+      sampleRows.rows,
+    );
+    if (remapped.join(",") !== selectedRowIndices.join(",")) {
+      setSelectedRowIndices(remapped);
+    }
+  }, [sampleRows, selectedRowIndices, setSelectedRowIndices]);
   const allColumns = sampleRows?.columns ?? [];
   const types = sampleRows?.types;
   const rawRows = sampleRows?.rows ?? [];
   const totalRowCount = selectedFile?.row_count ?? 0;
 
-  const columns = useMemo(() => {
-    let list = allColumns;
-    if (tablePrefs.visibleColumns != null && tablePrefs.visibleColumns.length > 0) {
-      const set = new Set(tablePrefs.visibleColumns);
-      list = allColumns.filter((c) => set.has(c));
-    }
-    if (tablePrefs.columnOrder != null && tablePrefs.columnOrder.length === list.length) {
-      const order = new Map(tablePrefs.columnOrder.map((c, i) => [c, i]));
-      list = [...list].sort((a, b) => (order.get(a) ?? 999) - (order.get(b) ?? 999));
-    }
-    return list;
-  }, [allColumns, tablePrefs.visibleColumns, tablePrefs.columnOrder]);
+  const columns = useMemo(
+    () => applyVisibleColumnOrder(allColumns, tablePrefs.visibleColumns, tablePrefs.columnOrder),
+    [allColumns, tablePrefs.visibleColumns, tablePrefs.columnOrder],
+  );
 
   const [sortCol, setSortCol] = useState<number | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sortDir, setSortDir] = useState<SortDir>(null);
   const [tableEnhance, setTableEnhance] = useState(DEFAULT_TABLE_ENHANCE);
   // On phones, keep header cells lean so columns stay scannable
   const enhance = isMobile
@@ -253,7 +309,7 @@ export function ExplorerView() {
   }, [columnsOpen]);
 
   const { sortedRows, sortedOriginalIndices } = useMemo(() => {
-    if (sortCol === null || sortCol < 0 || sortCol >= columns.length) {
+    if (sortCol === null || sortDir === null || sortCol < 0 || sortCol >= columns.length) {
       return { sortedRows: rawRows, sortedOriginalIndices: rawRows.map((_, i) => i) };
     }
     const colName = columns[sortCol];
@@ -262,12 +318,11 @@ export function ExplorerView() {
     const dir = sortDir === "asc" ? 1 : -1;
     const indexed = rawRows.map((row, i) => ({ row, i }));
     indexed.sort((a, b) => {
-      const va = a.row[rawColIdx];
-      const vb = b.row[rawColIdx];
-      const na = typeof va === "number" ? va : Number(va);
-      const nb = typeof vb === "number" ? vb : Number(vb);
-      if (!Number.isNaN(na) && !Number.isNaN(nb)) return (na - nb) * dir;
-      return String(va ?? "").localeCompare(String(vb ?? "")) * dir;
+      const va = a.row[rawColIdx] as string | number | boolean | null;
+      const vb = b.row[rawColIdx] as string | number | boolean | null;
+      const cmp = compareExplorerCells(va, vb, dir);
+      if (cmp !== 0) return cmp;
+      return (a.i - b.i) * dir;
     });
     return {
       sortedRows: indexed.map((x) => x.row),
@@ -301,7 +356,7 @@ export function ExplorerView() {
       rows = r;
       indices = i;
     }
-    const effectiveFilters = { ...tableColumnFilters, ...filterInputValues };
+    const effectiveFilters = tableColumnFilters ?? {};
     const colFilters = Object.keys(effectiveFilters).some((k) => (effectiveFilters[k] ?? "").trim());
     if (!colFilters) return { displayRows: rows, displayOriginalIndices: indices };
     const passed: { row: (string | number | boolean | null)[]; idx: number }[] = [];
@@ -324,13 +379,15 @@ export function ExplorerView() {
         }
         const stat = columnStats.find((s) => s.name === col);
         const isNum = stat && (NUMERIC_TYPES.has(stat.data_type.toUpperCase()) || /int|float|double|decimal|real/i.test(stat.data_type));
-        if (isNum && f.includes("-")) {
-          const [a, b] = f.split("-").map((x) => Number(x.trim()));
-          const v = Number(cell);
-          if (Number.isNaN(v)) { ok = false; break; }
-          if (!Number.isNaN(a) && v < a) { ok = false; break; }
-          if (!Number.isNaN(b) && v > b) { ok = false; break; }
-          continue;
+        if (isNum) {
+          const parsed = parseExplorerNumericFilter(filterVal);
+          if (parsed) {
+            if (!cellMatchesExplorerNumericFilter(cell, parsed)) {
+              ok = false;
+              break;
+            }
+            continue;
+          }
         }
         if (!str.includes(f)) {
           ok = false;
@@ -343,9 +400,18 @@ export function ExplorerView() {
       displayRows: passed.map((p) => p.row),
       displayOriginalIndices: passed.map((p) => p.idx),
     };
-  }, [sortedRows, sortedOriginalIndices, filterSet, tableColumnFilters, filterInputValues, columns, allColumns, columnStats]);
+  }, [sortedRows, sortedOriginalIndices, filterSet, tableColumnFilters, columns, allColumns, columnStats]);
 
   const useVirtual = displayRows.length > VIRTUALIZE_THRESHOLD;
+
+  useEffect(() => {
+    if (focusedRowIndex == null || !tableScrollRef.current) return;
+    const row = tableScrollRef.current.querySelector(
+      `[data-explorer-focus-row="${focusedRowIndex}"]`,
+    );
+    row?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [focusedRowIndex]);
+
   const rowVirtualizer = useVirtualizer({
     count: displayRows.length,
     getScrollElement: () => tableScrollRef.current,
@@ -361,38 +427,48 @@ export function ExplorerView() {
     if (rawIdx < 0) return;
     const val = row[rawIdx];
     const text = val === null || val === undefined ? "" : String(val);
-    void navigator.clipboard.writeText(text);
+    void navigator.clipboard.writeText(text).then(() => setToast("Cell copied"));
     setContextMenu(null);
-  }, [displayRows, columns, allColumns]);
+  }, [displayRows, columns, allColumns, setToast]);
 
   const copyRow = useCallback((rowIndex: number) => {
     const row = displayRows[rowIndex];
     if (!row) return;
     const text = row.map((c) => (c === null || c === undefined ? "" : String(c))).join("\t");
-    void navigator.clipboard.writeText(text);
+    void navigator.clipboard.writeText(text).then(() => setToast("Row copied"));
     setContextMenu(null);
   }, [displayRows]);
 
-  const numericData = useNumericColumnData(displayRows, columns, columnStats);
+  const numericData = useNumericColumnData(displayRows, columns, allColumns);
 
   const numericColSet = useMemo(() => {
     const set = new Set<number>();
-    columns.forEach((_, ci) => {
-      if (isNumericCol(ci, columns, types, columnStats)) set.add(ci);
+    columns.forEach((colName, ci) => {
+      if (isNumericCol(colName, allColumns, types, columnStats)) set.add(ci);
     });
     return set;
-  }, [columns, types, columnStats]);
+  }, [columns, allColumns, types, columnStats]);
 
   const handleSort = useCallback((ci: number) => {
     setSortCol((prev) => {
       if (prev === ci) {
-        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+        setSortDir((d) => (d === "asc" ? "desc" : d === "desc" ? null : "asc"));
         return ci;
       }
       setSortDir("asc");
       return ci;
     });
   }, []);
+
+  const handleSortKey = useCallback(
+    (e: React.KeyboardEvent, ci: number) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        handleSort(ci);
+      }
+    },
+    [handleSort],
+  );
 
   const [draggedCol, setDraggedCol] = useState<string | null>(null);
   const handleColumnDragStart = useCallback((e: React.DragEvent, colName: string) => {
@@ -452,9 +528,11 @@ export function ExplorerView() {
       const stat = columnStats.find((s) => s.name === col);
       const isDateCol = stat ? isDateColumn(stat.data_type) : false;
       const isNum = numericColSet.has(ci);
+      const isIntegerCol = stat ? NUMERIC_TYPES.has(stat.data_type.toUpperCase()) && /int/i.test(stat.data_type) : false;
       const colData = numericData?.[ci];
       const numVal = typeof cell === "number" ? cell : Number(cell);
       const isNumCell = !(cell === null || cell === "") && !Number.isNaN(numVal);
+      const numDisplay = isNumCell ? formatExplorerColumnNumber(col, numVal, isIntegerCol) : "";
       const pct = isNumCell && colData && colData.max > colData.min ? (numVal - colData.min) / (colData.max - colData.min) : 0;
       const heatOpacity = enhance.showHeat && isNumCell && colData ? pct * 0.12 : 0;
       const showBar = enhance.showValueBars && isNum;
@@ -462,15 +540,29 @@ export function ExplorerView() {
         heatOpacity > 0 && typeof document !== "undefined"
           ? { background: `color-mix(in srgb, var(--loom-accent) ${Math.round(heatOpacity * 100)}%, transparent)` }
           : undefined;
-      const displayStr = isDateCol ? formatDateCell(cell) : String(cell ?? "");
+      const displayStr = isDateCol
+        ? formatDateCell(cell, stat?.data_type)
+        : cell == null || cell === ""
+          ? "—"
+          : String(cell);
+      const colW = columnWidths[col] ?? 200;
       return (
         <td
           key={col}
-          className="px-2 py-1 text-loom-text whitespace-nowrap max-w-[200px] truncate align-middle"
-          style={heatStyle}
+          role="gridcell"
+          tabIndex={0}
+          className="px-2 py-1 text-loom-text whitespace-nowrap truncate align-middle"
+          style={{ ...heatStyle, maxWidth: colW, minWidth: colW }}
           onContextMenu={(e) => {
             e.preventDefault();
             setContextMenu({ x: e.clientX, y: e.clientY, rowIndex: ri, colIndex: ci });
+          }}
+          onClick={() => setCellDetail({ column: col, value: displayStr })}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setCellDetail({ column: col, value: displayStr });
+            }
           }}
         >
           {cell === null || cell === "" ? (
@@ -482,7 +574,7 @@ export function ExplorerView() {
                   <span className="block h-full rounded-full bg-loom-accent/80" style={{ width: `${Math.min(100, pct * 100)}%` }} />
                 </span>
               )}
-              <span className="text-loom-accent">{cell.toLocaleString()}</span>
+              <span className="text-loom-accent">{formatExplorerColumnNumber(col, cell, isIntegerCol)}</span>
             </span>
           ) : isNumCell && isNum ? (
             <span className="flex items-center gap-2">
@@ -491,15 +583,15 @@ export function ExplorerView() {
                   <span className="block h-full rounded-full bg-loom-accent/80" style={{ width: `${Math.min(100, pct * 100)}%` }} />
                 </span>
               )}
-              <span className="text-loom-accent">{numVal.toLocaleString()}</span>
+              <span className="text-loom-accent">{numDisplay}</span>
             </span>
           ) : (
-            <span className="truncate block max-w-[180px]" title={displayStr}>{displayStr}</span>
+            <span className="truncate block">{displayStr}</span>
           )}
         </td>
       );
     },
-    [allColumns, numericColSet, numericData, enhance, setContextMenu, columnStats]
+    [allColumns, numericColSet, numericData, enhance, setContextMenu, columnStats, columnWidths]
   );
 
   if (!selectedFile) {
@@ -508,6 +600,19 @@ export function ExplorerView() {
 
   return (
     <div className="flex flex-col h-full w-full overflow-hidden animate-fade-in">
+      <Dialog open={!!cellDetail} onClose={() => setCellDetail(null)} ariaLabel="Cell value">
+        {cellDetail && (
+          <div className="p-4 max-w-lg">
+            <h3 className="text-sm font-semibold text-loom-text mb-2">{cellDetail.column}</h3>
+            <p className="text-xs text-loom-text whitespace-pre-wrap break-all font-mono max-h-[50vh] overflow-y-auto">
+              {cellDetail.value}
+            </p>
+            <button type="button" className="loom-btn-primary text-xs mt-3" onClick={() => setCellDetail(null)}>
+              Close
+            </button>
+          </div>
+        )}
+      </Dialog>
       {contextMenu && (
         <div
           className="fixed z-50 min-w-[120px] py-1 bg-loom-surface border border-loom-border rounded shadow-lg text-xs"
@@ -544,7 +649,16 @@ export function ExplorerView() {
           className="text-loom-muted font-mono shrink-0"
           title={`${selectedFile.row_count.toLocaleString()} rows · ${columnStats.length} columns`}
         >
-          {formatNumber(selectedFile.row_count)}<span className="hidden sm:inline"> rows</span><span className="sm:hidden">r</span> &middot; {columnStats.length}<span className="hidden sm:inline"> cols</span><span className="sm:hidden">c</span>
+          {rawRows.length > 0 && rawRows.length < totalRowCount ? (
+            <>
+              Showing {formatNumber(rawRows.length)} of {formatNumber(totalRowCount)}<span className="hidden sm:inline"> rows (sample)</span>
+            </>
+          ) : (
+            <>
+              {formatNumber(totalRowCount)}<span className="hidden sm:inline"> rows</span><span className="sm:hidden">r</span>
+            </>
+          )}
+          {" "}&middot; {columnStats.length}<span className="hidden sm:inline"> cols</span><span className="sm:hidden">c</span>
         </span>
         <div className="flex-1 min-w-0" />
         {selectedRowIndices.length > 0 && (
@@ -568,6 +682,32 @@ export function ExplorerView() {
               CSV
             </button>
           </div>
+        )}
+        {displayRows.length > 0 && sampleRows && (
+          <button
+            type="button"
+            onClick={() => {
+              const types = columns.map((c) => sampleRows.types?.[sampleRows.columns.indexOf(c)] ?? "VARCHAR");
+              const rows = displayRows.map((row) =>
+                columns.map((c) => {
+                  const idx = allColumns.indexOf(c);
+                  return idx >= 0 ? (row[idx] ?? null) : null;
+                }),
+              );
+              const csv = queryResultToCsv({
+                columns,
+                rows,
+                types,
+                total_rows: rows.length,
+              });
+              downloadCsv(csv, `${selectedFile?.name?.replace(/\.[^.]+$/, "") ?? "data"}-view`);
+              setToast(`Exported ${rows.length} rows (${columns.length} columns)`);
+            }}
+            className="loom-btn-ghost py-0 px-1.5 text-xs shrink-0"
+            title="Export visible columns and filtered rows"
+          >
+            Export view
+          </button>
         )}
         <button
           type="button"
@@ -666,6 +806,7 @@ export function ExplorerView() {
                           type="checkbox"
                           checked={visible}
                           onChange={() => {
+                            pushTableUndo();
                             const next = tablePrefs.visibleColumns ?? allColumns;
                             const set = new Set(next);
                             if (visible) set.delete(col);
@@ -682,7 +823,10 @@ export function ExplorerView() {
                   <div className="px-2 mt-2">
                     <button
                       type="button"
-                      onClick={() => setTablePrefs({ visibleColumns: null, columnOrder: null })}
+                      onClick={() => {
+                        pushTableUndo();
+                        setTablePrefs({ visibleColumns: null, columnOrder: null });
+                      }}
                       className="w-full px-2 py-1 text-2xs text-loom-muted hover:text-loom-text border border-loom-border rounded"
                     >
                       Reset to all
@@ -731,7 +875,7 @@ export function ExplorerView() {
                       <button type="button" onClick={() => { pushTableUndo(); applyTableView(v.id); setFilterInputValues(v.columnFilters ?? {}); setViewsOpen(false); }} className="flex-1 text-left text-2xs text-loom-text hover:bg-loom-elevated truncate" title={v.name}>
                         {v.name}
                       </button>
-                      <button type="button" onClick={() => removeTableView(v.id)} className="opacity-0 group-hover:opacity-100 text-loom-muted hover:text-loom-text text-2xs" aria-label={`Remove ${v.name}`}>×</button>
+                      <button type="button" onClick={() => removeTableView(v.id)} className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100 focus:opacity-100 text-loom-muted hover:text-loom-text text-2xs" aria-label={`Remove ${v.name}`}>×</button>
                     </div>
                   ))}
                   {tableViews.length === 0 && <p className="px-2 py-1 text-2xs text-loom-muted">No saved views</p>}
@@ -861,12 +1005,15 @@ export function ExplorerView() {
                   return (
                     <th
                       key={col}
+                      style={{ minWidth: columnWidths[col] ?? 200, maxWidth: columnWidths[col] ?? 200 }}
+                      tabIndex={0}
                       draggable
                       onDragStart={(e) => handleColumnDragStart(e, col)}
                       onDragOver={handleColumnDragOver}
                       onDrop={(e) => handleColumnDrop(e, col)}
                       onDragEnd={handleColumnDragEnd}
-                      className={`px-2 py-1 text-left text-2xs font-semibold text-loom-muted whitespace-nowrap sticky top-0 bg-loom-bg border-b border-loom-border cursor-pointer hover:bg-loom-elevated/60 select-none ${draggedCol === col ? "opacity-50" : ""}`}
+                      className={`relative px-2 py-1 text-left text-2xs font-semibold text-loom-muted whitespace-nowrap sticky top-0 bg-loom-bg border-b border-loom-border cursor-pointer hover:bg-loom-elevated/60 select-none ${draggedCol === col ? "opacity-50" : ""}`}
+                      onKeyDown={(e) => handleSortKey(e, ci)}
                       onClick={() => {
                         // A long-press already opened the profile — don't also sort.
                         if (longPressFiredRef.current) {
@@ -925,12 +1072,27 @@ export function ExplorerView() {
                           </>
                         )}
                       </div>
+                      <span
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label={`Resize ${col}`}
+                        className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-loom-accent/40"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          resizeRef.current = {
+                            col,
+                            startX: e.clientX,
+                            startW: columnWidths[col] ?? 200,
+                          };
+                        }}
+                      />
                     </th>
                   );
                 })}
               </tr>
               {(!isMobile || showColumnFilters) && (
-              <tr className="bg-loom-surface/50">
+              <tr className="bg-loom-surface/50 sticky top-7 z-10">
                 <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-10 bg-loom-surface w-8" />
                 <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-10 bg-loom-surface w-10" />
                 {columns.map((col) => (
@@ -985,6 +1147,7 @@ export function ExplorerView() {
                         return (
                           <tr
                             key={virtualRow.key}
+                            data-explorer-focus-row={ri}
                             className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 ${isAnomaly ? "bg-loom-warning/10 border-l-2 border-l-loom-warning" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
                             title={isAnomaly ? "Marked as anomaly (Smart tab)" : undefined}
                             aria-rowindex={ri + 1}
@@ -1001,7 +1164,7 @@ export function ExplorerView() {
                                 aria-label={`Select row ${ri + 1}`}
                               />
                             </td>
-                            <td className="px-2 py-1 text-loom-muted w-10 sticky left-8 z-10 bg-inherit border-r border-loom-border/30">{ri + 1}</td>
+                            <td className="px-2 py-1 text-loom-muted w-10 sticky left-8 z-10 bg-inherit border-r border-loom-border/30">{originalIdx + 1}</td>
                             {columns.map((col, ci) => renderCell(row, ri, ci, col, originalIdx))}
                           </tr>
                         );
@@ -1016,6 +1179,7 @@ export function ExplorerView() {
                   return (
                     <tr
                       key={ri}
+                      data-explorer-focus-row={ri}
                       className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 transition-colors ${isAnomaly ? "bg-loom-warning/10 border-l-2 border-l-loom-warning" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
                       title={isAnomaly ? "Marked as anomaly (Smart tab)" : undefined}
                       aria-rowindex={ri + 1}
@@ -1031,7 +1195,7 @@ export function ExplorerView() {
                           aria-label={`Select row ${ri + 1}`}
                         />
                       </td>
-                      <td className="px-2 py-1 text-loom-muted sticky left-8 z-10 bg-inherit border-r border-loom-border/30">{ri + 1}</td>
+                      <td className="px-2 py-1 text-loom-muted sticky left-8 z-10 bg-inherit border-r border-loom-border/30">{originalIdx + 1}</td>
                       {columns.map((col, ci) => renderCell(row, ri, ci, col, originalIdx))}
                     </tr>
                   );

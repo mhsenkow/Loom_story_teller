@@ -11,9 +11,13 @@ type Json = Record<string, unknown>;
 
 const asObj = (v: unknown): Json => (v && typeof v === "object" ? (v as Json) : {});
 const asArr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+/** Finite number or numeric string only — blank/whitespace, booleans and arrays are null, never 0 (LOOM-498). */
 const numOrNull = (v: unknown): number | null => {
-  if (v == null || v === "") return null;
-  const n = Number(v);
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v !== "string") return null;
+  const t = v.trim();
+  if (!t) return null;
+  const n = Number(t);
   return Number.isFinite(n) ? n : null;
 };
 
@@ -301,10 +305,37 @@ export function worldBankWide(countryList: unknown, bodies: unknown[]): { rows: 
 
 // ---- Citi Bike (GBFS station_information ⨝ station_status) ----
 
+/** GBFS vehicle_type_id that denotes an e-bike (Citi Bike also publishes `num_ebikes_available`). */
+export function isEbikeVehicleType(id: unknown): boolean {
+  return /(^e$|e-?bike|electric)/i.test(String(id ?? ""));
+}
+
+/** GBFS booleans arrive as 0/1 or true/false; anything else is "unknown". */
+const gbfsFlag = (v: unknown): boolean | null => {
+  if (v === 1 || v === true || v === "1" || v === "true") return true;
+  if (v === 0 || v === false || v === "0" || v === "false") return false;
+  return null;
+};
+
+/** A plausible Unix-seconds timestamp (rejects 0 / 86400 "never reported" placeholders). */
+const plausibleEpoch = (v: unknown): number | null => {
+  const n = numOrNull(v);
+  return n != null && n > 1e9 ? n : null;
+};
+
 /**
- * Compact station rows with the registry column names. `pct_full` is a
- * percentage 0–100 (bikes available ÷ capacity, capped at 100; null when
- * capacity is 0). Stations that are not installed are dropped.
+ * Citi Bike parity contract (LOOM-435; mirrored by `citibike_rows` in
+ * src-tauri/src/sources.rs and checked against shared fixtures in
+ * src-tauri/tests/fixtures/sources/gbfs_parity_*.json):
+ *  - station kept only if it is in station_information, not
+ *    `is_installed` false/0, and has finite lat/lon;
+ *  - capacity / bikes / e-bikes / docks are null when absent (never 0);
+ *    capacity 0 stays 0 with pct_full null;
+ *  - e-bikes: `num_ebikes_available`, else the sum of
+ *    `vehicle_types_available` entries whose id is an e-bike type, else null;
+ *  - pct_full = bikes ÷ capacity × 100, 1 decimal, capped at 100;
+ *  - ts = station `last_reported` if plausible (> 1e9), else the feed
+ *    `last_updated` if plausible, else null (never "now").
  */
 export function joinCitibike(info: unknown, status: unknown): { stations: Json[] } {
   const infoById = new Map<string, Json>();
@@ -312,27 +343,25 @@ export function joinCitibike(info: unknown, status: unknown): { stations: Json[]
     const o = asObj(s);
     infoById.set(String(o.station_id ?? ""), o);
   }
+  const feedUpdated = plausibleEpoch(asObj(status).last_updated);
   const stations: Json[] = [];
   for (const s of asArr(asObj(asObj(status).data).stations)) {
     const st = asObj(s);
     const id = String(st.station_id ?? "");
     const inf = infoById.get(id);
     if (!inf) continue;
-    if (st.is_installed === 0 || st.is_installed === false) continue;
+    if (gbfsFlag(st.is_installed) === false) continue;
     const lat = numOrNull(inf.lat);
     const lon = numOrNull(inf.lon);
     if (lat == null || lon == null) continue;
-    const capacity = numOrNull(inf.capacity) ?? 0;
-    const bikes = numOrNull(st.num_bikes_available) ?? 0;
+    const capacity = numOrNull(inf.capacity);
+    const bikes = numOrNull(st.num_bikes_available);
     let ebikes = numOrNull(st.num_ebikes_available);
     if (ebikes == null) {
-      // GBFS v2.1+: vehicle_types_available [{vehicle_type_id, count}]
-      const vt = asArr(st.vehicle_types_available).map(asObj);
-      ebikes = vt.length
-        ? vt.filter((v) => /e|electric/i.test(String(v.vehicle_type_id ?? ""))).reduce((n, v) => n + (numOrNull(v.count) ?? 0), 0)
-        : 0;
+      const vt = asArr(st.vehicle_types_available).map(asObj).filter((v) => isEbikeVehicleType(v.vehicle_type_id));
+      ebikes = vt.length ? vt.reduce((n, v) => n + (numOrNull(v.count) ?? 0), 0) : null;
     }
-    const reported = numOrNull(st.last_reported);
+    const reported = plausibleEpoch(st.last_reported) ?? feedUpdated;
     stations.push({
       station_id: id,
       name: String(inf.name ?? ""),
@@ -341,10 +370,13 @@ export function joinCitibike(info: unknown, status: unknown): { stations: Json[]
       capacity,
       bikes_available: bikes,
       ebikes_available: ebikes,
-      docks_available: numOrNull(st.num_docks_available) ?? 0,
-      pct_full: capacity > 0 ? Math.min(100, Math.round((bikes / capacity) * 1000) / 10) : null,
-      is_renting: st.is_renting === 1 || st.is_renting === true,
-      ts: reported != null && reported > 1e9 ? new Date(reported * 1000).toISOString() : null,
+      docks_available: numOrNull(st.num_docks_available),
+      pct_full:
+        bikes != null && capacity != null && capacity > 0
+          ? Math.min(100, Math.round((bikes / capacity) * 1000) / 10)
+          : null,
+      is_renting: gbfsFlag(st.is_renting) === true,
+      ts: reported != null ? new Date(reported * 1000).toISOString() : null,
     });
   }
   return { stations };
@@ -822,7 +854,7 @@ export const FIRMS_COLUMNS = [
 
 /** NOAA-20 VIIRS active-fire CSV → one hotspot per row. */
 export function firmsViirsCsv(text: string): Columnar {
-  const lines = text.split(/\r?\n/).filter((l) => l.trim());
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((l) => l.trim());
   if (lines.length < 2) return { columns: FIRMS_COLUMNS, rows: [] };
   const header = lines[0]!.split(",").map((h) => h.trim().toLowerCase());
   const at = (n: string) => header.indexOf(n);
@@ -870,6 +902,9 @@ export function firmsViirsCsv(text: string): Columnar {
 
 // ---- USGS NWIS instantaneous values (wide by site × time) ----
 
+/** USGS publishes missing readings as -999999 (also `variable.noDataValue`); never a real measurement. */
+export const NWIS_NO_DATA = -999999;
+
 export const NWIS_COLUMNS = [
   "site_id", "site_name", "ts", "latitude", "longitude", "discharge_cfs", "gage_height_ft",
 ];
@@ -895,6 +930,7 @@ export function nwisIvWide(body: unknown): Columnar {
     const lon = numOrNull(geo.longitude);
     const siteName = strOrNull(info.siteName) ?? siteId;
     const varCode = strOrNull(asObj(asArr(asObj(o.variable).variableCode)[0]).value);
+    const noData = numOrNull(asObj(o.variable).noDataValue) ?? NWIS_NO_DATA;
     const values = asArr(asObj(asArr(o.values)[0]).value);
     let acc = sites.get(siteId);
     if (!acc) {
@@ -903,14 +939,15 @@ export function nwisIvWide(body: unknown): Columnar {
     }
     for (const v of values) {
       const p = asObj(v);
-      const ts = utcIso(p.dateTime) ?? strOrNull(p.dateTime);
-      if (!ts) continue;
+      const ts = utcIso(p.dateTime);
+      if (!ts) continue; // unparseable timestamp → drop, don't invent a key
       let cell = acc.byTs.get(ts);
       if (!cell) {
         cell = { discharge_cfs: null, gage_height_ft: null };
         acc.byTs.set(ts, cell);
       }
-      const n = numOrNull(p.value);
+      const raw = numOrNull(p.value);
+      const n = raw == null || raw === noData || raw <= NWIS_NO_DATA + 1 ? null : raw;
       if (varCode === "00060") cell.discharge_cfs = n;
       else if (varCode === "00065") cell.gage_height_ft = n;
     }
@@ -950,7 +987,7 @@ export function starlinkGp(body: unknown): Columnar {
       Math.round(id),
       name || null,
       strOrNull(o.OBJECT_ID),
-      utcIso(o.EPOCH) ?? strOrNull(o.EPOCH),
+      utcIso(o.EPOCH),
       numOrNull(o.INCLINATION),
       numOrNull(o.ECCENTRICITY),
       numOrNull(o.MEAN_MOTION),

@@ -11,6 +11,8 @@
 // =================================================================
 
 import { formatExprTime, type DiveDerived } from "./diveExpr";
+import { formatChartNumber } from "./formatChartNumber";
+import { safeUserRegex } from "./regexSafe";
 
 type Cell = string | number | boolean | null;
 
@@ -343,7 +345,7 @@ export function sanitizeDiveQuery(q: DiveQuery, profiles: DiveColumnProfile[]): 
   const has = new Set(profiles.map((p) => p.name));
   const kindOf = new Map(profiles.map((p) => [p.name, p.kind]));
   const timeOk = q.timeColumn && profiles.some((p) => p.name === q.timeColumn && p.kind === "time");
-  const metrics = q.metrics.filter((m) => {
+  const metrics = (q.metrics ?? []).filter((m) => {
     if (!m.column) return m.agg === "count";
     const info = DIVE_AGGS.find((a) => a.value === m.agg);
     if (!info || !has.has(m.column)) return false;
@@ -367,7 +369,7 @@ export function sanitizeDiveQuery(q: DiveQuery, profiles: DiveColumnProfile[]): 
     bucket: DIVE_BUCKETS.some((b) => b.value === q.bucket) ? q.bucket : "auto",
     fill: q.fill ?? "auto",
     filters,
-    groupBy: q.groupBy.filter((g) => has.has(g)),
+    groupBy: (q.groupBy ?? []).filter((g) => has.has(g)),
     metrics: metrics.length ? metrics : [{ agg: "count", column: null }],
     orderBy: Math.min(q.orderBy, Math.max(0, metrics.length - 1)),
     orderDir: q.orderDir === "asc" ? "asc" : "desc",
@@ -459,14 +461,6 @@ function likeRegex(pat: string): RegExp {
   return new RegExp(`^${re}$`, "is");
 }
 
-function safeRegex(src: string): RegExp | null {
-  try {
-    return new RegExp(src, "i");
-  } catch {
-    return null;
-  }
-}
-
 function compileFilter(f: DiveFilter, columns: string[], profiles: DiveColumnProfile[]): ((row: Cell[]) => boolean) | null {
   const ci = columns.indexOf(f.column);
   if (ci < 0) return null;
@@ -503,7 +497,7 @@ function compileFilter(f: DiveFilter, columns: string[], profiles: DiveColumnPro
         return (v) => String(v ?? "").toLowerCase().includes(lower);
       case "~":
       case "!~": {
-        const re = safeRegex(raw);
+        const re = safeUserRegex(raw);
         return re ? (v) => re.test(String(v ?? "")) : null;
       }
       case "like": {
@@ -531,7 +525,7 @@ function compileFilter(f: DiveFilter, columns: string[], profiles: DiveColumnPro
 /** True when a regex filter value doesn't compile (shown inline in the builder). */
 export function badFilterValue(f: DiveFilter): string | null {
   if (f.op !== "~" && f.op !== "!~") return null;
-  for (const v of f.values ?? []) if (v.trim() && !safeRegex(v.trim())) return `Not a valid regex: ${v}`;
+  for (const v of f.values ?? []) if (v.trim() && !safeUserRegex(v.trim())) return `Not a valid regex: ${v}`;
   return null;
 }
 
@@ -595,11 +589,50 @@ export function autoBucketMs(spanMs: number, target = 60): number {
   return NICE_BUCKETS[NICE_BUCKETS.length - 1]!;
 }
 
-/** First bucket boundary ≤ t. Day-or-longer buckets start at local midnight. */
-function bucketFloor(t: number, bucketMs: number): number {
-  if (bucketMs < 86_400_000) return Math.floor(t / bucketMs) * bucketMs;
+const MS_DAY = 86_400_000;
+const MS_WEEK = 7 * MS_DAY;
+
+/** First bucket boundary ≤ t. Day/week buckets use local calendar boundaries (Monday weeks). */
+export function diveBucketFloor(t: number, bucketMs: number): number {
+  if (bucketMs < MS_DAY) return Math.floor(t / bucketMs) * bucketMs;
+  const d = new Date(t);
+  d.setHours(0, 0, 0, 0);
+  if (bucketMs === MS_WEEK) {
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    return d.getTime();
+  }
+  if (bucketMs % MS_DAY === 0 && bucketMs < 365 * MS_DAY) return d.getTime();
   const off = -new Date(t).getTimezoneOffset() * 60_000;
   return Math.floor((t + off) / bucketMs) * bucketMs - off;
+}
+
+function bucketFloor(t: number, bucketMs: number): number {
+  return diveBucketFloor(t, bucketMs);
+}
+
+/** Nth bucket start after `first`, using calendar steps for multi-day buckets. */
+export function diveBucketAt(first: number, index: number, bucketMs: number): number {
+  if (bucketMs < MS_DAY) return first + index * bucketMs;
+  const d = new Date(first);
+  if (bucketMs === MS_WEEK) {
+    d.setDate(d.getDate() + index * 7);
+    return d.getTime();
+  }
+  if (bucketMs % MS_DAY === 0 && bucketMs < 365 * MS_DAY) {
+    d.setDate(d.getDate() + index * (bucketMs / MS_DAY));
+    return d.getTime();
+  }
+  return first + index * bucketMs;
+}
+
+function buildBucketStarts(first: number, windowEnd: number, bucketMs: number): number[] {
+  const buckets: number[] = [];
+  for (let i = 0; i < 10_000; i++) {
+    const b = diveBucketAt(first, i, bucketMs);
+    if (b > windowEnd) break;
+    buckets.push(b);
+  }
+  return buckets;
 }
 
 function compareOffset(compare: DiveCompare, windowSpan: number): number {
@@ -726,8 +759,8 @@ export function runDive(data: DiveData, q: DiveQuery, profiles: DiveColumnProfil
     // Never more than 500 points, whatever bucket was picked.
     if (span / bucketMs > 500) bucketMs = autoBucketMs(span, 500);
     const first = bucketFloor(window[0], bucketMs);
-    const nB = Math.floor((window[1] - first) / bucketMs) + 1;
-    buckets = Array.from({ length: nB }, (_, i) => first + i * bucketMs);
+    buckets = buildBucketStarts(first, window[1], bucketMs);
+    const nB = buckets.length;
     const off = compareWindow ? window[0] - compareWindow[0] : 0;
     const top = q.groupBy.length ? groups.map((g) => g.key) : [""];
     const topSet = new Set(top);
@@ -810,8 +843,12 @@ function sqlInterval(ms: number): string {
   return `INTERVAL '${secs} seconds'`;
 }
 
-function ident(name: string): string {
+export function sqlIdent(name: string): string {
   return /^[a-z_][a-z0-9_]*$/i.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+}
+
+function ident(name: string): string {
+  return sqlIdent(name);
 }
 
 const quote = (v: string) => `'${v.replace(/'/g, "''")}'`;
@@ -987,13 +1024,40 @@ export function encodeDiveLink(link: DiveLink): string {
 }
 
 /** Parse `#dive=…` (with or without the leading #). Returns null when absent or malformed. */
+function coerceDiveQuery(raw: unknown): DiveQuery | null {
+  if (!raw || typeof raw !== "object") return null;
+  const q = raw as Partial<DiveQuery>;
+  if (!Array.isArray(q.metrics)) return null;
+  return {
+    timeColumn: typeof q.timeColumn === "string" ? q.timeColumn : null,
+    range: (q.range as DiveRange) ?? "all",
+    start: q.start ?? "",
+    end: q.end ?? "",
+    bucket: (q.bucket as DiveBucket) ?? "auto",
+    fill: q.fill ?? "auto",
+    compare: (q.compare as DiveCompare) ?? "none",
+    filters: Array.isArray(q.filters) ? q.filters : [],
+    groupBy: Array.isArray(q.groupBy) ? q.groupBy : [],
+    metrics: q.metrics,
+    limit: typeof q.limit === "number" ? q.limit : 10,
+    orderBy: typeof q.orderBy === "number" ? q.orderBy : 0,
+    orderDir: q.orderDir === "asc" ? "asc" : "desc",
+    hits: q.hits ?? true,
+    derived: Array.isArray(q.derived) ? q.derived : [],
+    columns: Array.isArray(q.columns) ? q.columns : null,
+    view: q.view === "timeseries" || q.view === "samples" ? q.view : "table",
+  };
+}
+
 export function decodeDiveLink(hash: string): DiveLink | null {
   const m = hash.replace(/^#/, "").match(/(?:^|&)dive=([A-Za-z0-9_-]+)/);
   if (!m) return null;
   try {
     const obj = JSON.parse(b64urlDecode(m[1]!)) as Partial<DiveLink> & { v?: number };
-    if (typeof obj.src !== "string" || !obj.query || !Array.isArray(obj.query.metrics)) return null;
-    return { src: obj.src, query: obj.query as DiveQuery };
+    if (typeof obj.src !== "string" || !obj.query) return null;
+    const query = coerceDiveQuery(obj.query);
+    if (!query) return null;
+    return { src: obj.src, query };
   } catch {
     return null;
   }
@@ -1003,13 +1067,9 @@ export function decodeDiveLink(hash: string): DiveLink | null {
 // Formatting
 // ---------------------------------------------------------------------------
 
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
-
 export function formatDiveNumber(v: number | null | undefined): string {
   if (v == null || !Number.isFinite(v)) return "—";
-  if (Math.abs(v) >= 10_000) return compact.format(v);
-  if (Number.isInteger(v)) return v.toLocaleString("en");
-  return v.toFixed(Math.abs(v) < 1 ? 3 : 2).replace(/\.?0+$/, "");
+  return formatChartNumber(v);
 }
 
 /** Relative change, e.g. "+12%". Null when not comparable. */

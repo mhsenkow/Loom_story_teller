@@ -64,15 +64,17 @@ export function generateScatterSpec(
     config: {
       background: "transparent",
       axis: {
-        labelColor: "#6b6b78",
-        titleColor: "#e8e8ec",
+        labelColor: "#b4b4c0",
+        titleColor: "#ececf1",
+        labelFontSize: 11,
+        titleFontSize: 12,
         gridColor: "#2a2a30",
         domainColor: "#2a2a30",
       },
       title: {
-        color: "#e8e8ec",
+        color: "#ececf1",
         fontSize: 14,
-        fontWeight: 500,
+        fontWeight: 600,
       },
     },
   };
@@ -104,8 +106,10 @@ export function generateBarSpec(
     config: {
       background: "transparent",
       axis: {
-        labelColor: "#6b6b78",
-        titleColor: "#e8e8ec",
+        labelColor: "#b4b4c0",
+        titleColor: "#ececf1",
+        labelFontSize: 11,
+        titleFontSize: 12,
         gridColor: "#2a2a30",
         domainColor: "#2a2a30",
       },
@@ -134,8 +138,10 @@ export function generateHistogramSpec(
     config: {
       background: "transparent",
       axis: {
-        labelColor: "#6b6b78",
-        titleColor: "#e8e8ec",
+        labelColor: "#b4b4c0",
+        titleColor: "#ececf1",
+        labelFontSize: 11,
+        titleFontSize: 12,
         gridColor: "#2a2a30",
         domainColor: "#2a2a30",
       },

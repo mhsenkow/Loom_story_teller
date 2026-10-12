@@ -31,6 +31,7 @@ import { partitionRowsByFacet, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacet
 import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
 import { buildCorrMatrix, buildPareto, residualYs, rollingMean, normalizeSeriesValues } from "@/lib/dsTransforms";
 import { applyChartTimeWindow } from "@/lib/chartTime";
+import { downsampledRowsForThumb } from "@/lib/chartThumbnailCache";
 
 const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
 
@@ -152,10 +153,7 @@ export function ChartCard({
 
     if (xIdx === -1) return;
 
-    const timed = applyChartTimeWindow(data.rows, data.columns, rec).rows;
-    // Even sample across the whole table — the first rows of a sorted file (e.g. A–B countries) mislead
-    const stride = Math.max(1, Math.ceil(timed.length / 1500));
-    const rows = stride === 1 ? timed : timed.filter((_, i) => i % stride === 0);
+    const rows = downsampledRowsForThumb(data, rec);
 
     const paintPanel = (
       panelRows: unknown[][],
@@ -240,17 +238,30 @@ export function ChartCard({
   }, [rec, data, theme, hero, micro, COLORS, SEQ, ui]);
 
   useEffect(() => {
-    draw();
-  }, [draw]);
-
-  useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
-    const ro = new ResizeObserver(() => {
-      draw();
-    });
+    let visible = false;
+    let idle = 0;
+    const scheduleDraw = () => {
+      if (!visible) return;
+      cancelIdleCallback(idle);
+      idle = requestIdleCallback(() => draw(), { timeout: 120 });
+    };
+    const io = new IntersectionObserver(
+      (entries) => {
+        visible = entries.some((e) => e.isIntersecting);
+        if (visible) scheduleDraw();
+      },
+      { rootMargin: "80px" },
+    );
+    io.observe(container);
+    const ro = new ResizeObserver(() => scheduleDraw());
     ro.observe(container);
-    return () => ro.disconnect();
+    return () => {
+      io.disconnect();
+      ro.disconnect();
+      cancelIdleCallback(idle);
+    };
   }, [draw]);
 
   return (

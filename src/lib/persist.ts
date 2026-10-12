@@ -5,6 +5,14 @@
 // query history, and table preferences. No-op when localStorage is unavailable.
 // =================================================================
 
+import {
+  parsePersistedAppSettings,
+  parsePersistedChartViews,
+  parsePersistedDashboards,
+  parsePersistedQueryViews,
+} from "./persistValidation";
+import { migrateAppSettingsV0, unwrapPersist, wrapPersist } from "./persistEnvelope";
+
 const KEY_APP_SETTINGS = "loom-app-settings";
 const KEY_RECENT_FILES = "loom-recent-files";
 const KEY_LAST_SESSION = "loom-last-session";
@@ -29,12 +37,14 @@ function safeGetItem(key: string): string | null {
   }
 }
 
-function safeSetItem(key: string, value: string): void {
-  if (typeof window === "undefined" || !window.localStorage) return;
+/** @returns false when quota exceeded or storage is unavailable */
+export function safeSetItem(key: string, value: string): boolean {
+  if (typeof window === "undefined" || !window.localStorage) return false;
   try {
     window.localStorage.setItem(key, value);
+    return true;
   } catch {
-    // quota or disabled
+    return false;
   }
 }
 
@@ -54,14 +64,19 @@ export function getPersistedAppSettings(): PersistedAppSettings | null {
   const raw = safeGetItem(KEY_APP_SETTINGS);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as PersistedAppSettings;
+    const parsed = JSON.parse(raw);
+    const data = unwrapPersist(parsed, (v, d) =>
+      v === 0 ? migrateAppSettingsV0(d) : null,
+    );
+    if (!data) return null;
+    return parsePersistedAppSettings(data);
   } catch {
     return null;
   }
 }
 
-export function setPersistedAppSettings(s: PersistedAppSettings): void {
-  safeSetItem(KEY_APP_SETTINGS, JSON.stringify(s));
+export function setPersistedAppSettings(s: PersistedAppSettings): boolean {
+  return safeSetItem(KEY_APP_SETTINGS, JSON.stringify(wrapPersist(s)));
 }
 
 export interface RecentFileEntry {
@@ -89,20 +104,12 @@ export function getRecentFiles(): RecentFileEntry[] {
   }
 }
 
-export function addRecentFile(entry: RecentFileEntry): RecentFileEntry[] {
-  const list = getRecentFiles().filter((f) => f.path !== entry.path);
-  list.unshift(entry);
-  const out = list.slice(0, MAX_RECENT_FILES);
-  safeSetItem(KEY_RECENT_FILES, JSON.stringify(out));
-  return out;
+export function setPersistedRecentFiles(files: RecentFileEntry[]): boolean {
+  return safeSetItem(KEY_RECENT_FILES, JSON.stringify(files.slice(0, MAX_RECENT_FILES)));
 }
 
-export function setPersistedRecentFiles(files: RecentFileEntry[]): void {
-  safeSetItem(KEY_RECENT_FILES, JSON.stringify(files.slice(0, MAX_RECENT_FILES)));
-}
-
-export function setPersistedQueryHistory(items: QueryHistoryItem[]): void {
-  safeSetItem(KEY_QUERY_HISTORY, JSON.stringify(items.slice(0, MAX_QUERY_HISTORY)));
+export function setPersistedQueryHistory(items: QueryHistoryItem[]): boolean {
+  return safeSetItem(KEY_QUERY_HISTORY, JSON.stringify(items.slice(0, MAX_QUERY_HISTORY)));
 }
 
 export interface LastSession {
@@ -141,32 +148,70 @@ export function getQueryHistory(): QueryHistoryItem[] {
   }
 }
 
-export function appendQueryHistory(sql: string): void {
-  const trimmed = sql.trim();
-  if (!trimmed) return;
-  let list = getQueryHistory().filter((q) => q.sql !== trimmed);
-  list.unshift({ sql: trimmed, at: Date.now() });
-  list = list.slice(0, MAX_QUERY_HISTORY);
-  safeSetItem(KEY_QUERY_HISTORY, JSON.stringify(list));
-}
-
 export interface TablePrefs {
   visibleColumns: string[] | null;
   columnOrder: string[] | null;
 }
 
-export function getTablePrefs(): TablePrefs | null {
+/** Path-keyed explorer column prefs (LOOM-205). */
+export type TablePrefsByPath = Record<string, TablePrefs>;
+
+function isFlatTablePrefs(v: unknown): v is TablePrefs {
+  return (
+    !!v &&
+    typeof v === "object" &&
+    ("visibleColumns" in v || "columnOrder" in v) &&
+    !("byPath" in v)
+  );
+}
+
+/** Load path-keyed prefs; migrates legacy flat `{ visibleColumns, columnOrder }`. */
+export function getTablePrefsByPath(): TablePrefsByPath {
   const raw = safeGetItem(KEY_TABLE_PREFS);
-  if (!raw) return null;
+  if (!raw) return {};
   try {
-    return JSON.parse(raw) as TablePrefs;
+    const parsed = JSON.parse(raw) as unknown;
+    if (isFlatTablePrefs(parsed)) {
+      return { __legacy__: parsed };
+    }
+    if (parsed && typeof parsed === "object" && parsed !== null && "byPath" in parsed) {
+      const byPath = (parsed as { byPath?: unknown }).byPath;
+      return byPath && typeof byPath === "object" && byPath !== null
+        ? (byPath as TablePrefsByPath)
+        : {};
+    }
+    if (parsed && typeof parsed === "object" && parsed !== null) {
+      return parsed as TablePrefsByPath;
+    }
+    return {};
   } catch {
-    return null;
+    return {};
   }
 }
 
+export function getTablePrefsForPath(path: string): TablePrefs | null {
+  const map = getTablePrefsByPath();
+  return map[path] ?? map.__legacy__ ?? null;
+}
+
+export function setTablePrefsForPath(path: string, p: TablePrefs): void {
+  const map = getTablePrefsByPath();
+  const next: TablePrefsByPath = { ...map, [path]: p };
+  delete next.__legacy__;
+  safeSetItem(KEY_TABLE_PREFS, JSON.stringify({ byPath: next }));
+}
+
+/** @deprecated Prefer getTablePrefsForPath — kept for callers during migration. */
+export function getTablePrefs(): TablePrefs | null {
+  const map = getTablePrefsByPath();
+  const keys = Object.keys(map);
+  if (keys.length === 1 && keys[0] === "__legacy__") return map.__legacy__ ?? null;
+  return null;
+}
+
+/** @deprecated Prefer setTablePrefsForPath */
 export function setTablePrefs(p: TablePrefs): void {
-  safeSetItem(KEY_TABLE_PREFS, JSON.stringify(p));
+  safeSetItem(KEY_TABLE_PREFS, JSON.stringify({ byPath: { __legacy__: p } }));
 }
 
 export interface QuerySnippetItem {
@@ -185,8 +230,8 @@ export function getQuerySnippets(): QuerySnippetItem[] {
   }
 }
 
-export function setPersistedQuerySnippets(items: QuerySnippetItem[]): void {
-  safeSetItem(KEY_QUERY_SNIPPETS, JSON.stringify(items.slice(0, MAX_QUERY_SNIPPETS)));
+export function setPersistedQuerySnippets(items: QuerySnippetItem[]): boolean {
+  return safeSetItem(KEY_QUERY_SNIPPETS, JSON.stringify(items.slice(0, MAX_QUERY_SNIPPETS)));
 }
 
 export interface TableViewItem {
@@ -208,8 +253,22 @@ export function getTableViews(): TableViewItem[] {
   }
 }
 
-export function setPersistedTableViews(items: TableViewItem[]): void {
-  safeSetItem(KEY_TABLE_VIEWS, JSON.stringify(items.slice(0, 20)));
+export function setPersistedTableViews(
+  items: Array<
+    TableViewItem & {
+      querySql?: string | null;
+      snapshotData?: unknown;
+    }
+  >,
+): boolean {
+  const slim = items.slice(0, 20).map(({ id, name, visibleColumns, columnOrder, columnFilters }) => ({
+    id,
+    name,
+    visibleColumns,
+    columnOrder,
+    columnFilters,
+  }));
+  return safeSetItem(KEY_TABLE_VIEWS, JSON.stringify(slim));
 }
 
 export interface ChartViewItemPersist {
@@ -219,22 +278,22 @@ export interface ChartViewItemPersist {
   fileName: string;
   chart: Record<string, unknown>;
   visualOverrides: Record<string, unknown>;
+  querySql?: string | null;
   snapshotImageDataUrl?: string | null;
 }
 
-export function getChartViews(): ChartViewItemPersist[] {
+export function getChartViews(): ReturnType<typeof parsePersistedChartViews> {
   const raw = safeGetItem(KEY_CHART_VIEWS);
   if (!raw) return [];
   try {
-    const arr = JSON.parse(raw) as ChartViewItemPersist[];
-    return Array.isArray(arr) ? arr.slice(0, 30) : [];
+    return parsePersistedChartViews(JSON.parse(raw));
   } catch {
     return [];
   }
 }
 
-export function setPersistedChartViews(items: ChartViewItemPersist[]): void {
-  safeSetItem(KEY_CHART_VIEWS, JSON.stringify(items.slice(0, 30)));
+export function setPersistedChartViews(items: ChartViewItemPersist[]): boolean {
+  return safeSetItem(KEY_CHART_VIEWS, JSON.stringify(items.slice(0, 30)));
 }
 
 export interface QueryViewItemPersist {
@@ -247,15 +306,14 @@ export function getQueryViews(): QueryViewItemPersist[] {
   const raw = safeGetItem(KEY_QUERY_VIEWS);
   if (!raw) return [];
   try {
-    const arr = JSON.parse(raw) as QueryViewItemPersist[];
-    return Array.isArray(arr) ? arr.slice(0, 30) : [];
+    return parsePersistedQueryViews(JSON.parse(raw));
   } catch {
     return [];
   }
 }
 
-export function setPersistedQueryViews(items: QueryViewItemPersist[]): void {
-  safeSetItem(KEY_QUERY_VIEWS, JSON.stringify(items.slice(0, 30)));
+export function setPersistedQueryViews(items: QueryViewItemPersist[]): boolean {
+  return safeSetItem(KEY_QUERY_VIEWS, JSON.stringify(items.slice(0, 30)));
 }
 
 export interface DashboardSlotPersist {
@@ -277,21 +335,55 @@ export function getDashboards(): DashboardItemPersist[] {
   const raw = safeGetItem(KEY_DASHBOARDS);
   if (!raw) return [];
   try {
-    const arr = JSON.parse(raw) as DashboardItemPersist[];
-    return Array.isArray(arr) ? arr.slice(0, 20) : [];
+    return parsePersistedDashboards(JSON.parse(raw));
   } catch {
     return [];
   }
 }
 
-export function setPersistedDashboards(items: DashboardItemPersist[]): void {
-  safeSetItem(KEY_DASHBOARDS, JSON.stringify(items.slice(0, 20)));
+export function setPersistedDashboards(items: DashboardItemPersist[]): boolean {
+  return safeSetItem(KEY_DASHBOARDS, JSON.stringify(items.slice(0, 20)));
 }
 
 export function getVizPreferencesRaw(): string | null {
   return safeGetItem(KEY_VIZ_PREFERENCES);
 }
 
-export function setPersistedVizPreferences(model: object): void {
-  safeSetItem(KEY_VIZ_PREFERENCES, JSON.stringify(model));
+export function setPersistedVizPreferences(model: object): boolean {
+  return safeSetItem(KEY_VIZ_PREFERENCES, JSON.stringify(model));
+}
+
+/** Keys cleared by preference reset (LOOM-551) — not uploads/IDB. */
+export const LOOM_PREFERENCE_STORAGE_KEYS = [
+  KEY_APP_SETTINGS,
+  KEY_QUERY_HISTORY,
+  KEY_QUERY_SNIPPETS,
+  KEY_TABLE_PREFS,
+  KEY_TABLE_VIEWS,
+  KEY_CHART_VIEWS,
+  KEY_QUERY_VIEWS,
+  KEY_DASHBOARDS,
+  KEY_VIZ_PREFERENCES,
+] as const;
+
+export function clearPersistedPreferences(): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  for (const key of LOOM_PREFERENCE_STORAGE_KEYS) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function clearPersistedSessionKeys(): void {
+  if (typeof window === "undefined" || !window.localStorage) return;
+  for (const key of [KEY_RECENT_FILES, KEY_LAST_SESSION]) {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      /* ignore */
+    }
+  }
 }

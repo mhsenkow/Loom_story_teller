@@ -22,36 +22,71 @@ export interface MicrositeInput {
   caption?: string | null;
 }
 
+/** Human-readable export time with local time zone (for microsite footers). */
+export function formatMicrositeTimestamp(ms: number): string {
+  try {
+    return new Date(ms).toLocaleString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      timeZoneName: "short",
+    });
+  } catch {
+    return new Date(ms).toISOString();
+  }
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
+/** Only allow safe CSS color tokens into generated `<style>` blocks. */
+function sanitizeCssColor(value: string, fallback: string): string {
+  const v = value.trim();
+  if (
+    /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(v) ||
+    /^rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+(?:\s*,\s*[\d.]+\s*)?\)$/i.test(v) ||
+    /^hsla?\(\s*[\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%(?:\s*,\s*[\d.]+\s*)?\)$/i.test(v)
+  ) {
+    return v;
+  }
+  return fallback;
+}
+
+const SHARE_PAGE_CSP =
+  "default-src 'none'; img-src data: https: http:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'";
+
 function snapshotThemeTokens(): Record<string, string> {
+  const fallbacks = {
+    bg: "#0a0a0c",
+    surface: "#111114",
+    elevated: "#1a1a1f",
+    border: "#2a2a30",
+    text: "#e8e8ec",
+    muted: "#6b6b78",
+    accent: "#6c5ce7",
+  };
   if (typeof document === "undefined") {
-    return {
-      bg: "#0a0a0c",
-      surface: "#111114",
-      elevated: "#1a1a1f",
-      border: "#2a2a30",
-      text: "#e8e8ec",
-      muted: "#6b6b78",
-      accent: "#6c5ce7",
-    };
+    return { ...fallbacks };
   }
   const s = getComputedStyle(document.documentElement);
-  const get = (k: string, fb: string) => s.getPropertyValue(k).trim() || fb;
+  const get = (k: string, fb: string) =>
+    sanitizeCssColor(s.getPropertyValue(k).trim() || fb, fb);
   return {
-    bg: get("--loom-bg", "#0a0a0c"),
-    surface: get("--loom-surface", "#111114"),
-    elevated: get("--loom-elevated", "#1a1a1f"),
-    border: get("--loom-border", "#2a2a30"),
-    text: get("--loom-text", "#e8e8ec"),
-    muted: get("--loom-muted", "#6b6b78"),
-    accent: get("--loom-accent", "#6c5ce7"),
+    bg: get("--loom-bg", fallbacks.bg),
+    surface: get("--loom-surface", fallbacks.surface),
+    elevated: get("--loom-elevated", fallbacks.elevated),
+    border: get("--loom-border", fallbacks.border),
+    text: get("--loom-text", fallbacks.text),
+    muted: get("--loom-muted", fallbacks.muted),
+    accent: get("--loom-accent", fallbacks.accent),
   };
 }
 
@@ -70,16 +105,20 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
     (caption || `${dashboardName} — data story exported from Loom`).slice(0, 280),
   );
   const LOOM = snapshotThemeTokens();
+  const ogImage =
+    ogImageDataUrl?.startsWith("data:") ? LOOM_OG_IMG_TOKEN : escapeHtml(ogImageDataUrl ?? "");
   const ogMeta = ogImageDataUrl
     ? `
   <meta property="og:type" content="website" />
   <meta property="og:title" content="${title}" />
   <meta property="og:description" content="${desc}" />
-  <meta property="og:image" content="${escapeHtml(ogImageDataUrl)}" />
+  <meta property="og:image" content="${ogImage}" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="627" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${title}" />
   <meta name="twitter:description" content="${desc}" />
-  <meta name="twitter:image" content="${escapeHtml(ogImageDataUrl)}" />
+  <meta name="twitter:image" content="${ogImage}" />
   <meta name="description" content="${desc}" />`
     : `
   <meta property="og:type" content="website" />
@@ -128,17 +167,15 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
 
   const headerUpdated =
     lastUpdatedMs
-      ? `<span class="dm-header-muted">Updated ${escapeHtml(
-          new Date(lastUpdatedMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-        )}</span>`
+      ? `<span class="dm-header-muted">Updated ${escapeHtml(formatMicrositeTimestamp(lastUpdatedMs))}</span>`
       : "";
 
   const lineageSection =
     lastUpdatedMs || slots.some((s) => s.sourceLabel)
       ? `
   <footer class="dm-footer">
-    ${lastUpdatedMs ? `<p><strong>Last updated:</strong> ${escapeHtml(new Date(lastUpdatedMs).toLocaleString())}</p>` : ""}
-    ${slots.some((s) => s.sourceLabel) ? `<p><strong>Data sources:</strong> ${slots.map((s) => s.sourceLabel).filter(Boolean).join("; ")}</p>` : ""}
+    ${lastUpdatedMs ? `<p><strong>Last updated:</strong> ${escapeHtml(formatMicrositeTimestamp(lastUpdatedMs))}</p>` : ""}
+    ${slots.some((s) => s.sourceLabel) ? `<p><strong>Data sources:</strong> ${slots.map((s) => s.sourceLabel).filter(Boolean).map((l) => escapeHtml(l!)).join("; ")}</p>` : ""}
     <p>Exported from Loom — local-first data storytelling</p>
   </footer>`
       : "";
@@ -147,6 +184,7 @@ export function buildDashboardMicrositeHtml(input: MicrositeInput): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="${SHARE_PAGE_CSP}" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${title}</title>${ogMeta}
   <style>
@@ -346,6 +384,7 @@ export function buildChartSharePageHtml(input: ChartSharePageInput): string {
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="${SHARE_PAGE_CSP}" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>${title}</title>
   <meta name="description" content="${desc}" />

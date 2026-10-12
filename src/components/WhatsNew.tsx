@@ -9,7 +9,8 @@
 
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Dialog } from "@/components/ui/Dialog";
 import { useLoomStore } from "@/lib/store";
 import {
   CHANGELOG,
@@ -95,33 +96,25 @@ export function WhatsNew() {
     setOpen(false);
   }, [setOpen]);
 
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, close]);
-
-  if (!open) return null;
+  const primaryRef = useRef<HTMLButtonElement>(null);
 
   const freshIds = new Set(fresh.map((r) => r.id));
   const highlighted = fresh.length ? fresh : CHANGELOG.slice(0, 1);
   const earlier = CHANGELOG.filter((r) => !highlighted.includes(r));
 
   return (
-    <div
-      className="fixed inset-0 z-[210] flex items-end sm:items-center justify-center p-0 sm:p-4 loom-overlay animate-fade-in"
-      onClick={close}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="whats-new-title"
+    <Dialog
+      open={open}
+      onClose={close}
+      labelledBy="whats-new-title"
+      initialFocusRef={primaryRef}
+      zIndex={210}
+      panelClassName="sm:max-w-lg p-0 flex flex-col max-h-[88dvh] overflow-hidden"
+      className=""
     >
       <div
-        className="w-full sm:max-w-lg bg-loom-surface border border-loom-border shadow-loom-lg rounded-t-2xl sm:rounded-xl animate-slide-up flex flex-col max-h-[88dvh]"
+        className="w-full flex flex-col max-h-[88dvh]"
         style={{ paddingBottom: "max(0.75rem, var(--safe-bottom))" }}
-        onClick={(e) => e.stopPropagation()}
       >
         <header className="flex items-start gap-3 px-5 pt-4 pb-3 shrink-0 border-b border-loom-border/60">
           <div className="min-w-0 flex-1">
@@ -198,11 +191,16 @@ export function WhatsNew() {
         </div>
 
         <div className="px-5 pt-3 shrink-0 border-t border-loom-border/60">
-          <button type="button" onClick={close} className="loom-btn-primary w-full min-h-11 text-sm font-semibold rounded-lg">
+          <button
+            ref={primaryRef}
+            type="button"
+            onClick={close}
+            className="loom-btn-primary w-full min-h-11 text-sm font-semibold rounded-lg"
+          >
             {discoverNext ? "See what’s interesting right now →" : "Got it"}
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

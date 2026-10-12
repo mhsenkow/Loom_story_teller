@@ -8,8 +8,8 @@
 import {
   fetchUkCatalogUpstream,
   fetchUsCatalogUpstream,
-  type FetchDataGovOptions,
   type DataGovSortKey,
+  type FetchDataGovOptions,
 } from "../src/lib/openDataCatalog";
 import {
   ADSB_POINTS,
@@ -40,6 +40,27 @@ import {
   pageviewsPrimaryDaysAgo,
   worldBankWide,
 } from "./sourceTransforms";
+import { assertHttpUrlAllowed, fetchWithSsrfGuard } from "../src/lib/ssrfGuard";
+import { applyBaselineSecurityHeaders, baselineSecurityHeaderRecord } from "../src/lib/securityHeaders";
+import {
+  AIRCRAFT_FETCH_BUDGET_MS,
+  CATALOG_SEARCH_DEADLINE_MS,
+  CATALOG_SEARCH_TTL_SECS,
+  catalogSearchCacheKey,
+  clampWorkerCatalogRows,
+  FETCH_CSV_CACHE_TTL_SECS,
+  fetchCsvCacheKey,
+  sourceCacheKey,
+  sourcePayloadCacheable,
+  utf8ByteLength,
+  validateOgImageBytes,
+  worldBankDateRange,
+} from "../src/lib/workerCatalogPolicy";
+import {
+  allowedOriginHostsFromEnv,
+  DEFAULT_ALLOWED_ORIGIN_HOSTS,
+  originAllowed,
+} from "./allowedOrigins";
 
 export interface Env {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
@@ -47,25 +68,115 @@ export interface Env {
   GITHUB_TOKEN?: string;
   /** Global story HTML / .img / .data — Cache API is colo-local and breaks NeoSpace handoff */
   LOOM_STORIES?: KVNamespace;
+  /**
+   * Optional bearer token for non-browser story publish/delete (native shells,
+   * ops takedown). Browser callers must send an approved Origin instead.
+   */
+  STORY_ADMIN_TOKEN?: string;
+  /** Comma-separated hostnames; defaults to loom.ibm.io + localhost + workers.dev. */
+  ALLOWED_ORIGIN_HOSTS?: string;
 }
 
 const GITHUB_REPO = "mhsenkow/Loom_story_teller";
 const MAX_CSV_BYTES = 32 * 1024 * 1024;
-const PREVIEW_CSV_BYTES = 2 * 1024 * 1024;
 const UA =
   "Loom-Data-Storyteller/1.0 (https://loom.ibm.io; github.com/mhsenkow/Loom_story_teller)";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Accept",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
 };
 
+/** Sandbox published HTML so scripts cannot read loom.ibm.io storage. */
+const STORY_HTML_CSP =
+  "sandbox allow-popups allow-popups-to-escape-sandbox allow-top-navigation-by-user-activation; default-src 'none'; img-src 'self' data: blob:; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
+/** Browser cache short; edge can hold a bit longer and purge on DELETE. */
+const STORY_BROWSER_MAX_AGE = 300;
+const STORY_EDGE_S_MAXAGE = 3600;
+
+function bearerToken(request: Request): string | null {
+  const h = request.headers.get("Authorization");
+  if (!h?.startsWith("Bearer ")) return null;
+  const t = h.slice(7).trim();
+  return t || null;
+}
+
+export function storyMutationAuthorized(request: Request, env: Env): boolean {
+  const token = bearerToken(request);
+  if (token && env.STORY_ADMIN_TOKEN && token === env.STORY_ADMIN_TOKEN) {
+    return true;
+  }
+  const requestOrigin = request.headers.get("Origin");
+  return originAllowed(requestOrigin, allowedOriginHostsFromEnv(env));
+}
+
 function json(data: unknown, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: { "Content-Type": "application/json", ...CORS },
-  });
+  const headers = new Headers({ "Content-Type": "application/json", ...CORS });
+  applyBaselineSecurityHeaders(headers);
+  return new Response(JSON.stringify(data), { status, headers });
+}
+
+const MAX_STORY_POST_BYTES = 6 * 1024 * 1024;
+const MAX_FEEDBACK_POST_BYTES = 512 * 1024;
+
+function shortRequestId(): string {
+  return crypto.randomUUID().replace(/-/g, "").slice(0, 12);
+}
+
+async function readRequestBodyUpTo(request: Request, maxBytes: number): Promise<ArrayBuffer | "too-large"> {
+  const cl = request.headers.get("Content-Length");
+  if (cl) {
+    const n = Number(cl);
+    if (Number.isFinite(n) && n > maxBytes) return "too-large";
+  }
+  const reader = request.body?.getReader();
+  if (!reader) return new ArrayBuffer(0);
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => {});
+      return "too-large";
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c, off);
+    off += c.byteLength;
+  }
+  return out.buffer;
+}
+
+async function parseJsonBody(
+  request: Request,
+  maxBytes: number,
+): Promise<{ ok: true; data: unknown } | { ok: false; response: Response }> {
+  const body = await readRequestBodyUpTo(request, maxBytes);
+  if (body === "too-large") {
+    return { ok: false, response: json({ error: "Request body too large" }, 413) };
+  }
+  if (body.byteLength === 0) {
+    return { ok: false, response: json({ error: "Invalid JSON" }, 400) };
+  }
+  try {
+    return { ok: true, data: JSON.parse(new TextDecoder().decode(body)) };
+  } catch {
+    return { ok: false, response: json({ error: "Invalid JSON" }, 400) };
+  }
+}
+
+/** GitHub issue body: inline code so @mentions and [links] don't fire. */
+function githubInlineField(s: string): string {
+  const safe = s.replace(/\\/g, "\\\\").replace(/`/g, "\\`").replace(/@/g, "@\u200b").replace(/\[/g, "\\[");
+  return `\`${safe}\``;
 }
 
 /** In-isolate rate limit — dampens abuse across requests on this Worker. */
@@ -97,18 +208,83 @@ function allowRequest(key: string, limit: number, windowMs: number): boolean {
   return true;
 }
 
-function originAllowed(origin: string | null, hosts: string[]): boolean {
-  if (!origin) return false;
-  try {
-    const host = new URL(origin).hostname.toLowerCase();
-    return hosts.some((h) => host === h || host.endsWith(`.${h}`));
-  } catch {
-    return false;
+/** KV-backed limiter (LOOM_STORIES) so story/feedback caps hold across colos. */
+async function rateLimitAllow(
+  env: Env,
+  bucket: string,
+  key: string,
+  limit: number,
+  windowMs: number,
+): Promise<boolean> {
+  const composite = `${bucket}:${key}`;
+  const kv = env.LOOM_STORIES;
+  if (kv) {
+    const rlKey = `rl:${composite}`;
+    const now = Date.now();
+    type Bucket = { count: number; resetAt: number };
+    const raw = (await kv.get(rlKey, "json")) as Bucket | null;
+    if (!raw || now > raw.resetAt) {
+      await kv.put(rlKey, JSON.stringify({ count: 1, resetAt: now + windowMs }), {
+        expirationTtl: Math.ceil(windowMs / 1000) + 120,
+      });
+      return true;
+    }
+    if (raw.count >= limit) return false;
+    await kv.put(
+      rlKey,
+      JSON.stringify({ count: raw.count + 1, resetAt: raw.resetAt }),
+      { expirationTtl: Math.max(120, Math.ceil((raw.resetAt - now) / 1000) + 120) },
+    );
+    return true;
   }
+  return allowRequest(composite, limit, windowMs);
+}
+
+/** CORS reflecting an approved Origin (never `*`) for sensitive proxy routes. */
+function corsHeadersFor(request: Request, env?: Env): Record<string, string> {
+  const origin = request.headers.get("Origin");
+  const hosts = env ? allowedOriginHostsFromEnv(env) : DEFAULT_ALLOWED_ORIGIN_HOSTS;
+  if (origin && originAllowed(origin, hosts)) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+      Vary: "Origin",
+    };
+  }
+  return {
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Accept, Authorization",
+    Vary: "Origin",
+  };
+}
+
+/**
+ * Browser same-site / approved-Origin gate for `/api/fetch-csv`.
+ * Blocks cross-site and anonymous script abuse; allows same-origin GETs
+ * (often no Origin) and approved Loom webview Origins.
+ */
+export function fetchCsvAuthorized(request: Request, env?: Env): boolean {
+  const site = (request.headers.get("Sec-Fetch-Site") || "").toLowerCase();
+  if (site === "cross-site") return false;
+  if (site === "same-origin" || site === "same-site") return true;
+  const origin = request.headers.get("Origin");
+  const hosts = env ? allowedOriginHostsFromEnv(env) : DEFAULT_ALLOWED_ORIGIN_HOSTS;
+  if (origin) return originAllowed(origin, hosts);
+  // No Sec-Fetch-Site and no Origin → treat as non-browser / curl
+  if (!site) return false;
+  // Sec-Fetch-Site: none (user navigation / some webviews) — require Origin
+  return false;
+}
+
+function jsonFor(request: Request, data: unknown, status = 200): Response {
+  const headers = new Headers({ "Content-Type": "application/json", ...corsHeadersFor(request) });
+  applyBaselineSecurityHeaders(headers);
+  return new Response(JSON.stringify(data), { status, headers });
 }
 
 function optsFromUrl(url: URL): FetchDataGovOptions {
-  const rows = Number(url.searchParams.get("rows") || "40");
+  const rows = clampWorkerCatalogRows(url.searchParams.get("rows") ?? "40");
   const q = url.searchParams.get("q") || undefined;
   const sort = (url.searchParams.get("sort") as DataGovSortKey | null) || undefined;
   const csvOnly =
@@ -116,28 +292,48 @@ function optsFromUrl(url: URL): FetchDataGovOptions {
   return { rows, query: q, sort: sort || undefined, csvOnly };
 }
 
-function isBlockedHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  if (h === "localhost" || h === "127.0.0.1" || h === "::1" || h.endsWith(".local")) return true;
-  if (/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(h)) return true;
-  if (h === "0.0.0.0" || h.endsWith(".internal")) return true;
-  return false;
+interface WaitUntil {
+  waitUntil(promise: Promise<unknown>): void;
 }
 
-async function handleFetchCsv(requestUrl: URL): Promise<Response> {
+export async function handleFetchCsv(
+  request: Request,
+  requestUrl: URL,
+  ctx: WaitUntil,
+  env?: Env,
+): Promise<Response> {
+  if (!fetchCsvAuthorized(request, env)) {
+    return jsonFor(request, { error: "Forbidden origin" }, 403);
+  }
+  const ip = clientIp(request);
+  if (!allowRequest(`fetch-csv:${ip}`, 60, 60_000)) {
+    return jsonFor(request, { error: "Too many fetches — try again later" }, 429);
+  }
+
   const target = requestUrl.searchParams.get("url");
-  if (!target) return json({ error: "Missing url" }, 400);
+  if (!target) return jsonFor(request, { error: "Missing url" }, 400);
   let parsed: URL;
   try {
     parsed = new URL(target);
   } catch {
-    return json({ error: "Invalid url" }, 400);
+    return jsonFor(request, { error: "Invalid url" }, 400);
   }
-  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
-    return json({ error: "Only http(s) URLs allowed" }, 400);
+  try {
+    assertHttpUrlAllowed(parsed);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Host not allowed";
+    return jsonFor(request, { error: msg }, 400);
   }
-  if (isBlockedHost(parsed.hostname)) {
-    return json({ error: "Host not allowed" }, 400);
+
+  const cache = caches.default;
+  const cacheReq = new Request(fetchCsvCacheKey(parsed.toString()));
+  const cached = await cache.match(cacheReq).catch(() => undefined);
+  if (cached) {
+    const outHeaders = new Headers(cached.headers);
+    outHeaders.set("X-Loom-Cache", "HIT");
+    for (const [k, v] of Object.entries(corsHeadersFor(request))) outHeaders.set(k, v);
+    applyBaselineSecurityHeaders(outHeaders);
+    return new Response(cached.body, { status: cached.status, headers: outHeaders });
   }
 
   const headers = {
@@ -145,36 +341,29 @@ async function handleFetchCsv(requestUrl: URL): Promise<Response> {
     Accept: "text/csv,text/plain,*/*",
   };
 
-  let useRange = false;
-  try {
-    const head = await fetch(parsed.toString(), { method: "HEAD", headers, redirect: "follow" });
-    const len = Number(head.headers.get("content-length") || "0");
-    if (len > MAX_CSV_BYTES) useRange = true;
-  } catch {
-    /* HEAD may fail */
-  }
-
-  const upstream = await fetch(parsed.toString(), {
-    headers: useRange
-      ? { ...headers, Range: `bytes=0-${PREVIEW_CSV_BYTES - 1}` }
-      : headers,
-    redirect: "follow",
+  const upstream = await fetchWithSsrfGuard(parsed.toString(), {
+    headers,
+    signal: AbortSignal.timeout(30_000),
   });
   if (!upstream.ok && upstream.status !== 206) {
-    return json({ error: `Upstream ${upstream.status}` }, 502);
+    return jsonFor(request, { error: `Upstream ${upstream.status}` }, 502);
   }
 
   const reader = upstream.body?.getReader();
-  if (!reader) return json({ error: "Empty response" }, 502);
+  if (!reader) return jsonFor(request, { error: "Empty response" }, 502);
 
   const chunks: Uint8Array[] = [];
   let total = 0;
-  const cap = useRange ? PREVIEW_CSV_BYTES : MAX_CSV_BYTES;
+  let byte0 = -1;
+  let byte1 = -1;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     if (!value) continue;
-    const remaining = cap - total;
+    if (byte0 < 0 && value.length > 0) byte0 = value[0]!;
+    if (byte1 < 0 && value.length > 1) byte1 = value[1]!;
+    else if (byte1 < 0 && value.length === 1 && byte0 >= 0) byte1 = 0;
+    const remaining = MAX_CSV_BYTES - total;
     if (remaining <= 0) {
       reader.cancel().catch(() => {});
       break;
@@ -189,16 +378,9 @@ async function handleFetchCsv(requestUrl: URL): Promise<Response> {
     total += value.byteLength;
   }
 
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const c of chunks) {
-    out.set(c, offset);
-    offset += c.byteLength;
-  }
-
-  // Many open-data portals label Excel workbooks as .csv — reject early
-  if (total >= 2 && out[0] === 0x50 && out[1] === 0x4b) {
-    return json(
+  if (total >= 2 && byte0 === 0x50 && byte1 === 0x4b) {
+    return jsonFor(
+      request,
       {
         error:
           "This download is an Excel workbook (xlsx), not CSV. Pick a CSV resource from the portal.",
@@ -207,15 +389,40 @@ async function handleFetchCsv(requestUrl: URL): Promise<Response> {
     );
   }
 
-  const truncated = useRange || total >= MAX_CSV_BYTES;
-  return new Response(out, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/csv; charset=utf-8",
-      ...(truncated ? { "X-Loom-Truncated": "1" } : {}),
-      ...CORS,
-    },
+  const truncated = total >= MAX_CSV_BYTES;
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const c of chunks) {
+    out.set(c, offset);
+    offset += c.byteLength;
+  }
+
+  const outHeaders = new Headers({
+    "Content-Type": "text/csv; charset=utf-8",
+    "X-Loom-Cache": "MISS",
+    ...(truncated ? { "X-Loom-Truncated": "1" } : {}),
+    ...corsHeadersFor(request),
+    ...baselineSecurityHeaderRecord(),
   });
+  applyBaselineSecurityHeaders(outHeaders);
+
+  if (!truncated && total > 0) {
+    ctx.waitUntil(
+      cache
+        .put(
+          cacheReq,
+          new Response(out.slice(), {
+            headers: {
+              "Content-Type": "text/csv; charset=utf-8",
+              "Cache-Control": `public, max-age=${FETCH_CSV_CACHE_TTL_SECS}`,
+            },
+          }),
+        )
+        .catch(() => {}),
+    );
+  }
+
+  return new Response(out, { status: 200, headers: outHeaders });
 }
 
 // ---- Live poll sources (`/api/source/<kind>`) ----
@@ -226,10 +433,6 @@ async function handleFetchCsv(requestUrl: URL): Promise<Response> {
 // fails) and every upstream call has a timeout so one hung API can't stall
 // the request. Note: the Cache API is a no-op on *.workers.dev — caching
 // only takes effect on the custom domain (loom.ibm.io) and in wrangler dev.
-
-interface WaitUntil {
-  waitUntil(promise: Promise<unknown>): void;
-}
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 
@@ -312,7 +515,7 @@ async function spaceDevsText(path: string): Promise<string> {
   }
 }
 
-const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
+export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   usgs: () =>
     upstreamText("USGS", "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson"),
 
@@ -360,6 +563,8 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   },
 
   opensky: async () => {
+    const budgetStart = Date.now();
+    const overBudget = () => Date.now() - budgetStart >= AIRCRAFT_FETCH_BUDGET_MS;
     // OpenSky rate-limits Cloudflare's shared IPs (429/522) — try briefly, then ADSB.lol.
     try {
       const body = await upstreamJson<{ states?: unknown[] | null }>(
@@ -371,12 +576,7 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     } catch {
       /* fall through */
     }
-    // ADSB.lol tolerates only 2–3 quick calls per IP: go one point at a time, spaced out,
-    // starting at a rotating point so coverage moves across the US between polls, and
-    // keep whatever arrived before the first 429.
-    // Same readsb aircraft format from two community networks; adsb.fi names the list
-    // `aircraft` instead of `ac`. Both throttle per IP (~1 req/s), so go one point at a
-    // time from a rotating start and keep whatever arrived before the first refusal.
+    if (overBudget()) throw new UpstreamError("Aircraft fetch budget exceeded");
     const providers = [
       { name: "ADSB.lol", url: (p: { lat: number; lon: number }) => `https://api.adsb.lol/v2/point/${p.lat}/${p.lon}/250` },
       { name: "adsb.fi", url: (p: { lat: number; lon: number }) => `https://opendata.adsb.fi/api/v2/lat/${p.lat}/lon/${p.lon}/dist/250` },
@@ -386,6 +586,7 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     for (const prov of providers) {
       const ok: unknown[] = [];
       for (let i = 0; i < ADSB_POINTS.length; i++) {
+        if (overBudget()) break;
         const p = ADSB_POINTS[(start + i) % ADSB_POINTS.length]!;
         try {
           const body = await upstreamJson<{ ac?: unknown[]; aircraft?: unknown[] }>(prov.name, prov.url(p), 8_000);
@@ -394,9 +595,14 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
           errors.push(e instanceof Error ? e.message : String(e));
           break;
         }
-        if (i < ADSB_POINTS.length - 1) await new Promise((r) => setTimeout(r, 1_200));
+        if (i < ADSB_POINTS.length - 1) {
+          const wait = Math.min(1_200, AIRCRAFT_FETCH_BUDGET_MS - (Date.now() - budgetStart));
+          if (wait <= 0) break;
+          await new Promise((r) => setTimeout(r, wait));
+        }
       }
       if (ok.length > 0) return JSON.stringify(adsbToOpensky(ok));
+      if (overBudget()) break;
     }
     throw new UpstreamError(`OpenSky and ADS-B fallbacks failed (${errors.join("; ") || "unknown"})`);
   },
@@ -488,28 +694,32 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
 
   countries: async () => {
     // restcountries v3.1 is deprecated (v5 needs a key): mledoze/countries + World Bank population.
-    const [list, pop] = await Promise.all([
+    const [listR, popR] = await Promise.allSettled([
       upstreamJson("mledoze/countries", "https://raw.githubusercontent.com/mledoze/countries/master/countries.json", 15_000),
       upstreamJson(
         "World Bank",
         "https://api.worldbank.org/v2/country/all/indicator/SP.POP.TOTL?format=json&per_page=400&mrnev=1",
       ),
     ]);
+    const list = listR.status === "fulfilled" ? listR.value : [];
+    const pop = popR.status === "fulfilled" ? popR.value : [];
     return JSON.stringify(mergeCountries(list, pop));
   },
 
   world_bank: async (ctx) => {
-    const [countryList, ...bodies] = await Promise.all([
+    const wbRange = worldBankDateRange();
+    const settled = await Promise.allSettled([
       cachedUpstreamJson("World Bank", "https://api.worldbank.org/v2/country?format=json&per_page=400", 86_400, ctx),
-      // ≈ 265 entities × 24 years ≈ 6.4k rows per indicator — one page each
       ...WB_WIDE_INDICATORS.map((ind) =>
         upstreamJson(
           "World Bank",
-          `https://api.worldbank.org/v2/country/all/indicator/${ind.id}?format=json&per_page=10000&date=2000:2023`,
+          `https://api.worldbank.org/v2/country/all/indicator/${ind.id}?format=json&per_page=10000&date=${wbRange}`,
           15_000,
         ),
       ),
     ]);
+    const countryList = settled[0]?.status === "fulfilled" ? settled[0].value : [];
+    const bodies = settled.slice(1).map((r) => (r.status === "fulfilled" ? r.value : []));
     return JSON.stringify(worldBankWide(countryList, bodies));
   },
 
@@ -615,7 +825,7 @@ const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
 };
 
 /** Fresh-for seconds per kind (roughly the upstream's own update cadence). */
-const SOURCE_TTL_SECS: Record<string, number> = {
+export const SOURCE_TTL_SECS: Record<string, number> = {
   iss: 5,
   mbta: 30,
   opensky: 60,
@@ -658,76 +868,206 @@ function staleSecs(ttl: number): number {
   return Math.min(2 * 86_400, Math.max(600, ttl * 4));
 }
 
-const SOURCE_CACHE_ORIGIN = "https://loom-source.internal/source/";
-
-function sourceResponse(body: BodyInit | null, cacheState: string, fetchedAt: number): Response {
-  return new Response(body, {
-    status: 200,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Loom-Cache": cacheState,
-      "X-Loom-Fetched-At": new Date(fetchedAt).toISOString(),
-      ...CORS,
-    },
+function sourceResponse(
+  body: BodyInit | null,
+  cacheState: string,
+  fetchedAt: number,
+  request: Request,
+  ttlSec: number,
+  staleSec: number,
+): Response {
+  const ageMs = Math.max(0, Date.now() - fetchedAt);
+  const remaining = Math.max(0, ttlSec - Math.floor(ageMs / 1000));
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "X-Loom-Cache": cacheState,
+    "X-Loom-Fetched-At": new Date(fetchedAt).toISOString(),
+    "Cache-Control": `public, max-age=${remaining}, stale-while-revalidate=${staleSec}`,
+    ...corsHeadersFor(request),
   });
+  applyBaselineSecurityHeaders(headers);
+  return new Response(body, { status: 200, headers });
 }
 
-async function handleSource(kind: string, ctx: WaitUntil): Promise<Response> {
+function logSourceRequest(meta: Record<string, unknown>): void {
+  console.log(JSON.stringify({ loom: "source", ...meta }));
+}
+
+async function refreshSourceCache(
+  kind: string,
+  fetcher: SourceFetcher,
+  ctx: WaitUntil,
+  cache: Cache,
+  key: string,
+  ttl: number,
+  stale: number,
+): Promise<void> {
+  const lockKey = `${key}:refresh`;
+  const inflight = await cache.match(lockKey).catch(() => undefined);
+  if (inflight) return;
+  await cache.put(
+    lockKey,
+    new Response("1", { headers: { "Cache-Control": "max-age=60" } }),
+  );
+  const started = Date.now();
+  try {
+    const text = await fetcher(ctx);
+    if (!sourcePayloadCacheable(kind, text)) {
+      logSourceRequest({ kind, cache: "SKIP-EMPTY", ms: Date.now() - started });
+      return;
+    }
+    const now = Date.now();
+    await cache.put(
+      key,
+      new Response(text, {
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": `public, max-age=${ttl + stale}`,
+          "X-Loom-Fetched-Ms": String(now),
+        },
+      }),
+    );
+    logSourceRequest({ kind, cache: "REFRESH", ms: Date.now() - started, status: 200 });
+  } catch (e) {
+    logSourceRequest({
+      kind,
+      cache: "REFRESH-FAIL",
+      ms: Date.now() - started,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  } finally {
+    await cache.delete(lockKey).catch(() => {});
+  }
+}
+
+export async function handleSource(kind: string, request: Request, ctx: WaitUntil): Promise<Response> {
   const fetcher = Object.prototype.hasOwnProperty.call(SOURCE_FETCHERS, kind) ? SOURCE_FETCHERS[kind] : undefined;
-  if (!fetcher) return json({ error: "Unknown source" }, 404);
+  if (!fetcher) return jsonFor(request, { error: "Unknown source" }, 404);
 
   const ttl = SOURCE_TTL_SECS[kind] ?? 60;
   const stale = staleSecs(ttl);
   const cache = caches.default;
-  const key = SOURCE_CACHE_ORIGIN + kind;
+  const key = sourceCacheKey(kind);
   const now = Date.now();
+  const started = Date.now();
 
   const cached = await cache.match(key).catch(() => undefined);
   const cachedAt = cached ? Number(cached.headers.get("X-Loom-Fetched-Ms") || "0") : 0;
-  if (cached && now - cachedAt <= ttl * 1000) {
-    return sourceResponse(cached.body, "HIT", cachedAt);
+  const ageMs = cachedAt > 0 ? now - cachedAt : 0;
+
+  if (cached && ageMs <= ttl * 1000) {
+    logSourceRequest({ kind, cache: "HIT", ms: Date.now() - started });
+    return sourceResponse(cached.body, "HIT", cachedAt, request, ttl, stale);
+  }
+
+  if (cached && ageMs <= (ttl + stale) * 1000) {
+    ctx.waitUntil(refreshSourceCache(kind, fetcher, ctx, cache, key, ttl, stale));
+    logSourceRequest({ kind, cache: "STALE-REVALIDATING", ms: Date.now() - started });
+    return sourceResponse(cached.body, "STALE-REVALIDATING", cachedAt, request, ttl, stale);
   }
 
   try {
     const text = await fetcher(ctx);
+    if (!sourcePayloadCacheable(kind, text)) {
+      if (cached && ageMs <= (ttl + stale) * 1000) {
+        logSourceRequest({ kind, cache: "STALE", ms: Date.now() - started, fallback: true });
+        return sourceResponse(cached.body, "STALE", cachedAt, request, ttl, stale);
+      }
+      throw new UpstreamError("Upstream returned empty payload");
+    }
+    const fetchedAt = Date.now();
     ctx.waitUntil(
       cache
         .put(key, new Response(text, {
           headers: {
             "Content-Type": "application/json",
             "Cache-Control": `public, max-age=${ttl + stale}`,
-            "X-Loom-Fetched-Ms": String(now),
+            "X-Loom-Fetched-Ms": String(fetchedAt),
           },
         }))
         .catch(() => {}),
     );
     cached?.body?.cancel().catch(() => {});
-    return sourceResponse(text, "MISS", now);
+    logSourceRequest({ kind, cache: "MISS", ms: Date.now() - started, status: 200 });
+    return sourceResponse(text, "MISS", fetchedAt, request, ttl, stale);
   } catch (e) {
-    if (cached && now - cachedAt <= (ttl + stale) * 1000) {
-      return sourceResponse(cached.body, "STALE", cachedAt);
+    if (cached && ageMs <= (ttl + stale) * 1000) {
+      logSourceRequest({
+        kind,
+        cache: "STALE",
+        ms: Date.now() - started,
+        error: e instanceof Error ? e.message : String(e),
+      });
+      return sourceResponse(cached.body, "STALE", cachedAt, request, ttl, stale);
     }
     cached?.body?.cancel().catch(() => {});
-    const msg = e instanceof Error ? e.message : String(e);
-    return json({ error: msg }, 502);
+    logSourceRequest({
+      kind,
+      cache: "ERROR",
+      ms: Date.now() - started,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return jsonFor(request, { error: "Upstream fetch failed" }, 502);
   }
+}
+
+async function handleCatalogSearch(
+  portal: "us" | "uk",
+  url: URL,
+  ctx: WaitUntil,
+): Promise<Response> {
+  const cache = caches.default;
+  const key = catalogSearchCacheKey(portal, url);
+  const cacheReq = new Request(key);
+  const hit = await cache.match(cacheReq).catch(() => undefined);
+  if (hit) {
+    const headers = new Headers(hit.headers);
+    headers.set("X-Loom-Cache", "HIT");
+    applyBaselineSecurityHeaders(headers);
+    return new Response(hit.body, { status: hit.status, headers });
+  }
+
+  const opts: FetchDataGovOptions = {
+    ...optsFromUrl(url),
+    deadlineMs: CATALOG_SEARCH_DEADLINE_MS,
+    requestTimeoutMs: 12_000,
+  };
+  const data =
+    portal === "us"
+      ? await fetchUsCatalogUpstream(opts)
+      : await fetchUkCatalogUpstream(opts);
+  const body = JSON.stringify(data);
+  const headers = new Headers({
+    "Content-Type": "application/json",
+    "X-Loom-Cache": "MISS",
+    "Cache-Control": `public, max-age=${CATALOG_SEARCH_TTL_SECS}`,
+    ...CORS,
+  });
+  applyBaselineSecurityHeaders(headers);
+  ctx.waitUntil(
+    cache
+      .put(
+        cacheReq,
+        new Response(body, {
+          headers: {
+            "Content-Type": "application/json",
+            "Cache-Control": `public, max-age=${CATALOG_SEARCH_TTL_SECS}`,
+          },
+        }),
+      )
+      .catch(() => {}),
+  );
+  return new Response(body, { status: 200, headers });
 }
 
 async function handleFeedback(request: Request, env: Env): Promise<Response> {
   const origin = request.headers.get("Origin");
-  if (
-    !originAllowed(origin, [
-      "loom.ibm.io",
-      "loom-storyteller.mhsenkow.workers.dev",
-      "localhost",
-      "127.0.0.1",
-    ])
-  ) {
+  if (!originAllowed(origin, allowedOriginHostsFromEnv(env))) {
     return json({ error: "Forbidden origin" }, 403);
   }
 
   const ip = clientIp(request);
-  if (!allowRequest(`feedback:${ip}`, 5, 60 * 60 * 1000)) {
+  if (!(await rateLimitAllow(env, "feedback", ip, 5, 60 * 60 * 1000))) {
     return json({ error: "Too many notes — try again later" }, 429);
   }
 
@@ -741,18 +1081,15 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  let payload: {
+  const parsed = await parseJsonBody(request, MAX_FEEDBACK_POST_BYTES);
+  if (!parsed.ok) return parsed.response;
+  const payload = parsed.data as {
     title?: string;
     body?: string;
     imageBase64?: string | null;
     href?: string;
     kind?: string;
   };
-  try {
-    payload = (await request.json()) as typeof payload;
-  } catch {
-    return json({ error: "Invalid JSON" }, 400);
-  }
 
   const title = (payload.title || "Loom feedback").trim().slice(0, 200);
   let body = (payload.body || "(no description)").trim().slice(0, 50_000);
@@ -760,8 +1097,8 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
   const href = (payload.href || "").trim().slice(0, 500);
 
   const meta = [
-    `**Kind:** ${kind}`,
-    href ? `**Page:** ${href}` : null,
+    `**Kind:** ${githubInlineField(kind)}`,
+    href ? `**Page:** ${githubInlineField(href)}` : null,
     `**Source:** loom.ibm.io web feedback`,
   ]
     .filter(Boolean)
@@ -769,11 +1106,36 @@ async function handleFeedback(request: Request, env: Env): Promise<Response> {
 
   body = `${body}\n\n---\n${meta}`;
 
-  if (payload.imageBase64 && payload.imageBase64.length < 400_000) {
-    const dataUrl = payload.imageBase64.startsWith("data:")
-      ? payload.imageBase64
-      : `data:image/png;base64,${payload.imageBase64}`;
-    body += `\n\n![screenshot](${dataUrl})`;
+  if (payload.imageBase64?.trim()) {
+    const kv = env.LOOM_STORIES;
+    const b64 = payload.imageBase64.startsWith("data:")
+      ? payload.imageBase64.slice(payload.imageBase64.indexOf(",") + 1)
+      : payload.imageBase64;
+    let linked = false;
+    if (kv && b64.length <= 400_000) {
+      try {
+        const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+        if (bin.length > 0 && validateOgImageBytes("image/png", bin)) {
+          const imgId = storyId().slice(0, 12);
+          await kv.put(`s:${imgId}:img`, bin, {
+            expirationTtl: STORY_TTL_SECONDS,
+            metadata: { contentType: "image/png" },
+          });
+          const host = new URL(request.url).origin;
+          body += `\n\n![screenshot](${host}/s/${imgId}.img)`;
+          linked = true;
+        }
+      } catch {
+        /* invalid base64 */
+      }
+    }
+    if (!linked) {
+      body += "\n\n_(Screenshot omitted — stored feedback images require LOOM_STORIES KV and a valid PNG.)_";
+    }
+  }
+
+  if (body.length > 65_536) {
+    body = `${body.slice(0, 65_400)}\n\n_(Body truncated for GitHub API limit.)_`;
   }
 
   const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/issues`, {
@@ -806,42 +1168,36 @@ const STORY_TTL_SECONDS = 60 * 60 * 24 * 7; // 7 days
 const MAX_STORY_HTML_BYTES = 4 * 1024 * 1024;
 const MAX_STORY_DATA_BYTES = 900_000;
 
+/** ≥128 bits of entropy as hex (32 chars). */
 function storyId(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(9));
-  return Array.from(bytes, (b) => b.toString(36).padStart(2, "0"))
-    .join("")
-    .slice(0, 12);
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-async function handlePublishStory(request: Request, env: Env): Promise<Response> {
-  const requestOrigin = request.headers.get("Origin");
-  // Same-origin SPA publishes; also allow workers.dev previews
-  if (
-    requestOrigin &&
-    !originAllowed(requestOrigin, [
-      "loom.ibm.io",
-      "loom-storyteller.mhsenkow.workers.dev",
-      "localhost",
-      "127.0.0.1",
-    ])
-  ) {
-    return json({ error: "Forbidden origin" }, 403);
+export async function handlePublishStory(request: Request, env: Env): Promise<Response> {
+  // Publishing is intentionally anonymous for approved Loom web origins, but
+  // Origin (or STORY_ADMIN_TOKEN) is required — a missing Origin is not auth.
+  if (!storyMutationAuthorized(request, env)) {
+    return json(
+      {
+        error:
+          "Forbidden: approved Origin required, or Authorization: Bearer <STORY_ADMIN_TOKEN> for native/ops clients",
+      },
+      403,
+    );
   }
 
   const ip = clientIp(request);
   // 20 stories / hour / IP — enough for normal use, stops KV fill attacks
-  if (!allowRequest(`stories:${ip}`, 20, 60 * 60 * 1000)) {
+  if (!(await rateLimitAllow(env, "stories", ip, 20, 60 * 60 * 1000))) {
     return json({ error: "Too many publishes — try again later" }, 429);
   }
 
-  let payload: { html?: string; title?: string; ogImage?: string; data?: unknown };
-  try {
-    payload = (await request.json()) as typeof payload;
-  } catch {
-    return json({ error: "Invalid JSON" }, 400);
-  }
+  const parsedStory = await parseJsonBody(request, MAX_STORY_POST_BYTES);
+  if (!parsedStory.ok) return parsedStory.response;
+  const payload = parsedStory.data as { html?: string; title?: string; ogImage?: string; data?: unknown };
   let html = payload.html?.trim() ?? "";
-  if (!html || html.length > MAX_STORY_HTML_BYTES) {
+  if (!html || utf8ByteLength(html) > MAX_STORY_HTML_BYTES) {
     return json({ error: "HTML missing or too large (4MB max)" }, 400);
   }
   if (!html.includes("<html") && !html.includes("<HTML")) {
@@ -861,7 +1217,7 @@ async function handlePublishStory(request: Request, env: Env): Promise<Response>
   let hasData = false;
   if (payload.data != null) {
     const dataJson = typeof payload.data === "string" ? payload.data : JSON.stringify(payload.data);
-    if (dataJson.length > 2 && dataJson.length <= MAX_STORY_DATA_BYTES) {
+    if (dataJson.length > 2 && utf8ByteLength(dataJson) <= MAX_STORY_DATA_BYTES) {
       await kv.put(`s:${id}:data`, dataJson, { expirationTtl: ttl });
       hasData = true;
     }
@@ -874,6 +1230,9 @@ async function handlePublishStory(request: Request, env: Env): Promise<Response>
   const og = payload.ogImage?.match(/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/);
   if (og && og[2]!.length < MAX_STORY_HTML_BYTES) {
     const bytes = Uint8Array.from(atob(og[2]!), (c) => c.charCodeAt(0));
+    if (!validateOgImageBytes(og[1] as "image/png" | "image/jpeg", bytes)) {
+      return json({ error: "Invalid preview image" }, 400);
+    }
     await kv.put(`s:${id}:img`, bytes.buffer, {
       expirationTtl: ttl,
       metadata: { contentType: og[1]! },
@@ -909,7 +1268,8 @@ async function handlePublishStory(request: Request, env: Env): Promise<Response>
 }
 
 async function handleGetStory(id: string, env: Env): Promise<Response> {
-  if (!/^[a-z0-9]{8,16}(\.(img|data))?$/i.test(id)) {
+  // Legacy 12-char base36 ids + new 32-char hex ids
+  if (!/^[a-z0-9]{8,32}(\.(img|data))?$/i.test(id)) {
     return json({ error: "Invalid story id" }, 400);
   }
   const kv = env.LOOM_STORIES;
@@ -922,10 +1282,14 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
 
   const [baseId, ext] = id.includes(".") ? (id.split(".") as [string, string]) : [id, "html"];
   const key = `s:${baseId}:${ext === "img" ? "img" : ext === "data" ? "data" : "html"}`;
-  const hit = await kv.getWithMetadata<{ contentType?: string; title?: string; hasData?: string }>(
-    key,
-    ext === "img" ? "arrayBuffer" : "text",
-  );
+  type StoryKvHit = KVNamespaceGetWithMetadataResult<
+    string | ArrayBuffer,
+    { contentType?: string; title?: string; hasData?: string }
+  >;
+  const hit: StoryKvHit =
+    ext === "img"
+      ? await kv.getWithMetadata(key, "arrayBuffer")
+      : await kv.getWithMetadata(key, "text");
 
   if (hit.value == null) {
     // Never let the edge cache a miss — 404s must stay uncached.
@@ -941,13 +1305,14 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
 
   const meta = hit.metadata || {};
   const headers = new Headers({
-    "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}`,
+    "Cache-Control": `public, max-age=${STORY_BROWSER_MAX_AGE}, s-maxage=${STORY_EDGE_S_MAXAGE}`,
     "Access-Control-Allow-Origin": "*",
   });
+  applyBaselineSecurityHeaders(headers);
 
   if (ext === "img") {
     headers.set("Content-Type", meta.contentType || "image/png");
-    return new Response(hit.value as ArrayBuffer, { status: 200, headers });
+    return new Response(hit.value as unknown as ArrayBuffer, { status: 200, headers });
   }
   if (ext === "data") {
     headers.set("Content-Type", "application/json; charset=utf-8");
@@ -955,9 +1320,30 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
   }
 
   headers.set("Content-Type", meta.contentType || "text/html; charset=utf-8");
+  headers.set("Content-Security-Policy", STORY_HTML_CSP);
   if (meta.title) headers.set("X-Loom-Story-Title", meta.title);
   if (meta.hasData === "1") headers.set("X-Loom-Story-Data", "1");
   return new Response(hit.value as string, { status: 200, headers });
+}
+
+async function handleDeleteStory(id: string, request: Request, env: Env): Promise<Response> {
+  if (!/^[a-z0-9]{8,32}$/i.test(id)) {
+    return json({ error: "Invalid story id" }, 400);
+  }
+  const token = bearerToken(request);
+  if (!env.STORY_ADMIN_TOKEN || !token || token !== env.STORY_ADMIN_TOKEN) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+  const kv = env.LOOM_STORIES;
+  if (!kv) {
+    return json({ error: "Story storage not configured (LOOM_STORIES KV)" }, 503);
+  }
+  await Promise.all([
+    kv.delete(`s:${id}:html`),
+    kv.delete(`s:${id}:img`),
+    kv.delete(`s:${id}:data`),
+  ]);
+  return json({ ok: true, id, deleted: true });
 }
 
 export default {
@@ -965,24 +1351,33 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/"))) {
+      if (url.pathname === "/api/fetch-csv" || url.pathname.startsWith("/api/source/")) {
+        if (
+          url.pathname === "/api/fetch-csv" &&
+          !fetchCsvAuthorized(request, env) &&
+          !originAllowed(request.headers.get("Origin"), allowedOriginHostsFromEnv(env))
+        ) {
+          return new Response(null, { status: 403, headers: corsHeadersFor(request, env) });
+        }
+        return new Response(null, { status: 204, headers: corsHeadersFor(request, env) });
+      }
       return new Response(null, { status: 204, headers: CORS });
     }
 
+    const requestId = shortRequestId();
     try {
       if (url.pathname === "/api/catalog/us") {
-        const data = await fetchUsCatalogUpstream(optsFromUrl(url));
-        return json(data);
+        return await handleCatalogSearch("us", url, ctx);
       }
       if (url.pathname === "/api/catalog/uk") {
-        const data = await fetchUkCatalogUpstream(optsFromUrl(url));
-        return json(data);
+        return await handleCatalogSearch("uk", url, ctx);
       }
       if (url.pathname === "/api/fetch-csv") {
-        return await handleFetchCsv(url);
+        return await handleFetchCsv(request, url, ctx, env);
       }
       if (url.pathname.startsWith("/api/source/")) {
         const kind = url.pathname.replace("/api/source/", "").replace(/\/$/, "");
-        return await handleSource(kind, ctx);
+        return await handleSource(kind, request, ctx);
       }
       if (url.pathname === "/api/feedback" && request.method === "POST") {
         return await handleFeedback(request, env);
@@ -990,15 +1385,31 @@ export default {
       if (url.pathname === "/api/stories" && request.method === "POST") {
         return await handlePublishStory(request, env);
       }
+      {
+        const del = url.pathname.match(/^\/api\/stories\/([a-z0-9]{8,32})$/i);
+        if (del && request.method === "DELETE") {
+          return await handleDeleteStory(del[1]!, request, env);
+        }
+      }
       if (url.pathname.startsWith("/s/")) {
         const id = url.pathname.slice(3).replace(/\/$/, "");
         return await handleGetStory(id, env);
       }
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      return json({ error: msg }, 502);
+    } catch {
+      return json({ error: "Request failed", requestId }, 502);
     }
 
-    return env.ASSETS.fetch(request);
+    if (url.pathname.startsWith("/api/")) {
+      return jsonFor(request, { error: "Not found" }, 404);
+    }
+
+    const asset = await env.ASSETS.fetch(request);
+    const headers = new Headers(asset.headers);
+    applyBaselineSecurityHeaders(headers);
+    return new Response(asset.body, {
+      status: asset.status,
+      statusText: asset.statusText,
+      headers,
+    });
   },
 };

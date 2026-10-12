@@ -21,6 +21,7 @@ import {
   encodeChartLink,
   restoreChartRec,
 } from "@/lib/chartLink";
+import { sanitizeChartVisualOverrides } from "@/lib/chartVisualSanitize";
 import { storyIdFromSharedPath } from "@/lib/shareLineage";
 
 const SYNC_DEBOUNCE_MS = 400;
@@ -73,7 +74,7 @@ export function ChartLinkSync() {
       vegaSpec: rec.spec ?? null,
       aiSuggestionReason: null,
       chartRecs: s.chartRecs.some((r) => r.id === rec.id) ? s.chartRecs : [rec, ...s.chartRecs],
-      chartVisualOverrides: { ...(chartLink.visual ?? {}) } as ChartVisualOverrides,
+      chartVisualOverrides: { ...(sanitizeChartVisualOverrides(chartLink.visual) ?? {}) } as ChartVisualOverrides,
       chartTitleOverrides: chartLink.titleOverride
         ? { ...s.chartTitleOverrides, [rec.id]: chartLink.titleOverride }
         : (() => {

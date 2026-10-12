@@ -8,7 +8,7 @@
 // (approach_ts, launch net) use a forward window from now.
 // =================================================================
 
-import type { ColumnInfo } from "./store";
+import type { ColumnInfo } from "./queryTypes";
 
 export type ChartTimeRange = "all" | "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
 
@@ -192,19 +192,27 @@ export function applyChartTimeWindow<T extends unknown[]>(
   columns: string[],
   rec: { timeWindowField?: string | null; timeWindow?: ChartTimeRange | string | null } | null | undefined,
   now = Date.now(),
-): { rows: T[]; filtered: boolean; kept: number; total: number; mode: ChartTimeAnchorMode | null } {
+): {
+  rows: T[];
+  filtered: boolean;
+  kept: number;
+  total: number;
+  mode: ChartTimeAnchorMode | null;
+  /** Index in the input `rows` for each row in the returned slice. */
+  sourceIndices: number[];
+} {
   const total = rows.length;
   const field = rec?.timeWindowField;
   const range = rec?.timeWindow;
   if (!field || !range || range === "all") {
-    return { rows, filtered: false, kept: total, total, mode: null };
+    return { rows, filtered: false, kept: total, total, mode: null, sourceIndices: rows.map((_, i) => i) };
   }
   const spec = CHART_TIME_RANGES.find((r) => r.value === range);
   if (!spec || !Number.isFinite(spec.ms)) {
-    return { rows, filtered: false, kept: total, total, mode: null };
+    return { rows, filtered: false, kept: total, total, mode: null, sourceIndices: rows.map((_, i) => i) };
   }
   const idx = columns.indexOf(field);
-  if (idx < 0) return { rows, filtered: false, kept: total, total, mode: null };
+  if (idx < 0) return { rows, filtered: false, kept: total, total, mode: null, sourceIndices: rows.map((_, i) => i) };
 
   let max = -Infinity;
   const times = rows.map((r) => {
@@ -212,34 +220,38 @@ export function applyChartTimeWindow<T extends unknown[]>(
     if (t != null && t > max) max = t;
     return t;
   });
-  if (!Number.isFinite(max)) return { rows, filtered: false, kept: total, total, mode: null };
+  if (!Number.isFinite(max)) return { rows, filtered: false, kept: total, total, mode: null, sourceIndices: rows.map((_, i) => i) };
 
   const mode = fieldLooksFutureDated(field) && max > now
     ? "forward"
     : chartTimeAnchorMode(max, now);
 
-  let next: T[];
+  const next: T[] = [];
+  const sourceIndices: number[] = [];
+  const keep = (i: number) => {
+    next.push(rows[i]!);
+    sourceIndices.push(i);
+  };
   if (mode === "forward") {
     const end = now + spec.ms;
-    next = rows.filter((_, i) => {
+    rows.forEach((_, i) => {
       const t = times[i];
-      return t != null && t >= now && t <= end;
+      if (t != null && t >= now && t <= end) keep(i);
     });
   } else if (mode === "wall") {
     const cutoff = now - spec.ms;
-    next = rows.filter((_, i) => {
+    rows.forEach((_, i) => {
       const t = times[i];
-      // Allow 2 min of clock skew / slightly-future telemetry
-      return t != null && t >= cutoff && t <= now + 120_000;
+      if (t != null && t >= cutoff && t <= now + 120_000) keep(i);
     });
   } else {
     const cutoff = max - spec.ms;
-    next = rows.filter((_, i) => {
+    rows.forEach((_, i) => {
       const t = times[i];
-      return t != null && t >= cutoff && t <= max;
+      if (t != null && t >= cutoff && t <= max) keep(i);
     });
   }
-  return { rows: next, filtered: true, kept: next.length, total, mode };
+  return { rows: next, filtered: true, kept: next.length, total, mode, sourceIndices };
 }
 
 /** Min/max parseable times for a column in the (already windowed) sample. */

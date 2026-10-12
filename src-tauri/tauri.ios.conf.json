@@ -1,0 +1,18 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
+  "identifier": "com.loom.storyteller",
+  "bundle": {
+    "iOS": {
+      "minimumSystemVersion": "16.0",
+      "developmentTeam": "WC44W2QVE4"
+    }
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Loom",
+        "fullscreen": false
+      }
+    ]
+  }
+}

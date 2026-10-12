@@ -12,9 +12,11 @@ import {
   autoBucketMs,
   decodeDiveLink,
   defaultDiveQuery,
+  diveBucketFloor,
   diveToSql,
   encodeDiveLink,
   formatDelta,
+  formatDiveNumber,
   parseDiveTime,
   percentileOf,
   profileDiveColumns,
@@ -132,6 +134,14 @@ describe("sql + links", () => {
     expect(ts).toContain("quantile_cont(delta, 0.99)");
   });
 
+  it("opens a minimal shared link with empty metrics", () => {
+    const hash = `#${encodeDiveLink({ src: "stream://wiki", query: { metrics: [] } as unknown as DiveQuery })}`;
+    const parsed = decodeDiveLink(hash);
+    expect(parsed?.src).toBe("stream://wiki");
+    expect(parsed?.query.metrics).toEqual([]);
+    expect(sanitizeDiveQuery(parsed!.query, profiles).metrics).toEqual([{ agg: "count", column: null }]);
+  });
+
   it("round-trips a query through the URL hash", () => {
     const query = q({ groupBy: ["wiki"], filters: [{ column: "user", op: "contains", values: ["ü 'quote'"] }] });
     const hash = `#${encodeDiveLink({ src: "stream://wiki", query })}`;
@@ -245,6 +255,23 @@ describe("scuba parity", () => {
     expect(sql).toContain("ASC NULLS LAST");
     expect(sql).toContain("count(*) AS hits");
     expect(sql).toContain("quantile_cont(delta, 0.95) AS p95_delta");
+  });
+});
+
+describe("formatDiveNumber", () => {
+  it("shows tiny values and grouped decimals", () => {
+    expect(formatDiveNumber(0.0004)).toBe("0.0004");
+    expect(formatDiveNumber(1234.5)).toBe("1,234.5");
+  });
+});
+
+describe("diveBucketFloor", () => {
+  it("starts weekly buckets on Monday local midnight", () => {
+    // 2026-10-15 is a Thursday
+    const thu = new Date(2026, 9, 15, 14, 0, 0).getTime();
+    const mon = diveBucketFloor(thu, 7 * 86_400_000);
+    expect(new Date(mon).getDay()).toBe(1);
+    expect(new Date(mon).getHours()).toBe(0);
   });
 });
 

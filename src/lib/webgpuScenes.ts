@@ -8,6 +8,8 @@
 
 import scenesWgslRaw from "@/shaders/scenes.wgsl";
 import globeWgslRaw from "@/shaders/globe.wgsl";
+import { packGpuPalette } from "./gpuPalette";
+import type { SharedGpuDeviceLease } from "./gpuDevice";
 import type { GpuSceneKind, GpuScenePoint } from "./gpuScenes";
 export { isWebGpuDrawableScene } from "./gpuScenes";
 
@@ -20,20 +22,6 @@ const globeWgsl: string =
   typeof globeWgslRaw === "string"
     ? globeWgslRaw
     : (globeWgslRaw as unknown as { default: string }).default ?? String(globeWgslRaw);
-
-function parseColorToRgb(c: string): [number, number, number] {
-  const s = c.trim();
-  if (s.startsWith("#") && s.length >= 7) {
-    return [
-      parseInt(s.slice(1, 3), 16) / 255,
-      parseInt(s.slice(3, 5), 16) / 255,
-      parseInt(s.slice(5, 7), 16) / 255,
-    ];
-  }
-  const rgb = s.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
-  if (rgb) return [Number(rgb[1]) / 255, Number(rgb[2]) / 255, Number(rgb[3]) / 255];
-  return [0.424, 0.361, 0.906];
-}
 
 export type SceneMode = GpuSceneKind | "globe";
 
@@ -63,6 +51,7 @@ const DEFAULT_PALETTE = [
 ];
 
 export class LoomSceneRenderer {
+  private deviceLease: SharedGpuDeviceLease | null = null;
   private device: GPUDevice | null = null;
   private context: GPUCanvasContext | null = null;
   private computePipeline: GPUComputePipeline | null = null;
@@ -86,17 +75,11 @@ export class LoomSceneRenderer {
   };
   private bounds = { xMin: 0, xMax: 1, yMin: 0, yMax: 1, zMin: 0, zMax: 1 };
 
-  async init(canvas: HTMLCanvasElement): Promise<boolean> {
+  async init(canvas: HTMLCanvasElement, deviceLease: SharedGpuDeviceLease): Promise<boolean> {
     try {
       if (!navigator.gpu) return false;
-      const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-      if (!adapter) return false;
-      this.device = await adapter.requestDevice({
-        requiredLimits: {
-          maxStorageBufferBindingSize: 256 * 1024 * 1024,
-          maxBufferSize: 256 * 1024 * 1024,
-        },
-      });
+      this.deviceLease = deviceLease;
+      this.device = deviceLease.device;
       this.context = canvas.getContext("webgpu") as GPUCanvasContext;
       if (!this.context) return false;
       const format = navigator.gpu.getPreferredCanvasFormat();
@@ -117,7 +100,7 @@ export class LoomSceneRenderer {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.paletteBuffer = this.device.createBuffer({
-      size: 8 * 3 * 4,
+      size: 32 * 3 * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
   }
@@ -177,17 +160,8 @@ export class LoomSceneRenderer {
     }
     if (!this.computePipeline || !this.renderPipeline) return;
 
-    const palette = this.config.palette && this.config.palette.length >= 8
-      ? this.config.palette.map((c) => parseColorToRgb(c))
-      : DEFAULT_PALETTE;
-    const paletteF32 = new Float32Array(24);
-    for (let i = 0; i < 8; i++) {
-      const [r, g, b] = palette[i] ?? DEFAULT_PALETTE[0]!;
-      paletteF32[i * 3] = r;
-      paletteF32[i * 3 + 1] = g;
-      paletteF32[i * 3 + 2] = b;
-    }
-    this.device.queue.writeBuffer(this.paletteBuffer, 0, paletteF32);
+    const packed = packGpuPalette(this.config.palette, DEFAULT_PALETTE as [number, number, number][]);
+    this.device.queue.writeBuffer(this.paletteBuffer, 0, packed.floats as Float32Array<ArrayBuffer>);
 
     this.pointCount = points.length;
     if (this.pointCount === 0) return;
@@ -316,6 +290,8 @@ export class LoomSceneRenderer {
     this.screenBuffer?.destroy();
     this.uniformBuffer?.destroy();
     this.paletteBuffer?.destroy();
+    this.deviceLease?.release();
+    this.deviceLease = null;
     this.device = null;
   }
 }

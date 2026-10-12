@@ -9,37 +9,102 @@
 
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
+import { useShallow } from "zustand/react/shallow";
 import { useLoomStore } from "@/lib/store";
 import type { DashboardSlot, DashboardLayoutTemplate, ViewMode } from "@/lib/store";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
 import { DetailPanel } from "@/components/DetailPanel";
 import { PreviewFooter } from "@/components/PreviewFooter";
-import { ExplorerView } from "@/components/ExplorerView";
-import { ChartView } from "@/components/ChartView";
-import { QueryView } from "@/components/QueryView";
-import { DiveView } from "@/components/DiveView";
 import { ThemeApplicator } from "@/components/ThemeApplicator";
+import { WebServiceWorker } from "@/components/WebServiceWorker";
+import { DeployMismatchBanner } from "@/components/DeployMismatchBanner";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import { HydrateStore } from "@/components/HydrateStore";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toast } from "@/components/Toast";
-import { PromptDialog } from "@/components/PromptDialog";
-import { Onboarding } from "@/components/Onboarding";
-import { WhatsNew } from "@/components/WhatsNew";
 import { requestWhatsNew } from "@/lib/changelog";
-import { FeedbackNotes } from "@/components/FeedbackNotes";
 import { SuiteMenu } from "@/components/SuiteMenu";
-import { VizSwipeDeck } from "@/components/VizSwipeDeck";
-import { ShareSheet } from "@/components/ShareSheet";
-import { useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
+import { DISCOVER_SEEN_KEY } from "@/lib/discoverStories";
+import { Dialog } from "@/components/ui/Dialog";
+import { useMobileLiveEdit, useShellMode, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
+import {
+  applyShellModeTransition,
+  dashboardGridClass,
+  dashboardGridStyle,
+  readDesktopPrefsFromSession,
+  writeDesktopPrefsToSession,
+  type ShellMode,
+} from "@/lib/shellLayout";
 import { WebSessionResume } from "@/components/WebSessionResume";
-import { useEffect, useCallback } from "react";
+import { NeoSpaceIngest } from "@/components/NeoSpaceIngest";
 import { createGitHubIssue, getGitHubNewIssueUrl, isTauri, openExternalUrl } from "@/lib/tauri";
 import {
   captureChartViewPreview,
   captureStoryDashboardPreviews,
 } from "@/lib/captureStoryPreviews";
+
+const viewSkeleton = (
+  <div className="loom-panel flex-1 min-h-[12rem] animate-pulse bg-loom-surface/40" aria-hidden />
+);
+
+const ExplorerView = dynamic(() => import("@/components/ExplorerView").then((m) => m.ExplorerView), {
+  ssr: false,
+  loading: () => viewSkeleton,
+});
+const ChartView = dynamic(() => import("@/components/ChartView").then((m) => m.ChartView), {
+  ssr: false,
+  loading: () => viewSkeleton,
+});
+const QueryView = dynamic(() => import("@/components/QueryView").then((m) => m.QueryView), {
+  ssr: false,
+  loading: () => viewSkeleton,
+});
+const DiveView = dynamic(() => import("@/components/DiveView").then((m) => m.DiveView), {
+  ssr: false,
+  loading: () => viewSkeleton,
+});
+
+const Onboarding = dynamic(() => import("@/components/Onboarding").then((m) => m.Onboarding), { ssr: false });
+const WhatsNew = dynamic(() => import("@/components/WhatsNew").then((m) => m.WhatsNew), { ssr: false });
+const ShareSheet = dynamic(() => import("@/components/ShareSheet").then((m) => m.ShareSheet), { ssr: false });
+const VizSwipeDeck = dynamic(() => import("@/components/VizSwipeDeck").then((m) => m.VizSwipeDeck), { ssr: false });
+const PromptDialog = dynamic(() => import("@/components/PromptDialog").then((m) => m.PromptDialog), { ssr: false });
+const FeedbackNotes = dynamic(() => import("@/components/FeedbackNotes").then((m) => m.FeedbackNotes), { ssr: false });
+
+function OccasionalOverlays() {
+  const shareSheetOpen = useLoomStore((s) => s.shareSheetOpen);
+  const whatsNewOpen = useLoomStore((s) => s.whatsNewOpen);
+  const vizSwipeOpen = useLoomStore((s) => s.vizSwipeOpen);
+  const promptDialog = useLoomStore((s) => s.promptDialog);
+  const [mountDiscover, setMountDiscover] = useState(false);
+  useEffect(() => {
+    try {
+      if (!window.localStorage.getItem(DISCOVER_SEEN_KEY)) setMountDiscover(true);
+    } catch {
+      setMountDiscover(true);
+    }
+    const onDiscover = () => setMountDiscover(true);
+    window.addEventListener("loom-discover", onDiscover);
+    return () => window.removeEventListener("loom-discover", onDiscover);
+  }, []);
+  return (
+    <>
+      {(mountDiscover || whatsNewOpen) && <Onboarding />}
+      {whatsNewOpen && <WhatsNew />}
+      {shareSheetOpen && <ShareSheet />}
+      {vizSwipeOpen && <VizSwipeDeck />}
+      {promptDialog && <PromptDialog />}
+      <FeedbackNotes />
+    </>
+  );
+}
+
+function ariaModalOpen(): boolean {
+  return typeof document !== "undefined" && !!document.querySelector('[aria-modal="true"]');
+}
 
 /** Open a URL: in Tauri use backend (default browser), in web use new tab. */
 async function openUrl(url: string): Promise<void> {
@@ -72,6 +137,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
   const active = dashboards.find((d) => d.id === activeDashboardId);
   const [focusedSlot, setFocusedSlot] = useState<DashboardSlot | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
+  const shellMode = useShellMode();
   const capturingThis =
     !!previewCapture && !!active && previewCapture.dashboardId === active.id;
 
@@ -149,24 +215,9 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
   const lastRefreshed = active.lastRefreshedAt ? new Date(active.lastRefreshedAt) : null;
 
   const layout = (active.layoutTemplate ?? "auto") as DashboardLayoutTemplate;
-  const gridClass =
-    layout === "1x1"
-      ? "grid-cols-1"
-      : layout === "2x1"
-        ? "grid-cols-2"
-        : layout === "2x2"
-          ? "grid-cols-2"
-          : layout === "3x2"
-            ? "grid-cols-3"
-            : layout === "stream"
-              ? "grid-cols-3"
-              : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4";
-  const gridStyle =
-    layout === "1+2"
-      ? { display: "grid", gridTemplateColumns: "1fr 1fr", gridAutoRows: "minmax(140px, 1fr)" } as React.CSSProperties
-      : layout === "stream"
-        ? { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gridAutoRows: "minmax(160px, 1fr)" } as React.CSSProperties
-        : undefined;
+  const gridClass = dashboardGridClass(layout, shellMode);
+  const gridStyle = dashboardGridStyle(layout, shellMode) as React.CSSProperties | undefined;
+  const allowHeroSpans = shellMode === "desktop";
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -233,8 +284,8 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
               const label = getSlotLabel(slot.viewType, slot.viewId);
               const chartView = slot.viewType === "chart" ? chartViews.find((x) => x.id === slot.viewId) : null;
               const snapshotUrl = chartView?.snapshotImageDataUrl ?? null;
-              const is1p2First = layout === "1+2" && idx === 0;
-              const isStreamHero = layout === "stream" && idx === 0;
+              const is1p2First = allowHeroSpans && layout === "1+2" && idx === 0;
+              const isStreamHero = allowHeroSpans && layout === "stream" && idx === 0;
               const isChart = slot.viewType === "chart";
               const waitingPreview = isChart && !snapshotUrl;
               const busy = retryingId === slot.viewId || (capturingThis && waitingPreview);
@@ -252,7 +303,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
                     className="mt-1 flex-1 min-h-0 w-full rounded overflow-hidden bg-loom-bg/50 flex items-center justify-center hover:ring-1 hover:ring-loom-accent/40 transition-shadow"
                   >
                     {snapshotUrl ? (
-                      <img src={snapshotUrl} alt="" className="w-full h-full object-contain pointer-events-none" />
+                      <img src={snapshotUrl} alt={getSlotLabel(slot.viewType, slot.viewId)} className="w-full h-full object-contain pointer-events-none" />
                     ) : busy ? (
                       <div className="flex flex-col items-center gap-2 px-3">
                         <span className="inline-block w-5 h-5 rounded-full border-2 border-loom-border border-t-loom-accent animate-spin" aria-hidden />
@@ -343,7 +394,13 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
                 const cv = chartViews.find((x) => x.id === focusedSlot.viewId);
                 const url = cv?.snapshotImageDataUrl ?? null;
                 if (url) {
-                  return <img src={url} alt="" className="max-w-full max-h-full object-contain shadow-lg rounded" />;
+                  return (
+                    <img
+                      src={url}
+                      alt={getSlotLabel(focusedSlot.viewType, focusedSlot.viewId)}
+                      className="max-w-full max-h-full object-contain shadow-lg rounded"
+                    />
+                  );
                 }
                 return (
                   <div className="flex flex-col items-center gap-3">
@@ -382,17 +439,41 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
 }
 
 export default function Home() {
-  const { viewMode, setViewMode, dataSourcesExpanded: sourcesFlag, sidebarOpen, dashboardsExpanded, previewCapture, socialExportReady } = useLoomStore();
+  const {
+    viewMode,
+    setViewMode,
+    dataSourcesExpanded: sourcesFlag,
+    sidebarOpen,
+    dashboardsExpanded,
+    previewCapture,
+    socialExportReady,
+    selectedFilePath,
+    activeChartId,
+  } = useLoomStore(
+    useShallow((s) => ({
+      viewMode: s.viewMode,
+      setViewMode: s.setViewMode,
+      dataSourcesExpanded: s.dataSourcesExpanded,
+      sidebarOpen: s.sidebarOpen,
+      dashboardsExpanded: s.dashboardsExpanded,
+      previewCapture: s.previewCapture,
+      socialExportReady: s.socialExportReady,
+      selectedFilePath: s.selectedFile?.path ?? null,
+      activeChartId: s.activeChart?.id ?? null,
+    })),
+  );
   // Sources only take over the canvas while the sidebar showing them is open.
   const dataSourcesExpanded = sourcesFlag && sidebarOpen;
   return (
     <>
       <ThemeApplicator />
+      <WebServiceWorker />
+      <DeployMismatchBanner />
+      <OfflineBanner />
       <HydrateStore />
       <WebSessionResume />
-      <WhatsNew />
-      <Onboarding />
-      <ErrorBoundary>
+      <NeoSpaceIngest />
+      <ErrorBoundary resetKeys={[viewMode, selectedFilePath ?? "", activeChartId ?? ""]}>
         <HomeContent
           viewMode={viewMode}
           setViewMode={setViewMode}
@@ -402,10 +483,7 @@ export default function Home() {
           socialExportReady={socialExportReady}
         />
       </ErrorBoundary>
-      <PromptDialog />
-      <FeedbackNotes />
-      <VizSwipeDeck />
-      <ShareSheet />
+      <OccasionalOverlays />
       <Toast />
     </>
   );
@@ -484,6 +562,7 @@ function HomeContent({
   socialExportReady: boolean;
 }) {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const helpCloseRef = useRef<HTMLButtonElement>(null);
   const liveEdit = useMobileLiveEdit();
   const [helpTab, setHelpTab] = useState<"shortcuts" | "feedback">("shortcuts");
   const [feedbackTitle, setFeedbackTitle] = useState("");
@@ -494,17 +573,59 @@ function HomeContent({
   const setPanelTab = useLoomStore((s) => s.setPanelTab);
   const setToast = useLoomStore((s) => s.setToast);
 
-  // Mobile: start with drawers closed so the chart canvas owns the screen
+  // Phone / tablet / desktop chrome — restore docks after Split View / Stage Manager
+  const shellMode = useShellMode();
+  const shellModeRef = useRef<ShellMode | null>(null);
+  const sidebarOpen = useLoomStore((s) => s.sidebarOpen);
+  const panelOpen = useLoomStore((s) => s.panelOpen);
+
+  useLayoutEffect(() => {
+    const prev = shellModeRef.current;
+    if (prev === shellMode) return;
+    const next = applyShellModeTransition({
+      prevMode: prev,
+      nextMode: shellMode,
+      desktopPrefs: readDesktopPrefsFromSession(),
+      current: { sidebarOpen, panelOpen },
+    });
+    useLoomStore.setState(next);
+    shellModeRef.current = shellMode;
+  }, [shellMode, sidebarOpen, panelOpen]);
+
   useEffect(() => {
-    const mq = window.matchMedia("(max-width: 767px)");
-    const apply = () => {
-      if (mq.matches) {
-        useLoomStore.setState({ sidebarOpen: false, panelOpen: false });
+    if (shellMode !== "desktop") return;
+    writeDesktopPrefsToSession({ sidebarOpen, panelOpen });
+  }, [shellMode, sidebarOpen, panelOpen]);
+
+  useEffect(() => {
+    const onHelp = (event: Event) => {
+      const detail = event instanceof CustomEvent ? event.detail as {
+        tab?: "shortcuts" | "feedback";
+        feedbackTitle?: string;
+        feedbackBody?: string;
+      } | undefined : undefined;
+      setShortcutsOpen(true);
+      setHelpTab(detail?.tab ?? "shortcuts");
+      if (detail?.feedbackTitle) setFeedbackTitle(detail.feedbackTitle);
+      if (detail?.feedbackBody) setFeedbackBody(detail.feedbackBody);
+    };
+    window.addEventListener("loom-help", onHelp);
+    return () => window.removeEventListener("loom-help", onHelp);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.shiftKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      const s = useLoomStore.getState();
+      if (s.chartEditUndoStack.length > 0) {
+        e.preventDefault();
+        s.undoChartEdit();
       }
     };
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, []);
 
   useEffect(() => {
@@ -524,18 +645,23 @@ function HomeContent({
       }
       if (e.key === "Escape") {
         setShortcutsOpen(false);
+        if (ariaModalOpen()) return;
         if (useLoomStore.getState().socialExportReady) {
           useLoomStore.getState().setSocialExportReady(false);
           useLoomStore.getState().setSocialExportTarget(null);
         }
         return;
       }
-      if ((e.metaKey || e.ctrlKey) && e.key >= "1" && e.key <= "6") {
+      if (ariaModalOpen()) return;
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.key >= "1" && e.key <= "6") {
         const i = parseInt(e.key, 10) - 1;
         if (i >= 0 && i < PANEL_TABS.length) {
           setPanelTab(PANEL_TABS[i]);
           e.preventDefault();
         }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key >= "1" && e.key <= "6") {
         return;
       }
       if (e.metaKey || e.ctrlKey) return;
@@ -595,48 +721,26 @@ function HomeContent({
           setToast("Could not read that image. Try PNG or JPEG.");
         }
       }
-      if (isTauri()) {
-        try {
-          const url = await createGitHubIssue(title, body, imageBase64);
-          setToast("Issue created!");
-          await openUrl(url);
-          setFeedbackTitle("");
-          setFeedbackBody("");
-          setFeedbackImage(null);
-          if (feedbackFileRef.current) feedbackFileRef.current.value = "";
-          setShortcutsOpen(false);
-        } catch (e) {
-          console.error("createGitHubIssue:", e);
-          const url = getGitHubNewIssueUrl(title, body);
-          await openUrl(url);
-          setToast(
-            feedbackImage && imageBase64
-              ? "GitHub returned an error (often body too large). Browser opened — paste your screenshot there."
-              : feedbackImage
-                ? "Open the issue and paste your screenshot (Ctrl+V or drag the file)."
-                : "Opening GitHub to submit feedback",
-          );
-        }
-      } else {
-        try {
-          const url = await createGitHubIssue(title, body, imageBase64);
-          setToast("Issue created!");
-          await openUrl(url);
-          setFeedbackTitle("");
-          setFeedbackBody("");
-          setFeedbackImage(null);
-          if (feedbackFileRef.current) feedbackFileRef.current.value = "";
-          setShortcutsOpen(false);
-        } catch (e) {
-          console.error("createGitHubIssue (web):", e);
-          const url = getGitHubNewIssueUrl(title, body);
-          await openUrl(url);
-          setToast(
-            feedbackImage
-              ? "Opened GitHub — paste your screenshot there (API may need a token)."
+      try {
+        const url = await createGitHubIssue(title, body, imageBase64);
+        setToast("Issue created!");
+        await openUrl(url);
+        setFeedbackTitle("");
+        setFeedbackBody("");
+        setFeedbackImage(null);
+        if (feedbackFileRef.current) feedbackFileRef.current.value = "";
+        setShortcutsOpen(false);
+      } catch (e) {
+        console.error("createGitHubIssue:", e);
+        const url = getGitHubNewIssueUrl(title, body);
+        await openUrl(url);
+        setToast(
+          feedbackImage && imageBase64
+            ? "GitHub returned an error (often body too large). Browser opened — paste your screenshot there."
+            : feedbackImage
+              ? "Open the issue and paste your screenshot (Ctrl+V or drag the file)."
               : "Opening GitHub to submit feedback",
-          );
-        }
+        );
       }
     } finally {
       setFeedbackSubmitting(false);
@@ -645,18 +749,21 @@ function HomeContent({
 
   return (
     <div className="flex flex-col h-dvh max-h-dvh w-screen bg-loom-bg transition-theme overflow-hidden">
-      {shortcutsOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 loom-overlay animate-fade-in"
-          onClick={() => setShortcutsOpen(false)}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Help: shortcuts and feedback"
-        >
-          <div
-            className="loom-card max-w-md w-full p-4 sm:p-5 space-y-3.5 bg-loom-surface border border-loom-border shadow-loom-lg rounded-t-2xl sm:rounded-xl animate-slide-up max-h-[min(90dvh,40rem)] overflow-y-auto mb-[var(--safe-bottom)] sm:mb-0"
-            onClick={(e) => e.stopPropagation()}
-          >
+      <a
+        href="#main"
+        className="sr-only focus:not-sr-only focus:absolute focus:z-[300] focus:left-4 focus:top-[calc(var(--safe-top)+0.5rem)] focus:px-3 focus:py-2 focus:rounded-md focus:bg-loom-surface focus:border focus:border-loom-border focus:text-sm focus:text-loom-text"
+      >
+        Skip to main content
+      </a>
+      <h1 className="sr-only">Loom — data storytelling</h1>
+      <Dialog
+        open={shortcutsOpen}
+        onClose={() => setShortcutsOpen(false)}
+        ariaLabel="Help: shortcuts and feedback"
+        initialFocusRef={helpCloseRef}
+        zIndex={50}
+        panelClassName="max-w-md p-4 sm:p-5 space-y-3.5 max-h-[min(90dvh,40rem)] overflow-y-auto"
+      >
             <div className="flex items-center justify-between gap-2">
               <div className="loom-seg">
                 <button
@@ -677,10 +784,11 @@ function HomeContent({
                 </button>
               </div>
               <button
+                ref={helpCloseRef}
                 type="button"
                 onClick={() => setShortcutsOpen(false)}
                 className="loom-btn-ghost p-1.5 rounded-md min-h-9 min-w-9"
-                aria-label="Close"
+                aria-label="Close help"
               >
                 ×
               </button>
@@ -716,14 +824,22 @@ function HomeContent({
             {helpTab === "feedback" && (
               <div className="space-y-3">
                 <p className="text-xs text-loom-muted">Submit feedback or a bug report as a GitHub issue for this repo.</p>
+                <label htmlFor="loom-feedback-title" className="sr-only">
+                  Issue title
+                </label>
                 <input
+                  id="loom-feedback-title"
                   type="text"
                   placeholder="Title (optional)"
                   value={feedbackTitle}
                   onChange={(e) => setFeedbackTitle(e.target.value)}
                   className="loom-input w-full text-xs px-2 py-1.5"
                 />
+                <label htmlFor="loom-feedback-body" className="sr-only">
+                  Feedback description
+                </label>
                 <textarea
+                  id="loom-feedback-body"
                   placeholder="Describe your feedback or paste a screenshot after opening the issue…"
                   value={feedbackBody}
                   onChange={(e) => setFeedbackBody(e.target.value)}
@@ -769,9 +885,7 @@ function HomeContent({
                 </button>
               </div>
             )}
-          </div>
-        </div>
-      )}
+      </Dialog>
       {/* Top Bar spans full width */}
       {!socialExportReady && <TopBar onOpenShortcuts={() => setShortcutsOpen(true)} />}
 
@@ -782,6 +896,7 @@ function HomeContent({
 
           {/* Canvas Area — hidden when Data & sources is expanded; shows dashboard when dashboards expanded */}
           <main
+            id="main"
             className={`relative bg-loom-bg overflow-hidden transition-[flex] duration-200 flex flex-col ${dataSourcesExpanded && !socialExportReady ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}
             style={liveEdit && !socialExportReady ? { paddingBottom: MOBILE_LIVE_EDIT_SHEET } : undefined}
           >

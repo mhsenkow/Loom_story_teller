@@ -15,14 +15,16 @@
 
 import { useEffect, useRef } from "react";
 import { useLoomStore } from "@/lib/store";
+import { shellModeFromWidth, sidebarOverlays as sidebarOverlaysMode } from "@/lib/shellLayout";
 import { getLastSession } from "@/lib/persist";
 import { decodeDiveLink } from "@/lib/dive";
 import { chartLinkDatasetLabel, decodeChartLink, isPortableChartLink, type ChartLink } from "@/lib/chartLink";
-import { parseCsvToInspectResult } from "@/lib/mock-data";
+import { parseCsvToInspectResultAsync } from "@/lib/parseCsvAsync";
+import { WEB_VAULT_PATH } from "@/lib/webDataFolder";
 import {
   fetchCsvTextWeb,
   inspectFile,
-  isTauri,
+  isDesktop,
   scanFolder,
   sourceStart,
   sourceSnapshot,
@@ -30,11 +32,14 @@ import {
   streamSnapshot,
   type SourceKind,
 } from "@/lib/tauri";
-import { recommend, recommendSourceStory, recommendStreamStory } from "@/lib/recommendations";
+import { activateDataset } from "@/lib/datasetPipeline";
 import { ChartLinkSync } from "./ChartLinkSync";
+import { probeConnection } from "@/lib/connectionStatus";
+import { RECONNECTED_EVENT } from "./OfflineBanner";
 import { SOURCE_DEFS, SOURCE_EXPLORE_ROWS, SOURCE_BY_KIND, sourceKindFromPath } from "@/lib/sourceRegistry";
 import { parseShareDataSnapshot, sharedStoryPath, storyIdFromSharedPath } from "@/lib/shareLineage";
 import { guessHomepageFromDataUrl } from "@/lib/dataProvenance";
+import { remoteCsvLoadPrompt } from "@/lib/webSharedLink";
 
 const STREAM_NAMES: Record<string, string> = {
   wiki: "Wikipedia Live",
@@ -44,6 +49,19 @@ const STREAM_NAMES: Record<string, string> = {
 function parseStoryId(hash: string): string | null {
   const m = hash.match(/#story=([a-z0-9]{8,16})\b/i);
   return m?.[1] ?? null;
+}
+
+/** Landing view + collapsed chrome applied with the resumed live feed. */
+function landExtra(landView: "dive" | "chart") {
+  return {
+    viewMode: landView,
+    panelTab: "chart" as const,
+    dataSourcesExpanded: false,
+    dataRegionOpen: false,
+    sidebarOpen: sidebarOverlaysMode(shellModeFromWidth(window.innerWidth))
+      ? false
+      : useLoomStore.getState().sidebarOpen,
+  };
 }
 
 export function WebSessionResume() {
@@ -74,7 +92,7 @@ export function WebSessionResume() {
     if (chartLink) {
       useLoomStore.setState({ chartLink, viewMode: "chart" });
     }
-    if (isTauri()) {
+    if (isDesktop()) {
       if (chartLink) waitForFileToast(chartLink);
       return;
     }
@@ -89,20 +107,20 @@ export function WebSessionResume() {
           const inspect = await inspectFile(sharedSrc, 500);
           const file = entry ?? { path: sharedSrc, name: sharedSrc.replace(/^mock:\/\//, ""), extension: "csv", row_count: inspect.sample.total_rows, size_bytes: 0 };
           if (!chartLink) {
-            useLoomStore.setState({ selectedFile: file, columnStats: inspect.stats, sampleRows: inspect.sample, viewMode: "dive" });
+            activateDataset({
+              file,
+              stats: inspect.stats,
+              sample: inspect.sample,
+              shortlist: { type: "none" },
+              extra: { viewMode: "dive" },
+            });
             return;
           }
-          const recs = recommend(inspect.stats, inspect.sample, file.name);
-          useLoomStore.setState({
-            mountedFolder: "mock://demo-folder",
-            files,
-            selectedFile: file,
-            columnStats: inspect.stats,
-            sampleRows: inspect.sample,
-            chartRecs: recs,
-            activeChart: recs[0] ?? null,
-            vegaSpec: recs[0]?.spec ?? null,
-            viewMode: "chart",
+          activateDataset({
+            file,
+            stats: inspect.stats,
+            sample: inspect.sample,
+            extra: { mountedFolder: "mock://demo-folder", files, viewMode: "chart" },
           });
         } catch {
           /* leave the link banner up */
@@ -113,8 +131,13 @@ export function WebSessionResume() {
     }
 
     if (chartLink && !sharedSrc?.startsWith("stream://")) {
-      if (chartLink.url) void openSharedCsv(chartLink.src, chartLink.url);
-      else waitForFileToast(chartLink);
+      if (chartLink.url) {
+        if (typeof window !== "undefined" && !window.confirm(remoteCsvLoadPrompt(chartLink.url))) {
+          waitForFileToast(chartLink);
+          return;
+        }
+        void openSharedCsv(chartLink.src, chartLink.url);
+      } else waitForFileToast(chartLink);
       return;
     }
 
@@ -123,8 +146,11 @@ export function WebSessionResume() {
     if (!path?.startsWith("stream://")) return;
 
     // Let Onboarding / hydrate settle; skip if user already loaded something.
-    const id = window.setTimeout(() => {
-      void (async () => {
+    // LOOM-416: never hammer a remote feed on a cold offline start — keep
+    // local uploads usable and retry this one source when we reconnect.
+    let pendingOffline = false;
+    const resumeStream = async () => {
+      {
         if (useLoomStore.getState().selectedFile) return;
         // First-visit discover modal still open — don’t fight it (unless a link asked for this stream).
         try {
@@ -152,19 +178,12 @@ export function WebSessionResume() {
               row_count: snap.sample.total_rows,
               size_bytes: 0,
             };
-            const story = recommendStreamStory(snap.stats, snap.sample);
-            useLoomStore.setState({
-              selectedFile: file,
-              columnStats: snap.stats,
-              sampleRows: snap.sample,
-              streamActive: true,
-              chartRecs: story.charts,
-              activeChart: story.charts[0] ?? null,
-              viewMode: landView,
-              panelTab: "chart",
-              dataSourcesExpanded: false,
-              dataRegionOpen: false,
-              sidebarOpen: window.matchMedia("(max-width: 767px)").matches ? false : useLoomStore.getState().sidebarOpen,
+            activateDataset({
+              file,
+              stats: snap.stats,
+              sample: snap.sample,
+              shortlist: { type: "stream" },
+              extra: landExtra(landView),
             });
             return;
           }
@@ -179,30 +198,43 @@ export function WebSessionResume() {
             row_count: snap.sample.total_rows,
             size_bytes: 0,
           };
-          const story = recommendSourceStory(kind as SourceKind, snap.stats, snap.sample);
-          useLoomStore.setState({
-            selectedFile: file,
-            columnStats: snap.stats,
-            sampleRows: snap.sample,
-            streamActive: true,
-            chartRecs: story.charts,
-            activeChart: story.charts[0] ?? null,
-            viewMode: landView,
-            panelTab: "chart",
-            dataSourcesExpanded: false,
-            dataRegionOpen: false,
-            sidebarOpen: window.matchMedia("(max-width: 767px)").matches
-              ? false
-              : useLoomStore.getState().sidebarOpen,
+          activateDataset({
+            file,
+            stats: snap.stats,
+            sample: snap.sample,
+            shortlist: { type: "source", kind: kind as SourceKind },
+            extra: landExtra(landView),
           });
         } catch {
           /* leave empty shell — Chart CTA still works */
           if (chartLink) useLoomStore.getState().setToast("Couldn’t reach the live feed for this shared chart — try again in a moment");
         }
+      }
+    };
+
+    const id = window.setTimeout(() => {
+      void (async () => {
+        if (!(await probeConnection())) {
+          pendingOffline = true;
+          if (!useLoomStore.getState().selectedFile) {
+            useLoomStore.getState().setToast("Offline — live feed can't refresh. Reopen a saved upload from Recent files; the feed resumes when you reconnect.");
+          }
+          return;
+        }
+        await resumeStream();
       })();
     }, 600);
+    const onReconnect = () => {
+      if (!pendingOffline) return;
+      pendingOffline = false;
+      void resumeStream();
+    };
+    window.addEventListener(RECONNECTED_EVENT, onReconnect);
 
-    return () => window.clearTimeout(id);
+    return () => {
+      window.clearTimeout(id);
+      window.removeEventListener(RECONNECTED_EVENT, onReconnect);
+    };
   }, []);
 
   return <ChartLinkSync />;
@@ -256,25 +288,23 @@ async function openSharedStory(storyId: string) {
         return undefined;
       })(),
     };
-    const recs = recommend(stats, sample, entry.name);
     // Point the pending chart link at this hydrated path so ChartLinkSync applies encodings.
     const pendingChart = snap.chart ? { ...snap.chart, src: path, url: undefined } : null;
     const s = useLoomStore.getState();
-    useLoomStore.setState({
-      webFileCache: { ...s.webFileCache, [path]: { stats, sample } },
-      mountedFolder: "web://",
-      files: [...s.files.filter((f) => f.path !== path), entry],
-      selectedFile: entry,
-      columnStats: stats,
-      sampleRows: sample,
-      chartRecs: recs,
-      activeChart: recs[0] ?? null,
-      vegaSpec: recs[0]?.spec ?? null,
-      viewMode: "chart",
-      panelTab: "chart",
-      chartLink: pendingChart,
-      dataSourcesExpanded: false,
-      dataRegionOpen: false,
+    activateDataset({
+      file: entry,
+      stats,
+      sample,
+      extra: {
+        webFileCache: { ...s.webFileCache, [path]: { stats, sample } },
+        mountedFolder: WEB_VAULT_PATH,
+        files: [...s.files.filter((f) => f.path !== path), entry],
+        viewMode: "chart",
+        panelTab: "chart",
+        chartLink: pendingChart,
+        dataSourcesExpanded: false,
+        dataRegionOpen: false,
+      },
     });
     useLoomStore.getState().setToast(
       snap.truncated
@@ -299,7 +329,7 @@ async function openSharedCsv(path: string, url: string) {
   const name = path.replace(/^web:\/\//, "") || "dataset.csv";
   try {
     const { text } = await fetchCsvTextWeb(url);
-    const inspect = parseCsvToInspectResult(name, text);
+    const inspect = await parseCsvToInspectResultAsync(name, text);
     const s = useLoomStore.getState();
     const entry = {
       path,
@@ -310,18 +340,16 @@ async function openSharedCsv(path: string, url: string) {
       sourceUrl: url,
       sourceHome: guessHomepageFromDataUrl(url) ?? undefined,
     };
-    const recs = recommend(inspect.stats, inspect.sample, name);
-    useLoomStore.setState({
-      webFileCache: { ...s.webFileCache, [path]: inspect },
-      mountedFolder: "web://",
-      files: [...s.files.filter((f) => f.path.startsWith("web://") && f.path !== path), entry],
-      selectedFile: entry,
-      columnStats: inspect.stats,
-      sampleRows: inspect.sample,
-      chartRecs: recs,
-      activeChart: recs[0] ?? null,
-      vegaSpec: recs[0]?.spec ?? null,
-      viewMode: "chart",
+    activateDataset({
+      file: entry,
+      stats: inspect.stats,
+      sample: inspect.sample,
+      extra: {
+        webFileCache: { ...s.webFileCache, [path]: inspect },
+        mountedFolder: WEB_VAULT_PATH,
+        files: [...s.files.filter((f) => f.path.startsWith("web://") && f.path !== path), entry],
+        viewMode: "chart",
+      },
     });
   } catch {
     useLoomStore.getState().setToast(`Couldn’t download ${name} for this shared chart`);

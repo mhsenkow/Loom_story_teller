@@ -7,7 +7,7 @@
 // the in-store sample. Always reports how much of the data it holds.
 // =================================================================
 
-import { isTauri, queryFile, sourceQuery, sourceSnapshot, streamQuery, streamSnapshot, type SourceKind } from "./tauri";
+import { isDesktop, queryFile, sourceQuery, sourceSnapshot, streamQuery, streamSnapshot, type SourceKind } from "./tauri";
 import type { QueryResult } from "./store";
 import type { DiveData } from "./dive";
 import { SOURCE_DEFS } from "./sourceRegistry";
@@ -36,13 +36,18 @@ function fromQuery(r: QueryResult): DiveData {
   return { columns: r.columns, rows: r.rows, types: r.types };
 }
 
+function sourceOrderBy(kind: SourceKind): string {
+  const def = SOURCE_DEFS.find((d) => d.kind === kind);
+  return def?.orderBy ? ` ORDER BY ${def.orderBy}` : "";
+}
+
 export function isLiveDivePath(path: string | null | undefined): boolean {
   return !!path && path.startsWith("stream://");
 }
 
 /** Load as many rows as is reasonable for `path`; `fallback` is the current in-store sample. */
 export async function loadDiveDataset(path: string, fallback: QueryResult | null): Promise<DiveDataset> {
-  const desktop = isTauri();
+  const desktop = isDesktop();
   if (path === "stream://wiki") {
     if (desktop) {
       const r = await streamQuery("SELECT * FROM wiki_stream ORDER BY ts DESC", DIVE_DESKTOP_ROWS);
@@ -55,7 +60,7 @@ export async function loadDiveDataset(path: string, fallback: QueryResult | null
     const kind = path.slice("stream://".length) as SourceKind;
     const table = SOURCE_TABLES[kind] ?? kind;
     if (desktop) {
-      const r = await sourceQuery(kind, `SELECT * FROM ${table}`, DIVE_DESKTOP_ROWS);
+      const r = await sourceQuery(kind, `SELECT * FROM ${table}${sourceOrderBy(kind)}`, DIVE_DESKTOP_ROWS);
       return { data: fromQuery(r), totalRows: Math.max(r.total_rows, r.rows.length), sampled: r.rows.length >= DIVE_DESKTOP_ROWS, live: true, table };
     }
     const snap = await sourceSnapshot(kind, DIVE_WEB_STREAM_ROWS);

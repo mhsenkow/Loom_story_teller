@@ -10,95 +10,24 @@ import {
   getSocialPreset,
   type SocialPresetId,
   drawExportBurnIn,
-  blobToDataUrl,
 } from "./socialExport";
 import { getThemeUiColors } from "./chartPalettes";
+import { waitForChartPaint } from "./chartPaintSignal";
+import {
+  afterPaint,
+  blobToDataUrl,
+  looksLikeFailedCapture,
+  runSerializedCapture,
+  sleep,
+  waitForPngHandler,
+} from "./captureHelpers";
 
-function afterPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => resolve());
-    });
-  });
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function waitForPngHandler(timeoutMs: number): Promise<boolean> {
-  const getState = useLoomStore.getState;
-  const start = Date.now();
-  return new Promise((resolve) => {
-    const check = () => {
-      if (getState().pngExportHandler) {
-        resolve(true);
-        return;
-      }
-      if (Date.now() - start > timeoutMs) {
-        resolve(false);
-        return;
-      }
-      setTimeout(check, 50);
-    };
-    check();
-  });
-}
-
-/** True when PNG is a failed near-black slab (GPU race). */
-export async function looksLikeFailedCapture(blob: Blob): Promise<boolean> {
-  if (blob.size < 80) return true;
-  try {
-    const bmp = await createImageBitmap(blob);
-    const sw = Math.min(48, bmp.width);
-    const sh = Math.min(48, bmp.height);
-    if (sw < 4 || sh < 4) {
-      bmp.close();
-      return true;
-    }
-    const c = document.createElement("canvas");
-    c.width = sw;
-    c.height = sh;
-    const ctx = c.getContext("2d", { willReadFrequently: true });
-    if (!ctx) {
-      bmp.close();
-      return false;
-    }
-    ctx.drawImage(bmp, 0, 0, sw, sh);
-    bmp.close();
-    const { data } = ctx.getImageData(0, 0, sw, sh);
-    let sum = 0;
-    let n = 0;
-    let min = 255;
-    let max = 0;
-    for (let i = 0; i < data.length; i += 16) {
-      const r = data[i]!;
-      const g = data[i + 1]!;
-      const b = data[i + 2]!;
-      const a = data[i + 3]!;
-      const lum = a < 8 ? 0 : 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      sum += lum;
-      if (lum < min) min = lum;
-      if (lum > max) max = lum;
-      n++;
-    }
-    if (n === 0) return true;
-    const mean = sum / n;
-    const range = max - min;
-    return mean < 28 && range < 10;
-  } catch {
-    return false;
-  }
-}
+export { blobToDataUrl, looksLikeFailedCapture };
 
 /**
  * Capture the current chart at a social platform size.
  * Temporarily forces stage geometry + Canvas path, then restores.
  */
-// Captures mutate shared stage state and restore it afterwards; overlapping runs
-// would "restore" each other's forced size and leave the stage stuck. Serialize.
-let captureChain: Promise<unknown> = Promise.resolve();
-
 export function capturePlatformPng(
   presetId: SocialPresetId,
   options?: {
@@ -108,11 +37,9 @@ export function capturePlatformPng(
     shouldRun?: () => boolean;
   },
 ): Promise<Blob | null> {
-  const run = captureChain.then(() =>
-    options?.shouldRun && !options.shouldRun() ? null : captureNow(presetId, options),
+  return runSerializedCapture(() =>
+    options?.shouldRun && !options.shouldRun() ? Promise.resolve(null) : captureNow(presetId, options),
   );
-  captureChain = run.catch(() => undefined);
-  return run;
 }
 
 async function captureNow(
@@ -127,20 +54,18 @@ async function captureNow(
   const prevTarget = getState().socialExportTarget;
   const prevAspect = getState().appSettings.chartAspect;
   const prevSidebar = getState().sidebarOpen;
+  const prevViewMode = getState().viewMode;
+  const prevDashboardsExpanded = getState().dashboardsExpanded;
 
   try {
     getState().setViewMode("chart");
     getState().setDashboardsExpanded(false);
-    // Keep the detail panel mounted (Export tab runs from there). Only collapse the sidebar.
     useLoomStore.setState({ sidebarOpen: false });
 
     if (preset.width && preset.height) {
       if (preset.aspectId) {
         getState().setAppSettings((s) => ({ ...s, chartAspect: preset.aspectId! }));
       }
-      // Lay the chart out near phone width and render at ~2.4× so titles, labels,
-      // and marks read at feed size (17px type on a 1080px post looks tiny).
-      // Stay ≥400 CSS px wide so ChartView never drops into its compact layout.
       const layoutScale = Math.min(2.4, Math.max(1, preset.width / 450));
       getState().setSocialExportTarget({
         width: Math.round(preset.width / layoutScale),
@@ -152,16 +77,13 @@ async function captureNow(
       getState().setSocialExportTarget(null);
     }
 
-    await sleep(350);
     await afterPaint();
+    await waitForChartPaint(4000);
     const hasHandler = await waitForPngHandler(5000);
     if (!hasHandler) return null;
 
-    const kind = getState().activeChart?.kind;
-    const baseWait = kind === "scatter" || kind === "bubble" ? 900 : 550;
-
     for (let attempt = 0; attempt < attempts; attempt++) {
-      await sleep(baseWait + attempt * 400);
+      await waitForChartPaint(attempt === 0 ? 2500 : 1800);
       await afterPaint();
       const handler = getState().pngExportHandler;
       if (!handler) continue;
@@ -170,14 +92,12 @@ async function captureNow(
         if (!blob) continue;
         if (await looksLikeFailedCapture(blob)) continue;
 
-        // Supersampling / layout rounding can miss the preset by a pixel — resample to exact size.
         if (preset.width && preset.height) {
           const bmp = await createImageBitmap(blob);
           const exact = bmp.width === preset.width && bmp.height === preset.height;
           bmp.close();
           if (!exact) blob = (await downscaleBlob(blob, preset.width, preset.height)) ?? blob;
         }
-        // Current-frame path: burn-in isn't applied in the handler (no target) — post-process.
         if (!preset.width || !preset.height) {
           blob = await applyBurnInToPng(blob, getState().selectedFile?.name);
         }
@@ -191,6 +111,8 @@ async function captureNow(
     getState().setSocialExportTarget(prevTarget);
     getState().setAppSettings((s) => ({ ...s, chartAspect: prevAspect }));
     useLoomStore.setState({ sidebarOpen: prevSidebar });
+    getState().setViewMode(prevViewMode);
+    getState().setDashboardsExpanded(prevDashboardsExpanded);
     await sleep(100);
   }
 }
@@ -228,9 +150,6 @@ export async function applyBurnInToPng(
   sourceLabel?: string | null,
 ): Promise<Blob> {
   const st = useLoomStore.getState();
-  // Chart canvas already owns the bottom strip (source credit and/or time span).
-  // Time span draws even when Visual → Source footnote is off, so skip burn-in
-  // whenever a temporal column is available on the active chart sample.
   if ((st.chartVisualOverrides.sourceFootnote ?? "credit") !== "off") {
     return blob;
   }
@@ -283,5 +202,3 @@ export async function applyBurnInToPng(
     return blob;
   }
 }
-
-export { blobToDataUrl };

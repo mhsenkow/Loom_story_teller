@@ -5,6 +5,10 @@
 # Node.js server. Use this for sharing/deploying chart stories
 # or for frontend development without Rust.
 #
+# This image does NOT include the Cloudflare Worker — /api/* routes
+# (catalog, fetch-csv, live sources, stories, feedback) need `wrangler dev`
+# or the deployed loom.ibm.io Worker. See README “Web UI without API”.
+#
 # Usage:
 #   make shuttle        (docker compose up)
 #   make shuttle-build  (build only)
@@ -28,6 +32,10 @@ WORKDIR /app
 RUN npm install -g serve@14
 
 COPY --from=builder /app/out ./out
+
+RUN chown -R node:node /app
+
+USER node
 
 EXPOSE 3000
 

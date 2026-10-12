@@ -13,12 +13,14 @@ import {
   recommendSourceStory,
   diversifyRecommendations,
   createChartRec,
+  columnNameTokens,
   type ChartRecommendation,
 } from "./recommendations";
 import {
   applyPreferenceBoosts,
   type VizPreferenceModel,
 } from "./vizPreferences";
+import type { SourceKind } from "./sourceRegistry";
 
 export type ProfileColType = "quantitative" | "nominal" | "temporal";
 
@@ -66,7 +68,16 @@ export interface DeepScanResult {
 export type DeepScanSource =
   | { kind: "file"; fileName: string }
   | { kind: "stream" }
-  | { kind: "source"; sourceKind: string };
+  | { kind: "source"; sourceKind: SourceKind };
+
+/** Derive deep-scan profiling source from the active dataset path only. */
+export function resolveDeepScanSource(selectedPath: string, fileName: string): DeepScanSource {
+  if (selectedPath === "stream://wiki") return { kind: "stream" };
+  if (selectedPath.startsWith("stream://")) {
+    return { kind: "source", sourceKind: selectedPath.replace("stream://", "") as SourceKind };
+  }
+  return { kind: "file", fileName };
+}
 
 function inferType(dt: string, colName?: string): ProfileColType {
   const t = dt.toUpperCase();
@@ -74,10 +85,9 @@ function inferType(dt: string, colName?: string): ProfileColType {
     return "quantitative";
   }
   if (["DATE", "TIMESTAMP", "TIME", "INTERVAL"].some((n) => t.includes(n))) return "temporal";
-  const name = (colName ?? "").toUpperCase();
-  if (["DATE", "TIME", "YEAR", "MONTH", "DAY", "INCIDENT_DATE", "CREATED_AT", "UPDATED_AT", "TIMESTAMP", "TS"].some((n) => name.includes(n))) {
-    return "temporal";
-  }
+  const tokens = columnNameTokens(colName ?? "");
+  const temporalTokens = new Set(["date", "time", "ts", "timestamp", "year", "yr", "month", "day", "created", "updated", "at"]);
+  if (tokens.some((tok) => temporalTokens.has(tok))) return "temporal";
   return "nominal";
 }
 
@@ -167,10 +177,8 @@ export function buildDatasetProfile(
     }
     const nonNull = values.filter((v) => v != null && v !== "");
     const nullRatio = values.length > 0 ? 1 - nonNull.length / values.length : col.null_count > 0 ? 0.1 : 0;
-    const distinctRatio =
-      nonNull.length > 0
-        ? Math.min(1, (col.distinct_count || new Set(nonNull.map(String)).size) / nonNull.length)
-        : 0;
+    const sampleDistinct = new Set(nonNull.map(String)).size;
+    const distinctRatio = nonNull.length > 0 ? Math.min(1, sampleDistinct / nonNull.length) : 0;
 
     const base: ColumnProfile = {
       name: col.name,

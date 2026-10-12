@@ -18,7 +18,8 @@ import {
   getLastSession,
   getQueryHistory,
   getQuerySnippets,
-  getTablePrefs,
+  getTablePrefsForPath,
+  setTablePrefsForPath,
   getTableViews,
   getChartViews,
   getQueryViews,
@@ -30,11 +31,11 @@ import {
   setPersistedChartViews,
   setPersistedQueryViews,
   setPersistedDashboards,
-  setTablePrefs as persistTablePrefs,
   getVizPreferencesRaw,
   setPersistedVizPreferences,
 } from "@/lib/persist";
-import type { ChartViewItem, QueryViewItem, DashboardItem, ViewMode } from "@/lib/store";
+import type { ViewMode } from "@/lib/store";
+import { parseLastSessionViewMode } from "@/lib/persistValidation";
 import {
   readIbmToolsShared,
   normalizeTheme,
@@ -47,10 +48,22 @@ import {
   setCachedVizPreferences,
   emptyVizPreferenceModel,
 } from "@/lib/vizPreferences";
+import { stagedHydrateWebFileCache } from "@/lib/webHydration";
+import { hydrateChartViewThumbnails, putChartViewThumbnail } from "@/lib/chartViewThumbnails";
+import { isDesktop } from "@/lib/tauri";
+import { WEB_VAULT_PATH, isWebVaultPath } from "@/lib/webDataFolder";
 
 export function HydrateStore() {
   const hydrated = useRef(false);
+  const storageToastShown = useRef(false);
+  const notifyStorageFailure = () => {
+    if (storageToastShown.current) return;
+    storageToastShown.current = true;
+    useLoomStore.getState().setToast("Couldn't save — browser storage is full");
+  };
+
   const skipFirstPersist = useRef({
+    appSettings: true,
     recentFiles: true,
     queryHistory: true,
     querySnippets: true,
@@ -88,7 +101,10 @@ export function HydrateStore() {
     queryViews,
     dashboards,
     vizPreferences,
+    selectedFile,
   } = useLoomStore();
+  const selectedPath = selectedFile?.path ?? null;
+  const skipTablePrefsPathLoad = useRef(false);
 
   useEffect(() => {
     if (hydrated.current) return;
@@ -140,12 +156,35 @@ export function HydrateStore() {
     const recent = getRecentFiles();
     if (recent.length) setRecentFiles(recent as import("@/lib/store").FileEntry[]);
 
+    // Browser uploads: index first, sample rows in background (LOOM-304).
+    if (typeof window !== "undefined" && !isDesktop()) {
+      void stagedHydrateWebFileCache({
+        onIndex(entries) {
+          if (!entries.length) return;
+          const s = useLoomStore.getState();
+          const have = new Set(s.files.map((f) => f.path));
+          const extra = entries.filter((e) => !have.has(e.path));
+          if (extra.length && (!s.mountedFolder || isWebVaultPath(s.mountedFolder))) {
+            s.setMountedFolder(WEB_VAULT_PATH);
+            s.setFiles([
+              ...s.files.filter((f) => f.path.startsWith("web://")),
+              ...extra.filter((e) => !s.files.some((f) => f.path === e.path)),
+            ]);
+          }
+        },
+        onSample(path, payload) {
+          const s = useLoomStore.getState();
+          s.setWebFileCache({ ...s.webFileCache, [path]: payload });
+        },
+      });
+    }
+
     const session = getLastSession();
     if (session)
       setLastSession({
         folderPath: session.folderPath,
         filePath: session.filePath,
-        viewMode: (["explorer", "chart", "query", "dive"].includes(session.viewMode) ? session.viewMode : "explorer") as ViewMode,
+        viewMode: parseLastSessionViewMode(session.viewMode) as ViewMode,
       });
 
     const qh = getQueryHistory();
@@ -154,31 +193,54 @@ export function HydrateStore() {
     const snippets = getQuerySnippets();
     if (snippets.length) setQuerySnippets(snippets);
 
-    const prefs = getTablePrefs();
-    if (prefs) setTablePrefs(prefs);
-
     const views = getTableViews();
     if (views.length) setTableViews(views);
 
     const cv = getChartViews();
-    if (cv.length)
-      setChartViews(
-        cv.map((c) => ({
-          id: c.id,
-          name: c.name,
-          filePath: c.filePath,
-          fileName: c.fileName,
-          chart: c.chart as unknown as ChartViewItem["chart"],
-          visualOverrides: (c.visualOverrides || {}) as ChartViewItem["visualOverrides"],
-          snapshotImageDataUrl: c.snapshotImageDataUrl ?? null,
-        }))
-      );
+    if (cv.length) {
+      setChartViews(cv);
+      void hydrateChartViewThumbnails(cv.map((v) => v.id)).then((thumbs) => {
+        if (!Object.keys(thumbs).length) return;
+        useLoomStore.setState((s) => ({
+          chartViews: s.chartViews.map((v) =>
+            thumbs[v.id] ? { ...v, snapshotImageDataUrl: thumbs[v.id]! } : v,
+          ),
+        }));
+      });
+    }
 
     const qv = getQueryViews();
-    if (qv.length) setQueryViews(qv as QueryViewItem[]);
+    if (qv.length) setQueryViews(qv);
 
     const db = getDashboards();
-    if (db.length) setDashboards(db as DashboardItem[]);
+    if (db.length) {
+      const layouts = new Set([
+        "auto",
+        "1x1",
+        "2x1",
+        "2x2",
+        "3x2",
+        "1+2",
+        "stream",
+      ]);
+      const refresh = new Set(["manual", "1m", "5m", "15m", "1h"]);
+      setDashboards(
+        db.map((d) => ({
+          id: d.id,
+          name: d.name,
+          slots: d.slots as import("@/lib/store").DashboardSlot[],
+          layoutTemplate:
+            d.layoutTemplate && layouts.has(d.layoutTemplate)
+              ? (d.layoutTemplate as import("@/lib/store").DashboardLayoutTemplate)
+              : undefined,
+          refreshInterval:
+            d.refreshInterval && refresh.has(d.refreshInterval)
+              ? (d.refreshInterval as import("@/lib/store").DashboardRefreshInterval)
+              : undefined,
+          lastRefreshedAt: d.lastRefreshedAt ?? undefined,
+        })),
+      );
+    }
 
     const vizRaw = getVizPreferencesRaw();
     if (vizRaw) {
@@ -198,7 +260,11 @@ export function HydrateStore() {
   }, []);
 
   useEffect(() => {
-    setPersistedAppSettings(appSettings);
+    if (skipFirstPersist.current.appSettings) {
+      skipFirstPersist.current.appSettings = false;
+      return;
+    }
+    if (!setPersistedAppSettings(appSettings)) notifyStorageFailure();
   }, [appSettings]);
 
   useEffect(() => {
@@ -247,13 +313,29 @@ export function HydrateStore() {
     setPersistedQuerySnippets(querySnippets);
   }, [querySnippets]);
 
+  // LOOM-205: load column prefs for the active dataset path.
+  useEffect(() => {
+    if (!selectedPath) return;
+    skipTablePrefsPathLoad.current = true;
+    const prefs = getTablePrefsForPath(selectedPath) ?? {
+      visibleColumns: null,
+      columnOrder: null,
+    };
+    setTablePrefs(prefs);
+  }, [selectedPath, setTablePrefs]);
+
   useEffect(() => {
     if (skipFirstPersist.current.tablePrefs) {
       skipFirstPersist.current.tablePrefs = false;
       return;
     }
-    persistTablePrefs(tablePrefs);
-  }, [tablePrefs]);
+    if (skipTablePrefsPathLoad.current) {
+      skipTablePrefsPathLoad.current = false;
+      return;
+    }
+    if (!selectedPath) return;
+    setTablePrefsForPath(selectedPath, tablePrefs);
+  }, [tablePrefs, selectedPath]);
 
   useEffect(() => {
     if (tableViews.length === 0 && !hasPersistedTableViews.current) return;
@@ -263,11 +345,7 @@ export function HydrateStore() {
       return;
     }
     skipFirstPersist.current.tableViews = false;
-    try {
-      setPersistedTableViews(tableViews);
-    } catch (_) {
-      // localStorage full or disabled
-    }
+    if (!setPersistedTableViews(tableViews)) notifyStorageFailure();
   }, [tableViews]);
 
   useEffect(() => {
@@ -278,8 +356,13 @@ export function HydrateStore() {
       return;
     }
     skipFirstPersist.current.chartViews = false;
-    try {
-      setPersistedChartViews(
+    for (const c of chartViews) {
+      if (c.snapshotImageDataUrl?.startsWith("data:")) {
+        void putChartViewThumbnail(c.id, c.snapshotImageDataUrl);
+      }
+    }
+    if (
+      !setPersistedChartViews(
         chartViews.map((c) => ({
           id: c.id,
           name: c.name,
@@ -287,11 +370,12 @@ export function HydrateStore() {
           fileName: c.fileName,
           chart: c.chart as unknown as Record<string, unknown>,
           visualOverrides: c.visualOverrides as unknown as Record<string, unknown>,
-          snapshotImageDataUrl: c.snapshotImageDataUrl ?? null,
-        }))
-      );
-    } catch (_) {
-      // localStorage full or disabled
+          querySql: c.querySql ?? null,
+          snapshotImageDataUrl: null,
+        })),
+      )
+    ) {
+      notifyStorageFailure();
     }
   }, [chartViews]);
 
@@ -303,11 +387,7 @@ export function HydrateStore() {
       return;
     }
     skipFirstPersist.current.queryViews = false;
-    try {
-      setPersistedQueryViews(queryViews);
-    } catch (_) {
-      // localStorage full or disabled
-    }
+    if (!setPersistedQueryViews(queryViews)) notifyStorageFailure();
   }, [queryViews]);
 
   useEffect(() => {
@@ -318,11 +398,7 @@ export function HydrateStore() {
       return;
     }
     skipFirstPersist.current.dashboards = false;
-    try {
-      setPersistedDashboards(dashboards);
-    } catch (_) {
-      // localStorage full or disabled
-    }
+    if (!setPersistedDashboards(dashboards)) notifyStorageFailure();
   }, [dashboards]);
 
   useEffect(() => {
@@ -330,11 +406,10 @@ export function HydrateStore() {
       skipFirstPersist.current.vizPreferences = false;
       return;
     }
-    try {
-      setPersistedVizPreferences(vizPreferences);
+    if (setPersistedVizPreferences(vizPreferences)) {
       setCachedVizPreferences(vizPreferences);
-    } catch (_) {
-      // localStorage full or disabled
+    } else {
+      notifyStorageFailure();
     }
   }, [vizPreferences]);
 

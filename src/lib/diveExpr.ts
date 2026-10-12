@@ -18,6 +18,8 @@
 // show as written; DuckDB gives the same answers for naive columns).
 // =================================================================
 
+import { isUnsafeRegexPattern, safeUserRegex } from "./regexSafe";
+
 export type ExprValue = string | number | boolean | null;
 
 type Node =
@@ -406,11 +408,18 @@ const reCache = new Map<string, RegExp | null>();
 function regex(p: string, flags = ""): RegExp | null {
   const key = `${flags}/${p}`;
   if (!reCache.has(key)) {
-    try {
-      reCache.set(key, new RegExp(p, flags));
-    } catch {
-      reCache.set(key, null);
-    }
+    const compiled =
+      flags.includes("g") || flags.includes("m") || flags.includes("s") || flags.includes("u") || flags.includes("y")
+        ? (() => {
+            try {
+              if (isUnsafeRegexPattern(p)) return null;
+              return new RegExp(p, flags);
+            } catch {
+              return null;
+            }
+          })()
+        : safeUserRegex(p, flags || "i");
+    reCache.set(key, compiled);
     if (reCache.size > 500) reCache.delete(reCache.keys().next().value!);
   }
   return reCache.get(key)!;

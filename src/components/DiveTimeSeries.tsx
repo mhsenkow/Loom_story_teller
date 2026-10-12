@@ -147,6 +147,7 @@ export function DiveTimeSeries({
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [brush, setBrush] = useState<{ x0: number; x1: number } | null>(null);
   const dragRef = useRef<{ x0: number; x1: number; moved: boolean } | null>(null);
+  const touchBrushArmRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -277,17 +278,36 @@ export function DiveTimeSeries({
     if (series.length > 1) setFocusKey(nearestKey(l.i, l.panel, l.py));
   };
 
-  const onDown = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (e.pointerType === "mouse" && e.button === 0 && onZoom) {
-      const x0 = Math.max(M.l, locate(e).px);
-      dragRef.current = { x0, x1: x0, moved: false };
-      e.currentTarget.setPointerCapture(e.pointerId);
-    } else {
-      onMove(e);
+  const clearTouchBrushArm = () => {
+    if (touchBrushArmRef.current != null) {
+      clearTimeout(touchBrushArmRef.current);
+      touchBrushArmRef.current = null;
     }
   };
 
+  const onDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (onZoom && e.button === 0) {
+      const x0 = Math.max(M.l, locate(e).px);
+      if (e.pointerType === "mouse") {
+        dragRef.current = { x0, x1: x0, moved: false };
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+      if (e.pointerType === "touch") {
+        clearTouchBrushArm();
+        touchBrushArmRef.current = setTimeout(() => {
+          touchBrushArmRef.current = null;
+          dragRef.current = { x0, x1: x0, moved: false };
+        }, 420);
+        e.currentTarget.setPointerCapture(e.pointerId);
+        return;
+      }
+    }
+    onMove(e);
+  };
+
   const onUp = (e: React.PointerEvent<SVGSVGElement>) => {
+    clearTouchBrushArm();
     const drag = dragRef.current;
     dragRef.current = null;
     if (!drag) return;
@@ -359,9 +379,19 @@ export function DiveTimeSeries({
           </span>
         )}
         {onZoom && (
-          <span className="hidden sm:inline text-2xs text-loom-muted ml-auto">
-            {pinned ? "Pinned — click to release" : "Drag to zoom · click to pin"}
+          <span className="text-2xs text-loom-muted ml-auto">
+            <span className="hidden sm:inline">{pinned ? "Pinned — click to release" : "Drag to zoom · click to pin"}</span>
+            <span className="sm:hidden">Hold, then drag to zoom</span>
           </span>
+        )}
+        {onZoomOut && (
+          <button
+            type="button"
+            className="sm:hidden text-2xs px-2 py-1 rounded border border-loom-border text-loom-muted hover:text-loom-text"
+            onClick={() => onZoomOut()}
+          >
+            Zoom out
+          </button>
         )}
       </div>
 

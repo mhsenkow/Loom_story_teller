@@ -15,6 +15,7 @@ import { useLoomStore } from "@/lib/store";
 import { getRecommendationReason } from "@/lib/recommendations";
 import {
   buildSocialCaption,
+  copyTextPromiseToClipboard,
   copyTextToClipboard,
   getSocialPreset,
   publishStoryToWorker,
@@ -28,7 +29,12 @@ import { buildChartSharePageHtml } from "@/lib/dashboardMicrosite";
 import { isTauri } from "@/lib/tauri";
 import { chartLinkFromState, chartLinkSrc, isPortableChartLink } from "@/lib/chartLink";
 import { currentChartShareUrl } from "./ChartLinkSync";
-import { buildShareDataSnapshot } from "@/lib/shareLineage";
+import {
+  buildShareDataSnapshot,
+  chartEncodedColumnNames,
+  defaultIncludeShareData,
+} from "@/lib/shareLineage";
+import { getFocusableElements, trapTabKey } from "@/lib/focusTrap";
 
 const FORMATS: { id: SocialPresetId; label: string; hint: string }[] = [
   { id: "ig-square", label: "Square", hint: "Feed posts" },
@@ -60,6 +66,7 @@ function ShareSheetBody() {
     chartTitleOverrides,
     setChartTitleOverride,
     selectedFile,
+    sampleRows,
     aiSuggestionReason,
     socialPresetId,
     setSocialPresetId,
@@ -84,10 +91,29 @@ function ShareSheetBody() {
   const [busy, setBusy] = useState<null | "share" | "link" | "neospace">(null);
   const [link, setLink] = useState<string | null>(null);
   const [copied, setCopied] = useState<null | "caption" | "link" | "loom">(null);
+  const [includeData, setIncludeData] = useState(() => defaultIncludeShareData(selectedFile));
   const captureSeq = useRef(0);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
   const nativeShare = useMemo(canShareFiles, []);
   const desktop = useMemo(isTauri, []);
-  const close = useCallback(() => setShareSheetOpen(false), [setShareSheetOpen]);
+  const close = useCallback(() => {
+    setShareSheetOpen(false);
+    returnFocusRef.current?.focus();
+  }, [setShareSheetOpen]);
+
+  useEffect(() => {
+    setIncludeData(defaultIncludeShareData(selectedFile));
+  }, [selectedFile?.path, selectedFile?.sourceUrl]);
+
+  const shareDataPreview = useMemo(() => {
+    const chart = chartLinkFromState(useLoomStore.getState());
+    const encoded = chartEncodedColumnNames(chart);
+    const allCols = sampleRows?.columns ?? [];
+    const cols = encoded.length ? encoded.filter((c) => allCols.includes(c)) : allCols;
+    const rows = Math.min(sampleRows?.rows.length ?? 0, 2500);
+    return { rows, cols: cols.length, columnNames: cols };
+  }, [sampleRows, activeChart?.id, selectedFile?.path]);
 
   const caption = useMemo(() => {
     if (!activeChart) return "";
@@ -106,6 +132,7 @@ function ShareSheetBody() {
     const seq = ++captureSeq.current;
     setCapturing(true);
     setFailed(false);
+    setBlob(null);
     setLink(null);
     void (async () => {
       const { capturePlatformPng } = await import("@/lib/capturePlatformPng");
@@ -128,8 +155,13 @@ function ShareSheetBody() {
   }, [blob]);
 
   useEffect(() => {
+    returnFocusRef.current = document.activeElement as HTMLElement | null;
+    const root = panelRef.current;
+    const focusables = getFocusableElements(root);
+    (focusables[0] ?? root)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
+      if (root) trapTabKey(root, e);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -200,12 +232,17 @@ function ShareSheetBody() {
     // Letterbox into 1200×627 so Slack / iMessage / LinkedIn unfurls stay sharp.
     const image = await toLinkPreviewJpeg(blob, { fill, quality: 0.9 });
     const chart = chartLinkFromState(st);
-    const snapshot = buildShareDataSnapshot({
-      sample: st.sampleRows,
-      file: st.selectedFile,
-      stats: st.columnStats,
-      chart,
-    });
+    const encodedCols = chartEncodedColumnNames(chart);
+    const snapshot =
+      includeData
+        ? buildShareDataSnapshot({
+            sample: st.sampleRows,
+            file: st.selectedFile,
+            stats: st.columnStats,
+            chart,
+            columns: encodedCols.length ? encodedCols : null,
+          })
+        : null;
     const html = buildChartSharePageHtml({
       title: chartTitle,
       caption,
@@ -231,35 +268,47 @@ function ShareSheetBody() {
     });
   };
 
-  const handleGetLink = async () => {
+  const handleGetLink = () => {
     if (!blob) return;
     setBusy("link");
-    try {
-      const published = await publishStory();
+    // Resolve publish inside the click, then feed ClipboardItem a promise so
+    // iOS keeps user-activation for the eventual URL (LOOM-413).
+    const publishedPromise = publishStory();
+    const urlPromise = publishedPromise.then((published) => {
       if (!published?.url) {
-        setToast(
-          desktop
-            ? "Links need the web app — save the image instead"
-            : published?.error || "Couldn’t publish right now — share the image instead",
-        );
-        return;
+        throw new Error(published?.error || "publish-failed");
       }
-      setLink(published.url);
-      const copiedOk = await copyTextToClipboard(published.url);
-      setCopied(copiedOk ? "link" : null);
-      if (copiedOk) window.setTimeout(() => setCopied(null), 2200);
-      setToast(
-        published.hasData
-          ? copiedOk
-            ? "Link copied — image + data snapshot (7 days)"
-            : "Link ready — image + data snapshot (7 days)"
-          : copiedOk
-            ? "Link copied — chart image (7 days)"
-            : "Link ready — chart image (7 days)",
-      );
-    } finally {
-      setBusy(null);
-    }
+      return published.url;
+    });
+    const copyPromise = copyTextPromiseToClipboard(urlPromise);
+    void (async () => {
+      try {
+        const published = await publishedPromise;
+        if (!published?.url) {
+          setToast(
+            desktop
+              ? "Links need the web app — save the image instead"
+              : published?.error || "Couldn’t publish right now — share the image instead",
+          );
+          return;
+        }
+        setLink(published.url);
+        const copiedOk = await copyPromise;
+        setCopied(copiedOk ? "link" : null);
+        if (copiedOk) window.setTimeout(() => setCopied(null), 2200);
+        setToast(
+          published.hasData
+            ? copiedOk
+              ? "Link copied — image + data snapshot (7 days)"
+              : "Link ready — image + data snapshot (7 days)"
+            : copiedOk
+              ? "Link copied — chart image (7 days)"
+              : "Link ready — chart image (7 days)",
+        );
+      } finally {
+        setBusy(null);
+      }
+    })();
   };
 
   const NEOSPACE_ORIGIN = "https://neospace.ibm.io";
@@ -275,9 +324,11 @@ function ShareSheetBody() {
       return;
     }
     setBusy("neospace");
+    const child = window.open("about:blank", "neospace_loom_share");
     try {
       const published = await publishStory();
       if (!published?.url) {
+        child?.close();
         setToast(published?.error || "Couldn’t publish the chart image — try again in a moment");
         return;
       }
@@ -289,41 +340,55 @@ function ShareSheetBody() {
       dest.searchParams.set("story", storyUrl);
       dest.searchParams.set("text", body);
 
-      const child = window.open(dest.toString(), "neospace_loom_share");
-      if (!child) {
+      if (child) {
+        child.location.href = dest.toString();
+      } else {
         window.location.assign(dest.toString());
         close();
         return;
       }
 
-      // Best-effort: send the preview PNG; NeoSpace can also fetch /s/{id}.img (JPEG).
+      // Best-effort: pump the preview PNG until NeoSpace acks ready.
+      // Story URL in the query is authoritative — NeoSpace fetches /s/{id}.img if this fails.
       try {
         const buffer = await blob.arrayBuffer();
         const filename = `${slugifyFilename(chartTitle || "chart")}.png`;
+        const payload = {
+          type: "loom-neospace-share" as const,
+          v: 1 as const,
+          text: body,
+          story: storyUrl,
+          image: {
+            name: filename,
+            type: "image/png",
+            buffer,
+          },
+        };
         const send = () => {
           if (child.closed) return;
           try {
-            child.postMessage(
-              {
-                type: "loom-neospace-share",
-                v: 1,
-                text: body,
-                story: storyUrl,
-                image: {
-                  name: filename,
-                  type: "image/png",
-                  buffer,
-                },
-              },
-              NEOSPACE_ORIGIN,
-            );
+            child.postMessage(payload, NEOSPACE_ORIGIN);
           } catch {
             /* ignore */
           }
         };
+        const onReady = (e: MessageEvent) => {
+          if (e.source !== child) return;
+          if (e.origin !== NEOSPACE_ORIGIN && !String(e.origin).includes("neospace")) return;
+          const type = (e.data as { type?: string } | null)?.type;
+          if (type === "neospace-loom-ready" || type === "neospace-loom-ack") send();
+          if (type === "neospace-loom-ack") {
+            window.removeEventListener("message", onReady);
+            window.clearInterval(pump);
+          }
+        };
+        window.addEventListener("message", onReady);
+        const pump = window.setInterval(send, 400);
+        window.setTimeout(() => {
+          window.removeEventListener("message", onReady);
+          window.clearInterval(pump);
+        }, 10_000);
         send();
-        window.setTimeout(send, 800);
-        window.setTimeout(send, 1800);
       } catch {
         /* NeoSpace will fetch /s/{id}.img instead */
       }
@@ -375,7 +440,7 @@ function ShareSheetBody() {
   if (!activeChart) return null;
 
   const aspect = `${preset.width ?? 1} / ${preset.height ?? 1}`;
-  const ready = !!blob && !capturing;
+  const ready = !!blob && !capturing && !failed;
 
   return (
     <div
@@ -386,6 +451,7 @@ function ShareSheetBody() {
       aria-labelledby="share-sheet-title"
     >
       <div
+        ref={panelRef}
         className="w-full sm:max-w-md bg-loom-surface border border-loom-border shadow-loom-lg rounded-t-2xl sm:rounded-xl animate-slide-up flex flex-col max-h-[94dvh]"
         style={{ paddingBottom: "max(0.75rem, var(--safe-bottom))" }}
         onClick={(e) => e.stopPropagation()}
@@ -414,7 +480,7 @@ function ShareSheetBody() {
               {previewUrl && (
                 <img
                   src={previewUrl}
-                  alt="Share preview"
+                  alt={`${chartTitle || activeChart.title} — ${preset.label} preview`}
                   className={`w-full h-full object-contain transition-opacity ${capturing ? "opacity-40" : ""}`}
                 />
               )}
@@ -435,13 +501,28 @@ function ShareSheetBody() {
             </div>
           </div>
 
-          <div className="grid grid-cols-4 gap-1.5" role="radiogroup" aria-label="Image format">
+          <div
+            className="grid grid-cols-5 gap-1.5"
+            role="radiogroup"
+            aria-label="Image format"
+            onKeyDown={(e) => {
+              const idx = FORMATS.findIndex((f) => f.id === presetId);
+              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+                e.preventDefault();
+                setSocialPresetId(FORMATS[(idx + 1) % FORMATS.length]!.id);
+              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+                e.preventDefault();
+                setSocialPresetId(FORMATS[(idx - 1 + FORMATS.length) % FORMATS.length]!.id);
+              }
+            }}
+          >
             {FORMATS.map((f) => (
               <button
                 key={f.id}
                 type="button"
                 role="radio"
                 aria-checked={presetId === f.id}
+                tabIndex={presetId === f.id ? 0 : -1}
                 onClick={() => setSocialPresetId(f.id)}
                 className={`min-h-12 rounded-lg border px-1 py-1.5 flex flex-col items-center justify-center gap-0.5 transition-colors ${
                   presetId === f.id
@@ -483,10 +564,29 @@ function ShareSheetBody() {
             <span className="text-2xs text-loom-muted">(source note is Chart → Visual → Footnote)</span>
           </label>
 
+          <label className="flex items-start gap-2 text-xs text-loom-text min-h-9">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={includeData}
+              disabled={shareDataPreview.rows === 0 || shareDataPreview.cols === 0}
+              onChange={(e) => setIncludeData(e.target.checked)}
+            />
+            <span>
+              Include data ({shareDataPreview.rows.toLocaleString()} rows,{" "}
+              {shareDataPreview.cols} column{shareDataPreview.cols === 1 ? "" : "s"})
+              <span className="block text-2xs text-loom-muted mt-0.5 leading-snug">
+                Off by default for local and uploaded files. When on, only chart-encoded columns
+                leave the device with the public link.
+              </span>
+            </span>
+          </label>
+
           {link && (
             <div className="rounded-lg border border-loom-accent/40 bg-loom-accent/5 p-2.5 space-y-2">
               <p className="text-2xs text-loom-muted">
-                Public for 7 days — anyone with the link can open the chart image and data lineage.
+                Public for 7 days — anyone with the link can open the chart image
+                {includeData ? " and the opted-in data snapshot" : ""}.
               </p>
               <p className="text-xs font-mono text-loom-text break-all">{link}</p>
               <button type="button" onClick={handleShareLink} className="loom-btn-primary w-full min-h-10 text-sm rounded-lg">
@@ -504,13 +604,15 @@ function ShareSheetBody() {
                 onClick={handlePostToNeoSpace}
                 disabled={!ready || busy !== null}
                 className="w-full min-h-12 text-sm font-semibold rounded-lg border border-loom-accent/50 bg-loom-accent/15 text-loom-text hover:bg-loom-accent/25 disabled:opacity-50"
-                title="Publishes a public chart link (image + data lineage, 7 days), then opens NeoSpace ready to post"
+                title="Publishes a public chart link for 7 days, then opens NeoSpace ready to post"
               >
                 {busy === "neospace" ? "Sending to NeoSpace…" : "Post to NeoSpace"}
               </button>
               <p className="text-2xs text-loom-muted text-center leading-snug px-1">
                 Publishes a <strong className="font-medium text-loom-text/80">public</strong> link
-                for 7 days (chart image + data lineage). Don’t share private or PII datasets.
+                for 7 days (chart image
+                {includeData ? " + opted-in data snapshot" : " only"}). Don’t share private or PII
+                datasets.
               </p>
             </>
           )}

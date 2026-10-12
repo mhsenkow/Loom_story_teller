@@ -3,7 +3,8 @@
 
 import { normalizeTheme, type LookTheme } from "./lookSystem";
 
-const LOOM_DEFAULT = ["#6c5ce7", "#00d68f", "#ff6b6b", "#ffd93d", "#00b4d8", "#e77c5c", "#a29bfe", "#74b9ff"];
+/** Dark-theme series stops — bumped luminance for AA on #0a0a0c (LOOM-071). */
+const LOOM_DEFAULT = ["#8b7cf8", "#34e0a1", "#ff8585", "#ffe066", "#4dcae8", "#f09578", "#c4b5fd", "#93c5fd"];
 
 /** Okabe–Ito colorblind-safe categorical (research adjunct / a11y). */
 const OKABE_ITO = ["#4477AA", "#EE7733", "#009988", "#CC3311", "#BBBB00", "#66BBEE", "#AA3377", "#888888"];
@@ -31,6 +32,24 @@ export const VIZ_SEMANTIC = {
 } as const;
 
 export const VIZ_REFERENCE = ["#444C4F", "#6E7175", "#9A9D91", "#B4A7B8", "#CBC0D1"];
+
+export const AXIS_LINE_COLOR_SWATCHES = [
+  { value: "theme", label: "Theme border", color: "theme" },
+  { value: "#2a2a30", label: "Graphite", color: "#2a2a30" },
+  { value: "#6b6b78", label: "Muted", color: "#6b6b78" },
+  { value: "#000000", label: "Black", color: "#000000" },
+  { value: "#ffffff", label: "White", color: "#ffffff" },
+  { value: "#c8c8c4", label: "Light gray", color: "#c8c8c4" },
+] as const;
+
+export const AXIS_LABEL_COLOR_SWATCHES = [
+  { value: "theme", label: "Theme muted", color: "theme" },
+  { value: "#6b6b78", label: "Muted gray", color: "#6b6b78" },
+  { value: "#000000", label: "Black", color: "#000000" },
+  { value: "#ffffff", label: "White", color: "#ffffff" },
+  { value: "#e8e8ec", label: "Near white", color: "#e8e8ec" },
+  { value: "#1a1a1f", label: "Near black", color: "#1a1a1f" },
+] as const;
 
 export type PaletteKind =
   | "categorical"
@@ -82,7 +101,7 @@ const VIZ_CAT_8 = VIZ_CATEGORICAL.slice(0, 8);
 /** Chart series colors per look theme (keep in sync with globals.css --chart-*). */
 export const THEME_CHART: Record<LookTheme, string[]> = {
   light: ["#b84e1f", "#008f62", "#b71c1c", "#c49200", "#007a96", "#6b5fd4", "#4a8fc0", "#5c574e"],
-  dark: VIZ_CAT_8,
+  dark: ["#74b9ff", "#00d68f", "#ff7675", "#ffeaa7", "#00cec9", "#fab1a0", "#a29bfe", "#fd79a8"],
   contrast: ["#ffff00", "#00ff9d", "#ff5555", "#00ccff", "#ff8844", "#bb99ff", "#66bbff", "#ffffff"],
   paper: ["#7a3d0f", "#2f5a40", "#8a2424", "#8a6800", "#24526a", "#5c4068", "#4e5e3e", "#5c5548"],
   glass: ["#6d28d9", "#047857", "#b91c1c", "#b45309", "#1d4ed8", "#be185d", "#0e7490", "#4b5b70"],
@@ -490,24 +509,37 @@ export type ChartColorStatusHints = {
   xField?: string | null;
 };
 
+export type ChartColorStatusInfo = {
+  /** Encoding role + field, e.g. `nest: views` (no palette name). */
+  fieldLabel: string;
+  /** Human palette name for a11y / status text fallback. */
+  paletteName: string;
+  /** Stops for a glanceable ramp (continuous or categorical). */
+  stops: string[];
+  continuous: boolean;
+  /** Legacy one-liner: `nest: views · Diverging Hot–Cold`. */
+  line: string;
+};
+
+type ChartColorStatusOpts = {
+  paletteId?: string | null;
+  scaleKind?: ResolveChartColorsOpts["scaleKind"];
+  reverse?: boolean;
+  theme?: string | null;
+  colorblind?: boolean;
+  colorFieldType?: "quantitative" | "nominal" | "ordinal" | null;
+  /** Encoding panel name for the color slot (“Nest” on treemap, “Heat” on heatmap…). */
+  channelLabel?: string | null;
+};
+
 /**
- * Label for what color is doing — e.g. `nest: rank · Diverging Hot–Cold`.
- * `channelLabel` is the Encoding slot name (Color / Nest / Heat…).
+ * Structured color status for footnotes (ramp on the right) and the status bar.
  * Null only when color isn’t meaningfully in play.
  */
-export function formatChartColorStatus(
+export function describeChartColorStatus(
   chart: ChartColorStatusHints | null | undefined,
-  opts: {
-    paletteId?: string | null;
-    scaleKind?: ResolveChartColorsOpts["scaleKind"];
-    reverse?: boolean;
-    theme?: string | null;
-    colorblind?: boolean;
-    colorFieldType?: "quantitative" | "nominal" | "ordinal" | null;
-    /** Encoding panel name for the color slot (“Nest” on treemap, “Heat” on heatmap…). */
-    channelLabel?: string | null;
-  } = {},
-): string | null {
+  opts: ChartColorStatusOpts = {},
+): ChartColorStatusInfo | null {
   if (!chart?.kind) return null;
   const paletteId = opts.paletteId ?? "auto";
   const scaleKind = opts.scaleKind ?? "auto";
@@ -542,8 +574,30 @@ export function formatChartColorStatus(
   const name = palette?.name ?? resolved.paletteId;
   const rev = opts.reverse ? " ↺" : "";
   const role = (opts.channelLabel?.trim() || "color").toLowerCase();
-  if (field) return `${role}: ${field} · ${name}${rev}`;
-  return `${role} · ${name}${rev}`;
+  const fieldLabel = field ? `${role}: ${field}` : role;
+  const paletteName = `${name}${rev}`;
+  const stops = resolved.continuous
+    ? discretizeContinuous(resolved.colors, Math.min(12, Math.max(5, resolved.colors.length)))
+    : sampleCategorical(resolved.colors, Math.min(8, Math.max(3, resolved.colors.length)));
+
+  return {
+    fieldLabel,
+    paletteName,
+    stops,
+    continuous: resolved.continuous,
+    line: `${fieldLabel} · ${paletteName}`,
+  };
+}
+
+/**
+ * Label for what color is doing — e.g. `nest: rank · Diverging Hot–Cold`.
+ * Prefer `describeChartColorStatus` when you need a visual ramp.
+ */
+export function formatChartColorStatus(
+  chart: ChartColorStatusHints | null | undefined,
+  opts: ChartColorStatusOpts = {},
+): string | null {
+  return describeChartColorStatus(chart, opts)?.line ?? null;
 }
 
 /** Back-compat: discrete color list for a palette id (theme-aware). */
@@ -576,7 +630,7 @@ export function contrastingInk(hex: string): string {
     return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
   }) as [number, number, number];
   const L = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  return L > 0.45 ? "#0a0a0c" : "#ffffff";
+  return L > 0.42 ? "#0a0a0c" : "#ffffff";
 }
 
 export function palettesByKind(kind: PaletteKind | "all"): ColorPalette[] {

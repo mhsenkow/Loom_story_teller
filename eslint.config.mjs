@@ -23,6 +23,19 @@ export default defineConfig([
       "react-hooks/preserve-manual-memoization": "warn",
       "react-hooks/immutability": "warn",
       "react-hooks/incompatible-library": "warn",
+      // jsx-a11y via eslint-config-next/core-web-vitals (LOOM-483) — ratchet on new UI:
+      "jsx-a11y/control-has-associated-label": "warn",
+      "jsx-a11y/click-events-have-key-events": "warn",
+      "jsx-a11y/no-static-element-interactions": "warn",
+      "no-restricted-syntax": [
+        "warn",
+        {
+          selector:
+            "CallExpression[callee.name='useLoomStore'][arguments.length=0]",
+          message:
+            "Use selective useLoomStore((s) => …) slices (LOOM-067); whole-store subscription rerenders on every write.",
+        },
+      ],
     },
   },
   globalIgnores([

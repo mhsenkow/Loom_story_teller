@@ -8,6 +8,7 @@
 
 import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
 import { classifyKeys } from "./chartAxes";
+import { buildSpatialHitIndex, spatialCandidates } from "./spatialHitIndex";
 
 /** Precomputed facet for bar charts (category × subcategory); used for canvas draw + hit-test. */
 export type BarFacetHitPayload = {
@@ -96,6 +97,8 @@ export type Canvas2DHitContext = {
   yAggregate?: YAggregateOption;
   /** Marks registered by the renderer during the last paint (preferred over re-derived geometry). */
   targets?: HitTarget[];
+  /** Chrome regions from the last paint (axis/title/legend). */
+  chromeLayout?: import("./chartChromeLink").ChartChromeLayout | null;
 };
 
 /**
@@ -140,13 +143,21 @@ function hitDistance(t: HitTarget, x: number, y: number): number | null {
 /** Topmost / closest registered mark under the pointer. */
 export function pickHitTarget(targets: HitTarget[] | undefined, x: number, y: number): HitTarget | null {
   if (!targets?.length) return null;
+  const scan =
+    targets.length > 48
+      ? (() => {
+          const idx = buildSpatialHitIndex(targets, { w: 8192, h: 8192 });
+          const near = spatialCandidates(idx, x, y);
+          return near.length ? near : targets;
+        })()
+      : targets;
   let best: HitTarget | null = null;
   let bestD = Infinity;
-  for (let i = targets.length - 1; i >= 0; i--) {
-    const d = hitDistance(targets[i]!, x, y);
+  for (let i = scan.length - 1; i >= 0; i--) {
+    const d = hitDistance(scan[i]!, x, y);
     if (d != null && d < bestD) {
       bestD = d;
-      best = targets[i]!;
+      best = scan[i]!;
     }
   }
   return best;
@@ -159,6 +170,7 @@ export function rowForHitTarget(
   allowed: Set<number> | null = null,
 ): number | null {
   if (target.match.length === 0) {
+    if (target.summary) return -1;
     return target.rowIndex != null && inAllowed(target.rowIndex, allowed) ? target.rowIndex : null;
   }
   for (let i = 0; i < rows.length; i++) {
@@ -184,8 +196,16 @@ function aggregateValues(values: number[], agg: YAggregateOption): number {
   if (agg === "count") return values.length;
   if (agg === "sum") return values.reduce((a, b) => a + b, 0);
   if (agg === "mean") return values.reduce((a, b) => a + b, 0) / values.length;
-  if (agg === "min") return Math.min(...values);
-  if (agg === "max") return Math.max(...values);
+  if (agg === "min") {
+    let m = values[0]!;
+    for (let i = 1; i < values.length; i++) m = Math.min(m, values[i]!);
+    return m;
+  }
+  if (agg === "max") {
+    let m = values[0]!;
+    for (let i = 1; i < values.length; i++) m = Math.max(m, values[i]!);
+    return m;
+  }
   return values.reduce((a, b) => a + b, 0);
 }
 

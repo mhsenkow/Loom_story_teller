@@ -53,11 +53,19 @@ Rust implementation: `src-tauri/src/stream.rs`, `src-tauri/src/sources.rs`.
 ## Quality commands
 
 ```bash
-make check      # tsc + eslint + cargo check (+ clippy if available)
-make test       # Vitest
-npm run build   # Next production build (static export)
-make loft       # Deploy static web UI to Cloudflare Workers (wrangler.jsonc)
+make ci            # full PR gate (preflight, tsc, Worker, MCP, tests, build, cargo check)
+make check         # tsc + Worker + cargo check + Vitest
+make test          # Vitest
+npm run build      # Next production build (static export)
+make loft          # Deploy static web UI to Cloudflare Workers (wrangler.jsonc)
+make tablet        # iOS sim/device dev (web-parity; DuckDB stays desktop)
+make tablet-weave  # App Store IPA → TestFlight
+make tablet-xcode  # Open Xcode to Archive / Distribute
 ```
+
+**iOS:** Bundle `com.loom.storyteller`, team `WC44W2QVE4`. Mobile Rust is `src-tauri/src/mobile.rs` (no DuckDB). Frontend: `isDesktop()` for DuckDB IPC; iPad/iPhone Tauri uses the web data path. Re-auth Apple ID in Xcode → Settings → Accounts before the first IPA build. Shell strategy: [docs/MOBILE_IOS.md](docs/MOBILE_IOS.md). Release checklist: [docs/MOBILE_ACCEPTANCE.md](docs/MOBILE_ACCEPTANCE.md).
+
+**Clean checkout (LOOM-089):** Tag releases and `make ci` assume a fresh `git clone` + `npm ci` — no reliance on untracked local files. Before tagging, run `make ci` from a clean tree (or CI on the PR) so missing assets or config surface before App Store / Worker deploy.
 
 `eslint.config.mjs` uses flat config; some React Compiler ESLint rules are relaxed so the existing large components stay lint-clean without a full rewrite.
 
@@ -65,11 +73,14 @@ make loft       # Deploy static web UI to Cloudflare Workers (wrangler.jsonc)
 
 ## Adding a feature (checklist)
 
-1. **Data in Rust:** Extend `db.rs` / new module; expose via `commands.rs` + `lib.rs`.
-2. **Types + invoke:** Mirror types and wrappers in `tauri.ts`; add browser mocks in `mock-data.ts` if needed.
-3. **UI state:** Add minimal fields/actions in `store.ts`; wire in the smallest set of components.
-4. **Docs:** Update `DOCS.md` (internal) and, if user-visible, `README.md`.
-5. **What's new:** If people will notice it, add an item to the top release in `src/lib/changelog.ts` — or a new release with a newer `id` (e.g. `2026-10-05`) when shipping a new batch. Returning visitors see unseen releases once in the What's new modal. Write for users, not developers.
+1. **Acceptance:** Name the user-visible outcome and which runtime(s) change (desktop / web / iOS / Worker).
+2. **Data in Rust:** Extend `db.rs` / new module; expose via `commands.rs` + `lib.rs` when desktop-only.
+3. **Types + invoke:** Mirror types and wrappers in `tauri.ts`; add browser mocks in `mock-data.ts` if needed.
+4. **UI state:** Add minimal fields/actions in `store.ts`; wire in the smallest set of components.
+5. **Verification:** Pure logic → focused Vitest; Worker route → `check:worker` + handler fixture; native → `cargo test`; UI journey → DOM/e2e when behavior crosses components. Run `make check` locally; `make ci` before release.
+6. **Docs:** Update `DOCS.md` (internal) and, if user-visible, `README.md`. Platform limits → [docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md).
+7. **What's new:** If people will notice it, add an item to the top release in `src/lib/changelog.ts`. Write for users, not developers.
+8. **Performance:** If the journey touches parse/render hot paths, note impact against [docs/PERFORMANCE_BUDGETS.md](docs/PERFORMANCE_BUDGETS.md).
 
 ---
 

@@ -50,11 +50,23 @@ export interface ClusterResult {
   columnY: string;
 }
 
+export interface CorrelationResult {
+  columns: string[];
+  matrix: number[][];
+}
+
+function cellNumeric(r: unknown[], colIdx: number): number | null {
+  const raw = r[colIdx];
+  if (raw === null || raw === undefined || raw === "") return null;
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : null;
+}
+
 function getNumericValues(rows: unknown[][], colIdx: number): number[] {
   const out: number[] = [];
   for (const r of rows) {
-    const v = Number(r[colIdx]);
-    if (!isNaN(v)) out.push(v);
+    const v = cellNumeric(r, colIdx);
+    if (v != null) out.push(v);
   }
   return out;
 }
@@ -95,15 +107,13 @@ export function anomalyZScore(
   const m = mean(vals);
   const s = std(vals) || 1;
   const indices: number[] = [];
-  let idx = 0;
-  for (const r of rows) {
-    const v = Number(r[colIdx]);
-    if (!isNaN(v)) {
+  rows.forEach((r, rowIndex) => {
+    const v = cellNumeric(r, colIdx);
+    if (v != null) {
       const z = Math.abs((v - m) / s);
-      if (z > threshold) indices.push(idx);
-      idx++;
+      if (z > threshold) indices.push(rowIndex);
     }
-  }
+  });
   return indices;
 }
 
@@ -125,8 +135,8 @@ export function anomalyIQR(
   const indices: number[] = [];
   let idx = 0;
   for (const r of rows) {
-    const v = Number(r[colIdx]);
-    if (!isNaN(v) && (v < lo || v > hi)) indices.push(idx);
+    const v = cellNumeric(r, colIdx);
+    if (v != null && (v < lo || v > hi)) indices.push(idx);
     idx++;
   }
   return indices;
@@ -142,16 +152,15 @@ export function anomalyMAD(
   if (vals.length < 2) return [];
   const med = medianSorted([...vals].sort((a, b) => a - b));
   const m = mad(vals);
+  if (m === 0) return [];
   const indices: number[] = [];
-  let idx = 0;
-  for (const r of rows) {
-    const v = Number(r[colIdx]);
-    if (!isNaN(v)) {
+  rows.forEach((r, rowIndex) => {
+    const v = cellNumeric(r, colIdx);
+    if (v != null) {
       const modifiedZ = 0.6745 * Math.abs(v - med) / m;
-      if (modifiedZ > threshold) indices.push(idx);
-      idx++;
+      if (modifiedZ > threshold) indices.push(rowIndex);
     }
-  }
+  });
   return indices;
 }
 
@@ -358,4 +367,62 @@ export function runClustering(
     rowToCluster[p.rowIdx] = best;
   });
   return { rowToCluster, k, columnX, columnY };
+}
+
+/** Pairwise Pearson r for up to `maxCols` numeric columns (LOOM-480). */
+export function runCorrelationMatrix(
+  rows: unknown[][],
+  columns: string[],
+  maxCols = 8,
+): CorrelationResult | null {
+  const numericCols = columns.filter((c) => {
+    const i = columns.indexOf(c);
+    return rows.some((r) => {
+      const v = Number(r[i]);
+      return Number.isFinite(v);
+    });
+  });
+  if (numericCols.length < 2) return null;
+  const nc = numericCols.slice(0, maxCols);
+  const colIndices = nc.map((c) => columns.indexOf(c));
+  const means = colIndices.map((ci) => {
+    let sum = 0;
+    let n = 0;
+    for (const r of rows) {
+      const v = cellNumeric(r, ci);
+      if (v != null) {
+        sum += v;
+        n++;
+      }
+    }
+    return n > 0 ? sum / n : 0;
+  });
+  const matrix: number[][] = [];
+  for (let a = 0; a < nc.length; a++) {
+    matrix[a] = [];
+    for (let b = 0; b < nc.length; b++) {
+      if (a === b) {
+        matrix[a]![b] = 1;
+        continue;
+      }
+      let sumAB = 0;
+      let sumA2 = 0;
+      let sumB2 = 0;
+      let n = 0;
+      for (const r of rows) {
+        const va = cellNumeric(r, colIndices[a]!);
+        const vb = cellNumeric(r, colIndices[b]!);
+        if (va == null || vb == null) continue;
+        const da = va - means[a]!;
+        const db = vb - means[b]!;
+        sumAB += da * db;
+        sumA2 += da * da;
+        sumB2 += db * db;
+        n++;
+      }
+      matrix[a]![b] =
+        n > 2 && sumA2 > 0 && sumB2 > 0 ? sumAB / Math.sqrt(sumA2 * sumB2) : Number.NaN;
+    }
+  }
+  return { columns: nc, matrix };
 }

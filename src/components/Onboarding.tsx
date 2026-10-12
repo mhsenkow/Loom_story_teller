@@ -9,21 +9,29 @@
 
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { Dialog } from "@/components/ui/Dialog";
 import { useLoomStore } from "@/lib/store";
 import { openDataSources } from "@/components/StartHere";
 import { ChartCard } from "@/components/ChartCard";
 import {
   scanDiscoverStories,
+  getDiscoverScanSummary,
   DISCOVER_SEEN_KEY,
-  DISCOVER_STORY_LIMIT,
+  discoverStoryLimit,
+  getDiscoverStoryCache,
+  setDiscoverStoryCache,
+  retainDiscoverFeed,
+  stopDiscoverProbes,
   type DiscoverStory,
 } from "@/lib/discoverStories";
-import { recommendSourceStory, recommendStreamStory } from "@/lib/recommendations";
-import { ALL_SOURCE_KINDS, sourceStatus, streamStatus } from "@/lib/tauri";
+import { activateDataset, shortlistFor, type DatasetShortlist } from "@/lib/datasetPipeline";
+import { ALL_SOURCE_KINDS, sourceStart, sourceStatus, streamStart, streamStatus } from "@/lib/tauri";
 import { SOURCE_BY_KIND } from "@/lib/sourceRegistry";
 import { ODD_CHART_KIND_OPTIONS } from "@/lib/oddCharts";
 import { GEO_MAP_KIND_OPTIONS, isGeoFamilyKind } from "@/lib/geoMaps";
+import { resolveStartupIntent, shouldOpenOnboarding } from "@/lib/startupIntent";
+import { getLastSession } from "@/lib/persist";
 
 type SortMode = "score" | "category" | "chart" | "source" | "name";
 const SORT_LABELS: Record<SortMode, string> = {
@@ -90,22 +98,13 @@ export function Onboarding() {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [sortMode, setSortMode] = useState<SortMode>("score");
   const whatsNewOpen = useLoomStore((s) => s.whatsNewOpen);
-
-  const {
-    setSelectedFile,
-    setColumnStats,
-    setSampleRows,
-    setChartRecs,
-    setActiveChart,
-    setVegaSpec,
-    setViewMode,
-    setPanelTab,
-    setStreamActive,
-    setSourceStatus,
-    setDataRegionOpen,
-    setDataSourcesExpanded,
-    setToast,
-  } = useLoomStore();
+  const setViewMode = useLoomStore((s) => s.setViewMode);
+  const setPanelTab = useLoomStore((s) => s.setPanelTab);
+  const setSourceStatus = useLoomStore((s) => s.setSourceStatus);
+  const setDataRegionOpen = useLoomStore((s) => s.setDataRegionOpen);
+  const setDataSourcesExpanded = useLoomStore((s) => s.setDataSourcesExpanded);
+  const setToast = useLoomStore((s) => s.setToast);
+  const scanAbortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -113,44 +112,67 @@ export function Onboarding() {
     /** Bumps on each scan so a slow prior scan can’t wipe a newer one (or clear progressive cards). */
     let scanGen = 0;
 
-    const runScan = () => {
+    const applyStories = (list: DiscoverStory[], scanning: boolean) => {
+      setStories(list);
+      setPhase(list.length ? "ready" : scanning ? "scan" : "error");
+      if (!list.length) return;
+      const sources = new Set(list.map((s) => s.kind)).size;
+      setScannedHint(
+        `${list.length} stories · ${sources}/${ALL_SOURCE_KINDS.length + 1} feeds`,
+      );
+    };
+
+    const runScan = (opts?: { force?: boolean }) => {
       const gen = ++scanGen;
-      setPhase("scan");
-      setStories([]);
+      scanAbortRef.current?.abort();
+      const scanAbort = new AbortController();
+      scanAbortRef.current = scanAbort;
       setShow(true);
       setCategoryFilter("all");
       setChartFilter("all");
       setSourceFilter("all");
       setSortMode("score");
+
+      // Reopen: show the last scan from memory instead of clearing and waiting again.
+      const cached = !opts?.force ? getDiscoverStoryCache() : null;
+      if (cached?.length) {
+        applyStories(cached, false);
+        return;
+      }
+
+      setPhase("scan");
+      setStories([]);
       setScannedHint(`Scanning ${ALL_SOURCE_KINDS.length + 1} live feeds…`);
       void (async () => {
         try {
           const found = await scanDiscoverStories({
-            limit: DISCOVER_STORY_LIMIT,
+            limit: discoverStoryLimit(),
             includeWiki: true,
+            signal: scanAbort.signal,
             onStory: (_story, soFar) => {
-              if (cancelled || gen !== scanGen) return;
-              setStories(soFar);
-              setPhase("ready");
-              const sources = new Set(soFar.map((s) => s.kind)).size;
-              setScannedHint(
-                `${soFar.length} stories · ${sources}/${ALL_SOURCE_KINDS.length + 1} feeds`,
-              );
+              if (cancelled || scanAbort.signal.aborted || gen !== scanGen) return;
+              setDiscoverStoryCache(soFar);
+              applyStories(soFar, true);
             },
           });
-          if (cancelled || gen !== scanGen) return;
+          if (cancelled || scanAbort.signal.aborted || gen !== scanGen) return;
           if (found.length) {
-            setStories(found);
-            setPhase("ready");
-            const sources = new Set(found.map((s) => s.kind)).size;
-            setScannedHint(
-              `${found.length} stories · ${sources}/${ALL_SOURCE_KINDS.length + 1} feeds`,
-            );
+            setDiscoverStoryCache(found);
+            applyStories(found, false);
+            const summary = getDiscoverScanSummary();
+            const unavailable =
+              summary.failedKinds.length +
+              summary.timedOutKinds.length +
+              (summary.wikiFailed || summary.wikiTimedOut ? 1 : 0);
+            if (unavailable > 0) {
+              setScannedHint(`${found.length} stories · ${unavailable} feeds unavailable`);
+            }
             return;
           }
           // Don’t wipe cards that already streamed in if the final pass is empty.
           setStories((prev) => {
             if (prev.length) {
+              setDiscoverStoryCache(prev);
               setPhase("ready");
               return prev;
             }
@@ -158,26 +180,30 @@ export function Onboarding() {
             return prev;
           });
         } catch {
-          if (!cancelled && gen === scanGen) {
+          if (!cancelled && !scanAbort.signal.aborted && gen === scanGen) {
             setPhase((p) => (p === "ready" ? p : "error"));
           }
+        } finally {
+          if (scanAbortRef.current === scanAbort) scanAbortRef.current = null;
         }
       })();
     };
 
     const id = window.setTimeout(() => {
-      // Opened from a shared #chart= / #dive= / #story= link — show that, not discover
-      // (don't mark discover seen; it greets them next time).
-      if (/(?:^#|&)(?:chart|dive|story)=/.test(window.location.hash)) {
+      let hasDiscoverSeen = false;
+      try {
+        hasDiscoverSeen = !!window.localStorage.getItem(DISCOVER_SEEN_KEY);
+      } catch {
         setShow(false);
         return;
       }
-      try {
-        if (window.localStorage.getItem(DISCOVER_SEEN_KEY)) {
-          setShow(false);
-          return;
-        }
-      } catch {
+      const intent = resolveStartupIntent({
+        hash: window.location.hash,
+        hasDiscoverSeen,
+        hasLastSession: !!getLastSession()?.filePath,
+        neospaceHandoff: window.location.search.includes("neospace=1"),
+      });
+      if (!shouldOpenOnboarding(intent)) {
         setShow(false);
         return;
       }
@@ -197,6 +223,7 @@ export function Onboarding() {
     return () => {
       cancelled = true;
       scanGen += 1;
+      scanAbortRef.current?.abort();
       window.clearTimeout(id);
       window.removeEventListener("loom-discover", onForce);
     };
@@ -268,17 +295,25 @@ export function Onboarding() {
     } catch {
       /* ignore */
     }
+    scanAbortRef.current?.abort();
+    void stopDiscoverProbes();
     setShow(false);
   };
 
   const openStory = async (story: DiscoverStory) => {
+    scanAbortRef.current?.abort();
+    retainDiscoverFeed(story.kind);
     setOpeningId(story.id);
     try {
       try {
         if (story.kind === "wiki") {
+          const s0 = await streamStatus();
+          if (!s0.running) await streamStart();
           const s = await streamStatus();
           useLoomStore.getState().setStreamStatus(s);
         } else {
+          const s0 = await sourceStatus(story.kind);
+          if (!s0.running) await sourceStart(story.kind);
           const s = await sourceStatus(story.kind);
           setSourceStatus(story.kind, s);
         }
@@ -301,28 +336,27 @@ export function Onboarding() {
               sourceCredit: SOURCE_BY_KIND[story.kind]?.attribution,
             }),
       };
-      setSelectedFile(file);
-      setColumnStats(story.stats);
-      setSampleRows(story.sample);
-      setStreamActive(true);
-      const seq =
-        story.kind === "wiki"
-          ? recommendStreamStory(story.stats, story.sample)
-          : recommendSourceStory(story.kind, story.stats, story.sample);
-      const charts = seq.charts.length ? seq.charts : [story.chart];
+      const shortlist: DatasetShortlist =
+        story.kind === "wiki" ? { type: "stream" } : { type: "source", kind: story.kind };
+      const seqCharts = shortlistFor(shortlist, file, story.stats, story.sample);
+      const charts = seqCharts.length ? seqCharts : [story.chart];
       const preferred =
         charts.find((c) => c.kind === story.chart.kind && c.title === story.chart.title) ??
         charts.find((c) => c.kind === story.chart.kind) ??
         charts[0]!;
       // Open the exact Discover chart that was previewed (stack mode, encodings).
       const openChart = { ...preferred, ...story.chart, id: story.chart.id || preferred.id };
-      setChartRecs([openChart, ...charts.filter((c) => c.id !== openChart.id)]);
-      setActiveChart(openChart);
+      activateDataset({
+        file,
+        stats: story.stats,
+        sample: story.sample,
+        charts: [openChart, ...charts.filter((c) => c.id !== openChart.id)],
+        active: openChart,
+      });
       // The hook ("M5.8 quake — …") is the headline people came for; keep it on the chart.
       if (story.hook && story.hook !== openChart.title) {
         useLoomStore.getState().setChartTitleOverride(openChart.id, story.hook);
       }
-      setVegaSpec(null);
       setViewMode("chart");
       setPanelTab("chart");
       setDataRegionOpen(false);
@@ -385,195 +419,223 @@ export function Onboarding() {
 
   // The scan keeps streaming in the background while What's new is up, so
   // stories are ready the moment it closes.
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (show !== true) return;
+    const t = window.requestAnimationFrame(() => {
+      const btn =
+        document.querySelector<HTMLElement>("#onboarding-stories button") ??
+        closeRef.current;
+      btn?.focus();
+    });
+    return () => window.cancelAnimationFrame(t);
+  }, [show, visible.length, phase]);
+
   if (show !== true || whatsNewOpen) return null;
 
+  const showFilters = phase === "ready" || stories.length > 0;
+
+  const filterRows = showFilters ? (
+    <div className="space-y-1.5 sm:space-y-2">
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+        <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
+          Explore
+        </span>
+        <div
+          className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5"
+          ref={topicFade.ref}
+          style={topicFade.style}
+          role="group"
+          aria-label="Topic"
+        >
+          <div className="flex items-center gap-1 sm:gap-0.5 w-max">
+            <FilterChip
+              label="All"
+              pressed={categoryFilter === "all"}
+              onClick={() => setCategoryFilter("all")}
+            />
+            {categories.map((cat) => (
+              <FilterChip
+                key={cat}
+                label={cat}
+                pressed={categoryFilter === cat}
+                onClick={() => setCategoryFilter(cat)}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0 pl-1 border-l border-loom-border/60">
+          <label htmlFor="discover-sort" className="sr-only">
+            Sort stories
+          </label>
+          <span className="relative inline-flex items-center gap-1 min-h-9 sm:min-h-0 px-1 sm:px-0.5 text-xs sm:text-2xs text-loom-muted hover:text-loom-text focus-within:text-loom-text focus-within:ring-1 focus-within:ring-loom-accent/50 rounded">
+            {SORT_LABELS[sortMode]}
+            <svg width="8" height="5" viewBox="0 0 10 6" aria-hidden className="fill-current opacity-70">
+              <path d="M0 0l5 6 5-6z" />
+            </svg>
+            <select
+              id="discover-sort"
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as SortMode)}
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer appearance-none text-base"
+              title="Sort"
+            >
+              {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
+                <option key={m} value={m}>
+                  {SORT_LABELS[m]}
+                </option>
+              ))}
+            </select>
+          </span>
+          {filtersActive && (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="min-h-9 sm:min-h-0 px-1.5 text-xs sm:text-[10px] text-loom-muted hover:text-loom-accent transition-colors"
+            >
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+
+      {sources.length > 1 && (
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+          <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
+            From
+          </span>
+          <div
+            className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5"
+            ref={sourceFade.ref}
+            style={sourceFade.style}
+            role="group"
+            aria-label="Source"
+          >
+            <div className="flex items-center gap-1 sm:gap-0.5 w-max">
+              <FilterChip
+                label="All"
+                pressed={sourceFilter === "all"}
+                onClick={() => setSourceFilter("all")}
+              />
+              {sources.map((src) => (
+                <FilterChip
+                  key={src.kind}
+                  label={src.fileName}
+                  pressed={sourceFilter === src.kind}
+                  onClick={() => setSourceFilter(src.kind)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {chartKinds.length > 1 && (
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0" role="group" aria-label="Chart type">
+          <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
+            As
+          </span>
+          <div
+            className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            ref={kindFade.ref}
+            style={kindFade.style}
+          >
+            <div className="flex items-center gap-x-1.5 sm:gap-x-1.5 w-max text-xs sm:text-2xs text-loom-muted">
+              <ChartLink
+                label="Any"
+                pressed={chartFilter === "all"}
+                onClick={() => setChartFilter("all")}
+              />
+              <span className="inline-flex items-center gap-x-1.5">
+                <span className="text-loom-border select-none" aria-hidden>
+                  ·
+                </span>
+                <ChartLink
+                  label="Maps"
+                  pressed={chartFilter === "maps"}
+                  onClick={() => setChartFilter("maps")}
+                />
+              </span>
+              {chartKinds.map((kind) => (
+                <span key={kind} className="inline-flex items-center gap-x-1.5">
+                  <span className="text-loom-border select-none" aria-hidden>
+                    ·
+                  </span>
+                  <ChartLink
+                    label={chartKindLabel(kind)}
+                    pressed={chartFilter === kind}
+                    onClick={() => setChartFilter(kind)}
+                  />
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  ) : null;
+
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-end sm:items-center justify-center p-0 sm:p-4 loom-overlay animate-fade-in"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="onboarding-title"
-      aria-describedby="onboarding-desc"
+    <Dialog
+      open
+      onClose={dismiss}
+      labelledBy="onboarding-title"
+      describedBy="onboarding-desc"
+      initialFocusRef={closeRef}
+      zIndex={200}
+      panelClassName="max-w-5xl p-2.5 sm:p-5 space-y-0 h-[min(96dvh,100%)] sm:h-[min(88dvh,860px)] flex flex-col overflow-hidden"
     >
-      <div className="loom-card max-w-5xl w-full p-3 sm:p-5 space-y-0 bg-loom-surface border border-loom-border shadow-loom-lg h-[min(92dvh,900px)] sm:h-[min(88dvh,860px)] flex flex-col rounded-t-2xl sm:rounded-xl animate-slide-up mb-[var(--safe-bottom)] sm:mb-0">
-        {/* Title → explore strip: one continuous header, controls read as part of the sentence */}
-        <header className="shrink-0 pb-3 mb-3 border-b border-loom-border/50 space-y-3">
-          <div className="flex items-start gap-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <div className="flex items-baseline gap-2.5 flex-wrap">
+      <div className="flex flex-col h-full min-h-0 space-y-0">
+        {/* order: phone = title → stories → filters → footer; desktop = title → filters → stories → footer */}
+        <header className="order-1 shrink-0 pb-1.5 sm:pb-3 mb-1 sm:mb-3 border-b border-loom-border/50">
+          <div className="flex items-start gap-2 sm:gap-3">
+            <div className="min-w-0 flex-1 space-y-0.5 sm:space-y-1">
+              <div className="flex items-baseline gap-2 flex-wrap">
                 <h2
                   id="onboarding-title"
-                  className="text-[1.05rem] sm:text-lg font-semibold text-loom-text tracking-tight leading-tight"
+                  className="text-base sm:text-lg font-semibold text-loom-text tracking-tight leading-tight"
                 >
                   What’s interesting right now
                 </h2>
-                {(phase === "ready" || stories.length > 0) && (
-                  <span className="text-2xs font-mono text-loom-muted tabular-nums">
+                {showFilters && (
+                  <span className="text-2xs font-mono text-loom-muted tabular-nums" aria-live="polite">
                     {visible.length}
                     {visible.length !== stories.length ? `/${stories.length}` : ""}
                   </span>
                 )}
               </div>
-              <p id="onboarding-desc" className="text-2xs text-loom-muted leading-relaxed">
+              {/* Keep scan/error copy; once cards show, reclaim vertical space on phones */}
+              <p
+                id="onboarding-desc"
+                className={`text-2xs text-loom-muted leading-relaxed ${
+                  showFilters ? "hidden sm:block" : ""
+                }`}
+              >
                 {phase === "scan" && stories.length === 0
                   ? scannedHint
                   : exploreSummary}
               </p>
             </div>
             <button
+              ref={closeRef}
               type="button"
               onClick={dismiss}
-              className="loom-btn-ghost min-h-8 min-w-8 flex items-center justify-center text-loom-muted text-lg leading-none rounded-md -mt-0.5"
+              className="loom-btn-ghost min-h-9 min-w-9 sm:min-h-8 sm:min-w-8 flex items-center justify-center text-loom-muted text-lg leading-none rounded-md -mt-0.5"
               aria-label="Close"
             >
               ×
             </button>
           </div>
-
-          {(phase === "ready" || stories.length > 0) && (
-            <div className="space-y-2">
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
-                  Explore
-                </span>
-                <div
-                  className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5"
-                  ref={topicFade.ref}
-                  style={topicFade.style}
-                  role="group"
-                  aria-label="Topic"
-                >
-                  <div className="flex items-center gap-0.5 w-max">
-                    <FilterChip
-                      label="All"
-                      pressed={categoryFilter === "all"}
-                      onClick={() => setCategoryFilter("all")}
-                    />
-                    {categories.map((cat) => (
-                      <FilterChip
-                        key={cat}
-                        label={cat}
-                        pressed={categoryFilter === cat}
-                        onClick={() => setCategoryFilter(cat)}
-                      />
-                    ))}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0 pl-1 border-l border-loom-border/60">
-                  <label htmlFor="discover-sort" className="sr-only">
-                    Sort stories
-                  </label>
-                  {/* Small visible label; the native select sits invisibly on top so phones keep their 16px
-                      no-zoom font without the control crowding the topic chips. */}
-                  <span className="relative inline-flex items-center gap-1 text-2xs text-loom-muted hover:text-loom-text focus-within:text-loom-text focus-within:ring-1 focus-within:ring-loom-accent/50 rounded px-0.5">
-                    {SORT_LABELS[sortMode]}
-                    <svg width="8" height="5" viewBox="0 0 10 6" aria-hidden className="fill-current opacity-70">
-                      <path d="M0 0l5 6 5-6z" />
-                    </svg>
-                    <select
-                      id="discover-sort"
-                      value={sortMode}
-                      onChange={(e) => setSortMode(e.target.value as SortMode)}
-                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer appearance-none"
-                      title="Sort"
-                    >
-                      {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
-                        <option key={m} value={m}>
-                          {SORT_LABELS[m]}
-                        </option>
-                      ))}
-                    </select>
-                  </span>
-                  {filtersActive && (
-                    <button
-                      type="button"
-                      onClick={clearFilters}
-                      className="text-[10px] text-loom-muted hover:text-loom-accent transition-colors"
-                    >
-                      Clear
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {sources.length > 1 && (
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
-                    From
-                  </span>
-                  <div
-                    className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden -mx-0.5 px-0.5"
-                    ref={sourceFade.ref}
-                    style={sourceFade.style}
-                    role="group"
-                    aria-label="Source"
-                  >
-                    <div className="flex items-center gap-0.5 w-max">
-                      <FilterChip
-                        label="All"
-                        pressed={sourceFilter === "all"}
-                        onClick={() => setSourceFilter("all")}
-                      />
-                      {sources.map((src) => (
-                        <FilterChip
-                          key={src.kind}
-                          label={src.fileName}
-                          pressed={sourceFilter === src.kind}
-                          onClick={() => setSourceFilter(src.kind)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {chartKinds.length > 1 && (
-                <div
-                  className="flex items-center gap-2 min-w-0"
-                  role="group"
-                  aria-label="Chart type"
-                >
-                  <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
-                    As
-                  </span>
-                  <div className="flex-1 min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" ref={kindFade.ref} style={kindFade.style}>
-                    <div className="flex items-center gap-x-1.5 w-max text-2xs text-loom-muted">
-                      <ChartLink
-                        label="Any"
-                        pressed={chartFilter === "all"}
-                        onClick={() => setChartFilter("all")}
-                      />
-                      <span className="inline-flex items-center gap-x-1.5">
-                        <span className="text-loom-border select-none" aria-hidden>
-                          ·
-                        </span>
-                        <ChartLink
-                          label="Maps"
-                          pressed={chartFilter === "maps"}
-                          onClick={() => setChartFilter("maps")}
-                        />
-                      </span>
-                      {chartKinds.map((kind) => (
-                        <span key={kind} className="inline-flex items-center gap-x-1.5">
-                          <span className="text-loom-border select-none" aria-hidden>
-                            ·
-                          </span>
-                          <ChartLink
-                            label={chartKindLabel(kind)}
-                            pressed={chartFilter === kind}
-                            onClick={() => setChartFilter(kind)}
-                          />
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
         </header>
 
-        <div className="flex-1 min-h-0 overflow-y-auto -mx-1 px-1 flex flex-col">
+        {filterRows ? (
+          <div className="order-3 sm:order-2 shrink-0 pt-1.5 sm:pt-0 sm:pb-3 sm:mb-3 border-t sm:border-t-0 sm:border-b border-loom-border/50">
+            {filterRows}
+          </div>
+        ) : null}
+
+        <div className="order-2 sm:order-3 flex-1 min-h-0 overflow-y-auto overscroll-y-contain -mx-0.5 px-0.5 sm:-mx-1 sm:px-1 flex flex-col">
           {phase === "scan" && stories.length === 0 && (
             <div className="my-auto py-10 text-center space-y-2">
               <p className="text-sm text-loom-text">Scanning open data…</p>
@@ -594,7 +656,7 @@ export function Onboarding() {
             </div>
           )}
 
-          {(phase === "ready" || stories.length > 0) && visible.length === 0 && (
+          {showFilters && visible.length === 0 && (
             <div className="my-auto py-10 text-center space-y-2">
               <p className="text-sm text-loom-text">No stories match these filters.</p>
               <button type="button" onClick={clearFilters} className="text-2xs text-loom-accent hover:underline">
@@ -603,8 +665,8 @@ export function Onboarding() {
             </div>
           )}
 
-          {(phase === "ready" || stories.length > 0) && visible.length > 0 && (
-            <ul className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 content-start gap-2 list-none m-0 p-0">
+          {showFilters && visible.length > 0 && (
+            <ul id="onboarding-stories" className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 content-start gap-2 list-none m-0 p-0 pb-2">
               {visible.map((s) => (
                 <li key={s.id} className="min-w-0 animate-fade-in">
                   <div className="relative">
@@ -629,16 +691,16 @@ export function Onboarding() {
           )}
         </div>
 
-        <div className="flex items-center justify-between gap-2 shrink-0 pt-1 border-t border-loom-border/60">
-          <button type="button" onClick={browseSources} className="text-xs sm:text-2xs text-loom-muted hover:text-loom-accent min-h-10 sm:min-h-0 px-1">
+        <div className="order-4 flex items-center justify-between gap-2 shrink-0 pt-1 sm:pt-1 border-t border-loom-border/60">
+          <button type="button" onClick={browseSources} className="text-xs sm:text-2xs text-loom-muted hover:text-loom-accent min-h-9 sm:min-h-0 px-1">
             Browse all sources
           </button>
-          <button type="button" onClick={dismiss} className="loom-btn-ghost text-xs px-2.5 py-1.5 min-h-10 sm:min-h-0">
+          <button type="button" onClick={dismiss} className="loom-btn-ghost text-xs px-2 py-1 min-h-9 sm:min-h-0">
             Skip for now
           </button>
         </div>
       </div>
-    </div>
+    </Dialog>
   );
 }
 
@@ -683,7 +745,7 @@ function FilterChip({
       aria-pressed={pressed}
       onClick={onClick}
       className={`
-        min-h-9 sm:min-h-7 px-3 sm:px-2.5 text-xs sm:text-[11px] rounded-full border transition-colors whitespace-nowrap
+        min-h-10 sm:min-h-7 px-3 sm:px-2.5 text-xs sm:text-[11px] rounded-full border transition-colors whitespace-nowrap
         ${pressed
           ? "bg-loom-text text-loom-bg border-loom-text font-medium"
           : "bg-transparent text-loom-muted border-transparent hover:text-loom-text hover:bg-loom-elevated/80"}
@@ -709,7 +771,7 @@ function ChartLink({
       aria-pressed={pressed}
       onClick={onClick}
       className={`
-        whitespace-nowrap transition-colors underline-offset-4 py-2 sm:py-0
+        whitespace-nowrap transition-colors underline-offset-4 min-h-9 sm:min-h-0 inline-flex items-center py-1.5 sm:py-0
         ${pressed
           ? "text-loom-text font-medium underline decoration-loom-accent/70"
           : "text-loom-muted hover:text-loom-text"}

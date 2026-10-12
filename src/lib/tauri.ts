@@ -5,12 +5,14 @@
 // raw IPC calls. Each function maps 1:1 to a Rust #[tauri::command]
 // (folder/db, Data.gov, stream_*, source_*, export helpers).
 //
-// In browser dev mode (no Tauri), returns mock data so the UI
-// is fully functional for development and demos.
+// Desktop Tauri → DuckDB IPC. Browser and the iOS/Android shell share
+// the web data path (webStreams, catalog proxy, file pick / upload).
 // =================================================================
 
 import type { FileEntry, ColumnInfo, QueryResult } from "./store";
-import { mockFiles, mockInspect, mockQuery } from "./mock-data";
+async function webMockData() {
+  return import("./mock-data");
+}
 import {
   fetchCsvTextWeb,
   fetchUkCatalogWeb,
@@ -24,8 +26,27 @@ import {
 export type { DataGovDataset, DataGovResource, DataGovSortKey, FetchDataGovOptions };
 export { fetchCsvTextWeb };
 
+/** True inside any Tauri shell (macOS desktop or iOS/Android). */
 export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
+/** iPhone / iPad / Android — including iPadOS that reports as MacIntel. */
+export function isMobileOs(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  if (/Android/i.test(ua)) return true;
+  if (/iPhone|iPad|iPod/i.test(ua)) return true;
+  if (navigator.platform === "MacIntel" && (navigator.maxTouchPoints ?? 0) > 1) return true;
+  return false;
+}
+
+/**
+ * Desktop app with DuckDB / folder mount.
+ * False in the browser and in the iPad/iPhone Tauri shell (web-parity).
+ */
+export function isDesktop(): boolean {
+  return isTauri() && !isMobileOs();
 }
 
 async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -45,7 +66,7 @@ function normalizePath(p: string): string {
 }
 
 export async function pickFolder(): Promise<string | null> {
-  if (isTauri()) {
+  if (isDesktop()) {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const selected = await open({ directory: true, multiple: false });
     if (selected == null) return null;
@@ -55,27 +76,35 @@ export async function pickFolder(): Promise<string | null> {
 }
 
 export async function scanFolder(folderPath: string): Promise<FileEntry[]> {
-  if (isTauri()) {
+  if (isDesktop()) {
     return invoke<FileEntry[]>("scan_folder", { folderPath });
   }
-  return mockFiles;
+  const { getMockFiles } = await webMockData();
+  return getMockFiles();
 }
+
+export const WEB_FILE_SQL_ERROR =
+  "SQL on uploaded files needs the desktop app (DuckDB). Use Explore on web.";
 
 export async function queryFile(
   filePath: string,
   sql: string,
   limit?: number
 ): Promise<QueryResult> {
-  if (isTauri()) {
+  if (isDesktop()) {
     return invoke<QueryResult>("query_file", { filePath, sql, limit });
   }
-  return mockQuery(filePath, limit ?? 1000);
+  void filePath;
+  void sql;
+  void limit;
+  throw new Error(WEB_FILE_SQL_ERROR);
 }
 
 export async function getColumnStats(filePath: string): Promise<ColumnInfo[]> {
-  if (isTauri()) {
+  if (isDesktop()) {
     return invoke<ColumnInfo[]>("get_column_stats", { filePath });
   }
+  const { mockInspect } = await webMockData();
   return mockInspect(filePath).stats;
 }
 
@@ -83,9 +112,10 @@ export async function getSampleRows(
   filePath: string,
   limit?: number
 ): Promise<QueryResult> {
-  if (isTauri()) {
+  if (isDesktop()) {
     return invoke<QueryResult>("get_sample_rows", { filePath, limit });
   }
+  const { mockQuery } = await webMockData();
   return mockQuery(filePath, limit ?? 100);
 }
 
@@ -105,13 +135,14 @@ export async function inspectFile(
   filePath: string,
   limit?: number
 ): Promise<InspectResult> {
-  if (isTauri()) {
+  if (isDesktop()) {
     return invoke<InspectResult>("inspect_file", { filePath, limit });
   }
+  const { mockInspect } = await webMockData();
   return mockInspect(filePath);
 }
 
-/** Download CSV from URL and save to the mounted folder (Tauri only). */
+/** Download CSV from URL and save to the mounted folder (desktop only). */
 export async function saveCsvToFolder(
   folderPath: string,
   url: string,
@@ -124,9 +155,9 @@ export async function saveCsvToFolder(
   });
 }
 
-/** Fetch Data.gov datasets — Tauri IPC, or browser via Cloudflare `/api/catalog/us`. */
+/** Fetch Data.gov datasets — desktop IPC, or browser/iOS via Cloudflare `/api/catalog/us`. */
 export async function fetchDataGovRecentCsv(opts?: FetchDataGovOptions): Promise<DataGovDataset[]> {
-  if (isTauri()) {
+  if (isDesktop()) {
     return invoke<DataGovDataset[]>("fetch_data_gov_recent_csv", {
       rows: opts?.rows ?? 40,
       query: opts?.query?.trim() || null,
@@ -136,9 +167,9 @@ export async function fetchDataGovRecentCsv(opts?: FetchDataGovOptions): Promise
   return fetchUsCatalogWeb(opts);
 }
 
-/** Fetch data.gov.uk datasets — Tauri IPC, or browser (CKAN CORS / Worker fallback). */
+/** Fetch data.gov.uk datasets — desktop IPC, or browser/iOS (CKAN CORS / Worker fallback). */
 export async function fetchUkDataRecentCsv(opts?: FetchDataGovOptions): Promise<DataGovDataset[]> {
-  if (isTauri()) {
+  if (isDesktop()) {
     return invoke<DataGovDataset[]>("fetch_uk_data_recent_csv", {
       rows: opts?.rows ?? 40,
       query: opts?.query?.trim() || null,
@@ -169,7 +200,7 @@ export interface StreamStatus {
 }
 
 export async function streamStart(): Promise<void> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webStreamStart } = await import("./webStreams");
     return webStreamStart();
   }
@@ -177,7 +208,7 @@ export async function streamStart(): Promise<void> {
 }
 
 export async function streamStop(): Promise<void> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webStreamStop } = await import("./webStreams");
     return webStreamStop();
   }
@@ -185,7 +216,7 @@ export async function streamStop(): Promise<void> {
 }
 
 export async function streamStatus(): Promise<StreamStatus> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webStreamStatus } = await import("./webStreams");
     return webStreamStatus();
   }
@@ -193,14 +224,14 @@ export async function streamStatus(): Promise<StreamStatus> {
 }
 
 export async function streamQuery(sql: string, limit?: number): Promise<QueryResult> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     throw new Error("SQL on live streams needs the desktop app (DuckDB). Use Explore snapshot on web.");
   }
   return invoke<QueryResult>("stream_query", { sql, limit });
 }
 
 export async function streamSnapshot(limit?: number): Promise<InspectResult> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webStreamSnapshot } = await import("./webStreams");
     return webStreamSnapshot(limit);
   }
@@ -208,7 +239,7 @@ export async function streamSnapshot(limit?: number): Promise<InspectResult> {
 }
 
 export async function streamClear(): Promise<void> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webStreamClear } = await import("./webStreams");
     return webStreamClear();
   }
@@ -234,10 +265,16 @@ export interface SourceStatus {
   uptime_secs: number;
   /** Web: last upstream failure while polling (null once a poll succeeds). */
   last_error?: string | null;
+  /** Web: wall-clock ms when the buffer last accepted a successful poll. */
+  last_success_at?: number | null;
+  /** Web: rows are from a cached snapshot — not a current live measurement. */
+  snapshot_stale?: boolean;
+  /** Web: ms when the cached snapshot was captured (if snapshot_stale). */
+  snapshot_captured_at?: number | null;
 }
 
 export async function sourceStart(kind: SourceKind): Promise<void> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webSourceStart } = await import("./webStreams");
     return webSourceStart(kind);
   }
@@ -245,7 +282,7 @@ export async function sourceStart(kind: SourceKind): Promise<void> {
 }
 
 export async function sourceStop(kind: SourceKind): Promise<void> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webSourceStop } = await import("./webStreams");
     return webSourceStop(kind);
   }
@@ -253,7 +290,7 @@ export async function sourceStop(kind: SourceKind): Promise<void> {
 }
 
 export async function sourceStatus(kind: SourceKind): Promise<SourceStatus> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webSourceStatus } = await import("./webStreams");
     return webSourceStatus(kind);
   }
@@ -261,14 +298,14 @@ export async function sourceStatus(kind: SourceKind): Promise<SourceStatus> {
 }
 
 export async function sourceQuery(kind: SourceKind, sql: string, limit?: number): Promise<QueryResult> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     throw new Error("SQL on live sources needs the desktop app (DuckDB). Use Explore snapshot on web.");
   }
   return invoke<QueryResult>("source_query", { kind, sql, limit });
 }
 
 export async function sourceSnapshot(kind: SourceKind, limit?: number): Promise<InspectResult> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webSourceSnapshot } = await import("./webStreams");
     return webSourceSnapshot(kind, limit);
   }
@@ -276,7 +313,7 @@ export async function sourceSnapshot(kind: SourceKind, limit?: number): Promise<
 }
 
 export async function sourceClear(kind: SourceKind): Promise<void> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webSourceClear } = await import("./webStreams");
     return webSourceClear(kind);
   }
@@ -285,13 +322,13 @@ export async function sourceClear(kind: SourceKind): Promise<void> {
 
 const GITHUB_REPO = "mhsenkow/Loom_story_teller";
 
-/** Create a GitHub issue (feedback). Tauri uses GITHUB_TOKEN env; web uses Worker secret. */
+/** Create a GitHub issue (feedback). Desktop uses GITHUB_TOKEN env; web/iOS uses Worker secret. */
 export async function createGitHubIssue(
   title: string,
   body: string,
   imageBase64?: string | null
 ): Promise<string> {
-  if (!isTauri()) {
+  if (!isDesktop()) {
     const { webCreateGitHubIssue } = await import("./webStreams");
     return webCreateGitHubIssue(title, body, imageBase64);
   }
@@ -317,33 +354,38 @@ export async function openExternalUrl(url: string): Promise<void> {
   }
 }
 
-/** Open save-as dialog (Tauri only). Returns chosen path or null if cancelled. */
-export async function saveDialog(options: { defaultPath?: string; filters?: { name: string; extensions: string[] }[] }): Promise<string | null> {
-  if (!isTauri()) return null;
-  const { save } = await import("@tauri-apps/plugin-dialog");
-  const path = await save({
-    defaultPath: options.defaultPath,
-    filters: options.filters ?? [{ name: "HTML", extensions: ["html"] }],
+/** Open save-as dialog (desktop only). Returns chosen path or null if cancelled.
+ *  Goes through Rust so the path is one-time approved for write_text/binary_file. */
+export async function saveDialog(options: {
+  defaultPath?: string;
+  filters?: { name: string; extensions: string[] }[];
+}): Promise<string | null> {
+  if (!isDesktop()) return null;
+  const filter = options.filters?.[0] ?? { name: "HTML", extensions: ["html"] };
+  const path = await invoke<string | null>("pick_save_path", {
+    defaultPath: options.defaultPath ?? null,
+    filterName: filter.name,
+    extensions: filter.extensions,
   });
   return path ?? null;
 }
 
-/** Write text to a file at path (Tauri only; path typically from save dialog). */
+/** Write text to a file at path (desktop only; path typically from save dialog). */
 export async function writeTextFile(path: string, content: string): Promise<void> {
-  if (isTauri()) {
+  if (isDesktop()) {
     await invoke<void>("write_text_file", { path, content });
   }
 }
 
 /**
- * Export dashboard as microsite: Tauri = save dialog then write file;
- * Web = download as file.
+ * Export dashboard as microsite: desktop = save dialog then write file;
+ * Web / iOS = download as file.
  */
 export async function exportDashboardMicrosite(html: string, defaultName: string): Promise<boolean> {
   const baseName = defaultName.replace(/[^\w\-.]/g, "_").replace(/.html$/i, "") || "dashboard";
   const filename = `${baseName}.html`;
 
-  if (isTauri()) {
+  if (isDesktop()) {
     const path = await saveDialog({ defaultPath: filename, filters: [{ name: "HTML", extensions: ["html"] }] });
     if (!path) return false;
     await writeTextFile(path, html);
@@ -351,37 +393,33 @@ export async function exportDashboardMicrosite(html: string, defaultName: string
   }
 
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-  return true;
+  const { saveOrShareBlob } = await import("./nativeExport");
+  const outcome = await saveOrShareBlob(blob, filename, { title: "Loom dashboard" });
+  return outcome !== "cancelled" && outcome !== "unsupported";
 }
 
-/** Write binary bytes to a path chosen by the user (Tauri). */
+/** Write binary bytes to a path chosen by the user (desktop). */
 export async function writeBinaryFile(path: string, bytes: Uint8Array): Promise<void> {
-  if (!isTauri()) throw new Error("Tauri not available");
+  if (!isDesktop()) throw new Error("Desktop Tauri not available");
   // Pass as number[] for serde; chunked base64 would also work for huge files.
   await invoke<void>("write_binary_file", { path, bytes: Array.from(bytes) });
 }
 
-/** Reveal a file in Finder / file manager (Tauri). */
+/** Reveal a file in Finder / file manager (desktop). */
 export async function revealInFinder(path: string): Promise<void> {
-  if (!isTauri()) return;
+  if (!isDesktop()) return;
   await invoke<void>("reveal_in_finder", { path });
 }
 
 /**
- * Save a Blob via native dialog and reveal it. Falls back to browser download.
- * Returns the saved path (Tauri) or null (web / cancelled).
+ * Save a Blob via native dialog and reveal it. Falls back to browser download / share.
+ * Returns the saved path (desktop) or null (web / iOS / cancelled).
  */
 export async function saveBinaryAndReveal(blob: Blob, defaultName: string): Promise<string | null> {
   const filename = defaultName.replace(/[^\w\-.]/g, "_") || "loom-export.bin";
   const bytes = new Uint8Array(await blob.arrayBuffer());
 
-  if (isTauri()) {
+  if (isDesktop()) {
     const ext = filename.includes(".") ? filename.split(".").pop()! : "bin";
     const path = await saveDialog({
       defaultPath: filename,
@@ -393,11 +431,7 @@ export async function saveBinaryAndReveal(blob: Blob, defaultName: string): Prom
     return path;
   }
 
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  const { saveOrShareBlob } = await import("./nativeExport");
+  await saveOrShareBlob(blob, filename, { title: "Loom export" });
   return null;
 }

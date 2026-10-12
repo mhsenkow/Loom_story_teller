@@ -5,6 +5,7 @@ import { describe, it, expect } from "vitest";
 import {
   filterTidyTuesdayWeeks,
   parseSocrataSearch,
+  sanitizeSocrataPermalink,
   parseTidyTuesdayIndex,
   parseTidyTuesdayYearReadme,
   searchSocrata,
@@ -106,6 +107,15 @@ describe("Socrata Discovery", () => {
 
   it("rejects a payload without results", () => {
     expect(() => parseSocrataSearch({ error: "nope" })).toThrow(/missing results/);
+  });
+
+  it("rejects javascript and off-domain Socrata permalinks", () => {
+    expect(
+      sanitizeSocrataPermalink("javascript:alert(1)", "data.cityofnewyork.us", "erm2-nwe9"),
+    ).toBe("https://data.cityofnewyork.us/d/erm2-nwe9");
+    expect(
+      sanitizeSocrataPermalink("https://evil.example/d/x", "data.cityofnewyork.us", "erm2-nwe9"),
+    ).toBe("https://data.cityofnewyork.us/d/erm2-nwe9");
   });
 
   it("sizes the export to the cell target", () => {

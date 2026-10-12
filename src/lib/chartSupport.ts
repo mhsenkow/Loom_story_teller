@@ -298,7 +298,60 @@ export interface ChartCapabilities {
   emphasis: boolean;
   /** Hover readout honors Encoding Tooltip fields (false for GPU scenes / most geo maps). */
   tooltipHover: boolean;
+  /** Up / down / left / right layout (bar, lollipop, and similar band charts). */
+  layoutDirection: boolean;
+  /** Continuous measure axis transform (linear / log / symlog). */
+  yScale: boolean;
 }
+
+/** Measure-axis scale transforms shown in Encoding. */
+export type ChartYScaleOption = "linear" | "log" | "symlog";
+
+export const CHART_Y_SCALE_OPTIONS: {
+  value: ChartYScaleOption;
+  label: string;
+  title: string;
+}[] = [
+  { value: "linear", label: "Linear", title: "Even spacing — default" },
+  { value: "log", label: "Log", title: "Logarithmic — compresses wide positive ranges" },
+  { value: "symlog", label: "Symlog", title: "Symmetric log — soft log that allows zero / negatives" },
+];
+
+/** Measure grows this way — Auto keeps the existing portrait / label heuristic. */
+export type ChartLayoutDirection = "auto" | "up" | "down" | "right" | "left";
+
+export const CHART_LAYOUT_DIRECTIONS: {
+  value: ChartLayoutDirection;
+  label: string;
+  title: string;
+}[] = [
+  { value: "auto", label: "Auto", title: "Pick vertical or horizontal from the stage" },
+  { value: "up", label: "↑", title: "Vertical — zero at bottom, values grow up" },
+  { value: "down", label: "↓", title: "Vertical — zero at top, values grow down (ranks, losses, deficits)" },
+  { value: "right", label: "→", title: "Horizontal — zero at left, values grow right" },
+  { value: "left", label: "←", title: "Horizontal — zero at right, values grow left" },
+];
+
+/** Resolve Encoding Direction into horizontal + reverse measure axis. */
+export function resolveLayoutDirection(
+  dir: ChartLayoutDirection | null | undefined,
+  autoHorizontal: boolean,
+): { horizontal: boolean; reverse: boolean } {
+  switch (dir) {
+    case "up":
+      return { horizontal: false, reverse: false };
+    case "down":
+      return { horizontal: false, reverse: true };
+    case "right":
+      return { horizontal: true, reverse: false };
+    case "left":
+      return { horizontal: true, reverse: true };
+    default:
+      return { horizontal: autoHorizontal, reverse: false };
+  }
+}
+
+export { measureSuggestsGrowDown } from "./chartFieldHeuristics";
 
 /** Which Encoding / Visual controls actually affect this chart kind. */
 export function chartCapabilities(kind: ChartKind): ChartCapabilities {
@@ -347,6 +400,9 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     emphasis: false,
     // GPU particle scenes and lon/lat maps lack hover; dataCube has its own picker
     tooltipHover: kind === "dataCube" || (!gpu && !isGeoMapKind(kind)),
+    layoutDirection: ["bar", "pareto", "lollipop", "waterfall"].includes(kind),
+    // Canvas applies opts.yScale in scatter / line / area paths today
+    yScale: kind === "scatter" || kind === "line" || kind === "area",
   };
 }
 
@@ -448,4 +504,14 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
     default:
       return base("X", "Y", "Color");
   }
+}
+
+/** Whether SVG export is meaningful for the current Vega spec (Canvas is authoritative). */
+export function svgExportMode(vegaSpec: unknown): "off" | "approx" {
+  if (!vegaSpec || typeof vegaSpec !== "object") return "off";
+  const spec = vegaSpec as Record<string, unknown>;
+  if (Object.keys(spec).length === 0) return "off";
+  const enc = spec.encoding;
+  if (!enc || typeof enc !== "object" || Object.keys(enc as object).length === 0) return "off";
+  return "approx";
 }

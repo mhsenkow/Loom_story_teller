@@ -80,11 +80,15 @@ export interface SourceDef {
   types: SourceColumnType[];
   /** Web poll interval; 0 = load once. */
   pollMs: number;
+  /** Slower cadence on phones / save-data (defaults to pollMs). */
+  mobilePollMs?: number;
   /** ORDER BY clause for snapshots (no "ORDER BY" keyword). */
   orderBy: string;
   group: SourceGroup;
   /** Token class for the card's status dot. */
   color: "loom-accent" | "loom-success" | "loom-warning" | "loom-error";
+  /** Max upstream rows retained in the browser buffer for this feed (when set). */
+  parserRowCap?: number;
 }
 
 const def = (d: SourceDef) => d;
@@ -273,6 +277,7 @@ export const SOURCE_DEFS: SourceDef[] = [
     columns: ["icao24", "callsign", "origin_country", "longitude", "latitude", "baro_altitude", "velocity", "true_track", "on_ground", "ts"],
     types: ["VARCHAR", "VARCHAR", "VARCHAR", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "BOOLEAN", "TIMESTAMP"],
     pollMs: 30_000,
+    mobilePollMs: 60_000,
     orderBy: "baro_altitude DESC",
     group: "cities",
     color: "loom-accent",
@@ -304,6 +309,7 @@ export const SOURCE_DEFS: SourceDef[] = [
     columns: ["id", "label", "route", "route_type", "latitude", "longitude", "bearing", "speed_mph", "status", "occupancy", "ts"],
     types: ["VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "VARCHAR", "VARCHAR", "TIMESTAMP"],
     pollMs: 30_000,
+    mobilePollMs: 60_000,
     orderBy: "route, label",
     group: "cities",
     color: "loom-accent",
@@ -334,6 +340,7 @@ export const SOURCE_DEFS: SourceDef[] = [
     columns: ["ts", "latitude", "longitude", "altitude_km", "velocity_kmh", "visibility"],
     types: ["TIMESTAMP", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "VARCHAR"],
     pollMs: 15_000,
+    mobilePollMs: 60_000,
     orderBy: "ts DESC",
     group: "space",
     color: "loom-accent",
@@ -356,7 +363,8 @@ export const SOURCE_DEFS: SourceDef[] = [
   def({
     kind: "spacex",
     label: "SpaceX history",
-    description: "SpaceX's most recent 100 launches — success, rocket, cadence over time.",
+    description: "SpaceX's most recent 120 launches — success, rocket, cadence over time.",
+    parserRowCap: 120,
     attribution: "The Space Devs · free",
     homepage: "https://thespacedevs.com/llapi",
     fileName: "SpaceX Launches",
@@ -614,6 +622,25 @@ export const SOURCE_DEFS: SourceDef[] = [
 export const SOURCE_BY_KIND: Record<SourceKind, SourceDef> = Object.fromEntries(
   SOURCE_DEFS.map((d) => [d.kind, d]),
 ) as Record<SourceKind, SourceDef>;
+
+/** Canonical kind list — derived from defs so a missing entry fails tests/tsc at call sites. */
+export const SOURCE_KINDS_FROM_DEFS: readonly SourceKind[] = SOURCE_DEFS.map((d) => d.kind);
+
+function isPhoneProfile(): boolean {
+  if (typeof window === "undefined") return false;
+  const coarse = window.matchMedia("(max-width: 640px)").matches;
+  const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  const slow = conn?.saveData || /(?:^|[^a-z])2g|3g(?:$|[^a-z])/i.test(conn?.effectiveType ?? "");
+  return coarse || slow;
+}
+
+/** Poll interval for the current device profile (LOOM-417). */
+export function effectivePollIntervalMs(kind: SourceKind): number {
+  const def = SOURCE_BY_KIND[kind];
+  if (!def) return 60_000;
+  if (isPhoneProfile() && def.mobilePollMs != null) return def.mobilePollMs;
+  return def.pollMs;
+}
 
 /**
  * Sort rows to match a registry `orderBy` clause (e.g. `net ASC`, `as_of DESC, quote`).

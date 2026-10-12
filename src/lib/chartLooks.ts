@@ -14,6 +14,13 @@ import {
   titlePreferCenter,
 } from "./chartLayout";
 import { formatAxisValue, layoutBandLabels, niceTicks } from "./chartAxes";
+import {
+  CHART_LABEL_FALLBACK,
+  CHART_TEXT_FALLBACK,
+  chartFont,
+  chartTypeRamp,
+  fitTextWrap,
+} from "./chartType";
 
 export type ChartBackgroundStyle =
   | "default"
@@ -46,6 +53,16 @@ export interface ChartLookOpts {
   tickCount?: number;
   tickRotation?: number;
   fontFamily?: string;
+  /**
+   * Value → pixel maps from the active renderer. When present, grid + ticks
+   * follow them so Direction ↓ / ← (reversed measure) keeps labels aligned
+   * with the bars (zero at top / right).
+   */
+  scales?: {
+    x?: (v: number) => number;
+    y?: (v: number) => number;
+    valueAxis?: "x" | "y";
+  } | null;
 }
 
 /** Plot area in canvas px. Pass instead of a uniform `pad` when a renderer shifts its plot (e.g. a category-label gutter). */
@@ -340,29 +357,53 @@ export function drawChartGrid(
   const tickFractions = (d: [number, number]) =>
     niceTicks(d[0], d[1], n, false).ticks.map((v) => (v - d[0]) / (d[1] - d[0] || 1));
   const evenFractions = Array.from({ length: n + 1 }, (_, i) => i / n);
+  const yMap = opts?.scales?.y;
+  const xMap = opts?.scales?.x;
 
   // Newspaper / mercury / tape: horizontal rules only (less chartjunk)
   const horizontalOnly = axis === "mercury" || axis === "tape" || axis === "spine";
   if (domains?.y !== null) {
-    const ys = domains?.y ? tickFractions(domains.y) : evenFractions;
-    for (const t of ys) {
-      if (t < -1e-6 || t > 1 + 1e-6) continue;
-      const y = Math.round(bottom - t * (bottom - top)) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(left, y);
-      ctx.lineTo(right, y);
-      ctx.stroke();
+    if (domains?.y && yMap) {
+      for (const v of niceTicks(domains.y[0], domains.y[1], n, false).ticks) {
+        const y = Math.round(yMap(v)) + 0.5;
+        if (y < top - 0.5 || y > bottom + 0.5) continue;
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+      }
+    } else {
+      const ys = domains?.y ? tickFractions(domains.y) : evenFractions;
+      for (const t of ys) {
+        if (t < -1e-6 || t > 1 + 1e-6) continue;
+        const y = Math.round(bottom - t * (bottom - top)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(left, y);
+        ctx.lineTo(right, y);
+        ctx.stroke();
+      }
     }
   }
   if (!horizontalOnly && domains?.x !== null) {
-    const xs = domains?.x ? tickFractions(domains.x) : evenFractions;
-    for (const t of xs) {
-      if (t < -1e-6 || t > 1 + 1e-6) continue;
-      const x = Math.round(left + t * (right - left)) + 0.5;
-      ctx.beginPath();
-      ctx.moveTo(x, top);
-      ctx.lineTo(x, bottom);
-      ctx.stroke();
+    if (domains?.x && xMap) {
+      for (const v of niceTicks(domains.x[0], domains.x[1], n, false).ticks) {
+        const x = Math.round(xMap(v)) + 0.5;
+        if (x < left - 0.5 || x > right + 0.5) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+      }
+    } else {
+      const xs = domains?.x ? tickFractions(domains.x) : evenFractions;
+      for (const t of xs) {
+        if (t < -1e-6 || t > 1 + 1e-6) continue;
+        const x = Math.round(left + t * (right - left)) + 0.5;
+        ctx.beginPath();
+        ctx.moveTo(x, top);
+        ctx.lineTo(x, bottom);
+        ctx.stroke();
+      }
     }
   }
   ctx.setLineDash([]);
@@ -388,8 +429,8 @@ export function drawChartTicks(
 ): void {
   const n = Math.max(2, opts?.tickCount ?? 5);
   const fontFamily = opts?.fontFamily ?? "Inter";
-  const axisLabelColor = opts?.axisLabelColor ?? "#6b6b78";
-  const fontSize = Math.max(9, opts?.axisFontSize ?? 10);
+  const axisLabelColor = opts?.axisLabelColor ?? CHART_LABEL_FALLBACK;
+  const fontSize = chartTypeRamp(opts?.axisFontSize).tick;
   const rotDeg = opts?.tickRotation ?? 0;
   const rotRad = (rotDeg * Math.PI) / 180;
   const axis = (opts?.axisStyle ?? "rule") as ChartAxisStyle;
@@ -403,6 +444,9 @@ export function drawChartTicks(
   ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
   ctx.textBaseline = "alphabetic";
 
+  const xMap = opts?.scales?.x;
+  const yMap = opts?.scales?.y;
+
   // X ticks
   if (show.x !== false && Number.isFinite(xMin) && Number.isFinite(xMax)) {
     const xs = niceTicks(xMin, xMax, n, false);
@@ -410,7 +454,7 @@ export function drawChartTicks(
     ctx.textAlign = "center";
     let lastRight = -Infinity;
     for (const v of xs.ticks) {
-      const x = left + ((v - xMin) / span) * (right - left);
+      const x = xMap ? xMap(v) : left + ((v - xMin) / span) * (right - left);
       if (x < left - 0.5 || x > right + 0.5) continue;
       // stub downward from baseline
       if (axis !== "spine") {
@@ -444,7 +488,7 @@ export function drawChartTicks(
     const span = yMax - yMin || 1;
     ctx.textAlign = "right";
     for (const v of ys.ticks) {
-      const y = bottom - ((v - yMin) / span) * (bottom - top);
+      const y = yMap ? yMap(v) : bottom - ((v - yMin) / span) * (bottom - top);
       if (y < top - 0.5 || y > bottom + 0.5) continue;
       if (axis !== "mercury") {
         ctx.beginPath();
@@ -479,8 +523,8 @@ export function drawBandAxisX(
 ): void {
   if (labels.length === 0) return;
   const fontFamily = opts?.fontFamily ?? "Inter";
-  const color = opts?.axisLabelColor ?? opts?.themeMuted ?? "#6b6b78";
-  const baseFont = Math.max(9, opts?.axisFontSize ?? 10);
+  const color = opts?.axisLabelColor ?? opts?.themeMuted ?? CHART_LABEL_FALLBACK;
+  const baseFont = chartTypeRamp(opts?.axisFontSize).tick;
   const { bottom } = plotRect(w, h, pad);
   // Labels live between the baseline and the axis field name near the canvas floor
   const room = Math.max(14, h - bottom - 22);
@@ -544,8 +588,8 @@ export function drawBandAxisY(
 ): void {
   if (labels.length === 0) return;
   const fontFamily = opts?.fontFamily ?? "Inter";
-  const color = opts?.axisLabelColor ?? opts?.themeMuted ?? "#6b6b78";
-  const fontSize = Math.max(9, Math.min(opts?.axisFontSize ?? 11, bandHeight * 0.6));
+  const color = opts?.axisLabelColor ?? opts?.themeMuted ?? CHART_LABEL_FALLBACK;
+  const fontSize = Math.max(10, Math.min(chartTypeRamp(opts?.axisFontSize).tick, bandHeight * 0.65));
   const every = Math.max(1, Math.ceil((fontSize + 2) / Math.max(1, bandHeight)));
   ctx.save();
   ctx.fillStyle = color;
@@ -573,10 +617,10 @@ export function drawPositionedLabelsX(
 ): void {
   const { left, right, bottom } = plotRect(w, h, pad);
   const fontFamily = opts?.fontFamily ?? "Inter";
-  const fontSize = Math.max(9, opts?.axisFontSize ?? 10);
+  const fontSize = chartTypeRamp(opts?.axisFontSize).tick;
   ctx.save();
-  ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
-  ctx.strokeStyle = opts?.axisLineColor ?? opts?.themeBorder ?? "#6b6b78";
+  ctx.fillStyle = opts?.axisLabelColor ?? CHART_LABEL_FALLBACK;
+  ctx.strokeStyle = opts?.axisLineColor ?? opts?.themeBorder ?? CHART_LABEL_FALLBACK;
   ctx.lineWidth = Math.max(1, (opts?.axisLineWidth ?? 1) * 0.7);
   ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
   ctx.textAlign = "center";
@@ -623,8 +667,9 @@ export function drawColorRamp(
   ctx.strokeStyle = opts?.themeBorder ?? "#2a2a30";
   ctx.lineWidth = 0.5;
   ctx.strokeRect(x + 0.25, y + 0.25, rampW - 0.5, height - 0.5);
-  ctx.fillStyle = opts?.axisLabelColor ?? opts?.themeMuted ?? "#6b6b78";
-  ctx.font = `9px '${fontFamily}', sans-serif`;
+  const meta = chartTypeRamp(opts?.axisFontSize).footnoteMeta;
+  ctx.fillStyle = opts?.axisLabelColor ?? opts?.themeMuted ?? CHART_LABEL_FALLBACK;
+  ctx.font = chartFont(meta, fontFamily, 500);
   ctx.textAlign = "left";
   ctx.textBaseline = "top";
   ctx.fillText(highLabel, x + rampW + 4, y);
@@ -632,7 +677,7 @@ export function drawColorRamp(
   ctx.fillText(lowLabel, x + rampW + 4, y + height);
   if (title) {
     ctx.textBaseline = "bottom";
-    ctx.fillText(fitTextEllipsis(ctx, title, 64), x, y - 4);
+    ctx.fillText(fitTextEllipsis(ctx, title, 72), x, y - 4);
   }
   ctx.restore();
 }
@@ -648,18 +693,18 @@ export function drawAxisFieldLabels(
   opts?: ChartLookOpts,
 ): void {
   const fontFamily = opts?.fontFamily ?? "Inter";
-  const fontSize = opts?.axisFontSize ?? 10;
-  const color = opts?.axisLabelColor ?? opts?.themeMuted ?? "#6b6b78";
+  const fontSize = chartTypeRamp(opts?.axisFontSize).axisField;
+  const color = opts?.axisLabelColor ?? opts?.themeMuted ?? CHART_LABEL_FALLBACK;
   const maxX = Math.max(40, w - pad * 2);
   const maxY = Math.max(40, h - pad * 2);
 
   ctx.save();
   ctx.fillStyle = color;
-  ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+  ctx.font = chartFont(fontSize, fontFamily, 500);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   // Sit just above the canvas floor, clear of tick labels
-  const xY = h - Math.max(9, Math.min(16, pad * 0.2));
+  const xY = h - Math.max(10, Math.min(18, pad * 0.22));
   ctx.fillText(fitTextEllipsis(ctx, xLabel, maxX), w / 2, xY);
 
   if (yLabel) {
@@ -676,7 +721,7 @@ export function drawAxisFieldLabels(
   ctx.restore();
 }
 
-/** Title / subtitle block with centering + ellipsis for pair/slab/caption. */
+/** Title / subtitle block — wraps up to 2 lines before ellipsis; sizes from type ramp. */
 export function drawChartTitleBlock(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -693,6 +738,7 @@ export function drawChartTitleBlock(
     themeMuted?: string;
     themeBorder?: string;
     axisLabelColor?: string;
+    axisFontSize?: number;
   },
 ): void {
   void h;
@@ -700,42 +746,53 @@ export function drawChartTitleBlock(
   const pos = titlePositions(pad, layout);
   const fontFamily = opts.fontFamily ?? "Inter";
   const titleWeight = opts.titleFontWeight ?? 600;
-  const titleItalic = opts.titleItalic ? "italic" : "normal";
-  const text = opts.themeText ?? "#e8e8ec";
-  const muted = opts.axisLabelColor ?? opts.themeMuted ?? "#6b6b78";
+  const titleStyle = opts.titleItalic ? "italic" : "normal";
+  const text = opts.themeText ?? CHART_TEXT_FALLBACK;
+  const muted = opts.axisLabelColor ?? opts.themeMuted ?? CHART_LABEL_FALLBACK;
   const center = titlePreferCenter(layout);
   const maxW = Math.max(48, w - pad * 2 - (center ? 0 : 8));
+  const ramp = chartTypeRamp(opts.axisFontSize);
+  const lineGap = Math.round(ramp.title * 1.15);
+
+  const paintWrapped = (
+    value: string,
+    x: number,
+    y: number,
+    size: number,
+    weight: number | string,
+    style: "normal" | "italic",
+    fill: string,
+    align: CanvasTextAlign,
+    maxLines: number,
+  ) => {
+    ctx.font = chartFont(size, fontFamily, weight, style);
+    ctx.fillStyle = fill;
+    ctx.textAlign = align;
+    const lines = fitTextWrap(ctx, value, maxW, maxLines);
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i]!, x, y + i * lineGap * (size / ramp.title));
+    }
+  };
 
   ctx.save();
-  ctx.fillStyle = text;
-  ctx.textAlign = center ? "center" : "left";
   ctx.textBaseline = "alphabetic";
   const tx = center ? w / 2 : pad;
+  const align: CanvasTextAlign = center ? "center" : "left";
 
   if (layout === "slab") {
-    ctx.font = `${titleItalic} ${titleWeight} 17px ${fontFamily}, sans-serif`;
-    ctx.fillText(fitTextEllipsis(ctx, title, maxW), tx, pos.titleY);
+    paintWrapped(title, tx, pos.titleY, ramp.titleSlab, titleWeight, titleStyle, text, align, 2);
   } else if (layout === "ticket") {
-    ctx.font = `${titleItalic} ${titleWeight} 11px ${fontFamily}, sans-serif`;
     ctx.fillStyle = opts.themeBorder ?? "#2a2a30";
     const tw = Math.min(280, w - pad * 2);
     ctx.strokeRect(pad, Math.max(6, pos.titleY - 12), tw, pos.ticketH || 34);
-    ctx.fillStyle = text;
-    ctx.textAlign = "left";
-    ctx.fillText(fitTextEllipsis(ctx, title, tw - 16), pad + 8, pos.titleY);
+    paintWrapped(title, pad + 8, pos.titleY, ramp.titleCompact, titleWeight, titleStyle, text, "left", 1);
     if (subtitle) {
-      ctx.fillStyle = muted;
-      ctx.font = `9px ${fontFamily}, sans-serif`;
-      ctx.fillText(fitTextEllipsis(ctx, subtitle, tw - 16), pad + 8, pos.subtitleY);
+      paintWrapped(subtitle, pad + 8, pos.subtitleY, Math.max(10, ramp.subtitle - 1), 400, "normal", muted, "left", 1);
     }
   } else if (layout === "stack" || layout === "spine") {
-    ctx.font = `${titleItalic} ${titleWeight} 13px ${fontFamily}, sans-serif`;
-    ctx.textAlign = "left";
-    ctx.fillText(fitTextEllipsis(ctx, title, maxW), pad, pos.titleY);
+    paintWrapped(title, pad, pos.titleY, Math.max(12, ramp.title - 1), titleWeight, titleStyle, text, "left", 2);
     if (subtitle) {
-      ctx.fillStyle = muted;
-      ctx.font = `10px ${fontFamily}, sans-serif`;
-      ctx.fillText(fitTextEllipsis(ctx, subtitle, maxW), pad, pos.subtitleY);
+      paintWrapped(subtitle, pad, pos.subtitleY, ramp.subtitle, 400, "normal", muted, "left", 1);
     }
     if (layout === "spine") {
       ctx.strokeStyle = text;
@@ -746,28 +803,24 @@ export function drawChartTitleBlock(
       ctx.stroke();
     }
   } else if (layout === "caption") {
-    ctx.font = `${titleItalic} ${titleWeight} 12px ${fontFamily}, sans-serif`;
-    ctx.fillText(fitTextEllipsis(ctx, title, maxW), tx, pos.titleY);
+    paintWrapped(title, tx, pos.titleY, Math.max(12, ramp.title - 2), titleWeight, titleStyle, text, align, 2);
     if (subtitle) {
-      ctx.fillStyle = muted;
-      ctx.font = `italic 10px ${fontFamily}, sans-serif`;
-      ctx.fillText(fitTextEllipsis(ctx, subtitle, maxW), tx, pos.subtitleY);
+      paintWrapped(subtitle, tx, pos.subtitleY, ramp.subtitle, 400, "italic", muted, align, 1);
     }
   } else {
-    // pair (default) — centered title + subtitle
-    ctx.font = `${titleItalic} ${titleWeight} 14px ${fontFamily}, sans-serif`;
-    ctx.fillText(fitTextEllipsis(ctx, title, maxW), tx, pos.titleY);
+    paintWrapped(title, tx, pos.titleY, ramp.title, titleWeight, titleStyle, text, align, 2);
     if (subtitle) {
-      ctx.fillStyle = muted;
-      ctx.font = `11px ${fontFamily}, sans-serif`;
-      ctx.fillText(fitTextEllipsis(ctx, subtitle, maxW), tx, pos.subtitleY);
+      paintWrapped(subtitle, tx, pos.subtitleY, ramp.subtitle, 500, "normal", muted, align, 1);
     }
   }
   ctx.restore();
 }
 
-/** Bottom source lineage footnote — rides with the chart into PNG / share. */
-/** Bottom source / time footnote — rides into PNG / share. Supports 1–2 lines (`\\n`). */
+/**
+ * Bottom source / time footnote — rides into PNG / share.
+ * Supports 1–2 text lines (`\\n`). Optional `colorRamp` draws a glanceable
+ * palette strip on the right (replacing a written palette name).
+ */
 export function drawChartSourceFootnote(
   ctx: CanvasRenderingContext2D,
   w: number,
@@ -779,6 +832,12 @@ export function drawChartSourceFootnote(
     fontFamily?: string;
     themeMuted?: string;
     themeBorder?: string;
+    /** Palette stops — continuous blends, categorical draws discrete chips. */
+    colorRamp?: string[] | null;
+    /** Tiny label above the ramp, e.g. `nest: views`. */
+    colorRampLabel?: string | null;
+    /** When true, blend stops into a gradient; otherwise discrete chips. */
+    colorRampContinuous?: boolean;
   } = {},
 ): void {
   const lines = text
@@ -786,20 +845,23 @@ export function drawChartSourceFootnote(
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 3);
-  if (!lines.length) return;
+  const ramp = opts.colorRamp?.filter((c) => typeof c === "string" && c.length > 0) ?? [];
+  if (!lines.length && !ramp.length) return;
+
   const align = opts.align ?? "left";
   const fontFamily = opts.fontFamily ?? "Inter";
-  const muted = opts.themeMuted ?? "#9e9eac";
-  const maxW = Math.max(48, w - pad * 2);
-  const lineH = 13;
+  const type = chartTypeRamp(11);
+  const muted = opts.themeMuted ?? CHART_LABEL_FALLBACK;
+  const lineH = type.footnote + 3;
+  const rampH = 8;
+  const rampW = Math.min(132, Math.max(72, w * 0.22));
+  const rampGap = ramp.length ? rampW + 10 : 0;
+  const maxW = Math.max(48, w - pad * 2 - rampGap);
   const baseY = h - Math.max(6, pad * 0.22);
-  const topLineY = baseY - (lines.length - 1) * lineH;
+  const textLines = Math.max(lines.length, ramp.length ? 1 : 0);
+  const topLineY = baseY - (textLines - 1) * lineH;
+
   ctx.save();
-  ctx.font = `500 11px ${fontFamily}, sans-serif`;
-  ctx.fillStyle = muted;
-  ctx.textBaseline = "bottom";
-  ctx.textAlign = align === "center" ? "center" : align === "right" ? "right" : "left";
-  const x = align === "center" ? w / 2 : align === "right" ? w - pad : pad;
   ctx.strokeStyle = opts.themeBorder ?? muted;
   ctx.globalAlpha = 0.45;
   ctx.lineWidth = 1;
@@ -808,8 +870,55 @@ export function drawChartSourceFootnote(
   ctx.lineTo(w - pad, topLineY - 13);
   ctx.stroke();
   ctx.globalAlpha = 1;
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(fitTextEllipsis(ctx, lines[i]!, maxW), x, topLineY + i * lineH);
+
+  if (lines.length) {
+    ctx.font = chartFont(type.footnote, fontFamily, 500);
+    ctx.fillStyle = muted;
+    ctx.textBaseline = "bottom";
+    ctx.textAlign = align === "center" ? "center" : align === "right" ? "right" : "left";
+    const x =
+      align === "center"
+        ? pad + maxW / 2
+        : align === "right"
+          ? w - pad - rampGap
+          : pad;
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(fitTextEllipsis(ctx, lines[i]!, maxW), x, topLineY + i * lineH);
+    }
+  }
+
+  if (ramp.length) {
+    const rx = w - pad - rampW;
+    const ry = baseY - rampH;
+    if (opts.colorRampLabel) {
+      ctx.font = chartFont(type.footnoteMeta, fontFamily, 500);
+      ctx.fillStyle = muted;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(fitTextEllipsis(ctx, opts.colorRampLabel, rampW), rx + rampW, ry - 2);
+    }
+    if (opts.colorRampContinuous !== false && ramp.length >= 2) {
+      const grad = ctx.createLinearGradient(rx, 0, rx + rampW, 0);
+      ramp.forEach((c, i) => grad.addColorStop(i / (ramp.length - 1), c));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      // subtle rounded strip
+      const rr = 2;
+      ctx.moveTo(rx + rr, ry);
+      ctx.arcTo(rx + rampW, ry, rx + rampW, ry + rampH, rr);
+      ctx.arcTo(rx + rampW, ry + rampH, rx, ry + rampH, rr);
+      ctx.arcTo(rx, ry + rampH, rx, ry, rr);
+      ctx.arcTo(rx, ry, rx + rampW, ry, rr);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      const chip = rampW / ramp.length;
+      ramp.forEach((c, i) => {
+        ctx.fillStyle = c;
+        const x0 = rx + i * chip;
+        ctx.fillRect(x0, ry, Math.max(1, chip - 0.75), rampH);
+      });
+    }
   }
   ctx.restore();
 }

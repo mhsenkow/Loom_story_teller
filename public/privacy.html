@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Loom Storyteller</title>
+<meta name="description" content="Privacy policy for Loom Storyteller (iOS, iPad, and loom.ibm.io).">
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 400 16px/1.55 system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+    max-width: 40rem;
+    margin: 2.5rem auto;
+    padding: 0 1.25rem 3rem;
+    color: #111;
+  }
+  @media (prefers-color-scheme: dark) {
+    body { color: #eee; background: #0a0a0c; }
+    a { color: #8ab4ff; }
+  }
+  h1 { font-size: 1.35rem; font-weight: 650; letter-spacing: -0.02em; }
+  h2 { font-size: 1.05rem; font-weight: 600; margin-top: 1.75rem; }
+  p, li { color: inherit; opacity: 0.92; }
+  a { color: #1a5cff; }
+  code { font-size: 0.92em; }
+</style>
+</head>
+<body>
+<h1>Privacy Policy — Loom Storyteller</h1>
+<p><strong>Last updated:</strong> October 9, 2026</p>
+<p>
+  This policy covers the Loom Storyteller apps on iPhone and iPad, the web app at
+  <a href="https://loom.ibm.io/">loom.ibm.io</a>, and related open-data catalog proxies.
+  Contact: <a href="mailto:mhsenkow@gmail.com">mhsenkow@gmail.com</a>.
+</p>
+
+<h2>Summary</h2>
+<p>
+  Loom is local-first. We do <strong>not</strong> require an account, and we do
+  <strong>not</strong> run analytics, advertising, or user tracking SDKs in the App Store build.
+  Data you load stays on your device unless you choose a live/open-data feed that fetches
+  over the network.
+</p>
+
+<h2>Data we do not collect</h2>
+<ul>
+  <li>No account, email, or profile signup</li>
+  <li>No advertising identifiers or cross-app tracking</li>
+  <li>No crash/analytics SDKs that upload usage histories to us</li>
+  <li>Local CSV / Files you open stay on the device</li>
+</ul>
+
+<h2>Network activity you may choose</h2>
+<p>
+  When you open a live or open-data source (for example earthquakes, flights, Wikipedia edits,
+  weather, or a catalog listing), the app requests that public data over HTTPS from the upstream
+  provider and/or our Cloudflare Worker proxy. Those requests are made to show you the chart or
+  listing you asked for. We do not sell that activity and we do not use it to build advertising profiles.
+</p>
+<p>
+  Our Cloudflare Workers may log request metadata (URL path, status, timing) for abuse prevention
+  and operations. We do not intentionally log chart data or uploaded file contents in those logs.
+  MCP demo chat should not put your dataset in URL query parameters (see product privacy review LOOM-506).
+</p>
+<p>
+  Shared chart links (when you use share-to-link) store the chart configuration needed to reopen
+  the view. Do not put secrets in shared titles or fields.
+</p>
+
+<h2>Third-party content</h2>
+<p>
+  Live feeds and open-data catalogs display content from third-party public sources (for example
+  USGS, Wikipedia, Open-Meteo, and similar providers). Those providers have their own terms and
+  privacy practices. Loom does not claim ownership of that upstream data.
+</p>
+
+<h2>Children</h2>
+<p>Loom Storyteller is not directed at children under 13 and does not knowingly collect personal information from children.</p>
+
+<h2>Changes</h2>
+<p>We may update this page when the product changes. The “Last updated” date above will change when we do.</p>
+
+<h2>Contact</h2>
+<p>
+  Questions about this policy:
+  <a href="mailto:mhsenkow@gmail.com">mhsenkow@gmail.com</a>
+  ·
+  <a href="https://github.com/mhsenkow/Loom_story_teller">GitHub</a>
+</p>
+</body>
+</html>

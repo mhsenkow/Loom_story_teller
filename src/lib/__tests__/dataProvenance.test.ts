@@ -24,6 +24,12 @@ describe("dataProvenance", () => {
     expect(p?.rowsLabel).toContain("80");
   });
 
+  it("rejects look-alike provenance hosts", () => {
+    expect(guessHomepageFromDataUrl("https://github.com.evil.example/raw/x.csv")).toBe(
+      "https://github.com.evil.example/",
+    );
+  });
+
   it("guesses OWID grapher homepage from CSV URL", () => {
     const url =
       "https://ourworldindata.org/grapher/co-emissions-per-capita.csv?v=1&csvType=full";

@@ -1,0 +1,96 @@
+{
+  "_comment": "Shared Citi Bike parity output (LOOM-435): Worker joinCitibike→parseSourceRows and Rust citibike_rows must both produce exactly this. ts = ISO-8601 UTC.",
+  "columns": [
+    "station_id",
+    "name",
+    "latitude",
+    "longitude",
+    "capacity",
+    "bikes_available",
+    "ebikes_available",
+    "docks_available",
+    "pct_full",
+    "is_renting",
+    "ts"
+  ],
+  "rows": [
+    [
+      "full",
+      "Full Data St",
+      40.7,
+      -74,
+      20,
+      15,
+      4,
+      5,
+      75,
+      true,
+      "2026-10-02T20:45:00.000Z"
+    ],
+    [
+      "zero-cap",
+      "Zero Capacity St",
+      40.71,
+      -74.01,
+      0,
+      3,
+      0,
+      0,
+      null,
+      false,
+      "2026-10-02T20:45:10.000Z"
+    ],
+    [
+      "vehicle-types",
+      "Vehicle Types St",
+      40.72,
+      -74.02,
+      10,
+      7,
+      2,
+      3,
+      70,
+      true,
+      "2026-10-02T20:45:30.000Z"
+    ],
+    [
+      "sparse",
+      "Sparse St",
+      40.73,
+      -74.03,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true,
+      "2026-10-02T20:45:40.000Z"
+    ],
+    [
+      "stale",
+      "Stale St",
+      40.74,
+      -74.04,
+      8,
+      2,
+      1,
+      6,
+      25,
+      true,
+      "2026-10-02T20:47:07.000Z"
+    ],
+    [
+      "overfull",
+      "Overfull St",
+      40.75,
+      -74.05,
+      20,
+      25,
+      0,
+      0,
+      100,
+      true,
+      "2026-10-02T20:45:50.000Z"
+    ]
+  ]
+}

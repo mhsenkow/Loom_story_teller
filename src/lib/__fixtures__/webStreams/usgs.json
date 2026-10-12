@@ -1,0 +1,18 @@
+{
+  "features": [
+    {
+      "id": "usgs-1",
+      "properties": {
+        "mag": 4.2,
+        "place": "Test Bay",
+        "time": 1700000000000,
+        "tsunami": 0,
+        "sig": 100,
+        "net": "us",
+        "magType": "ml",
+        "status": "reviewed"
+      },
+      "geometry": { "coordinates": [-122.1, 37.2, 10] }
+    }
+  ]
+}

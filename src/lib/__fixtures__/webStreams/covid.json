@@ -1,0 +1,1 @@
+[{ "country": "Test Country", "cases": 100, "todayCases": 1, "deaths": 2, "todayDeaths": 0, "recovered": 90, "active": 8, "casesPerOneMillion": 10, "deathsPerOneMillion": 1, "population": 1000000, "continent": "Test" }]

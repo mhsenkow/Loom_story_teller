@@ -162,4 +162,17 @@ describe("hit targets", () => {
   it("misses empty space", () => {
     expect(pickHitTarget(targets, 50, 50)).toBeNull();
   });
+
+  it("summary-only targets resolve as -1 without a row match", () => {
+    const summaryTarget: HitTarget = {
+      shape: "rect",
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      match: [],
+      summary: { columns: ["A", "B"], row: ["x", "0.42"] },
+    };
+    expect(rowForHitTarget(summaryTarget, rows)).toBe(-1);
+  });
 });

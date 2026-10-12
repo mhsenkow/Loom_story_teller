@@ -8,9 +8,10 @@
 
 import type { ColumnInfo } from "./store";
 import type { InspectResult, SourceKind, SourceStatus, StreamStatus } from "./tauri";
-import { SOURCE_BY_KIND, SOURCE_DEFS, sortRowsByOrderBy } from "./sourceRegistry";
+import { SOURCE_BY_KIND, SOURCE_DEFS, effectivePollIntervalMs, sortRowsByOrderBy } from "./sourceRegistry";
 import { treasuryDebt } from "../../workers/sourceTransforms";
 import { nycWallToUtcIso } from "./zonedTime";
+import { readSourceSnapshotCache, writeSourceSnapshotCache } from "./sourceSnapshotCache";
 
 const MAX_ROWS = 8_000;
 const WIKI_SSE = "https://stream.wikimedia.org/v2/stream/recentchange";
@@ -24,14 +25,23 @@ interface BufferState {
   running: boolean;
   totalEvents: number;
   startedAt: number | null;
-  pollTimer: ReturnType<typeof setInterval> | null;
+  pollTimer: ReturnType<typeof setTimeout> | null;
+  pollInFlight: boolean;
   eventSource: EventSource | null;
   seenIds: Set<string>;
-  lastCountAt: { count: number; t: number };
+  rateSamples: { t: number; count: number }[];
   /** Last upstream failure (cleared by the next good poll) — shown on the source card. */
   lastError: string | null;
+  lastSuccessAt: number | null;
+  /** When tab is hidden, polling / SSE is suspended until visible again. */
+  pausedForHidden?: boolean;
+  /** True when buffer rows came from a persisted snapshot, not a live poll. */
+  snapshotFromCache?: boolean;
+  snapshotCapturedAt?: number | null;
   /** Row cap (oldest rows dropped past it). */
   maxRows: number;
+  failStreak: number;
+  nextRetryAt: number | null;
 }
 
 function emptyBuffer(columns: string[], types: string[], maxRows = MAX_ROWS): BufferState {
@@ -43,11 +53,17 @@ function emptyBuffer(columns: string[], types: string[], maxRows = MAX_ROWS): Bu
     totalEvents: 0,
     startedAt: null,
     pollTimer: null,
+    pollInFlight: false,
     eventSource: null,
     seenIds: new Set(),
-    lastCountAt: { count: 0, t: Date.now() },
+    rateSamples: [],
     lastError: null,
+    lastSuccessAt: null,
+    snapshotFromCache: false,
+    snapshotCapturedAt: null,
     maxRows,
+    failStreak: 0,
+    nextRetryAt: null,
   };
 }
 
@@ -61,17 +77,55 @@ const SOURCE_MAX_ROWS: Partial<Record<SourceKind, number>> = {
   debt: 12_000,
 };
 
+function bufferMaxRows(kind: SourceKind): number {
+  const def = SOURCE_DEFS.find((d) => d.kind === kind);
+  return def?.parserRowCap ?? SOURCE_MAX_ROWS[kind] ?? MAX_ROWS;
+}
+
 // Columns + types come from the registry so web buffers, desktop tables, and Query stay aligned
 const sourceBufs = Object.fromEntries(
-  SOURCE_DEFS.map((d) => [d.kind, emptyBuffer(d.columns, d.types, SOURCE_MAX_ROWS[d.kind])]),
+  SOURCE_DEFS.map((d) => [d.kind, emptyBuffer(d.columns, d.types, bufferMaxRows(d.kind))]),
 ) as Record<SourceKind, BufferState>;
 
-const SOURCE_POLL_MS = Object.fromEntries(SOURCE_DEFS.map((d) => [d.kind, d.pollMs])) as Record<SourceKind, number>;
+const SOURCE_POLL_MS = Object.fromEntries(
+  SOURCE_DEFS.map((d) => [d.kind, effectivePollIntervalMs(d.kind)]),
+) as Record<SourceKind, number>;
 
-function trim(buf: BufferState) {
-  if (buf.rows.length > buf.maxRows) {
-    buf.rows = buf.rows.slice(buf.rows.length - buf.maxRows);
+const TRIM_BATCH_RATIO = 1.1;
+
+function rebuildSeenIds(buf: BufferState, idIdx?: number) {
+  if (idIdx == null) return;
+  buf.seenIds.clear();
+  for (const row of buf.rows) {
+    const id = String(row[idIdx] ?? "");
+    if (id) buf.seenIds.add(id);
   }
+}
+
+function trim(buf: BufferState, idIdx?: number) {
+  const threshold = Math.ceil(buf.maxRows * TRIM_BATCH_RATIO);
+  if (buf.rows.length <= threshold) return;
+  buf.rows = buf.rows.slice(buf.rows.length - buf.maxRows);
+  rebuildSeenIds(buf, idIdx);
+}
+
+function recordRateSample(buf: BufferState) {
+  const now = Date.now();
+  buf.rateSamples.push({ t: now, count: buf.totalEvents });
+  const cutoff = now - 12_000;
+  while (buf.rateSamples.length > 2 && buf.rateSamples[0]!.t < cutoff) {
+    buf.rateSamples.shift();
+  }
+}
+
+export function eventsPerSecFromBuffer(buf: BufferState): number {
+  const samples = buf.rateSamples;
+  if (samples.length < 2) return 0;
+  const first = samples[0]!;
+  const last = samples[samples.length - 1]!;
+  const dt = (last.t - first.t) / 1000;
+  if (dt <= 0) return 0;
+  return Math.round(((last.count - first.count) / dt) * 10) / 10;
 }
 
 function pushRows(buf: BufferState, rows: Cell[][], idIdx?: number) {
@@ -83,37 +137,40 @@ function pushRows(buf: BufferState, rows: Cell[][], idIdx?: number) {
     }
     buf.rows.push(row);
     buf.totalEvents += 1;
+    recordRateSample(buf);
   }
-  trim(buf);
+  trim(buf, idIdx);
 }
 
-function statsFromBuffer(buf: BufferState): ColumnInfo[] {
-  return buf.columns.map((name, i) => {
-    const type = buf.types[i]!;
-    const values = buf.rows.map((r) => r[i]);
+function statsFromRows(columns: string[], types: string[], rows: Cell[][]): ColumnInfo[] {
+  return columns.map((name, i) => {
+    const type = types[i]!;
+    const values = rows.map((r) => r[i]);
     const nonNull = values.filter((v) => v !== null && v !== undefined);
     const distinct = new Set(nonNull.map(String)).size;
     const isNum = ["DOUBLE", "INTEGER", "BIGINT", "FLOAT"].includes(type);
+    const isTime = type === "TIMESTAMP" || type === "DATE";
     const nums = isNum
       ? nonNull.map(Number).filter((n) => !Number.isNaN(n))
       : [];
+    const strings = !isNum ? nonNull.map(String) : [];
+    let min_value: string | null = null;
+    let max_value: string | null = null;
+    if (isNum && nums.length > 0) {
+      min_value = String(Math.min(...nums));
+      max_value = String(Math.max(...nums));
+    } else if ((isTime || strings.length > 0) && strings.length > 0) {
+      const sorted = [...strings].sort();
+      min_value = sorted[0]!;
+      max_value = sorted[sorted.length - 1]!;
+    }
     return {
       name,
       data_type: type,
       null_count: values.length - nonNull.length,
       distinct_count: distinct,
-      min_value:
-        isNum && nums.length > 0
-          ? String(Math.min(...nums))
-          : nonNull.length > 0
-            ? String(nonNull[0])
-            : null,
-      max_value:
-        isNum && nums.length > 0
-          ? String(Math.max(...nums))
-          : nonNull.length > 0
-            ? String(nonNull[nonNull.length - 1])
-            : null,
+      min_value,
+      max_value,
     };
   });
 }
@@ -126,7 +183,7 @@ function snapshotFromBuffer(buf: BufferState, limit = 500, orderBy?: string): In
       : buf.rows.slice(-limit).reverse()
   ) as Cell[][];
   return {
-    stats: statsFromBuffer(buf),
+    stats: statsFromRows(buf.columns, buf.types, rows),
     sample: {
       columns: buf.columns,
       types: buf.types,
@@ -138,21 +195,20 @@ function snapshotFromBuffer(buf: BufferState, limit = 500, orderBy?: string): In
 
 function statusFromBuffer(buf: BufferState, extra?: { wikis_seen?: number }): StreamStatus & SourceStatus {
   const now = Date.now();
-  const elapsed = Math.max(0.001, (now - buf.lastCountAt.t) / 1000);
-  const delta = buf.totalEvents - buf.lastCountAt.count;
-  const eps = Math.round((delta / elapsed) * 10) / 10;
-  buf.lastCountAt = { count: buf.totalEvents, t: now };
   const uptime =
     buf.startedAt != null ? Math.max(0, now / 1000 - buf.startedAt) : 0;
   return {
     running: buf.running,
     total_events: buf.totalEvents,
-    events_per_sec: eps,
+    events_per_sec: eventsPerSecFromBuffer(buf),
     buffer_rows: buf.rows.length,
     wikis_seen: extra?.wikis_seen ?? 0,
     started_at: buf.startedAt,
     uptime_secs: uptime,
     last_error: buf.lastError,
+    last_success_at: buf.lastSuccessAt,
+    snapshot_stale: buf.snapshotFromCache ?? false,
+    snapshot_captured_at: buf.snapshotCapturedAt ?? null,
   };
 }
 
@@ -170,6 +226,24 @@ const DIRECT_SOURCES: Partial<Record<SourceKind, { url: string; transform: (body
   },
 };
 
+/** User-facing message for upstream / network failures (LOOM-167). */
+export function formatStreamFetchError(kind: SourceKind, err: unknown): string {
+  if (err instanceof DOMException && err.name === "AbortError") {
+    return `${SOURCE_BY_KIND[kind]?.label ?? kind} timed out — retrying shortly`;
+  }
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/failed to fetch|networkerror|offline|load failed/i.test(msg)) {
+    return "You appear offline — will retry when the connection returns";
+  }
+  const status = msg.match(/\((\d{3})\)/)?.[1];
+  if (status === "429") return "Rate-limited upstream — retrying with backoff";
+  if (status && Number(status) >= 500) return "Upstream temporarily unavailable — retrying";
+  if (/unexpected token|json|syntax/i.test(msg)) {
+    return "Unexpected response from data source — retrying";
+  }
+  return msg.length > 120 ? `${msg.slice(0, 117)}…` : msg;
+}
+
 async function fetchSourceJson(kind: SourceKind): Promise<unknown> {
   const direct = DIRECT_SOURCES[kind];
   if (direct) {
@@ -186,20 +260,34 @@ async function fetchSourceJson(kind: SourceKind): Promise<unknown> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 12_000);
   try {
-    const res = await fetch(`/api/source/${kind}`, { signal: ctrl.signal });
+    const { apiUrl } = await import("./openDataCatalog");
+    const res = await fetch(apiUrl(`/api/source/${kind}`), { signal: ctrl.signal });
     if (!res.ok) {
       const err = await res.json().catch(() => ({})) as { error?: string };
       throw new Error(err.error || `Source ${kind} failed (${res.status})`);
     }
-    return res.json();
+    const body = await res.json();
+    writeSourceSnapshotCache(kind, body);
+    return body;
   } finally {
     clearTimeout(timer);
   }
 }
 
+/** GeoJSON FeatureCollection guard — malformed bodies must not become empty charts (LOOM-095). */
+export function assertUsgsBody(body: unknown): asserts body is { type?: string; features: unknown[] } {
+  if (!body || typeof body !== "object") {
+    throw new Error("Unexpected USGS response");
+  }
+  const features = (body as { features?: unknown }).features;
+  if (!Array.isArray(features)) {
+    throw new Error("Unexpected USGS response");
+  }
+}
+
 function parseUsgs(body: unknown): Cell[][] {
-  const features = (body as { features?: unknown[] })?.features;
-  if (!Array.isArray(features)) return [];
+  assertUsgsBody(body);
+  const features = body.features;
   const out: Cell[][] = [];
   for (const feat of features) {
     const f = feat as {
@@ -209,20 +297,21 @@ function parseUsgs(body: unknown): Cell[][] {
     };
     const props = f.properties ?? {};
     const coords = f.geometry?.coordinates ?? [];
+    const hasCoords = coords.length >= 2 && coords[0] != null && coords[1] != null;
     const id = String(f.id ?? props.ids ?? "");
     out.push([
       id,
       numOrNullVal(props.mag),
-      String(props.place ?? ""),
+      strCell(props.place),
       props.time != null ? new Date(Number(props.time)).toISOString() : null,
-      coords[1] ?? 0,
-      coords[0] ?? 0,
-      coords[2] ?? 0,
-      String(props.magType ?? ""),
-      String(props.status ?? ""),
+      hasCoords ? numOrNullVal(coords[1]) : null,
+      hasCoords ? numOrNullVal(coords[0]) : null,
+      coords.length >= 3 ? numOrNullVal(coords[2]) : null,
+      strCell(props.magType),
+      strCell(props.status),
       Number(props.tsunami ?? 0) === 1,
       numOrNullVal(props.sig),
-      String(props.net ?? ""),
+      strCell(props.net),
     ]);
   }
   return out;
@@ -236,18 +325,18 @@ function parseNws(body: unknown): Cell[][] {
     const f = feat as { id?: string; properties?: Record<string, unknown> };
     const p = f.properties ?? {};
     out.push([
-      String(f.id ?? p.id ?? ""),
-      String(p.event ?? ""),
-      String(p.headline ?? ""),
-      String(p.severity ?? ""),
-      String(p.certainty ?? ""),
-      String(p.urgency ?? ""),
-      String(p.areaDesc ?? ""),
-      String(p.senderName ?? ""),
-      p.effective != null ? String(p.effective) : null,
-      p.expires != null ? String(p.expires) : null,
-      String(p.status ?? ""),
-      String(p.category ?? ""),
+      strCell(f.id ?? p.id) ?? "",
+      strCell(p.event) ?? "",
+      strCell(p.headline) ?? "",
+      strCell(p.severity) ?? "",
+      strCell(p.certainty) ?? "",
+      strCell(p.urgency) ?? "",
+      strCell(p.areaDesc) ?? "",
+      strCell(p.senderName) ?? "",
+      isoOrNull(p.effective),
+      isoOrNull(p.expires),
+      strCell(p.status) ?? "",
+      strCell(p.category) ?? "",
     ]);
   }
   return out;
@@ -274,7 +363,14 @@ function isoOrNull(v: unknown): string | null {
   }
   const s = String(v).trim();
   if (!s) return null;
-  const zoned = /[zZ]$|[+-]\d{2}:?\d{2}$/.test(s) ? s : /^\d{4}-\d{2}-\d{2}T/.test(s) ? `${s}Z` : s;
+  let zoned = s;
+  if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(s)) {
+    zoned = s;
+  } else if (/^\d{4}-\d{2}-\d{2}T/.test(s)) {
+    zoned = `${s}Z`;
+  } else if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(s)) {
+    zoned = `${s.replace(" ", "T")}Z`;
+  }
   const t = Date.parse(zoned);
   return Number.isNaN(t) ? null : new Date(t).toISOString();
 }
@@ -461,7 +557,7 @@ function parseFx(body: unknown): Cell[][] {
   // `/latest` shape: { date, rates: { USD: 1.08, … } }
   if (entries.length > 0 && typeof entries[0]![1] === "number") {
     const asOf = String(j.date ?? "");
-    return entries.map(([quote, rate]) => [asOf, base, quote, Number(rate), 0]);
+    return entries.map(([quote, rate]) => [asOf, base, quote, Number(rate), null]);
   }
   // Time series: { rates: { "2026-07-03": { USD: 1.08, … }, … } } → one row per (date, quote),
   // change_pct vs. the previous available day for that quote (null on its first day).
@@ -565,14 +661,22 @@ function parseCountries(body: unknown): Cell[][] {
 
 function parseSpacex(body: unknown): Cell[][] {
   if (!Array.isArray(body)) return [];
-  const start = Math.max(0, body.length - 120);
+  const cap = SOURCE_DEFS.find((d) => d.kind === "spacex")?.parserRowCap ?? 120;
+  const start = Math.max(0, body.length - cap);
   return body.slice(start).map((r) => {
     const row = r as Record<string, unknown>;
+    const successRaw = row.success;
+    const success =
+      successRaw === null || successRaw === undefined
+        ? null
+        : typeof successRaw === "boolean"
+          ? successRaw
+          : Boolean(successRaw);
     return [
       String(row.id ?? ""),
       String(row.name ?? ""),
       row.date_utc != null ? String(row.date_utc) : null,
-      Boolean(row.success),
+      success,
       Boolean(row.upcoming),
       String(row.rocket ?? ""),
       numOrNullVal(row.flight_number),
@@ -964,6 +1068,25 @@ export function parseSourceRows(kind: SourceKind, body: unknown): Cell[][] {
   return SOURCE_PARSERS[kind](body);
 }
 
+function hydrateSourceBufferFromCache(kind: SourceKind): boolean {
+  const buf = sourceBufs[kind];
+  if (buf.rows.length > 0) return false;
+  const cached = readSourceSnapshotCache(kind);
+  if (!cached) return false;
+  const rows = parseSourceRows(kind, cached.body);
+  if (!rows.length) return false;
+  const merge = SOURCE_MERGE[kind];
+  if (merge.mode === "replace") {
+    buf.rows = [];
+    buf.seenIds.clear();
+  }
+  pushRows(buf, rows, merge.key);
+  buf.snapshotFromCache = true;
+  buf.snapshotCapturedAt = cached.capturedAt;
+  buf.lastSuccessAt = cached.capturedAt;
+  return true;
+}
+
 async function pollSourceOnce(kind: SourceKind) {
   const buf = sourceBufs[kind];
   let body: unknown;
@@ -972,14 +1095,30 @@ async function pollSourceOnce(kind: SourceKind) {
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 12_000);
-      const res = await fetch("/api/source/iss_trail", { signal: ctrl.signal });
+      const { apiUrl } = await import("./openDataCatalog");
+      const res = await fetch(apiUrl("/api/source/iss_trail"), { signal: ctrl.signal });
       clearTimeout(timer);
       if (res.ok) body = await res.json();
     } catch {
       /* fall through to live tip */
     }
   }
-  if (body === undefined) body = await fetchSourceJson(kind);
+  if (body === undefined) {
+    try {
+      body = await fetchSourceJson(kind);
+      sourceBufs[kind].snapshotFromCache = false;
+      sourceBufs[kind].snapshotCapturedAt = null;
+    } catch (e) {
+      const cached = readSourceSnapshotCache(kind);
+      if (cached && sourceBufs[kind].rows.length === 0) {
+        body = cached.body;
+        sourceBufs[kind].snapshotFromCache = true;
+        sourceBufs[kind].snapshotCapturedAt = cached.capturedAt;
+      } else {
+        throw e;
+      }
+    }
+  }
   const rows = parseSourceRows(kind, body);
 
   if (kind === "opensky") {
@@ -990,8 +1129,14 @@ async function pollSourceOnce(kind: SourceKind) {
       if (id !== "|") buf.seenIds.add(id);
       buf.rows.push(row);
       buf.totalEvents += 1;
+      recordRateSample(buf);
     }
     trim(buf);
+    buf.seenIds.clear();
+    for (const row of buf.rows) {
+      const id = `${String(row[0] ?? "")}|${String(row[9] ?? "")}`;
+      if (id !== "|") buf.seenIds.add(id);
+    }
     return;
   }
 
@@ -1009,8 +1154,10 @@ function parseWikiEvent(raw: string): Cell[] | null {
     const j = JSON.parse(raw) as Record<string, unknown>;
     const meta = j.meta as Record<string, unknown> | undefined;
     if (!meta) return null;
-    const idStr = String(meta.id ?? "0").replace(/\D/g, "") || "0";
-    const id = Number(idStr) || Date.now();
+    const id =
+      typeof j.id === "number" && Number.isFinite(j.id)
+        ? j.id
+        : Date.now();
     const len = j.length as { old?: number; new?: number } | undefined;
     const oldLen = numOrNullVal(len?.old);
     const newLen = numOrNullVal(len?.new);
@@ -1039,34 +1186,72 @@ function parseWikiEvent(raw: string): Cell[] | null {
 
 // ---- Public API (used from tauri.ts when !isTauri) ----
 
-export async function webStreamStart(): Promise<void> {
-  if (wikiBuf.running) return;
-  wikiBuf.running = true;
-  wikiBuf.startedAt = Math.floor(Date.now() / 1000);
-  wikiBuf.totalEvents = wikiBuf.totalEvents; // keep buffer across reconnects
+let wikiReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let wikiReconnectAttempt = 0;
+
+function clearWikiReconnectTimer() {
+  if (wikiReconnectTimer != null) {
+    clearTimeout(wikiReconnectTimer);
+    wikiReconnectTimer = null;
+  }
+}
+
+function scheduleWikiReconnect() {
+  if (!wikiBuf.running) return;
+  clearWikiReconnectTimer();
+  const delay = Math.min(60_000, 1000 * 2 ** Math.min(wikiReconnectAttempt, 6));
+  wikiReconnectTimer = setTimeout(() => {
+    wikiReconnectTimer = null;
+    if (wikiBuf.running) void connectWikiEventSource();
+  }, delay);
+}
+
+function connectWikiEventSource(): void {
+  wikiBuf.eventSource?.close();
+  wikiBuf.eventSource = null;
   try {
     const es = new EventSource(WIKI_SSE);
     wikiBuf.eventSource = es;
+    es.onopen = () => {
+      wikiReconnectAttempt = 0;
+      wikiBuf.lastError = null;
+    };
     es.onmessage = (ev) => {
       const row = parseWikiEvent(ev.data);
       if (!row) return;
       pushRows(wikiBuf, [row], 0);
     };
     es.onerror = () => {
-      /* EventSource auto-reconnects; leave running */
+      if (es.readyState === EventSource.CLOSED) {
+        wikiBuf.lastError = "Wikipedia stream disconnected";
+        es.close();
+        wikiBuf.eventSource = null;
+        wikiReconnectAttempt += 1;
+        scheduleWikiReconnect();
+      }
     };
   } catch (e) {
-    wikiBuf.running = false;
-    wikiBuf.startedAt = null;
-    throw e instanceof Error ? e : new Error(String(e));
+    wikiBuf.lastError = e instanceof Error ? e.message : String(e);
+    wikiReconnectAttempt += 1;
+    scheduleWikiReconnect();
   }
 }
 
+export async function webStreamStart(): Promise<void> {
+  if (wikiBuf.running) return;
+  wikiBuf.running = true;
+  wikiBuf.startedAt = Math.floor(Date.now() / 1000);
+  wikiBuf.totalEvents = wikiBuf.totalEvents; // keep buffer across reconnects
+  connectWikiEventSource();
+}
+
 export async function webStreamStop(): Promise<void> {
+  clearWikiReconnectTimer();
   wikiBuf.eventSource?.close();
   wikiBuf.eventSource = null;
   wikiBuf.running = false;
   wikiBuf.startedAt = null;
+  wikiReconnectAttempt = 0;
 }
 
 export async function webStreamStatus(): Promise<StreamStatus> {
@@ -1082,6 +1267,7 @@ export async function webStreamClear(): Promise<void> {
   wikiBuf.rows = [];
   wikiBuf.seenIds.clear();
   wikiBuf.totalEvents = 0;
+  wikiBuf.rateSamples = [];
 }
 
 export async function webSourceStart(kind: SourceKind): Promise<void> {
@@ -1089,37 +1275,53 @@ export async function webSourceStart(kind: SourceKind): Promise<void> {
   if (buf.running) return;
   buf.running = true;
   buf.startedAt = Math.floor(Date.now() / 1000);
-  // A failed poll must not strand the feed: record the error, keep the schedule, and let
-  // the next poll recover (load-once feeds retry every minute until they have data).
-  const poll = async () => {
+  hydrateSourceBufferFromCache(kind);
+
+  const basePollMs = () => SOURCE_POLL_MS[kind] || (buf.rows.length === 0 ? 60_000 : 0);
+
+  const pollIntervalMs = () => {
+    const base = basePollMs();
+    if (base <= 0) return 0;
+    const mult = Math.min(10, 2 ** Math.min(buf.failStreak, 4));
+    return Math.round(base * mult * (0.85 + Math.random() * 0.3));
+  };
+
+  const runPoll = async () => {
+    if (!buf.running || buf.pollInFlight || buf.pausedForHidden) return;
+    buf.pollInFlight = true;
     try {
       await pollSourceOnce(kind);
       buf.lastError = null;
+      buf.lastSuccessAt = Date.now();
+      buf.failStreak = 0;
+      buf.nextRetryAt = null;
     } catch (e) {
-      buf.lastError = e instanceof Error ? e.message : String(e);
+      buf.failStreak += 1;
+      buf.lastError = formatStreamFetchError(kind, e);
+      buf.nextRetryAt = Date.now() + pollIntervalMs();
+    } finally {
+      buf.pollInFlight = false;
     }
-  };
-  await poll();
-  const ms = SOURCE_POLL_MS[kind] || (buf.rows.length === 0 ? 60_000 : 0);
-  if (ms > 0) {
-    buf.pollTimer = setInterval(() => {
-      if (SOURCE_POLL_MS[kind] === 0 && buf.rows.length > 0 && buf.pollTimer) {
-        clearInterval(buf.pollTimer);
-        buf.pollTimer = null;
-        return;
-      }
-      void poll();
+    if (!buf.running) return;
+    const ms = pollIntervalMs();
+    if (ms <= 0) return;
+    if (SOURCE_POLL_MS[kind] === 0 && buf.rows.length > 0) return;
+    buf.pollTimer = setTimeout(() => {
+      buf.pollTimer = null;
+      void runPoll();
     }, ms);
-  }
+  };
+
+  await runPoll();
 }
 
 export async function webSourceStop(kind: SourceKind): Promise<void> {
   const buf = sourceBufs[kind];
+  buf.running = false;
   if (buf.pollTimer) {
-    clearInterval(buf.pollTimer);
+    clearTimeout(buf.pollTimer);
     buf.pollTimer = null;
   }
-  buf.running = false;
   buf.startedAt = null;
 }
 
@@ -1139,14 +1341,96 @@ export async function webSourceClear(kind: SourceKind): Promise<void> {
   buf.rows = [];
   buf.seenIds.clear();
   buf.totalEvents = 0;
+  buf.rateSamples = [];
+  buf.lastSuccessAt = null;
 }
+
+// ---- Tab visibility: pause polls / SSE while hidden (LOOM-081) ----
+
+let visibilityHooked = false;
+const pausedSources = new Set<SourceKind>();
+let wikiPausedForHidden = false;
+
+function pauseAllStreamWork() {
+  if (wikiBuf.running && wikiBuf.eventSource) {
+    wikiPausedForHidden = true;
+    clearWikiReconnectTimer();
+    wikiBuf.eventSource.close();
+    wikiBuf.eventSource = null;
+    wikiBuf.pausedForHidden = true;
+  }
+  for (const kind of SOURCE_DEFS.map((d) => d.kind)) {
+    const buf = sourceBufs[kind];
+    if (!buf.running) continue;
+    if (buf.pollTimer) {
+      clearTimeout(buf.pollTimer);
+      buf.pollTimer = null;
+    }
+    buf.pausedForHidden = true;
+    pausedSources.add(kind);
+  }
+}
+
+async function resumeAllStreamWork() {
+  if (wikiBuf.running && wikiPausedForHidden) {
+    wikiPausedForHidden = false;
+    wikiBuf.pausedForHidden = false;
+    connectWikiEventSource();
+  }
+  for (const kind of [...pausedSources]) {
+    pausedSources.delete(kind);
+    const buf = sourceBufs[kind];
+    if (!buf.running) continue;
+    buf.pausedForHidden = false;
+    const pollIntervalMs = () =>
+      SOURCE_POLL_MS[kind] || (buf.rows.length === 0 ? 60_000 : 0);
+    const runPoll = async () => {
+      if (!buf.running || buf.pollInFlight || buf.pausedForHidden) return;
+      buf.pollInFlight = true;
+      try {
+        await pollSourceOnce(kind);
+        buf.lastError = null;
+        buf.lastSuccessAt = Date.now();
+      } catch (e) {
+        buf.lastError = e instanceof Error ? e.message : String(e);
+      } finally {
+        buf.pollInFlight = false;
+      }
+      if (!buf.running || buf.pausedForHidden) return;
+      const ms = pollIntervalMs();
+      if (ms <= 0) return;
+      if (SOURCE_POLL_MS[kind] === 0 && buf.rows.length > 0) return;
+      buf.pollTimer = setTimeout(() => {
+        buf.pollTimer = null;
+        void runPoll();
+      }, ms);
+    };
+    void runPoll();
+  }
+}
+
+function ensureVisibilityHooks() {
+  if (visibilityHooked || typeof document === "undefined") return;
+  visibilityHooked = true;
+  void import("./appActivity").then(({ subscribeAppActivity }) => {
+    subscribeAppActivity((active) => {
+      if (active) void resumeAllStreamWork();
+      else if (wikiBuf.running || SOURCE_DEFS.some((d) => sourceBufs[d.kind].running)) {
+        pauseAllStreamWork();
+      }
+    });
+  });
+}
+
+ensureVisibilityHooks();
 
 export async function webCreateGitHubIssue(
   title: string,
   body: string,
   imageBase64?: string | null,
 ): Promise<string> {
-  const res = await fetch("/api/feedback", {
+  const { apiUrl } = await import("./openDataCatalog");
+  const res = await fetch(apiUrl("/api/feedback"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

@@ -16,31 +16,45 @@ import {
   normalizeUi,
   writeIbmToolsShared,
 } from "@/lib/lookSystem";
+import { resolveEffectiveTheme } from "@/lib/resolveEffectiveTheme";
+import { useMediaQuery } from "@/lib/useMediaQuery";
+import { ensureLookFontLoaded } from "@/lib/fontCatalog";
+import { applyThemeChromeColor, themeChromeColor } from "@/lib/themeChromeColor";
 
 export function ThemeApplicator() {
   const { appSettings, setAppSettings } = useLoomStore();
   const { theme, uiChrome, font, faces, fontScale, reducedMotion, colorblindCharts } = appSettings;
+  const prefersDark = useMediaQuery("(prefers-color-scheme: dark)");
 
   // Honor OS preference once when the user hasn't chosen yet (saved false is intentional).
   useLayoutEffect(() => {
-    try {
-      const raw = localStorage.getItem("loom-app-settings");
-      if (raw) {
-        const parsed = JSON.parse(raw) as { reducedMotion?: boolean };
-        if (typeof parsed.reducedMotion === "boolean") return;
+    const applyOsReducedMotion = () => {
+      try {
+        const raw = localStorage.getItem("loom-app-settings");
+        if (raw) {
+          const parsed = JSON.parse(raw) as { reducedMotion?: boolean };
+          if (typeof parsed.reducedMotion === "boolean") return;
+        }
+      } catch {
+        /* ignore */
       }
-    } catch {
-      /* ignore */
-    }
-    if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setAppSettings((prev) => (prev.reducedMotion ? prev : { ...prev, reducedMotion: true }));
-    }
+      if (typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+        setAppSettings((prev) => (prev.reducedMotion ? prev : { ...prev, reducedMotion: true }));
+      }
+    };
+    applyOsReducedMotion();
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    mq.addEventListener("change", applyOsReducedMotion);
+    return () => mq.removeEventListener("change", applyOsReducedMotion);
   }, [setAppSettings]);
 
   // useLayoutEffect so data-theme lands before paint — shell + chart stay in sync
   useLayoutEffect(() => {
     const root = document.documentElement;
-    const t = normalizeTheme(theme);
+    const t =
+      theme === "system"
+        ? resolveEffectiveTheme("system", prefersDark)
+        : normalizeTheme(theme);
     const ui = normalizeUi(uiChrome);
     const f = normalizeFont(font);
     const face = normalizeFaces(faces);
@@ -77,7 +91,9 @@ export function ThemeApplicator() {
     else root.classList.remove("reduced-motion");
 
     writeIbmToolsShared({ theme: t, ui, font: f, faces: face });
-  }, [theme, uiChrome, font, faces, fontScale, reducedMotion, colorblindCharts]);
+    ensureLookFontLoaded(f, face);
+    applyThemeChromeColor(themeChromeColor(t, prefersDark));
+  }, [theme, uiChrome, font, faces, fontScale, reducedMotion, colorblindCharts, prefersDark]);
 
   return null;
 }

@@ -67,6 +67,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
   const {
     viewMode,
     setViewMode,
+    sidebarOpen,
     panelOpen,
     togglePanel,
     toggleSidebar,
@@ -79,6 +80,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
     queryResult,
     activeChart,
     setShareSheetOpen,
+    setToast,
   } = useLoomStore();
   const viewportW = useViewportWidth();
   const aspect = appSettings.chartAspect ?? "free";
@@ -104,6 +106,20 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
     setAppSettings((prev) => ({ ...prev, chartDevice: id }));
   };
 
+  const shareDisabledReason = !activeChart
+    ? "Pick or create a chart before sharing"
+    : !hasData
+      ? "Open data before sharing a chart"
+      : null;
+
+  const handleShare = () => {
+    if (shareDisabledReason) {
+      setToast(shareDisabledReason);
+      return;
+    }
+    setShareSheetOpen(true);
+  };
+
   return (
     <header
       className="flex items-center gap-1 sm:gap-2 flex-shrink-0 border-b border-loom-border bg-loom-surface/95 backdrop-blur-md px-1.5 sm:px-3"
@@ -120,6 +136,8 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         className="loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 flex items-center justify-center text-xs px-2 rounded-md"
         title="Toggle Sidebar"
         aria-label="Toggle data sidebar"
+        aria-expanded={sidebarOpen}
+        aria-controls="loom-sidebar"
       >
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
           <rect x="1" y="2" width="14" height="12" rx="2" />
@@ -133,7 +151,6 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             key={mode.key}
             type="button"
             onClick={() => setViewMode(mode.key)}
-            aria-pressed={viewMode === mode.key}
             aria-current={viewMode === mode.key ? "page" : undefined}
             className="loom-seg-item min-h-9 sm:min-h-0 px-2.5 sm:px-3"
           >
@@ -226,11 +243,13 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       {viewMode === "chart" && (
         <button
           type="button"
-          onClick={() => setShareSheetOpen(true)}
-          disabled={!activeChart || !hasData}
-          className="min-h-10 px-3 sm:px-3.5 text-xs font-semibold rounded-md bg-loom-accent text-[color:var(--btn-primary-fg)] disabled:opacity-40 shadow-sm flex items-center gap-1.5 shrink-0"
+          onClick={handleShare}
+          aria-disabled={!!shareDisabledReason}
+          className={`min-h-10 px-3 sm:px-3.5 text-xs font-semibold rounded-md bg-loom-accent text-[color:var(--btn-primary-fg)] shadow-sm flex items-center gap-1.5 shrink-0 ${
+            shareDisabledReason ? "opacity-60" : ""
+          }`}
           aria-label="Share chart"
-          title="Share this chart as an image or link"
+          title={shareDisabledReason ?? "Share this chart as an image or link"}
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
@@ -243,7 +262,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         <button
           type="button"
           onClick={onOpenShortcuts}
-          className="loom-btn-ghost hidden sm:flex min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md"
+          className="loom-btn-ghost flex min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md"
           title="Keyboard shortcuts (?)"
           aria-label="Keyboard shortcuts"
         >
@@ -269,7 +288,8 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         className={`loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 items-center justify-center text-xs px-2 rounded-md ${viewMode === "chart" ? "hidden md:flex" : "flex"}`}
         title={viewMode === "chart" ? "Chart encoding & visual" : "Toggle Detail Panel"}
         aria-label={viewMode === "chart" ? "Open chart panel" : "Toggle detail panel"}
-        aria-pressed={panelOpen}
+        aria-expanded={panelOpen}
+        aria-controls="loom-detail-panel"
       >
         <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
           <rect x="1" y="2" width="14" height="12" rx="2" />

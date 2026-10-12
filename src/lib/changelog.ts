@@ -25,6 +25,287 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-12",
+    date: "2026-10-12",
+    title: "Responsive shell for iPad and iPhone",
+    summary: "Side panels survive Split View and Stage Manager, with a real tablet layout between phone and desktop.",
+    items: [
+      {
+        title: "Back up and restore your saved work",
+        detail:
+          "Settings → Local data can export saved views, dashboards and SQL snippets to one file (with a size and privacy preview) and import it on another device. Datasets themselves aren’t included.",
+      },
+      {
+        title: "Clear offline messaging",
+        detail:
+          "Without a connection Loom now says which live sources can’t refresh and that your saved uploads still open from Recent files; the feed resumes when you’re back online.",
+      },
+      {
+        title: "Get link stays image-only unless you opt in",
+        detail:
+          "Publishing a public link no longer uploads every column by default. Local and uploaded files start with image-only; turn on “Include data” to share chart columns.",
+      },
+      {
+        title: "Panels come back after you resize",
+        detail:
+          "Shrinking Loom then expanding it (Split View, Stage Manager) restores the sidebar and detail panel instead of leaving empty chrome.",
+      },
+      {
+        title: "Tablet band",
+        detail:
+          "Between phone and desktop widths, the data sidebar overlays while the detail panel stays docked — more room for the chart on iPad.",
+      },
+      {
+        title: "Help on phones",
+        detail: "Open Help from the sidebar or Settings when the ? control isn’t on the top bar.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-10a",
+    date: "2026-10-10",
+    title: "Faster What’s interesting on iPad",
+    summary: "The discover grid keeps a tight top list on tablet and remembers it when you close and reopen.",
+    items: [
+      {
+        title: "120 stories on iPad",
+        detail:
+          "What’s interesting caps at 120 cards on iPad and iPhone so the scan and thumbnails stay responsive.",
+      },
+      {
+        title: "Remembers the last scan",
+        detail:
+          "Close the panel and open it again — your stories are still there from memory, no waiting on a full rescan.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-09f",
+    date: "2026-10-09",
+    title: "Scatter scale & alignment",
+    summary: "Log / Symlog on GPU scatter now reshape the Y axis, and dots sit inside the plot frame with the ticks.",
+    items: [
+      {
+        title: "Y scale on dense scatter",
+        detail:
+          "Linear / Log / Symlog apply to WebGPU scatter the same way they do on Canvas — ticks, grid, and points share one transform.",
+      },
+      {
+        title: "Dots match the axes",
+        detail:
+          "GPU points map into the padded plot rectangle so they line up with axis labels instead of the full canvas edge.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-09e",
+    date: "2026-10-09",
+    title: "Loom on iPad",
+    summary:
+      "A first App Store build ships the same charts, live feeds, and share flow you already use on the phone web — no desktop DuckDB required.",
+    items: [
+      {
+        title: "iPad / iPhone app shell",
+        detail:
+          "Install Loom from TestFlight or the App Store. Live feeds, Dive, file pick, and share use the familiar web path inside a native shell.",
+      },
+      {
+        title: "Desktop stays the heavy lifter",
+        detail:
+          "Folder mount, SQL over millions of rows, and WebGPU scatter remain in the macOS app. The tablet build is the storytelling surface.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-09d",
+    date: "2026-10-09",
+    title: "Clearer chart type",
+    summary:
+      "Titles, ticks, legends, and labels share one type ramp — bigger by default, stronger ink, titles wrap before they truncate.",
+    items: [
+      {
+        title: "One type ramp",
+        detail:
+          "Axis size 11 is the new baseline (10 on compact phones). Titles, subtitles, legends, footnotes, and mark labels step from that single control instead of scattered 9px leftovers.",
+      },
+      {
+        title: "Ink that reads",
+        detail:
+          "Axis chrome uses theme label (not muddy mid-gray). Labels on colored cells pick black/white with a stricter contrast check — Hot–Cold treemaps stay readable.",
+      },
+      {
+        title: "Titles can wrap",
+        detail:
+          "Long chart titles take two lines before ellipsis, so “What’s interesting” stories don’t lose the point in a single truncated line.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-09c",
+    date: "2026-10-09",
+    title: "Preview tokens · more discover room",
+    summary:
+      "Column headers are sortable, draggable tokens that map into Encoding. Discover on phones gives the story grid more of the screen.",
+    items: [
+      {
+        title: "Preview / Schema field tokens",
+        detail:
+          "Click a column header to sort. Drag it (or a Schema chip) into Chart → Encoding. On phones, tap a field then pick X / Y / Color — the chart updates live. Active roles show as badges on the tokens.",
+      },
+      {
+        title: "Discover: taller story scroll",
+        detail:
+          "With filters parked at the bottom on mobile, the card grid stretches higher — tighter chrome, description tucked away once stories load.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-09b",
+    date: "2026-10-09",
+    title: "My Loom data",
+    summary:
+      "A personal data folder on your phone — add files, link a real device folder, and sync. Same mental model as the desktop folder.",
+    items: [
+      {
+        title: "Your folder, by name",
+        detail:
+          "Web Loom now mounts “My Loom data” instead of a nameless upload pile. Add files into it; they stay on this device and reopen after refresh.",
+      },
+      {
+        title: "Link & sync a device folder",
+        detail:
+          "On Chrome (including Android), Link a folder remembers that directory. Drop CSVs into it in Files, come back to Loom, tap Sync — your charts catch up.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-09",
+    date: "2026-10-09",
+    title: "Open more files · discover in thumb reach",
+    summary:
+      "Web Loom opens CSV, TSV, JSON, Parquet, and Excel — and remembers them. Discover filters sit where your thumb is on phones.",
+    items: [
+      {
+        title: "More formats on the web",
+        detail:
+          "Open CSV, TSV, JSON / NDJSON, Parquet, and Excel (.xlsx) from this device. Chromium can Choose folder; paste a CSV/JSON URL when the file lives online.",
+      },
+      {
+        title: "Uploads survive refresh",
+        detail:
+          "Local web files are stored in this browser (IndexedDB), so Recent still reopens them after a reload — data stays on your machine.",
+      },
+      {
+        title: "Discover filters for one-handed use",
+        detail:
+          "On phones, topic / source / chart filters move under the story cards into the thumb zone. The chip rows still slide sideways.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-07j",
+    date: "2026-10-07",
+    title: "Color legend at a glance",
+    summary: "Palette names leave the footnote — a real color ramp sits on the right so Hot–Cold (and friends) read without reading.",
+    items: [
+      {
+        title: "Footnote color ramp",
+        detail:
+          "Source and date stay on the left. The active palette draws as a strip on the right, with a tiny field label (e.g. nest: views) above it — no more “Diverging Hot–Cold” as plain text.",
+      },
+      {
+        title: "Status bar swatch",
+        detail:
+          "The bottom status line shows the same ramp next to the encoding field, so the color story matches what you see on the chart.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-07i",
+    date: "2026-10-07",
+    title: "Tooltip styles",
+    summary: "Tooltips stay on by default — six styles from hover float to frosted glass, with Auto picking glass on phones.",
+    items: [
+      {
+        title: "Six presentation modes",
+        detail:
+          "Encoding → Tooltip → Style: Auto, Hover, Glass, Dock, Pill, or Off. Auto floats on desktop and uses a frosted sheet on mobile so your finger doesn’t cover the numbers.",
+      },
+      {
+        title: "Sticky on glass & dock",
+        detail:
+          "Touch-friendly modes keep the readout until you tap × or pick another mark — no more vanishing the moment you lift your finger.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-07h",
+    date: "2026-10-07",
+    title: "Chart ↔ Encoding link",
+    summary: "Hover an axis, title, or legend on the chart and Encoding / Visual jumps to the matching control — and the other way around.",
+    items: [
+      {
+        title: "Hover the chart chrome",
+        detail:
+          "Y gutter → Y channel, X strip → X, title band → Title layout, legend pocket → Color / Legend. The Detail panel switches Encoding ↔ Visual and scrolls to the control.",
+      },
+      {
+        title: "Hover Encoding or Visual",
+        detail:
+          "Mousing a channel or look control outlines the related region on the canvas so you can see what you’re editing.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-07g",
+    date: "2026-10-07",
+    title: "Y scale in Encoding",
+    summary: "Linear, log, and symlog for the measure axis — next to Direction on line, area, and scatter.",
+    items: [
+      {
+        title: "Encoding → Y scale",
+        detail:
+          "Pick Linear / Log / Symlog on charts that map a continuous Y. Log compresses wide positive ranges; symlog stays soft around zero.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-07f",
+    date: "2026-10-07",
+    title: "Down means zero at the top",
+    summary: "Direction ↓ flips the measure axis for real — and suggestions offer it for ranks, losses, and similar fields.",
+    items: [
+      {
+        title: "Axis labels follow Direction",
+        detail:
+          "↓ puts 0 at the top (and ← puts 0 on the right) so hanging bars aren’t lying about the scale.",
+      },
+      {
+        title: "Suggestions for “lower is the story”",
+        detail:
+          "When Y looks like rank, loss, latency, deficit, and friends, the rail gets a ↓ zero-at-top variant.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-07e",
+    date: "2026-10-07",
+    title: "Chart direction",
+    summary: "Point bars and lollipops up, down, left, or right from Encoding — Auto still picks from the stage.",
+    items: [
+      {
+        title: "Direction control for bar-like charts",
+        detail:
+          "Encoding → Direction (Auto / ↑ / ↓ / → / ←) orients bars, lollipops, Pareto, and waterfalls. Auto keeps the portrait and label heuristic.",
+      },
+      {
+        title: "Shares with the chart link",
+        detail:
+          "Direction rides in #chart= links so a flipped layout opens the same way on another device.",
+      },
+    ],
+  },
+  {
     id: "2026-10-07d",
     date: "2026-10-07",
     title: "Color named in the status bar",
@@ -98,9 +379,9 @@ export const CHANGELOG: ChangelogRelease[] = [
     summary: "NYC and UK dates land in the right zone, Wikipedia picks a published day, and chart labels stay readable across themes.",
     items: [
       {
-        title: "NYC 311 times are Eastern → UTC",
+        title: "NYC 311 times use Eastern time",
         detail:
-          "Socrata’s zone-less created_date is interpreted as America/New_York before storage, so “last 7 days” matches the real calendar.",
+          "311 request timestamps without a time zone are treated as New York local time before charts and filters run, so “last 7 days” matches the calendar you expect.",
       },
       {
         title: "UK carbon and Wikipedia days",
@@ -110,7 +391,7 @@ export const CHANGELOG: ChangelogRelease[] = [
       {
         title: "Typography that stays legible",
         detail:
-          "Dark and NES themes lift muted/label contrast, chart axes and footnotes use the stronger label token at 11px, and suggestion chips stop shrinking to 9px.",
+          "Dark and NES themes brighten secondary text, chart labels stay readable at small sizes, and suggestion chips no longer shrink to unreadable type.",
       },
     ],
   },
@@ -503,4 +784,16 @@ export function unseenReleases(seenId: string | null): ChangelogRelease[] {
 export function requestWhatsNew(): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event("loom-whats-new"));
+}
+
+export type HelpRequestDetail = {
+  tab?: "shortcuts" | "feedback";
+  feedbackTitle?: string;
+  feedbackBody?: string;
+};
+
+/** Ask the Help / shortcuts dialog to open (phones hide the TopBar ? button). */
+export function requestHelp(detail?: HelpRequestDetail): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<HelpRequestDetail>("loom-help", { detail }));
 }

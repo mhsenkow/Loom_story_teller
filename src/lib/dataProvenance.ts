@@ -39,21 +39,28 @@ export interface DataProvenance {
 const WIKI_HOME = "https://www.wikimedia.org/";
 const WIKI_CREDIT = "Wikimedia recent changes · CC BY-SA";
 
+function hostnameMatches(host: string, base: string): boolean {
+  const h = host.toLowerCase();
+  const b = base.toLowerCase();
+  return h === b || h.endsWith(`.${b}`);
+}
+
 /** Guess a human homepage from a raw CSV / API URL when we only have the file. */
 export function guessHomepageFromDataUrl(url: string): string | null {
   try {
     const u = new URL(url);
-    if (u.hostname.includes("ourworldindata.org")) {
+    const host = u.hostname.toLowerCase();
+    if (hostnameMatches(host, "ourworldindata.org")) {
       // grapher CSV → grapher page
       const m = u.pathname.match(/\/grapher\/([^/.]+)/);
       if (m) return `https://ourworldindata.org/grapher/${m[1]}`;
       return "https://ourworldindata.org/";
     }
-    if (u.hostname.includes("earthquake.usgs.gov")) return "https://earthquake.usgs.gov/";
-    if (u.hostname.includes("exoplanetarchive.ipac.caltech.edu")) {
+    if (hostnameMatches(host, "earthquake.usgs.gov")) return "https://earthquake.usgs.gov/";
+    if (hostnameMatches(host, "exoplanetarchive.ipac.caltech.edu")) {
       return "https://exoplanetarchive.ipac.caltech.edu/";
     }
-    if (u.hostname.includes("github.com") || u.hostname.includes("githubusercontent.com")) {
+    if (hostnameMatches(host, "github.com") || hostnameMatches(host, "githubusercontent.com")) {
       // raw.githubusercontent.com/org/repo/... → github.com/org/repo
       const parts = u.pathname.split("/").filter(Boolean);
       if (u.hostname.includes("githubusercontent.com") && parts.length >= 2) {
@@ -61,7 +68,7 @@ export function guessHomepageFromDataUrl(url: string): string | null {
       }
       if (parts.length >= 2) return `https://github.com/${parts[0]}/${parts[1]}`;
     }
-    if (u.hostname.includes("data.gov")) return u.origin + u.pathname.replace(/\/resource\/.*$/, "");
+    if (hostnameMatches(host, "data.gov")) return u.origin + u.pathname.replace(/\/resource\/.*$/, "");
     // Strip query; prefer directory for raw files
     if (u.pathname.endsWith(".csv") || u.pathname.endsWith(".json")) {
       return `${u.origin}/`;

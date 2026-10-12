@@ -23,23 +23,24 @@ type SuiteGroup = {
   tools: SuiteTool[];
 };
 
+/** Same quiet map as wordcount suite.js / NeoSpace SuiteMenu — think first. */
 const GROUPS: SuiteGroup[] = [
   {
     id: "think",
     label: "think",
     tools: [
       {
+        id: "bruh",
+        label: "bruh",
+        blurb: "ideas · paper",
+        href: "https://bruh.ibm.io/",
+      },
+      {
         id: "loom",
         label: "loom",
         blurb: "data · stories",
         href: "https://loom.ibm.io/",
         current: true,
-      },
-      {
-        id: "bruh",
-        label: "bruh",
-        blurb: "ideas · paper",
-        href: "https://bruh.ibm.io/",
       },
       {
         id: "notebook",
@@ -53,18 +54,18 @@ const GROUPS: SuiteGroup[] = [
         blurb: "count · draft",
         href: "https://ibm.io/wordcount/",
       },
-    ],
-  },
-  {
-    id: "connect",
-    label: "connect",
-    tools: [
       {
         id: "neospace",
         label: "neospace",
         blurb: "people · feed",
         href: "https://neospace.ibm.io/",
       },
+    ],
+  },
+  {
+    id: "connect",
+    label: "connect",
+    tools: [
       {
         id: "ibm",
         label: "ibm.io",
@@ -78,6 +79,7 @@ const GROUPS: SuiteGroup[] = [
 export function SuiteMenu() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -87,7 +89,10 @@ export function SuiteMenu() {
       setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key === "Escape") {
+        setOpen(false);
+        toggleRef.current?.focus();
+      }
     };
     document.addEventListener("pointerdown", onPointer);
     document.addEventListener("keydown", onKey);
@@ -107,10 +112,11 @@ export function SuiteMenu() {
       style={{ fontFamily: "var(--font-ui, inherit)", fontSize: 11 }}
     >
       <button
+        ref={toggleRef}
         type="button"
-        className="suite-menu-btn pointer-events-auto relative inline-flex items-center justify-center size-11 p-0 border-0 rounded-sm bg-transparent text-inherit cursor-pointer opacity-[0.42] transition-opacity hover:opacity-95 hover:text-loom-text focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-loom-accent focus-visible:outline-offset-2"
+        className="suite-menu-btn pointer-events-auto relative inline-flex items-center justify-center size-11 p-0 border-0 rounded-sm bg-transparent text-inherit cursor-pointer opacity-70 transition-opacity hover:opacity-95 hover:text-loom-text focus-visible:opacity-100 focus-visible:outline focus-visible:outline-1 focus-visible:outline-loom-accent focus-visible:outline-offset-2"
         aria-expanded={open}
-        aria-haspopup="true"
+        aria-haspopup="dialog"
         aria-controls="loomSuitePanel"
         aria-label="Tools"
         title="Tools"
@@ -137,7 +143,7 @@ export function SuiteMenu() {
 
           {GROUPS.map((group) => (
             <section key={group.id} className="mb-3 last:mb-2" aria-label={group.label}>
-              <span className="block px-1 pb-1.5 text-[9px] tracking-[0.12em] uppercase text-loom-muted opacity-75">
+              <span className="block px-1 pb-1.5 text-2xs tracking-[0.12em] uppercase text-loom-label">
                 {group.label}
               </span>
               <ul className="m-0 p-0 list-none grid grid-cols-2 gap-1">

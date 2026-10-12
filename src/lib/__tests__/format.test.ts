@@ -35,6 +35,11 @@ describe("format", () => {
     it("formats B suffix for billions", () => {
       expect(formatNumber(1_200_000_000)).toBe("1.2B");
     });
+    it("rounds compact values sensibly", () => {
+      expect(formatNumber(999_950)).toBe("1M");
+      expect(formatNumber(2_000)).toBe("2K");
+      expect(formatNumber(-5_000_000)).toBe("-5M");
+    });
   });
 
   describe("truncate", () => {

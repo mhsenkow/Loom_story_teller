@@ -13,6 +13,11 @@
 // =================================================================
 
 import scatterWgslRaw from "@/shaders/scatter.wgsl";
+import { packGpuPalette } from "./gpuPalette";
+import type { SharedGpuDeviceLease } from "./gpuDevice";
+import { parseColorToRgb } from "./webgpuColor";
+
+export { parseColorToRgb };
 
 // raw-loader may export as default string or as { default: string }
 const scatterWgsl: string =
@@ -39,19 +44,6 @@ export interface ScatterConfig {
   clearColor?: [number, number, number];
 }
 
-function parseColorToRgb(c: string): [number, number, number] {
-  const s = c.trim();
-  if (s.startsWith("#") && s.length >= 7) {
-    const r = parseInt(s.slice(1, 3), 16) / 255;
-    const g = parseInt(s.slice(3, 5), 16) / 255;
-    const b = parseInt(s.slice(5, 7), 16) / 255;
-    return [r, g, b];
-  }
-  const rgb = s.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
-  if (rgb) return [Number(rgb[1]) / 255, Number(rgb[2]) / 255, Number(rgb[3]) / 255];
-  return [0.424, 0.361, 0.906];
-}
-
 const DEFAULT_CONFIG: ScatterConfig = {
   pointSize: 4.0,
   opacity: 0.7,
@@ -59,6 +51,11 @@ const DEFAULT_CONFIG: ScatterConfig = {
 };
 
 export class LoomRenderer {
+  /** Set when device.lost fires — ChartView should fall back to Canvas (LOOM-112). */
+  deviceLost = false;
+  private initGeneration = 0;
+  private disposed = false;
+  private deviceLease: SharedGpuDeviceLease | null = null;
   private device: GPUDevice | null = null;
   private context: GPUCanvasContext | null = null;
   private computePipeline: GPUComputePipeline | null = null;
@@ -69,7 +66,10 @@ export class LoomRenderer {
   private computeBindGroup: GPUBindGroup | null = null;
   private renderBindGroup: GPUBindGroup | null = null;
   private paletteBuffer: GPUBuffer | null = null;
+  private paletteSize = 8;
   private pointCount = 0;
+  private dataCapacityBytes = 0;
+  private screenCapacityBytes = 0;
   private config: ScatterConfig = { ...DEFAULT_CONFIG };
 
   private static readonly DEFAULT_PALETTE = [
@@ -77,28 +77,34 @@ export class LoomRenderer {
     [0, 0.706, 0.847], [0.906, 0.486, 0.361], [0.635, 0.608, 0.996], [0.455, 0.725, 1],
   ];
 
-  async init(canvas: HTMLCanvasElement): Promise<boolean> {
+  async init(canvas: HTMLCanvasElement, deviceLease: SharedGpuDeviceLease): Promise<boolean> {
+    const gen = ++this.initGeneration;
+    this.disposed = false;
+    this.deviceLost = false;
     try {
       if (!navigator.gpu) {
         console.warn("WebGPU not available");
         return false;
       }
+      const { device } = deviceLease;
 
-      const adapter = await navigator.gpu.requestAdapter({
-        powerPreference: "high-performance",
-      });
-      if (!adapter) return false;
+      if (gen !== this.initGeneration || this.disposed) {
+        return false;
+      }
 
-      this.device = await adapter.requestDevice({
-        requiredLimits: {
-          maxStorageBufferBindingSize: 256 * 1024 * 1024,
-          maxBufferSize: 256 * 1024 * 1024,
-        },
+      this.deviceLease = deviceLease;
+      this.device = device;
+      void device.lost.then(() => {
+        if (gen !== this.initGeneration) return;
+        this.deviceLost = true;
+        this.device = null;
+        this.context = null;
       });
 
       this.context = canvas.getContext("webgpu") as GPUCanvasContext;
       if (!this.context) {
         console.warn("Failed to get WebGPU canvas context");
+        this.device = null;
         return false;
       }
 
@@ -111,6 +117,10 @@ export class LoomRenderer {
       });
 
       await this.createPipelines(format);
+      if (gen !== this.initGeneration || this.disposed) {
+        this.destroy();
+        return false;
+      }
       return true;
     } catch (e) {
       console.warn("WebGPU init failed:", e);
@@ -168,12 +178,12 @@ export class LoomRenderer {
     });
 
     this.uniformBuffer = this.device.createBuffer({
-      size: 36, // 9 floats × 4 bytes (incl. size_scale)
+      size: 64, // 16 floats — WGSL uniform alignment
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
 
     this.paletteBuffer = this.device.createBuffer({
-      size: 8 * 3 * 4, // 8 colors × RGB × 4 bytes
+      size: 32 * 3 * 4,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     });
   }
@@ -185,17 +195,16 @@ export class LoomRenderer {
       this.config = { ...this.config, ...config };
     }
 
-    const palette = this.config.palette && this.config.palette.length >= 8
-      ? this.config.palette.map((c) => parseColorToRgb(c))
-      : LoomRenderer.DEFAULT_PALETTE;
-    const paletteF32 = new Float32Array(24);
-    for (let i = 0; i < 8; i++) {
-      const [r, g, b] = palette[i] ?? LoomRenderer.DEFAULT_PALETTE[0]!;
-      paletteF32[i * 3 + 0] = r;
-      paletteF32[i * 3 + 1] = g;
-      paletteF32[i * 3 + 2] = b;
-    }
-    this.device.queue.writeBuffer(this.paletteBuffer, 0, paletteF32);
+    const packed = packGpuPalette(
+      this.config.palette,
+      LoomRenderer.DEFAULT_PALETTE as [number, number, number][],
+    );
+    this.paletteSize = packed.size;
+    this.device.queue.writeBuffer(
+      this.paletteBuffer,
+      0,
+      packed.floats as Float32Array<ArrayBuffer>,
+    );
 
     this.pointCount = points.length;
     if (this.pointCount === 0) return;
@@ -211,19 +220,30 @@ export class LoomRenderer {
       dataArray[i * 4 + 3] = typeof p.size === "number" ? p.size : 1; // 1 = use uniform size
     }
 
-    this.dataBuffer = this.device.createBuffer({
-      size: dataArray.byteLength,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-      mappedAtCreation: true,
-    });
-    new Float32Array(this.dataBuffer.getMappedRange()).set(dataArray);
-    this.dataBuffer.unmap();
+    const dataBytes = dataArray.byteLength;
+    const screenBytes = this.pointCount * 32;
+    if (!this.dataBuffer || this.dataCapacityBytes < dataBytes) {
+      this.dataBuffer?.destroy();
+      this.dataBuffer = this.device.createBuffer({
+        size: dataBytes,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        mappedAtCreation: true,
+      });
+      this.dataCapacityBytes = dataBytes;
+      new Float32Array(this.dataBuffer.getMappedRange()).set(dataArray);
+      this.dataBuffer.unmap();
+    } else {
+      this.device.queue.writeBuffer(this.dataBuffer, 0, dataArray);
+    }
 
-    // Screen buffer: 8 floats per point (pos, color, alpha, size, pad)
-    this.screenBuffer = this.device.createBuffer({
-      size: this.pointCount * 32,
-      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
+    if (!this.screenBuffer || this.screenCapacityBytes < screenBytes) {
+      this.screenBuffer?.destroy();
+      this.screenBuffer = this.device.createBuffer({
+        size: screenBytes,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+      });
+      this.screenCapacityBytes = screenBytes;
+    }
 
     // Recreate bind groups
     this.computeBindGroup = this.device.createBindGroup({
@@ -278,22 +298,29 @@ export class LoomRenderer {
   render(
     xMin: number, xMax: number,
     yMin: number, yMax: number,
-  ) {
+    /** Plot inset in device pixels (same space as canvas.width/height). */
+    padPx: number = 0,
+    padYPx?: number,
+  ): Promise<void> {
     if (
       !this.device || !this.context || !this.computePipeline ||
       !this.renderPipeline || !this.uniformBuffer ||
       !this.computeBindGroup || !this.renderBindGroup ||
       this.pointCount === 0
     ) {
-      return;
+      return Promise.resolve();
     }
 
     const canvas = this.context.canvas as HTMLCanvasElement | undefined;
     if (!canvas || typeof canvas.width !== "number" || typeof canvas.height !== "number") {
-      return;
+      return Promise.resolve();
     }
 
     const sizeScale = this.config.sizeScale ?? 1;
+    const padX = Math.max(0, padPx);
+    const padY = Math.max(0, padYPx ?? padPx);
+    const dpr =
+      typeof window !== "undefined" && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
     const uniforms = new Float32Array([
       canvas.width,
       canvas.height,
@@ -304,6 +331,13 @@ export class LoomRenderer {
       this.config.pointSize,
       this.config.opacity,
       sizeScale,
+      padX,
+      padY,
+      dpr,
+      this.paletteSize,
+      0,
+      0,
+      0,
     ]);
     this.device.queue.writeBuffer(this.uniformBuffer, 0, uniforms);
 
@@ -335,14 +369,18 @@ export class LoomRenderer {
     renderPass.end();
 
     this.device.queue.submit([encoder.finish()]);
+    return this.device.queue.onSubmittedWorkDone();
   }
 
   destroy() {
+    this.disposed = true;
+    this.initGeneration++;
     this.dataBuffer?.destroy();
     this.screenBuffer?.destroy();
     this.uniformBuffer?.destroy();
     this.paletteBuffer?.destroy();
-    this.device?.destroy();
+    this.deviceLease?.release();
+    this.deviceLease = null;
     this.device = null;
     this.context = null;
   }

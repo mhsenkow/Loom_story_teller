@@ -5,7 +5,7 @@
 // Visual values live in globals.css (`data-theme` / `data-ui` / `data-font`).
 // =================================================================
 
-import type { ChartVisualOverrides } from "./store";
+import type { ChartVisualOverrides } from "./chartVisualTypes";
 
 export const THEMES = [
   "light",
@@ -111,7 +111,7 @@ export type FacesSource = (typeof FACES_SOURCES)[number];
 export const DEFAULT_THEME: LookTheme = "dark";
 export const DEFAULT_UI: UiChrome = "noyes";
 export const DEFAULT_FONT: AppFont = "inter";
-export const DEFAULT_FACES: FacesSource = "auto";
+export const DEFAULT_FACES: FacesSource = "local";
 
 export function normalizeTheme(raw: string | undefined | null): LookTheme {
   if (!raw) return DEFAULT_THEME;
@@ -336,7 +336,7 @@ export const VISUAL_PRESETS: Record<VisualPresetId, { name: string; overrides: C
       showGrid: true,
       gridStyle: "dotted",
       gridOpacity: 0.28,
-      axisFontSize: 10,
+      axisFontSize: 11,
       tickCount: 5,
       barCornerRadius: 0,
       lineWidth: 2,
@@ -364,7 +364,7 @@ export const VISUAL_PRESETS: Record<VisualPresetId, { name: string; overrides: C
       gridOpacity: 0.35,
       titleFontWeight: 600,
       titleItalic: false,
-      axisFontSize: 10,
+      axisFontSize: 11,
       axisLineWidth: 1,
       tickCount: 5,
       tickRotation: 0,
@@ -411,7 +411,7 @@ export const VISUAL_PRESETS: Record<VisualPresetId, { name: string; overrides: C
       fontFamily: "Inter",
       titleFontWeight: 500,
       titleItalic: false,
-      axisFontSize: 10,
+      axisFontSize: 11,
       showGrid: true,
       gridStyle: "solid",
       gridOpacity: 0.22,
@@ -562,7 +562,7 @@ export const VISUAL_PRESETS: Record<VisualPresetId, { name: string; overrides: C
       titleFontWeight: 700,
       titleItalic: false,
       fontFamily: "JetBrains Mono",
-      axisFontSize: 10,
+      axisFontSize: 11,
       chartDetail: "deep",
       chartFrame: "focus",
       titleLayout: "slab",
@@ -647,6 +647,10 @@ const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]>
   type: ["fontFamily", "titleFontWeight", "titleItalic"],
 };
 
+export const CHART_VISUAL_OVERRIDE_KEYS: (keyof ChartVisualOverrides)[] = (
+  Object.values(SECTION_KEYS) as (keyof ChartVisualOverrides)[][]
+).flat();
+
 function pickOne<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]!;
 }
@@ -725,10 +729,18 @@ export interface IbmToolsShared {
   faces?: string;
 }
 
+type SimpleStorage = { getItem(key: string): string | null; setItem(key: string, value: string): void };
+
+function ibmToolsStorage(): SimpleStorage | undefined {
+  if (typeof globalThis === "undefined") return undefined;
+  return (globalThis as { localStorage?: SimpleStorage }).localStorage;
+}
+
 export function readIbmToolsShared(): IbmToolsShared | null {
-  if (typeof localStorage === "undefined") return null;
+  const storage = ibmToolsStorage();
+  if (!storage) return null;
   try {
-    const raw = localStorage.getItem(IBM_TOOLS_SHARED_KEY);
+    const raw = storage.getItem(IBM_TOOLS_SHARED_KEY);
     if (!raw) return null;
     return JSON.parse(raw) as IbmToolsShared;
   } catch {
@@ -737,10 +749,11 @@ export function readIbmToolsShared(): IbmToolsShared | null {
 }
 
 export function writeIbmToolsShared(partial: IbmToolsShared): void {
-  if (typeof localStorage === "undefined") return;
+  const storage = ibmToolsStorage();
+  if (!storage) return;
   try {
     const prev = readIbmToolsShared() ?? {};
-    localStorage.setItem(IBM_TOOLS_SHARED_KEY, JSON.stringify({ ...prev, ...partial }));
+    storage.setItem(IBM_TOOLS_SHARED_KEY, JSON.stringify({ ...prev, ...partial }));
   } catch {
     /* ignore */
   }

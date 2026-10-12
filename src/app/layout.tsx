@@ -7,16 +7,49 @@
 
 import type { Metadata, Viewport } from "next";
 import "@/styles/globals.css";
+import { SHELL_BOOTSTRAP_SCRIPT } from "@/lib/shellBootstrap";
+import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/themeBootstrap";
+import { APP_CSP_REPORT_ONLY } from "@/lib/appCsp";
 
 export const metadata: Metadata = {
-  title: "Loom — Data Storyteller",
-  description: "Local-first data storytelling — explore, chart, and share.",
+  metadataBase: new URL("https://loom.ibm.io"),
+  alternates: { canonical: "/" },
+  title: "Loom — turn live data into shareable charts",
+  description:
+    "Import CSV or discover live quakes, flights, and markets—build charts on your device and share a link from the browser.",
+  formatDetection: { telephone: false, address: false, email: false },
+  icons: {
+    icon: [
+      { url: "/favicon-16x16.png", sizes: "16x16", type: "image/png" },
+      { url: "/favicon-32x32.png", sizes: "32x32", type: "image/png" },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  openGraph: {
+    title: "Loom — turn live data into shareable charts",
+    description:
+      "Import CSV or discover live quakes, flights, and markets—build charts on your device and share a link from the browser.",
+    url: "https://loom.ibm.io",
+    siteName: "Loom",
+    type: "website",
+    images: [{ url: "/og.png", width: 1200, height: 630, alt: "Loom data storytelling" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Loom — turn live data into shareable charts",
+    description:
+      "Import CSV or discover live quakes, flights, and markets—build charts on your device and share a link from the browser.",
+    images: ["/og.png"],
+  },
+  manifest: "/manifest.webmanifest",
 };
 
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // Keep bottom-sheet inputs above the on-screen keyboard (Chrome / Android; iOS ignores).
+  interactiveWidget: "resizes-content",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f2f2f0" },
     { media: "(prefers-color-scheme: dark)", color: "#0a0a0c" },
@@ -29,16 +62,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" data-theme="dark" data-ui="noyes" data-font="inter" data-faces="auto" className="dark">
+    <html lang="en" data-theme="dark" data-ui="noyes" data-font="inter" data-faces="local" className="dark">
       <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Josefin+Sans:wght@400;500;600;700&family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Lora:ital,wght@0,400;0,600;0,700;1,400&family=Oswald:wght@400;500;600;700&family=Share+Tech+Mono&family=Source+Code+Pro:wght@400;500;600&family=Source+Sans+3:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap"
-          rel="stylesheet"
-        />
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: SHELL_BOOTSTRAP_SCRIPT }} />
+        <meta httpEquiv="Content-Security-Policy-Report-Only" content={APP_CSP_REPORT_ONLY} />
       </head>
-      <body className="antialiased overflow-hidden">{children}</body>
+      <body className="antialiased min-h-dvh overflow-x-hidden overflow-y-auto md:overflow-hidden">{children}</body>
     </html>
   );
 }

@@ -23,6 +23,18 @@ export interface FacetCell {
 }
 
 /** Group rows by facet column; largest groups first, capped. */
+/** Distinct facet groups not shown after the panel cap. */
+export function countFacetGroupsDropped(
+  rows: unknown[][],
+  facetIdx: number,
+  maxPanels = FACET_MAX_PANELS,
+): number {
+  if (facetIdx < 0 || rows.length === 0) return 0;
+  const keys = new Set<string>();
+  for (const r of rows) keys.add(String(r[facetIdx] ?? ""));
+  return Math.max(0, keys.size - maxPanels);
+}
+
 export function partitionRowsByFacet(
   rows: unknown[][],
   facetIdx: number,

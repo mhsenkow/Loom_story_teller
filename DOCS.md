@@ -19,13 +19,38 @@ For contributors and AI: where things live and how they connect. For a shorter a
 
 1. **Folder selection** — User picks a folder (Tauri dialog or, on web, file input). Frontend calls `scanFolder(folderPath)` → Rust `scan_folder` → DuckDB scans directory, returns `FileEntry[]`. Store: `mountedFolder`, `files`, `isScanning`.
 2. **File selection** — User clicks a file. Frontend calls `inspectFile(filePath)` → Rust `inspect_file` → DuckDB returns column stats + sample rows. Store: `selectedFile`, `columnStats`, `sampleRows`, and a Vega-Lite spec is derived (or built from recommendations).
-3. **Chart suggestions** — `recommendations.ts` builds candidate specs from column types and names; optional Ollama call suggests one. User clicks a suggestion or encoding; store updates `activeChart`, `vegaSpec`, and optional `encodingOverrides`.
-4. **Rendering** — `ChartView` uses `vegaSpec` + `sampleRows`: WebGPU for point marks, Canvas 2D or Vega for bar/line/area/arc. Export handlers (PNG/SVG) read from a ref that’s updated with the current spec and canvas.
+3. **Chart suggestions** — `recommendations.ts` (barrel over `src/lib/recs/`) builds candidate specs from column types and names; optional Ollama call suggests one. User clicks a suggestion or encoding; store updates `activeChart`, `vegaSpec`, and optional `encodingOverrides`.
+4. **Rendering** — `ChartView` builds portable Vega-Lite specs but **on-screen** charts are drawn with Canvas 2D (all bar/line/area/map kinds) and **gated WebGPU** for eligible dense scatters. Vega’s renderer is used for **SVG export** only, not live pixels. Export handlers (PNG/SVG) read from a ref updated with the current spec and canvas.
 5. **Open data catalogs** — Data & sources searches Data.gov / data.gov.uk (Tauri IPC or browser via Worker `/api/catalog/*` + `/api/fetch-csv`). Web Explore parses CSV in `mock-data.ts` (`parseCsvToInspectResult`: quoted newlines, thousands separators, trim incomplete trailing records, reject xlsx). Recommendations prefer mean for rate/% fields and boost lat×lon scatters.
 6. **Wikipedia live stream** — `stream_start` / `stream_stop` / `stream_snapshot` / `stream_query` (Rust `stream.rs`) append to DuckDB `wiki_stream`. Sidebar starts the stream; chart stories use `recommendStreamStory`; Query view uses `STREAM_SQL_SNIPPETS` and routes SQL for `stream://wiki`.
-7. **Poll-based sources** — 30 feeds registered in `src/lib/sourceRegistry.ts` (USGS quakes, NASA EONET events, GDACS disaster alerts, NWS alerts, weather + air quality for 12 cities, UK grid carbon, NOAA global temperature since 1880, NOAA ocean buoys, live aircraft, Citi Bike docks, MBTA vehicles, NYC 311, ISS, launches, SpaceX, NOAA space weather, NOAA aurora forecast, JPL asteroid close approaches, Hacker News, Wikipedia most-read, Steam top games, crypto, Bitcoin blocks, FX history, US national debt, FEMA, COVID, countries, World Bank). Columnar feeds (the newer eight) come from the Worker as `{ columns, rows }` and parse by column name (`parseColumnar`); `SOURCE_MAX_ROWS` raises the 8k buffer cap per kind (debt keeps all ~8.4k days). Desktop: `source_start` / `source_stop` / `source_snapshot` / `source_query` (Rust `sources.rs`) fill one DuckDB table per kind. Web: the Worker's `/api/source/<kind>` proxies + caches each upstream (Cache API, per-kind TTL, stale-on-error, fetch timeouts; fallbacks: CoinGecko → CoinPaprika, OpenSky → ADSB.lol) and `webStreams.ts` parses into in-memory buffers (≤8k rows). Explore loads the whole buffer (`SOURCE_EXPLORE_ROWS`). Sidebar cards are grouped by `SourceDef.group`; `recommendSourceStory` + `SOURCE_SQL_SNIPPETS` give each feed its opening charts and SQL; `discoverStories.ts` writes the headline hook.
+7. **Poll-based sources** — 34 feeds registered in `src/lib/sourceRegistry.ts` (USGS quakes, NASA EONET events, GDACS disaster alerts, NWS alerts, weather + air quality for 12 cities, UK grid carbon, NOAA global temperature since 1880, NOAA ocean buoys, live aircraft, Citi Bike docks, MBTA vehicles, NYC 311, ISS, launches, SpaceX, NOAA space weather, NOAA aurora forecast, JPL asteroid close approaches, Hacker News, Wikipedia most-read, Steam top games, crypto, Bitcoin blocks, FX history, US national debt, FEMA, COVID, countries, World Bank). Columnar feeds (the newer eight) come from the Worker as `{ columns, rows }` and parse by column name (`parseColumnar`); `SOURCE_MAX_ROWS` raises the 8k buffer cap per kind (debt keeps all ~8.4k days). Desktop: `source_start` / `source_stop` / `source_snapshot` / `source_query` (Rust `sources.rs`) fill one DuckDB table per kind. Web: the Worker's `/api/source/<kind>` proxies + caches each upstream (Cache API, per-kind TTL, stale-on-error, fetch timeouts; fallbacks: CoinGecko → CoinPaprika, OpenSky → ADSB.lol) and `webStreams.ts` parses into in-memory buffers (≤8k rows). Explore loads the whole buffer (`SOURCE_EXPLORE_ROWS`). Sidebar cards are grouped by `SourceDef.group`; `recommendSourceStory` + `SOURCE_SQL_SNIPPETS` give each feed its opening charts and SQL; `discoverStories.ts` writes the headline hook.
 8. **Curated packs + web CSV** — Sidebar `CURATED_OPEN_PACKS` are complete CSVs (OWID per-indicator grapher files, Keeling curve, NASA exoplanets, WRI power plants, US cities) fetched via `/api/fetch-csv`. `parseCsvToInspectResult` keeps rows up to a cell budget (`WEB_CSV_CELL_BUDGET` 1.5M cells, ≤60k rows) and charts every kept row; demo files chart all rows.
 9. **Socrata + TidyTuesday** — `PublicCatalogSections.tsx` (rendered by Sidebar's Data & sources after the curated packs) over pure helpers in `src/lib/publicCatalogs.ts`. Both upstreams send CORS `*`, so search runs straight from the browser / Tauri webview (no Worker route). *City & state open data*: Socrata Discovery API (`api.us.socrata.com/api/catalog/v1?only=dataset`, optional `domains=` / `order=`); `parseSocrataSearch` keeps tabular datasets only (drops maps, filtered views, attached files). Explore loads SODA CSV `https://<domain>/resource/<id>.csv?$limit=N` where `socrataRowLimit` sizes N to `SOCRATA_CELL_TARGET` (1M cells, ≤50k rows) from the column count; the toast says "first N rows (the portal has more)" when the cap is hit. Don't add `$order` — sorting a big table server-side takes minutes. *TidyTuesday*: `static/tt_data_type.csv` → `parseTidyTuesdayIndex` (csv/tsv only; files at `data/<year column>/<date>/<file>`), week titles lazily from each year's `data/<year>/readme.md` table. `parseCsvToInspectResult` sniffs the delimiter from the header (`sniffCsvDelimiter`: comma / tab / semicolon), so TSV and `;` files parse. Web loads go through `handleLoadRemoteCsv` (`/api/fetch-csv`); desktop uses Save to folder.
+
+### Browser ingestion and persistence (web / iOS shell)
+
+When `isDesktop()` is false, there is no DuckDB folder scan. Own-data flows use this pipeline:
+
+| Step | Module | Notes |
+|------|--------|--------|
+| Format registry | `src/lib/webFormats.ts` | CSV, TSV, JSON, NDJSON/JSONL, Parquet, XLSX — extensions, MIME types, text vs binary |
+| Picker / drop | `Sidebar`, `webFolderPick.ts` | File System Access API or `<input>`; linked-folder handles where supported |
+| Parse | `src/lib/webIngest.ts` | Produces `{ stats, sample }` like `inspectFile`; CSV path shares `parseCsvToInspectResult` cell/row caps |
+| In-memory cache | `store.webFileCache` | Fast reopen within a session |
+| Durable store | `src/lib/webFileStore.ts` | IndexedDB `loom-web-files` / store `inspects`; max **24** entries, LRU by `updatedAt` |
+| Vault paths | `src/lib/webDataFolder.ts` | `web://…` paths under `WEB_VAULT_PATH`; Recent list in `persist.ts` |
+| Hydrate on load | `HydrateStore.tsx` | Merges IDB payloads into cache + file list after refresh |
+| Remote CSV | Worker `/api/fetch-csv` | Shared `#chart=` links with `url` require user confirm before fetch (`WebSessionResume`) |
+
+**Identity:** Re-import of the same filename updates the same `web://` path and IDB row. **Desktop difference:** DuckDB owns full-folder SQL (`query_file` / `source_query` with read-only policy in Rust), native save-to-folder, and stream/source tables; web keeps samples in memory/IDB, runs **no DuckDB** (Query view uses the mock path unless `isDesktop()`), and polls live feeds via the Worker into `webStreams` buffers (see item 7).
+
+**Desktop DuckDB lifetime:** The Tauri backend uses `Connection::open_in_memory()` (`src-tauri/src/db.rs`). Poll/stream tables are created once at app startup via `ensure_tables` / `ensure_stream_table`; schema-drift repair (drop + recreate when column names/types no longer match `sourceRegistry.ts`) therefore only applies **within a running session**, not across app restarts. `source_start` does not re-run full migration — tables already exist from setup.
+
+### Cloudflare Worker (`workers/catalog-proxy.ts`)
+
+Serves the static export (`ASSETS`) and JSON/HTML API routes: `/api/catalog/us|uk`, `/api/fetch-csv` (SSRF-guarded, origin-gated), `/api/source/<kind>` (cached upstream proxies), `/api/stories` + `/s/<id>` (published stories), `/api/feedback`. Policy helpers live in `src/lib/workerCatalogPolicy.ts` (cache schema version, catalog row clamps, story byte limits). Local full-stack preview: `npm run build` + `wrangler dev` (Docker `serve out` alone has no `/api/*`).
+
+**Adding a format:** extend `WEB_FORMATS` → branch in `webIngest.ts` → wire Sidebar accept filters; do not add a parallel global cache.
 
 ---
 
@@ -52,7 +77,8 @@ Components subscribe to slices; avoid putting derived data that changes often in
 
 All Rust commands are in `src-tauri/src/commands.rs`. Ingestion helpers live in `stream.rs` (SSE) and `sources.rs` (HTTP polls). Frontend wrappers in `src/lib/tauri.ts`:
 
-- Use `isTauri()` to branch; in browser, many calls fall back to `mock-data.ts`.
+- Use `isDesktop()` for DuckDB / folder-mount IPC; `isTauri()` means any shell (macOS or iOS). Browser and the iPad/iPhone shell share the web data path (`webStreams`, catalog Worker).
+- **iOS (web-parity):** `npm run tauri ios init` once; `make tablet` for sim/device; `make tablet-weave` for an App Store IPA; `make tablet-xcode` to Archive in Xcode. Team `WC44W2QVE4`, bundle `com.loom.storyteller`. Mobile Rust skips DuckDB (`src-tauri/src/mobile.rs`).
 - Never call `invoke()` directly from UI code; use the typed functions from `tauri.ts`.
 
 Adding a new command:
@@ -65,7 +91,7 @@ Adding a new command:
 
 ## Chart pipeline
 
-- **Spec generation** — `src/lib/vega.ts`: `buildScatterSpec`, `buildBarSpec`, `buildLineSpec`, etc. They take column names, types, and options and return Vega-Lite JSON.
+- **Spec generation** — live specs are built in `createChartRec` (`src/lib/recs/createChartRec.ts`). `src/lib/vega.ts` (`generateScatterSpec`, `generateBarSpec`, …) has no importers today and is kept only as reference builders. `src/lib/chartSpecParity.ts` declares per kind whether the spec is `native`, a `stand-in`, or `none` (LOOM-543; enforced by `chartSpecParity.test.ts`).
 - **Recommendations** — `src/lib/recommendations.ts`: `ChartKind` covers classic canvas kinds (scatter → sankey / network / arc diagram, plus dumbbell / ridgeline / hexbin / funnel / parallel), 20 odd Canvas kinds (`oddCharts.ts`), and 6 GPU/3D scene kinds (`gpuScenes.ts`: `scatter3d`, `trailRibbon`, `quakeTerrain`, `firefly`, `loomWeave`, `dataCube`) with optional `zField` / `timeField` / `trailId`. Flow graphs share `src/lib/flowGraphs.ts`. `recommend()` for arbitrary files; `recommendStorySequence()` for multi-chart dashboards; `recommendStreamStory()` / `recommendSourceStory()` for `wiki_stream` and poll-source schemas (often `spec: {}` with `xField`/`yField` — WebGPU scatter reads those when `spec.encoding` is missing). `STREAM_SQL_SNIPPETS` and `SOURCE_SQL_SNIPPETS` feed the Query view. Returns `ChartRecommendation[]` with encoding fields used by `ChartView`. Capabilities / honesty labels live in `chartSupport.ts`. Before diversify, `recommend()` applies local **viz preference boosts** from swipe feedback (`src/lib/vizPreferences.ts` + cached model hydrated from `loom-viz-preferences`).
 - **Deep scan + swipe deck** — `src/lib/deepScan.ts` builds a `DatasetProfile` (pairwise Pearson, nominal contingency, skew/entropy) then `deepRecommend()` expands/re-ranks candidates into a ~12–20 chart deck. Mobile **✦ Swipe ideas** (suggestions header) / desktop **Deep scan** (ChartView) opens `VizSwipeDeck`: swipe right = Keep (apply chart + like), left = Skip (dislike). Preferences stay on-device; they re-rank future `recommend()` and deep scans. No cloud learning in v1.
 - **Rendering** — `ChartView.tsx`:
@@ -106,7 +132,7 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 ## Mobile shell & sharing
 
 - **Start here** — `StartHere.tsx` is the shared empty state (Explorer / Chart / Query / Dive): discover scan (`requestDiscoverScan`) first, then `openDataSources()`. Opening a discover story sets the story hook as the chart title override.
-- **Shell** — phones (<768px): TopBar shows view tabs + **Share** (chart view); Edit / ✦ Swipe ideas live in the suggestions header; Settings is a panel tab. `useMobileLiveEdit()` (`useMediaQuery.ts`): Chart view + Chart/Smart panel tab → the panel is an undimmed `MOBILE_LIVE_EDIT_SHEET`-tall sheet, `<main>` pads its bottom by the same height, and the suggestions rail hides so the chart re-fits above the editor. `<main>` only collapses for Data & sources while the sidebar is actually open (closing the drawer also clears `dataSourcesExpanded`). Toasts sit at the top on phones; the note button hides under drawers/sheets. Touch-only CSS in `globals.css`: 16px form fields (no iOS focus zoom), hover-only controls revealed under `(hover: none)`.
+- **Shell modes** — cutoffs match `chartViewport.detectDevice` (`src/lib/shellLayout.ts` + `useShellMode()`): **phone** `<768`, **tablet** `768–1099`, **desktop** `≥1100`. Phone: sidebar + detail are overlays/sheets, both closed by default. Tablet: sidebar overlays (closed by default), detail panel docks at `--panel-width: 280px` and opens by default. Desktop: both dock; drawer prefs restore from `sessionStorage` (`loom-shell-desktop-prefs`) when leaving Split View / Stage Manager. Store defaults start closed to avoid mobile CLS; `useLayoutEffect` in `page.tsx` applies mode policy on enter. Help: `requestHelp()` (sidebar on phone/tablet, Settings tab). `useMobileLiveEdit()`: Chart view + Chart/Smart panel → undimmed `MOBILE_LIVE_EDIT_SHEET` sheet + `<main>` bottom pad. `<main>` only collapses for Data & sources while the sidebar is open. Touch CSS in `globals.css`: 16px form fields (no iOS focus zoom), hover-only controls under `(hover: none)`.
 - **Stats** — column profile (distinct / nulls / min / max) plus a **Source** card (`dataProvenance.ts`): live-feed homepage + attribution from `sourceRegistry`, catalog/pack CSV URL + guessed website, shared-snapshot capture time and origin path. Always a path back to where the rows came from.
 - **Share sheet** — `ShareSheet.tsx` (store `shareSheetOpen`) pre-renders via `capturePlatformPng` on open / format / headline change so `navigator.share({ files })` runs inside the tap (iOS drops share after slow async work). Captures are serialized (overlapping runs would restore each other's forced stage) and lay out at ~450 CSS px × ~2.4 pixel ratio so type reads at feed size. **Get link** builds `buildChartSharePageHtml` (JPEG) and POSTs `/api/stories` with an optional capped **data snapshot** (`shareLineage.ts` → `/s/{id}.data`); the Worker hosts the og image at `/s/{id}.img`, rewrites `og:image` / `twitter:image`, and points “Open with shared data” at `/#story={id}`. `WebSessionResume` hydrates that snapshot so the chart rebuilds from the frozen rows (7-day TTL). The Export tab keeps the long tail (SVG, carousel, video, bundle).
 - **Chart links** — `src/lib/chartLink.ts` (pure): `chartLinkFromState` → `encodeChartLink` / `decodeChartLink` (`#chart=` base64url JSON, `v: 1`, short keys, defaults/undefined omitted, no rows or spec). Carries `src` (stream / `mock://` / `web://` path; local files only as `file:<name>`), `u` (catalog CSV URL for `web://`), the rec's kind + every encoding (`x y c s z t tr r g o op a tf tk`) + title/subtitle, headline override (`h`), primitive `chartVisualOverrides` (`vo`), `barStackMode`, trail/marginals, `chartAspect` / `chartDevice`. Data-cube slice / pivot-table toggles are ChartView-local and not shared (the pivoted axes are, via the encodings). `ChartLinkSync.tsx` (rendered by `WebSessionResume`) mirrors the setup into the hash while in Chart view (debounced `replaceState`; clears `#chart=` when leaving Chart, never touches `#dive=`), and applies a pending store `chartLink` once its dataset is open (`chartLinkMatchesFile`): `restoreChartRec` prefers an identical rail rec, else `createChartRec` (so Encoding stays in sync), else a field-only rec; then overrides, headline, stack mode, framing, Chart view. `WebSessionResume` reads `#chart=` on load like `#dive=`: streams and `mock://` open themselves, `web://` refetches `u`, local files toast and wait for the recipient to open a file with the same name. Onboarding skips the first-visit discover modal when a shared link is in the hash. Share sheet: **🔗 Copy chart link** (web only; built synchronously from the store so the clipboard write stays in the tap) and **Get link** pages whose CTA is *Open this chart in Loom* (`openUrl` in `buildChartSharePageHtml`).
@@ -182,8 +208,13 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 | File | Purpose |
 |------|---------|
 | `src-tauri/src/db.rs` | DuckDB connection, `scan_folder`, `query_file`, `get_column_stats`, `inspect_file`. Table name for the active file is `loom_active`. |
-| `src/lib/vega.ts` | Vega-Lite spec builders; used by ChartView and recommendations. |
-| `src/lib/recommendations.ts` | Heuristic chart suggestions from schema. |
+| `src/lib/vega.ts` | Reference Vega-Lite builders (no importers; live specs come from `recs/createChartRec.ts`). |
+| `src/lib/recommendations.ts` | Stable barrel re-exporting `src/lib/recs/*` (`types`, `columns`, `createChartRec`, `recommend`, `recommendSeeded`, `random`, `expand`, `sourceStory`, `sqlSnippets`). |
+| `src/lib/chartSpecParity.ts` | Per-`ChartKind` portability tier (native / stand-in / none) for the Vega-Lite spec. |
+| `src/lib/canvasCharts/*` | Pure Canvas 2D renderers (`renderFull*`) extracted from `ChartView.tsx`; unit-smoked in `canvasChartsRenderers.test.ts`. |
+| `src/lib/datasetPipeline.ts` | `activateDataset` (open → recommend → select with the per-dataset reset) and `applyQueryResult` (QueryView "Chart this"). Use these instead of hand-rolling setSampleRows/setChartRecs sequences. |
+| `src/lib/store/*` | Zustand slice creators composed into `useLoomStore` (`queryLibrarySlice`, `tableSlice`); further slices are LOOM-552 follow-up. |
+| `workers/__tests__/*` | Worker handler tests (`catalogProxyHandlers.test.ts`: fetch-csv, source cache, stories, feedback) with fake `caches` / KV / `fetch`; run by `npm run test:node` and type-checked by `check:worker`. |
 | `src/lib/ollama.ts` | Ollama API for “Suggest with AI”. |
 | `src/lib/webgpu.ts` | WebGPU device, pipeline, buffer upload, draw for scatter. |
 | `src/components/ChartView.tsx` | Main chart area, suggestion grid, Smart overlays (anomaly/trend/forecast/ref lines/clusters), title edit, export handler registration. |
@@ -208,14 +239,16 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 
 ## Testing
 
-Unit tests live under `src/lib/__tests__/` and are run with **Vitest** (`npm run test` or `npm run test:run`; `make test`). They cover:
+| Gate | Command | Scope |
+|------|---------|--------|
+| Fast local | `make check` | Root `tsc`, catalog Worker `tsc`, `cargo check`, Vitest (`src/lib`, `mcp/src`) |
+| Full CI mirror | `make ci` | Above + MCP `tsc`, `next build`, `cargo fmt/clippy/test` |
+| DOM harness | `npm run test:dom` | `vitest.dom.config.ts` (hydration / component smoke) |
+| Coverage (optional) | `npm run test:coverage` | V8 report; thresholds ratchet in `vitest.config.ts` |
 
-- **format.test.ts** — `formatBytes`, `formatNumber`, `truncate`, `extensionIcon`
-- **smartAnalytics.test.ts** — `runAnomaly`, `runForecast`, `runTrend`, `runReferenceLines`, `runClustering`, and low-level anomaly helpers
-- **store.test.ts** — Zustand store: initial state, `setPanelTab`, `setSmartResults`, `setActiveChart`, `setChartVisualOverrides`, `reset`, etc.
-- **recommendations.test.ts** — `createChartRec`, `createScatterRec`, `CHART_KIND_OPTIONS`, `getRecommendationReason`
+Vitest defaults to **Node**; browser-only behavior uses per-file `@vitest-environment` or the DOM project. Root `tsc` does **not** type-check `workers/` or `mcp/` — use `npm run check:worker` and `npm run check:mcp`.
 
-Run `make test` or `npm run test:run` to confirm everything passes.
+Run `make test` for Vitest only; run `make ci` before tagging releases.
 
 ---
 

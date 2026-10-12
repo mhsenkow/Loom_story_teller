@@ -7,6 +7,7 @@ import {
   anomalyRowIndices,
   buildCorrMatrix,
   buildPareto,
+  invScaleY,
   normalizeSeriesValues,
   pearsonR,
   residualYs,
@@ -66,6 +67,19 @@ describe("dsTransforms", () => {
     const d = scaleDomain(1, 1000, "log");
     expect(scaleY(1, d.min, d.max, "log")).toBeCloseTo(0, 5);
     expect(scaleY(1000, d.min, d.max, "log")).toBeCloseTo(1, 5);
+  });
+
+  it("invScaleY reverses scaleY for log and symlog", () => {
+    const d = scaleDomain(1, 1000, "log");
+    for (const v of [1, 10, 100, 1000]) {
+      const t = scaleY(v, d.min, d.max, "log");
+      expect(invScaleY(t, d.min, d.max, "log")).toBeCloseTo(v, 5);
+    }
+    const s = scaleDomain(-50, 200, "symlog");
+    for (const v of [-50, 0, 50, 200]) {
+      const t = scaleY(v, s.min, s.max, "symlog");
+      expect(invScaleY(t, s.min, s.max, "symlog")).toBeCloseTo(v, 5);
+    }
   });
 
   it("anomalyRowIndices flags outliers", () => {

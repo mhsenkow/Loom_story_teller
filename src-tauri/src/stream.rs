@@ -1,28 +1,26 @@
 // =================================================================
 // Loom — Wikimedia Live Stream Ingestion
 // =================================================================
-// Connects to Wikimedia EventStreams (Server-Sent Events) and
-// buffers edit events into DuckDB for Scuba-style interactive
-// analytics: time bucketing, breakdowns by wiki/namespace/bot,
-// anomaly detection, and live dashboards.
-//
-// Architecture:
-//   Frontend starts/stops the stream via IPC commands.
-//   A background tokio task reads SSE, parses JSON, and
-//   batch-inserts rows into a DuckDB table `wiki_stream`.
-//   The frontend polls `stream_snapshot` to get current data.
-// =================================================================
 
 use crate::db::{ColumnInfo, LoomDb, QueryResult};
-use duckdb::params;
+use crate::http_client::build_loom_sse_client;
+use crate::query_engine;
+use duckdb::types::{TimeUnit, Value as DbValue};
+use duckdb::{appender_params_from_iter, params};
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex as TokioMutex;
+use tokio::task::JoinHandle;
 
 const STREAM_URL: &str = "https://stream.wikimedia.org/v2/stream/recentchange";
 const MAX_BUFFER_ROWS: usize = 50_000;
 const BATCH_INSERT_SIZE: usize = 50;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
+const MAX_BACKOFF_SECS: u64 = 30;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WikiEditEvent {
@@ -51,24 +49,34 @@ pub struct StreamStatus {
     pub wikis_seen: u32,
     pub started_at: Option<i64>,
     pub uptime_secs: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 pub struct StreamState {
     pub running: Arc<AtomicBool>,
-    pub total_events: Arc<std::sync::atomic::AtomicU64>,
+    pub total_events: Arc<AtomicU64>,
     pub started_at: Arc<TokioMutex<Option<i64>>>,
-    pub cancel_token: Arc<TokioMutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    cancel_token: Arc<TokioMutex<Option<tokio::sync::oneshot::Sender<()>>>>,
+    cancel_flag: Arc<AtomicBool>,
     events_last_check: Arc<TokioMutex<(u64, std::time::Instant)>>,
+    generation: Arc<AtomicU64>,
+    worker: Arc<TokioMutex<Option<(u64, JoinHandle<()>)>>>,
+    last_error: Arc<TokioMutex<Option<String>>>,
 }
 
 impl StreamState {
     pub fn new() -> Self {
         Self {
             running: Arc::new(AtomicBool::new(false)),
-            total_events: Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            total_events: Arc::new(AtomicU64::new(0)),
             started_at: Arc::new(TokioMutex::new(None)),
             cancel_token: Arc::new(TokioMutex::new(None)),
+            cancel_flag: Arc::new(AtomicBool::new(false)),
             events_last_check: Arc::new(TokioMutex::new((0, std::time::Instant::now()))),
+            generation: Arc::new(AtomicU64::new(0)),
+            worker: Arc::new(TokioMutex::new(None)),
+            last_error: Arc::new(TokioMutex::new(None)),
         }
     }
 
@@ -97,11 +105,9 @@ impl StreamState {
             .lock()
             .ok()
             .and_then(|c| {
-                c.query_row(
-                    "SELECT COUNT(*) FROM wiki_stream",
-                    params![],
-                    |r| r.get::<_, i64>(0),
-                )
+                c.query_row("SELECT COUNT(*) FROM wiki_stream", params![], |r| {
+                    r.get::<_, i64>(0)
+                })
                 .ok()
             })
             .unwrap_or(0) as u64;
@@ -128,12 +134,13 @@ impl StreamState {
             wikis_seen,
             started_at: started,
             uptime_secs: uptime,
+            last_error: self.last_error.lock().await.clone(),
         }
     }
 }
 
 pub fn ensure_stream_table(db: &LoomDb) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_connection();
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS wiki_stream (
             id BIGINT,
@@ -155,7 +162,7 @@ pub fn ensure_stream_table(db: &LoomDb) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-fn parse_sse_event(data: &str) -> Option<WikiEditEvent> {
+pub(crate) fn parse_sse_event(data: &str) -> Option<WikiEditEvent> {
     let v: serde_json::Value = serde_json::from_str(data).ok()?;
     let obj = v.as_object()?;
     let meta = obj.get("meta")?.as_object()?;
@@ -174,10 +181,7 @@ fn parse_sse_event(data: &str) -> Option<WikiEditEvent> {
         user: obj.get("user")?.as_str().unwrap_or("anonymous").to_string(),
         bot: obj.get("bot").and_then(|v| v.as_bool()).unwrap_or(false),
         minor: obj.get("minor").and_then(|v| v.as_bool()).unwrap_or(false),
-        namespace: obj
-            .get("namespace")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as i32,
+        namespace: obj.get("namespace").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
         edit_type: obj.get("type")?.as_str().unwrap_or("edit").to_string(),
         old_len: obj
             .get("length")
@@ -211,42 +215,81 @@ fn parse_sse_event(data: &str) -> Option<WikiEditEvent> {
     })
 }
 
-fn batch_insert(db: &LoomDb, events: &[WikiEditEvent]) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(
-            "INSERT INTO wiki_stream (id, wiki, title, \"user\", bot, minor, namespace, edit_type, old_len, new_len, delta, ts, server_name, comment)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, to_timestamp(?), ?, ?)",
-        )
-        .map_err(|e| e.to_string())?;
+/// Append raw SSE bytes and return complete decoded lines (UTF-8 safe across chunk boundaries).
+pub(crate) fn drain_sse_lines(line_buf: &mut Vec<u8>, chunk: &[u8]) -> Vec<String> {
+    line_buf.extend_from_slice(chunk);
+    let mut out = Vec::new();
+    while let Some(pos) = line_buf.iter().position(|&b| b == b'\n') {
+        let mut line_bytes: Vec<u8> = line_buf.drain(..=pos).collect();
+        line_bytes.pop();
+        if line_bytes.last() == Some(&b'\r') {
+            line_bytes.pop();
+        }
+        let line = match std::str::from_utf8(&line_bytes) {
+            Ok(s) => s.to_string(),
+            Err(_) => String::from_utf8_lossy(&line_bytes).into_owned(),
+        };
+        out.push(line);
+    }
+    out
+}
 
-    for ev in events {
-        let _ = stmt.execute(params![
-            ev.id,
-            ev.wiki,
-            ev.title,
-            ev.user,
-            ev.bot,
-            ev.minor,
-            ev.namespace,
-            ev.edit_type,
-            ev.old_len,
-            ev.new_len,
-            ev.delta,
-            ev.timestamp,
-            ev.server_name,
-            ev.comment,
-        ]);
+pub(crate) fn reconnect_backoff_secs(attempt: u32) -> u64 {
+    (1u64 << attempt.min(5)).min(MAX_BACKOFF_SECS)
+}
+
+pub(crate) fn should_clear_running(task_generation: u64, current_generation: u64) -> bool {
+    task_generation == current_generation
+}
+
+fn batch_insert(db: &LoomDb, events: &[WikiEditEvent]) -> Result<(), String> {
+    if events.is_empty() {
+        return Ok(());
+    }
+    let conn = db.lock_connection();
+    conn.execute_batch("BEGIN TRANSACTION")
+        .map_err(|e| e.to_string())?;
+    let result = (|| {
+        let mut appender = conn.appender("wiki_stream").map_err(|e| e.to_string())?;
+        for ev in events {
+            appender
+                .append_row(appender_params_from_iter([
+                    DbValue::BigInt(ev.id),
+                    DbValue::Text(ev.wiki.clone()),
+                    DbValue::Text(ev.title.clone()),
+                    DbValue::Text(ev.user.clone()),
+                    DbValue::Boolean(ev.bot),
+                    DbValue::Boolean(ev.minor),
+                    DbValue::Int(ev.namespace),
+                    DbValue::Text(ev.edit_type.clone()),
+                    DbValue::BigInt(ev.old_len),
+                    DbValue::BigInt(ev.new_len),
+                    DbValue::BigInt(ev.delta),
+                    DbValue::Timestamp(
+                        TimeUnit::Microsecond,
+                        ev.timestamp.saturating_mul(1_000_000),
+                    ),
+                    DbValue::Text(ev.server_name.clone()),
+                    DbValue::Text(ev.comment.clone()),
+                ]))
+                .map_err(|e| e.to_string())?;
+        }
+        appender.flush().map_err(|e| e.to_string())
+    })();
+    match result {
+        Ok(()) => conn.execute_batch("COMMIT").map_err(|e| e.to_string())?,
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            return Err(e);
+        }
     }
     Ok(())
 }
 
 fn trim_buffer(db: &LoomDb) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_connection();
     let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM wiki_stream", params![], |r| {
-            r.get(0)
-        })
+        .query_row("SELECT COUNT(*) FROM wiki_stream", params![], |r| r.get(0))
         .map_err(|e| e.to_string())?;
 
     if count > MAX_BUFFER_ROWS as i64 {
@@ -260,20 +303,48 @@ fn trim_buffer(db: &LoomDb) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn start_stream(
-    db: Arc<LoomDb>,
-    state: Arc<StreamState>,
-) -> Result<(), String> {
-    if state.running.load(Ordering::Relaxed) {
+async fn probe_stream_connect(client: &reqwest::Client) -> Result<(), String> {
+    let response = client
+        .get(STREAM_URL)
+        .header("Accept", "text/event-stream")
+        .timeout(CONNECT_TIMEOUT)
+        .send()
+        .await
+        .map_err(|e| format!("Stream connect failed: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!("Stream connect failed: HTTP {}", response.status()));
+    }
+    Ok(())
+}
+
+pub async fn start_stream(db: Arc<LoomDb>, state: Arc<StreamState>) -> Result<(), String> {
+    if state
+        .running
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+        .is_err()
+    {
         return Err("Stream already running".to_string());
     }
 
     ensure_stream_table(&db)?;
+    *state.last_error.lock().await = None;
 
-    let (cancel_tx, mut cancel_rx) = tokio::sync::oneshot::channel::<()>();
+    let client = build_loom_sse_client()?;
+    if let Err(e) = probe_stream_connect(&client).await {
+        state.running.store(false, Ordering::Relaxed);
+        *state.last_error.lock().await = Some(e.clone());
+        return Err(e);
+    }
+
+    if let Some((_, handle)) = state.worker.lock().await.take() {
+        handle.abort();
+    }
+
+    let my_gen = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
+    state.cancel_flag.store(false, Ordering::Relaxed);
+    let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
     *state.cancel_token.lock().await = Some(cancel_tx);
 
-    state.running.store(true, Ordering::Relaxed);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -283,187 +354,232 @@ pub async fn start_stream(
 
     let db_clone = db.clone();
     let state_clone = state.clone();
+    let cancel_flag = state.cancel_flag.clone();
+    let handle = tokio::spawn(async move {
+        run_stream_worker(
+            db_clone,
+            state_clone,
+            client,
+            cancel_rx,
+            cancel_flag,
+            my_gen,
+        )
+        .await;
+    });
+    *state.worker.lock().await = Some((my_gen, handle));
 
-    tokio::spawn(async move {
-        let client = match reqwest::Client::builder()
-            .user_agent("Loom-Data-Storyteller/1.0 (local analytics tool)")
-            .build()
-        {
-            Ok(c) => c,
-            Err(_) => {
-                state_clone.running.store(false, Ordering::Relaxed);
-                return;
+    Ok(())
+}
+
+async fn run_stream_worker(
+    db: Arc<LoomDb>,
+    state: Arc<StreamState>,
+    client: reqwest::Client,
+    mut cancel_rx: tokio::sync::oneshot::Receiver<()>,
+    cancel_flag: Arc<AtomicBool>,
+    my_gen: u64,
+) {
+    let mut buffer: Vec<WikiEditEvent> = Vec::with_capacity(BATCH_INSERT_SIZE);
+    let mut line_buf: Vec<u8> = Vec::new();
+    let mut last_event_id: Option<String> = None;
+    let mut reconnect_attempt: u32 = 0;
+    let mut trim_counter: u32 = 0;
+
+    'reconnect: loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            break;
+        }
+        if state.generation.load(Ordering::Acquire) != my_gen {
+            break;
+        }
+
+        let mut req = client.get(STREAM_URL).header("Accept", "text/event-stream");
+        if let Some(ref id) = last_event_id {
+            req = req.header("Last-Event-ID", id);
+        }
+
+        let response = match req.send().await {
+            Ok(r) if r.status().is_success() => r,
+            Ok(r) => {
+                let msg = format!("Stream HTTP {}", r.status());
+                log::warn!("wiki stream: {}", msg);
+                *state.last_error.lock().await = Some(msg);
+                reconnect_attempt = reconnect_attempt.saturating_add(1);
+                let wait = reconnect_backoff_secs(reconnect_attempt);
+                tokio::select! {
+                    _ = &mut cancel_rx => break 'reconnect,
+                    _ = tokio::time::sleep(Duration::from_secs(wait)) => continue 'reconnect,
+                }
+            }
+            Err(e) => {
+                let msg = format!("Stream read failed: {}", e);
+                log::warn!("wiki stream: {}", msg);
+                *state.last_error.lock().await = Some(msg);
+                reconnect_attempt = reconnect_attempt.saturating_add(1);
+                let wait = reconnect_backoff_secs(reconnect_attempt);
+                tokio::select! {
+                    _ = &mut cancel_rx => break 'reconnect,
+                    _ = tokio::time::sleep(Duration::from_secs(wait)) => continue 'reconnect,
+                }
             }
         };
 
-        let response = match client.get(STREAM_URL).send().await {
-            Ok(r) => r,
-            Err(_) => {
-                state_clone.running.store(false, Ordering::Relaxed);
-                return;
-            }
-        };
-
-        let mut buffer: Vec<WikiEditEvent> = Vec::with_capacity(BATCH_INSERT_SIZE);
-        let mut data_buf = String::new();
+        reconnect_attempt = 0;
+        *state.last_error.lock().await = None;
         let mut bytes_stream = response.bytes_stream();
-        use futures_util::StreamExt;
-        let mut trim_counter: u32 = 0;
 
         loop {
             tokio::select! {
-                _ = &mut cancel_rx => break,
-                chunk = bytes_stream.next() => {
+                _ = &mut cancel_rx => break 'reconnect,
+                chunk = tokio::time::timeout(SSE_IDLE_TIMEOUT, bytes_stream.next()) => {
                     match chunk {
+                        Err(_) => {
+                            let msg = format!("Stream idle for {}s; reconnecting", SSE_IDLE_TIMEOUT.as_secs());
+                            log::warn!("wiki stream: {}", msg);
+                            *state.last_error.lock().await = Some(msg);
+                            continue 'reconnect;
+                        }
+                        Ok(chunk) => match chunk {
                         Some(Ok(bytes)) => {
-                            let text = String::from_utf8_lossy(&bytes);
-                            for line in text.lines() {
+                            for line in drain_sse_lines(&mut line_buf, &bytes) {
+                                if let Some(id) = line.strip_prefix("id: ") {
+                                    last_event_id = Some(id.trim().to_string());
+                                    continue;
+                                }
                                 if line.starts_with("data: ") {
-                                    data_buf.clear();
-                                    data_buf.push_str(&line[6..]);
-                                    if let Some(ev) = parse_sse_event(&data_buf) {
+                                    let payload = line[6..].trim();
+                                    if let Some(ev) = parse_sse_event(payload) {
                                         buffer.push(ev);
-                                        state_clone.total_events.fetch_add(1, Ordering::Relaxed);
-
+                                        state.total_events.fetch_add(1, Ordering::Relaxed);
                                         if buffer.len() >= BATCH_INSERT_SIZE {
-                                            let _ = batch_insert(&db_clone, &buffer);
+                                            let _ = batch_insert(&db, &buffer);
                                             buffer.clear();
                                             trim_counter += 1;
                                             if trim_counter % 20 == 0 {
-                                                let _ = trim_buffer(&db_clone);
+                                                let _ = trim_buffer(&db);
                                             }
                                         }
                                     }
                                 }
                             }
                         }
-                        Some(Err(_)) | None => break,
+                        Some(Err(e)) => {
+                            log::warn!("wiki stream chunk error: {}", e);
+                            continue 'reconnect;
+                        }
+                        None => {
+                            log::warn!("wiki stream EOF — reconnecting");
+                            continue 'reconnect;
+                        }
+                        }
                     }
                 }
             }
         }
+    }
 
-        if !buffer.is_empty() {
-            let _ = batch_insert(&db_clone, &buffer);
-        }
-        state_clone.running.store(false, Ordering::Relaxed);
-    });
-
-    Ok(())
+    if !buffer.is_empty() {
+        let _ = batch_insert(&db, &buffer);
+    }
+    if should_clear_running(my_gen, state.generation.load(Ordering::Acquire)) {
+        state.running.store(false, Ordering::Relaxed);
+    }
 }
 
 pub async fn stop_stream(state: Arc<StreamState>) -> Result<(), String> {
+    state.cancel_flag.store(true, Ordering::Relaxed);
     if let Some(tx) = state.cancel_token.lock().await.take() {
         let _ = tx.send(());
     }
+    if let Some((_, handle)) = state.worker.lock().await.take() {
+        handle.abort();
+    }
+    state.generation.fetch_add(1, Ordering::AcqRel);
     state.running.store(false, Ordering::Relaxed);
     *state.started_at.lock().await = None;
     Ok(())
 }
 
-pub fn query_stream(
-    db: &LoomDb,
-    sql: &str,
-    limit: u32,
-) -> Result<QueryResult, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-
+pub fn query_stream(db: &LoomDb, sql: &str, limit: u32) -> Result<QueryResult, String> {
+    crate::sql_policy::validate_user_sql(sql)?;
+    let conn = db.lock_connection();
     conn.execute_batch("CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM wiki_stream")
         .map_err(|e| e.to_string())?;
-
-    let full_sql = if sql.trim().is_empty() {
-        format!("SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT {}", limit)
-    } else {
-        format!("{} LIMIT {}", sql.trim().trim_end_matches(';'), limit)
-    };
-
-    let meta_sql = format!(
-        "SELECT column_name, column_type FROM (DESCRIBE ({}))",
-        full_sql
-    );
-    let mut meta_stmt = conn.prepare(&meta_sql).map_err(|e| e.to_string())?;
-    let meta_rows = meta_stmt
-        .query_map(params![], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut columns = Vec::new();
-    let mut types = Vec::new();
-    for mr in meta_rows.flatten() {
-        columns.push(mr.0);
-        types.push(mr.1);
-    }
-
-    let col_count = columns.len();
-    let mut stmt = conn.prepare(&full_sql).map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map(params![], |row| {
-            let mut row_vec = Vec::new();
-            for i in 0..col_count {
-                let val: duckdb::types::Value = row.get(i)?;
-                row_vec.push(crate::db::duckdb_value_to_json(val));
-            }
-            Ok(row_vec)
-        })
-        .map_err(|e| e.to_string())?;
-
-    let mut rows_out = Vec::new();
-    for row in rows.flatten() {
-        rows_out.push(row);
-    }
-    let total = rows_out.len() as u64;
-
-    Ok(QueryResult {
-        columns,
-        types,
-        rows: rows_out,
-        total_rows: total,
-    })
+    query_engine::run_user_query(
+        &conn,
+        sql,
+        limit,
+        "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT {limit}",
+    )
 }
 
 pub fn stream_column_stats(db: &LoomDb) -> Result<Vec<ColumnInfo>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.lock_connection();
+    query_engine::column_stats_for_table(&conn, "wiki_stream")
+}
 
-    let count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM wiki_stream", params![], |r| r.get(0))
-        .unwrap_or(0);
-    if count == 0 {
-        return Ok(vec![]);
+#[cfg(test)]
+mod stream_tests {
+    use super::*;
+
+    #[test]
+    fn parse_sse_event_extracts_edit() {
+        let data = r#"{"meta":{"id":"12345"},"wiki":"enwiki","title":"Earth","user":"alice","bot":false,"minor":true,"namespace":0,"type":"edit","length":{"old":100,"new":110},"timestamp":1700000000,"server_name":"mw123","comment":"fix typo"}"#;
+        let ev = parse_sse_event(data).expect("parsed");
+        assert_eq!(ev.id, 12345);
+        assert_eq!(ev.title, "Earth");
+        assert_eq!(ev.delta, 10);
     }
 
-    conn.execute_batch("CREATE OR REPLACE TEMP VIEW loom_stats AS SELECT * FROM wiki_stream")
-        .map_err(|e| e.to_string())?;
+    #[test]
+    fn parse_sse_event_rejects_garbage() {
+        assert!(parse_sse_event("not json").is_none());
+        assert!(parse_sse_event("{}").is_none());
+    }
 
-    let mut stmt = conn
-        .prepare("DESCRIBE loom_stats")
-        .map_err(|e| e.to_string())?;
-    let schema_rows = stmt
-        .query_map(params![], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        .map_err(|e| e.to_string())?;
+    #[test]
+    fn utf8_split_across_chunks_stays_intact() {
+        let title = "日本語";
+        let bytes = title.as_bytes();
+        let mut buf = Vec::new();
+        let a = drain_sse_lines(&mut buf, &bytes[..2]);
+        assert!(a.is_empty());
+        let b = drain_sse_lines(&mut buf, &bytes[2..]);
+        assert!(b.is_empty());
+        let c = drain_sse_lines(&mut buf, b"\n");
+        assert_eq!(c.len(), 1);
+        assert_eq!(c[0], title);
+    }
 
-    let mut out = Vec::new();
-    for row in schema_rows.flatten() {
-        let (col_name, data_type) = row;
-        let col_q = format!("\"{}\"", col_name.replace('"', "\"\""));
-        let stats_sql = format!(
-            "SELECT COUNT(*) - COUNT({0}) AS nulls, APPROX_COUNT_DISTINCT({0}) AS dist, TRY_CAST(MIN({0}) AS VARCHAR), TRY_CAST(MAX({0}) AS VARCHAR) FROM loom_stats",
-            col_q
-        );
-        if let Ok(mut s) = conn.prepare(&stats_sql) {
-            if let Ok(info) = s.query_row(params![], |sr| {
-                Ok(ColumnInfo {
-                    name: col_name.clone(),
-                    data_type: data_type.clone(),
-                    null_count: sr.get::<_, i64>(0).unwrap_or(0) as u64,
-                    distinct_count: sr.get::<_, i64>(1).unwrap_or(0) as u64,
-                    min_value: sr.get::<_, Option<String>>(2).unwrap_or(None),
-                    max_value: sr.get::<_, Option<String>>(3).unwrap_or(None),
-                })
-            }) {
-                out.push(info);
+    #[test]
+    fn reconnect_backoff_caps() {
+        assert_eq!(reconnect_backoff_secs(0), 1);
+        assert_eq!(reconnect_backoff_secs(10), MAX_BACKOFF_SECS);
+    }
+
+    #[test]
+    fn generation_gate_only_own_task_clears_running() {
+        assert!(should_clear_running(3, 3));
+        assert!(!should_clear_running(3, 4));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn start_stop_start_keeps_single_worker_generation() {
+        let db = Arc::new(LoomDb::new().unwrap());
+        let state = Arc::new(StreamState::new());
+        ensure_stream_table(&db).unwrap();
+        state.generation.store(1, Ordering::Relaxed);
+        state.running.store(true, Ordering::Relaxed);
+        let running = state.running.clone();
+        let stale = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            if should_clear_running(1, 2) {
+                running.store(false, Ordering::Relaxed);
             }
-        }
+        });
+        state.generation.store(2, Ordering::Relaxed);
+        state.running.store(true, Ordering::Relaxed);
+        stale.await.unwrap();
+        assert!(state.running.load(Ordering::Relaxed));
     }
-    Ok(out)
 }

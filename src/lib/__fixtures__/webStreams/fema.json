@@ -1,0 +1,15 @@
+{
+  "DisasterDeclarationsSummaries": [
+    {
+      "id": "fema-1",
+      "disasterNumber": 4999,
+      "state": "CA",
+      "declarationType": "DR",
+      "declarationTitle": "Fire",
+      "incidentType": "Fire",
+      "declarationDate": "2026-01-01",
+      "incidentBeginDate": "2025-12-30",
+      "fyDeclared": 2026
+    }
+  ]
+}

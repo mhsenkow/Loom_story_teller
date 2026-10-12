@@ -15,5 +15,5 @@
       "@loom/*": ["../src/lib/*"]
     }
   },
-  "include": ["src/**/*.ts", "../src/lib/recommendations.ts", "../src/lib/chartSupport.ts", "../src/lib/store.ts"]
+  "include": ["src/**/*.ts"]
 }

@@ -156,6 +156,26 @@ export function scaleY(v: number, min: number, max: number, kind: YScaleKind): n
   return (t(v) - a) / (b - a || 1);
 }
 
+/** Inverse of `scaleY`: unit interval [0,1] → data value. */
+export function invScaleY(t: number, min: number, max: number, kind: YScaleKind): number {
+  const u = Number.isFinite(t) ? Math.max(0, Math.min(1, t)) : 0.5;
+  if (kind === "linear") {
+    if (!(max > min)) return min;
+    return min + u * (max - min);
+  }
+  if (kind === "log") {
+    const lo = Math.max(1e-12, min);
+    const hi = Math.max(lo * 1.0001, max);
+    const a = Math.log(lo);
+    const b = Math.log(hi);
+    return Math.exp(a + u * (b - a));
+  }
+  const c = 1;
+  const a = Math.asinh(min / c);
+  const b = Math.asinh(max / c);
+  return c * Math.sinh(a + u * (b - a));
+}
+
 /** Domain for log scales: force positive for log; keep signed for symlog. */
 export function scaleDomain(min: number, max: number, kind: YScaleKind): { min: number; max: number } {
   if (kind === "log") {

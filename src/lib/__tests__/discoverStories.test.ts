@@ -2,12 +2,31 @@
 // Discover hook unit tests
 // =================================================================
 
-import { describe, it, expect } from "vitest";
-import { DISCOVER_SEEN_KEY, DISCOVER_STORY_LIMIT, VARIANTS_PER_SOURCE } from "../discoverStories";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import {
+  DISCOVER_SEEN_KEY,
+  DISCOVER_STORY_LIMIT,
+  DISCOVER_STORY_LIMIT_MOBILE,
+  VARIANTS_PER_SOURCE,
+  VARIANTS_PER_SOURCE_MOBILE,
+  clearDiscoverStoryCache,
+  discoverHookFor,
+  discoverStoryLimit,
+  getDiscoverScanSummary,
+  getDiscoverStoryCache,
+  setDiscoverStoryCache,
+  type DiscoverStory,
+} from "../discoverStories";
+import type { ChartRecommendation } from "../recommendations";
 import { ALL_SOURCE_KINDS } from "../tauri";
 import { SOURCE_BY_KIND, SOURCE_DEFS, sortRowsByOrderBy } from "../sourceRegistry";
 
 describe("discoverStories", () => {
+  afterEach(() => {
+    clearDiscoverStoryCache();
+    vi.unstubAllGlobals();
+  });
+
   it("exports the dismiss key used by Onboarding", () => {
     expect(DISCOVER_SEEN_KEY).toBe("loom-discover-v1");
   });
@@ -17,6 +36,32 @@ describe("discoverStories", () => {
     expect(VARIANTS_PER_SOURCE).toBeGreaterThanOrEqual(20);
     expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(10_000);
     expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(ALL_SOURCE_KINDS.length * VARIANTS_PER_SOURCE);
+  });
+
+  it("caps iPad / phone discover at 120 with fewer variants per feed", () => {
+    expect(DISCOVER_STORY_LIMIT_MOBILE).toBe(120);
+    expect(VARIANTS_PER_SOURCE_MOBILE).toBeLessThanOrEqual(8);
+    expect(VARIANTS_PER_SOURCE_MOBILE * ALL_SOURCE_KINDS.length).toBeGreaterThanOrEqual(
+      DISCOVER_STORY_LIMIT_MOBILE,
+    );
+  });
+
+  it("discoverStoryLimit uses the mobile cap on iPad-class UA", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+      platform: "MacIntel",
+      maxTouchPoints: 5,
+    });
+    expect(discoverStoryLimit()).toBe(DISCOVER_STORY_LIMIT_MOBILE);
+  });
+
+  it("keeps a session cache for reopen-without-rescan", () => {
+    expect(getDiscoverStoryCache()).toBeNull();
+    const stub = [{ id: "discover-usgs", score: 90 } as DiscoverStory];
+    setDiscoverStoryCache(stub);
+    expect(getDiscoverStoryCache()).toEqual(stub);
+    clearDiscoverStoryCache();
+    expect(getDiscoverStoryCache()).toBeNull();
   });
 
   it("sortRowsByOrderBy puts soonest launches first (net ASC)", () => {
@@ -40,6 +85,32 @@ describe("discoverStories", () => {
     const ordered = sortRowsByOrderBy(rows, cols, "as_of DESC, quote");
     expect(ordered[0]).toEqual(["2026-01-02", "JPY", 160]);
     expect(ordered[1]).toEqual(["2026-01-02", "USD", 1.08]);
+  });
+
+  it("exposes discover scan summary defaults", () => {
+    expect(getDiscoverScanSummary().failedKinds).toEqual([]);
+  });
+
+  it("headlines G1 when Kp peak is 4.67 (spaceweather hook)", () => {
+    const sample = {
+      columns: ["kp", "storm_level", "ts"],
+      types: ["DOUBLE", "VARCHAR", "TIMESTAMP"],
+      rows: [[4.67, "G1", "2026-10-12T12:00:00Z"]],
+      total_rows: 1,
+    };
+    const chart = {
+      id: "c1",
+      kind: "line",
+      title: "Kp",
+      subtitle: "",
+      score: 80,
+      spec: {},
+      xField: "ts",
+      yField: "kp",
+      colorField: null,
+    } as ChartRecommendation;
+    const hook = discoverHookFor("spaceweather", sample, chart);
+    expect(hook.hook).toMatch(/G1/i);
   });
 
   it("every live source has an orderBy Discover/web snapshots can apply", () => {

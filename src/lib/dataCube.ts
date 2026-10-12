@@ -11,8 +11,15 @@
 // columns (left → right), Z field = depth (front → back).
 // =================================================================
 
-import type { ColumnInfo } from "./store";
+import type { ColumnInfo } from "./queryTypes";
 import type { YAggregateOption } from "./recommendations";
+import { formatChartNumber } from "./formatChartNumber";
+import { toTime } from "./dive";
+import {
+  CUBE_MAX_BINS,
+  pickDataCubeEncoding,
+  rankCubeDimensions,
+} from "./dataCubeSchema";
 import { sampleContinuous } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
 import { drawEmptyMessage, drawRampKey, mixColor, resolveChartInk, withAlpha, type ChartInk } from "./chartInk";
@@ -60,7 +67,7 @@ export interface CubeEncoding {
   aggregate?: YAggregateOption | null;
 }
 
-export const CUBE_MAX_BINS = 12;
+export { CUBE_MAX_BINS, pickDataCubeEncoding, rankCubeDimensions } from "./dataCubeSchema";
 
 const AGG_LABEL: Record<YAggregateOption, string> = {
   sum: "Sum",
@@ -74,14 +81,8 @@ const AGG_LABEL: Record<YAggregateOption, string> = {
 // Binning
 // ---------------------------------------------------------------------------
 
-const compactFmt = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
-
 export function formatCubeNumber(n: number): string {
-  if (!Number.isFinite(n)) return "—";
-  // Below 10k stay literal so years (2024) never read as "2K".
-  if (Math.abs(n) >= 10_000) return compactFmt.format(n);
-  if (Number.isInteger(n)) return String(n);
-  return n.toFixed(Math.abs(n) < 1 ? 3 : Math.abs(n) < 10 ? 2 : 1).replace(/\.?0+$/, "");
+  return formatChartNumber(n);
 }
 
 function asNumber(v: unknown): number {
@@ -97,8 +98,7 @@ function asNumber(v: unknown): number {
 const DATE_LIKE = /^\d{4}-\d{1,2}(-\d{1,2})?([T ]\d{1,2}:\d{2})?|^\d{1,2}\/\d{1,2}\/\d{2,4}/;
 
 function asTime(v: unknown): number {
-  if (typeof v !== "string" || !DATE_LIKE.test(v.trim())) return NaN;
-  const t = Date.parse(v);
+  const t = toTime(v);
   return Number.isFinite(t) ? t : NaN;
 }
 
@@ -111,10 +111,10 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 function formatTime(ms: number, spanMs: number): string {
   const d = new Date(ms);
   const day = 86_400_000;
-  if (spanMs > 3 * 365 * day) return String(d.getUTCFullYear());
-  if (spanMs > 60 * day) return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
-  if (spanMs > 2 * day) return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`;
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`;
+  if (spanMs > 3 * 365 * day) return String(d.getFullYear());
+  if (spanMs > 60 * day) return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  if (spanMs > 2 * day) return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 interface BuiltAxis {
@@ -431,70 +431,6 @@ export function cubeCellKey(cube: Pick<DataCube, "x" | "y" | "z">, cell: Pick<Cu
     .join("\u0001");
 }
 
-// ---------------------------------------------------------------------------
-// Encoding heuristics (schema-only)
-// ---------------------------------------------------------------------------
-
-function isNumericType(dt: string): boolean {
-  const t = dt.toUpperCase();
-  return ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL", "HUGEINT", "TINYINT", "SMALLINT"].some((n) => t.includes(n));
-}
-
-function isTimeColumn(c: ColumnInfo): boolean {
-  const t = c.data_type.toUpperCase();
-  return t.includes("DATE") || t.includes("TIMESTAMP") || /^(ts|time|date|timestamp|year|month)$/i.test(c.name);
-}
-
-function isIdLike(name: string): boolean {
-  return /\b(id|uuid|key|index)\b/i.test(name) || /(_id|_key)$/i.test(name);
-}
-
-/** How well a column works as a cube dimension (higher = better, ≤0 = unusable). */
-function dimensionScore(c: ColumnInfo): number {
-  const d = c.distinct_count ?? 0;
-  if (d < 2 || isIdLike(c.name)) return 0;
-  if (isTimeColumn(c)) return 8;
-  if (!isNumericType(c.data_type)) {
-    if (d <= CUBE_MAX_BINS) return 10;
-    if (d <= 40) return 6;
-    return 2;
-  }
-  // Low-cardinality numerics (ratings, years, floors) behave like ordered categories.
-  if (d <= CUBE_MAX_BINS) return 7;
-  return 3;
-}
-
-/** Columns that can span a cube axis, best first. */
-export function rankCubeDimensions(columns: ColumnInfo[]): ColumnInfo[] {
-  return columns
-    .map((c) => ({ c, s: dimensionScore(c) }))
-    .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s)
-    .map((x) => x.c);
-}
-
-/** Best rows / columns / depth / value encoding for a schema, or null. */
-export function pickDataCubeEncoding(
-  columns: ColumnInfo[],
-): { xField: string; yField: string; zField: string; valueField: string | null; aggregate: YAggregateOption } | null {
-  const dims = rankCubeDimensions(columns);
-  if (dims.length < 3) return null;
-  // Put time on depth when present so slices read as "pages" through time.
-  const time = dims.find(isTimeColumn);
-  const flat = dims.filter((c) => c !== time);
-  const [x, y, z] = time ? [flat[0], flat[1], time] : [dims[0], dims[1], dims[2]];
-  if (!x || !y || !z) return null;
-  const used = new Set([x.name, y.name, z.name]);
-  const measure = columns.find((c) => isNumericType(c.data_type) && !used.has(c.name) && !isIdLike(c.name) && (c.distinct_count ?? 0) > CUBE_MAX_BINS);
-  const rateLike = measure && /(percent|pct|rate|ratio|%|avg|mean|score|temp)/i.test(measure.name);
-  return {
-    xField: x.name,
-    yField: y.name,
-    zField: z.name,
-    valueField: measure?.name ?? null,
-    aggregate: measure ? (rateLike ? "mean" : "sum") : "count",
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Camera (column-major 4×4, WebGPU clip space z ∈ [0, 1])

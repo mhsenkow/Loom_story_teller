@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildShareDataSnapshot,
+  chartEncodedColumnNames,
+  defaultIncludeShareData,
   parseShareDataSnapshot,
   SHARE_DATA_MAX_ROWS,
   sharedStoryPath,
@@ -46,5 +48,67 @@ describe("shareLineage", () => {
 
   it("sharedStoryPath is stable", () => {
     expect(sharedStoryPath("abcdefghijkl")).toBe("web://shared/abcdefghijkl");
+  });
+
+  it("limits snapshot to chart-encoded columns", () => {
+    const snap = buildShareDataSnapshot({
+      sample: {
+        columns: ["x", "y", "secret", "z"],
+        types: ["DOUBLE", "DOUBLE", "VARCHAR", "DOUBLE"],
+        rows: [[1, 2, "ssn", 3]],
+        total_rows: 1,
+      },
+      file: { path: "/tmp/local.csv", name: "local.csv" },
+      chart: {
+        src: "file:local.csv",
+        chart: { kind: "scatter", xField: "x", yField: "y" },
+      },
+      columns: chartEncodedColumnNames({
+        src: "file:local.csv",
+        chart: { kind: "scatter", xField: "x", yField: "y" },
+      }),
+    });
+    expect(snap?.columns).toEqual(["x", "y"]);
+    expect(snap?.rows[0]).toEqual([1, 2]);
+  });
+
+  it("defaults include-data off for local files and on for streams", () => {
+    expect(defaultIncludeShareData({ path: "/Users/me/secret.csv" })).toBe(false);
+    expect(defaultIncludeShareData({ path: "web://upload/foo.csv" })).toBe(false);
+    expect(defaultIncludeShareData({ path: "stream://usgs" })).toBe(true);
+    expect(
+      defaultIncludeShareData({
+        path: "web://catalog/a.csv",
+        sourceUrl: "https://example.com/a.csv",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects object cells and javascript: source URLs", () => {
+    expect(
+      parseShareDataSnapshot({
+        v: 1,
+        capturedAt: "2026-01-01T00:00:00.000Z",
+        source: { label: "x", path: "web://x", url: "javascript:alert(1)" },
+        columns: ["a"],
+        types: ["VARCHAR"],
+        rows: [[{ evil: true }]],
+        totalRows: 1,
+        truncated: false,
+      }),
+    ).toBeNull();
+
+    const cleaned = parseShareDataSnapshot({
+      v: 1,
+      capturedAt: "2026-01-01T00:00:00.000Z",
+      source: { label: "x", path: "web://x", url: "javascript:alert(1)" },
+      columns: ["a"],
+      types: ["VARCHAR"],
+      rows: [["ok"]],
+      totalRows: 1,
+      truncated: false,
+    });
+    expect(cleaned).toBeTruthy();
+    expect(cleaned!.source.url).toBeUndefined();
   });
 });

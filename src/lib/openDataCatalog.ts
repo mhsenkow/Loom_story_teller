@@ -1,6 +1,8 @@
 // =================================================================
 // Loom — Open data catalog fetchers (browser / Worker)
 // =================================================================
+
+import { shouldRetryCsvOnCatalogFallback } from "./openDataCatalogPolicy";
 // Mirrors Rust `fetch_data_gov_recent_csv` / `fetch_uk_data_recent_csv`
 // for the static web UI. US Catalog API has no CORS; prefer same-origin
 // `/api/catalog/*` (Cloudflare Worker). UK CKAN allows CORS `*`.
@@ -14,6 +16,10 @@ export interface FetchDataGovOptions {
   sort?: DataGovSortKey;
   /** Prefer datasets with a direct CSV download (web explore path). */
   csvOnly?: boolean;
+  /** Per-request upstream timeout (Worker catalog searches). */
+  requestTimeoutMs?: number;
+  /** Overall pagination budget; aborts with partial results when exceeded. */
+  deadlineMs?: number;
 }
 
 export interface DataGovResource {
@@ -40,6 +46,21 @@ const UK_CKAN = "https://ckan.publishing.service.gov.uk/api/action/package_searc
 export const DEFAULT_CATALOG_ORIGIN =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_CATALOG_ORIGIN) ||
   "https://loom-storyteller.mhsenkow.workers.dev";
+
+/**
+ * Resolve a Worker API path for fetch.
+ * Browser on loom.ibm.io / Next dev → same-origin `/api/…`.
+ * Tauri shells (iOS/Android/desktop web-parity helpers) → absolute Worker URL.
+ */
+export function apiUrl(path: string): string {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  const g = typeof globalThis !== "undefined" ? globalThis : undefined;
+  const w = g && "window" in g ? (g as unknown as { window?: Record<string, unknown> }).window : undefined;
+  if (w && "__TAURI_INTERNALS__" in w) {
+    return `${DEFAULT_CATALOG_ORIGIN}${p}`;
+  }
+  return p;
+}
 
 function datasetHasCsv(ds: DataGovDataset): boolean {
   return ds.resources.some(
@@ -236,8 +257,12 @@ export async function fetchUsCatalogUpstream(
   const collected: DataGovDataset[] = [];
   let after: string | undefined;
   const maxPages = opts.csvOnly ? 40 : 25;
+  const started = Date.now();
+  const deadlineMs = opts.deadlineMs ?? 0;
+  const requestTimeoutMs = opts.requestTimeoutMs ?? 12_000;
 
   for (let page = 0; page < maxPages && collected.length < rows; page++) {
+    if (deadlineMs > 0 && Date.now() - started >= deadlineMs) break;
     const url = new URL(US_CATALOG);
     url.searchParams.set("per_page", "100");
     url.searchParams.set("sort", usSortParam(sort));
@@ -246,6 +271,7 @@ export async function fetchUsCatalogUpstream(
 
     const res = await fetchImpl(url.toString(), {
       headers: { Accept: "application/json", "User-Agent": "Loom-Data-Storyteller/1.0" },
+      signal: AbortSignal.timeout(requestTimeoutMs),
     });
     if (!res.ok) throw new Error(`Data.gov returned ${res.status}`);
     const body = (await res.json()) as { results?: unknown[]; after?: string };
@@ -329,6 +355,7 @@ export async function fetchUkCatalogUpstream(
 ): Promise<DataGovDataset[]> {
   const rows = clampRows(opts.rows);
   const q = sanitizeQ(opts.query);
+  const requestTimeoutMs = opts.requestTimeoutMs ?? 12_000;
   const url = new URL(UK_CKAN);
   url.searchParams.set("rows", String(rows));
   url.searchParams.set("sort", ukSortParam(opts.sort));
@@ -337,6 +364,7 @@ export async function fetchUkCatalogUpstream(
 
   const res = await fetchImpl(url.toString(), {
     headers: { Accept: "application/json", "User-Agent": "Loom-Data-Storyteller/1.0" },
+    signal: AbortSignal.timeout(requestTimeoutMs),
   });
   if (!res.ok) throw new Error(`UK data returned ${res.status}`);
   return parseUkCatalogBody(await res.json(), rows);
@@ -419,7 +447,12 @@ export async function fetchCsvTextWeb(csvUrl: string): Promise<{ text: string; t
       const truncated = res.headers.get("X-Loom-Truncated") === "1";
       return { text, truncated };
     } catch (e) {
-      lastErr = e instanceof Error ? e : new Error(String(e));
+      const err = e instanceof Error ? e : new Error(String(e));
+      if (origin === "" && shouldRetryCsvOnCatalogFallback(err)) {
+        lastErr = err;
+        continue;
+      }
+      throw err;
     }
   }
   throw lastErr ?? new Error("CSV fetch failed");

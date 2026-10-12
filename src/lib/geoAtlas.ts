@@ -9,9 +9,6 @@
 import { feature as topoFeature, mesh as topoMesh } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
-import worldCountries from "world-atlas/countries-110m.json";
-import worldLand from "world-atlas/land-110m.json";
-import usStates from "us-atlas/states-10m.json";
 
 export type AtlasKind = "world" | "us";
 
@@ -173,7 +170,11 @@ function addKey(map: Map<string, number>, key: string, idx: number) {
   map.set(k, idx);
 }
 
-function buildWorldAtlas(): AtlasBundle {
+async function buildWorldAtlas(): Promise<AtlasBundle> {
+  const [{ default: worldCountries }, { default: worldLand }] = await Promise.all([
+    import("world-atlas/countries-110m.json"),
+    import("world-atlas/land-110m.json"),
+  ]);
   const topo = worldCountries as unknown as Topology<{ countries: GeometryCollection }>;
   const landTopo = worldLand as unknown as Topology<{ land: GeometryCollection }>;
   const fc = topoFeature(topo, topo.objects.countries) as FeatureCollection;
@@ -215,7 +216,8 @@ function buildWorldAtlas(): AtlasBundle {
   return { kind: "world", features, outline, byKey };
 }
 
-function buildUsAtlas(): AtlasBundle {
+async function buildUsAtlas(): Promise<AtlasBundle> {
+  const { default: usStates } = await import("us-atlas/states-10m.json");
   const topo = usStates as unknown as Topology<{ states: GeometryCollection; nation: GeometryCollection }>;
   const fc = topoFeature(topo, topo.objects.states) as FeatureCollection;
   const features = fc.features as GeoFeature[];
@@ -242,14 +244,37 @@ function buildUsAtlas(): AtlasBundle {
 
 let worldCache: AtlasBundle | null = null;
 let usCache: AtlasBundle | null = null;
+const loadPromises: Partial<Record<AtlasKind, Promise<AtlasBundle>>> = {};
+
+/** Lazy-load TopoJSON into separate chunks (LOOM-063). */
+export async function loadAtlas(kind: AtlasKind): Promise<AtlasBundle> {
+  if (kind === "us") {
+    if (usCache) return usCache;
+    if (!loadPromises.us) {
+      loadPromises.us = buildUsAtlas().then((b) => {
+        usCache = b;
+        return b;
+      });
+    }
+    return loadPromises.us;
+  }
+  if (worldCache) return worldCache;
+  if (!loadPromises.world) {
+    loadPromises.world = buildWorldAtlas().then((b) => {
+      worldCache = b;
+      return b;
+    });
+  }
+  return loadPromises.world;
+}
 
 export function getWorldAtlas(): AtlasBundle {
-  if (!worldCache) worldCache = buildWorldAtlas();
+  if (!worldCache) throw new Error("World atlas not loaded — call loadAtlas('world') first");
   return worldCache;
 }
 
 export function getUsAtlas(): AtlasBundle {
-  if (!usCache) usCache = buildUsAtlas();
+  if (!usCache) throw new Error("US atlas not loaded — call loadAtlas('us') first");
   return usCache;
 }
 
@@ -299,29 +324,22 @@ export function pickAtlasKind(regionField: string, sampleValues: unknown[]): Atl
   if (/\b(state|stusps|fips|province)\b/.test(field) && !/country/.test(field)) {
     return "us";
   }
-  let usHits = 0;
-  let worldHits = 0;
-  const us = getUsAtlas();
-  const world = getWorldAtlas();
-  for (const v of sampleValues.slice(0, 40)) {
-    if (findFeatureIndex(us, v) >= 0) usHits++;
-    if (findFeatureIndex(world, v) >= 0) worldHits++;
+  if (usCache && worldCache) {
+    let usHits = 0;
+    let worldHits = 0;
+    for (const v of sampleValues.slice(0, 40)) {
+      if (findFeatureIndex(usCache, v) >= 0) usHits++;
+      if (findFeatureIndex(worldCache, v) >= 0) worldHits++;
+    }
+    if (usHits >= worldHits && usHits >= 2) return "us";
+  } else if (usCache) {
+    let usHits = 0;
+    for (const v of sampleValues.slice(0, 40)) {
+      if (findFeatureIndex(usCache, v) >= 0) usHits++;
+    }
+    if (usHits >= 2) return "us";
   }
-  if (usHits >= worldHits && usHits >= 2) return "us";
   return "world";
 }
 
-/** Region-like column names for choropleth support. */
-export function isGeoRegionField(name: string): boolean {
-  return /^(country|country_code|country_name|cca3|iso|iso3|iso2|state|stusps|region|nation|territory|province|fips|origin_country|borough)$/i.test(
-    name,
-  ) || /^(country|state|region|nation|province|iso)/i.test(name);
-}
-
-export function isLatField(name: string): boolean {
-  return /^(lat|latitude)$/i.test(name);
-}
-
-export function isLonField(name: string): boolean {
-  return /^(lon|lng|long|longitude)$/i.test(name);
-}
+export { isGeoRegionField, isLatField, isLonField } from "./geoFields";

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   SOURCE_DEFS,
   SOURCE_KINDS,
+  SOURCE_KINDS_FROM_DEFS,
   sourceKindFromPath,
   sourceStreamPath,
 } from "../sourceRegistry";
@@ -48,6 +49,7 @@ function referencedIdentifiers(sql: string): string[] {
 describe("source registry", () => {
   it("has one definition per kind, in kind order", () => {
     expect(SOURCE_DEFS.map((d) => d.kind)).toEqual([...SOURCE_KINDS]);
+    expect(SOURCE_KINDS_FROM_DEFS).toEqual(SOURCE_DEFS.map((d) => d.kind));
     expect(ALL_SOURCE_KINDS).toEqual(SOURCE_KINDS);
   });
 

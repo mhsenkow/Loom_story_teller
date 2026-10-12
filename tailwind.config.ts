@@ -27,6 +27,7 @@ const config: Config = {
           muted:    token("--loom-muted"),
           label:    token("--loom-label"),
           accent:   token("--loom-accent"),
+          "accent-text": token("--loom-accent-text"),
           "accent-dim": token("--loom-accent-dim"),
           success:  token("--loom-success"),
           warning:  token("--loom-warning"),

@@ -115,6 +115,26 @@ describe("chart links", () => {
     expect(bad({ v: 99, src: "mock://a.csv", c: { k: "bar", x: "a" } })).toBeNull();
   });
 
+  it("clamps hostile vo payloads (LOOM-672)", () => {
+    const enc = `#chart=${b64urlEncode(
+      JSON.stringify({
+        v: 1,
+        src: "mock://a.csv",
+        c: { k: "scatter", x: "a", y: "b" },
+        vo: {
+          pointSize: 9999,
+          opacity: -5,
+          colorPalette: "seq-blue",
+          padding: { t: -100, r: 1e9 },
+        },
+      }),
+    )}`;
+    const decoded = decodeChartLink(enc);
+    expect(decoded?.visual?.colorPalette).toBe("seq-blue");
+    expect(decoded?.visual?.pointSize).toBe(24);
+    expect(decoded?.visual?.opacity).toBe(0);
+  });
+
   it("drops invalid optional values instead of failing", () => {
     const enc = `chart=${b64urlEncode(
       JSON.stringify({
@@ -185,6 +205,21 @@ describe("chart links", () => {
     expect(rec.timeWindowField).toBe("date");
   });
 
+  it("round-trips layoutDirection on the chart payload", () => {
+    const original = createChartRec("bar", columns, "region", "revenue", null, "sales", {
+      layoutDirection: "down",
+    })!;
+    expect(original.layoutDirection).toBe("down");
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: original,
+    })!;
+    const decoded = decodeChartLink(encodeChartLink(link))!;
+    expect(decoded.chart.layoutDirection).toBe("down");
+    const rec = restoreChartRec(decoded, columns, [], "sales")!;
+    expect(rec.layoutDirection).toBe("down");
+  });
+
   it("prefers an identical rec already in the rail (keeps its spec)", () => {
     const story: ChartRecommendation = {
       id: "story-1",
@@ -205,5 +240,17 @@ describe("chart links", () => {
   it("returns null when the dataset lacks a column the chart uses", () => {
     const link: ChartLink = { src: "mock://a.csv", chart: { kind: "bar", xField: "region", yField: "profit" } };
     expect(restoreChartRec(link, columns, [], "a")).toBeNull();
+  });
+
+  it("sanitizes hostile visual overrides on decode", () => {
+    const hostile = {
+      ...full,
+      visual: { pointSize: 1_000_000, chartPadding: -500, notARealKey: "x" } as ChartLink["visual"],
+    };
+    const decoded = decodeChartLink(encodeChartLink(hostile));
+    expect(decoded).not.toBeNull();
+    expect(decoded!.visual?.pointSize).toBe(24);
+    expect(decoded!.visual?.chartPadding).toBe(24);
+    expect(decoded!.visual).not.toHaveProperty("notARealKey");
   });
 });

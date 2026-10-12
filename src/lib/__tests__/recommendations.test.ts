@@ -19,8 +19,16 @@ import {
   recommendStreamStory,
   expandRecommendationsWithExtras,
   randomEncodingToExtra,
+  isMeasureColumn,
+  stableLiveChartId,
+  parseChartKind,
 } from "../recommendations";
-import { chartCapabilities, encodingChannelLabels } from "../chartSupport";
+import {
+  chartCapabilities,
+  encodingChannelLabels,
+  resolveLayoutDirection,
+  measureSuggestsGrowDown,
+} from "../chartSupport";
 import type { ColumnInfo, QueryResult } from "../store";
 
 const numericColumns: ColumnInfo[] = [
@@ -55,6 +63,14 @@ describe("recommendations", () => {
       expect(kinds).toContain("pie");
       expect(kinds).toContain("histogram");
       expect(CHART_KIND_OPTIONS.length).toBeGreaterThanOrEqual(8);
+    });
+  });
+
+  describe("parseChartKind", () => {
+    it("accepts known kinds and rejects unknown", () => {
+      expect(parseChartKind("scatter")).toBe("scatter");
+      expect(parseChartKind("BAR")).toBe("bar");
+      expect(parseChartKind("not-a-chart")).toBeNull();
     });
   });
 
@@ -247,6 +263,44 @@ describe("recommendations", () => {
       expect(chartCapabilities("bar").tooltipHover).toBe(true);
       expect(chartCapabilities("scatter3d").tooltipHover).toBe(false);
       expect(chartCapabilities("geoPoints").tooltipHover).toBe(false);
+      expect(chartCapabilities("bar").layoutDirection).toBe(true);
+      expect(chartCapabilities("lollipop").layoutDirection).toBe(true);
+      expect(chartCapabilities("waterfall").layoutDirection).toBe(true);
+      expect(chartCapabilities("line").layoutDirection).toBe(false);
+      expect(chartCapabilities("line").yScale).toBe(true);
+      expect(chartCapabilities("area").yScale).toBe(true);
+      expect(chartCapabilities("scatter").yScale).toBe(true);
+      expect(chartCapabilities("bar").yScale).toBe(false);
+      expect(resolveLayoutDirection("auto", true)).toEqual({ horizontal: true, reverse: false });
+      expect(resolveLayoutDirection("up", true)).toEqual({ horizontal: false, reverse: false });
+      expect(resolveLayoutDirection("down", false)).toEqual({ horizontal: false, reverse: true });
+      expect(resolveLayoutDirection("right", false)).toEqual({ horizontal: true, reverse: false });
+      expect(resolveLayoutDirection("left", false)).toEqual({ horizontal: true, reverse: true });
+    });
+
+    it("createChartRec keeps layoutDirection on bar rebuilds", () => {
+      const rec = createChartRec("bar", richColumns, "category", "value", null, "t", {
+        layoutDirection: "left",
+      });
+      expect(rec?.layoutDirection).toBe("left");
+      const auto = createChartRec("bar", richColumns, "category", "value", null, "t", {
+        layoutDirection: "auto",
+      });
+      expect(auto?.layoutDirection).toBeUndefined();
+    });
+
+    it("suggests Direction ↓ for lower-is-better measure names", () => {
+      expect(measureSuggestsGrowDown("rank")).toBe(true);
+      expect(measureSuggestsGrowDown("latency_ms")).toBe(true);
+      expect(measureSuggestsGrowDown("views")).toBe(false);
+      const base = createChartRec("bar", richColumns, "category", "value", null, "t")!;
+      const withRank = { ...base, yField: "rank", id: "bar-rank" };
+      const cols: ColumnInfo[] = [
+        ...richColumns,
+        { name: "rank", data_type: "INTEGER", null_count: 0, distinct_count: 20, min_value: "1", max_value: "20" },
+      ];
+      const expanded = expandRecommendationsWithExtras([withRank], cols);
+      expect(expanded.some((r) => r.layoutDirection === "down")).toBe(true);
     });
 
     it("createChartRec keeps tooltips on geo / GPU / odd rebuilds", () => {
@@ -513,8 +567,15 @@ describe("recommendations", () => {
       ];
       const base = createChartRec("bar", cols, "region", "sales", null, "t")!;
       const expanded = expandRecommendationsWithExtras([base], cols);
-      expect(expanded.some((c) => c.barStackMode === "stacked" && c.colorField === "product")).toBe(true);
-      expect(expanded.some((c) => c.barStackMode === "percent" && c.colorField === "product")).toBe(true);
+      const variants = expanded.filter((c) => c.id !== base.id);
+      expect(variants.length).toBeLessThanOrEqual(3);
+      expect(
+        variants.some(
+          (c) =>
+            (c.barStackMode === "stacked" || c.barStackMode === "percent" || c.barStackMode === "grouped") &&
+            c.colorField === "product",
+        ),
+      ).toBe(true);
     });
 
     it("adds Top N, facet, and compare variants for file suggestions", () => {
@@ -551,13 +612,11 @@ describe("recommendations", () => {
         createChartRec("scatter", cols, "sales", "profit", null, "t")!,
       ];
       const expanded = expandRecommendationsWithExtras(base, cols);
-      expect(expanded.some((r) => r.rollingWindow === 7 || r.rollingWindow === 30)).toBe(true);
-      expect(expanded.some((r) => r.seriesNormalize === "index100" || r.seriesNormalize === "zscore")).toBe(true);
-      expect(expanded.some((r) => r.kind === "pareto")).toBe(true);
-      expect(expanded.some((r) => r.residualOverlay)).toBe(true);
-      expect(expanded.some((r) => r.anomalyHighlight)).toBe(true);
-      expect(expanded.some((r) => r.kind === "corrMatrix")).toBe(true);
-      expect(expanded.some((r) => r.yScale === "log")).toBe(true);
+      const perBase = (id: string) => expanded.filter((r) => r.id.startsWith(`${id}-`)).length;
+      expect(perBase(base[0]!.id)).toBeLessThanOrEqual(3);
+      expect(perBase(base[1]!.id)).toBeLessThanOrEqual(3);
+      expect(perBase(base[2]!.id)).toBeLessThanOrEqual(3);
+      expect(expanded.length).toBeGreaterThan(base.length);
     });
 
   it("adds time-window variants when a timestamp column exists", () => {
@@ -659,5 +718,73 @@ describe("fitEncodingToKind (chart-type switch)", () => {
   it("requires a second category for flow charts", () => {
     const fit = fitEncodingToKind("sankey", gap, { xField: "continent", yField: "pop", colorField: null });
     expect(fit.colorField).toBe("country");
+  });
+});
+
+describe("column semantics (LOOM-030–034)", () => {
+  it("does not treat substring names like candidate as temporal", () => {
+    const cols: ColumnInfo[] = [
+      {
+        name: "candidate",
+        data_type: "VARCHAR",
+        null_count: 0,
+        distinct_count: 5,
+        min_value: null,
+        max_value: null,
+      },
+      {
+        name: "created_date",
+        data_type: "VARCHAR",
+        null_count: 0,
+        distinct_count: 5,
+        min_value: null,
+        max_value: null,
+      },
+    ];
+    const recs = recommend(cols, null, "fixture.csv");
+    const usesCandidateAsTime = recs.some((r) => r.xField === "candidate" && r.kind === "line");
+    expect(usesCandidateAsTime).toBe(false);
+  });
+
+  it("excludes identifier-like numerics from measures", () => {
+    const cols: ColumnInfo[] = [
+      { name: "id", data_type: "INTEGER", null_count: 0, distinct_count: 100, min_value: "1", max_value: "100" },
+      { name: "zip", data_type: "INTEGER", null_count: 0, distinct_count: 80, min_value: "10000", max_value: "99999" },
+      { name: "sales", data_type: "DOUBLE", null_count: 0, distinct_count: 50, min_value: "1", max_value: "500" },
+      { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 4, min_value: null, max_value: null },
+    ];
+    expect(isMeasureColumn(cols[0]!, 100)).toBe(false);
+    expect(isMeasureColumn(cols[1]!, 100)).toBe(false);
+    expect(isMeasureColumn(cols[2]!, 100)).toBe(true);
+  });
+
+  it("uses stable ids for source story charts", () => {
+    const cols: ColumnInfo[] = [
+      { name: "mag", data_type: "DOUBLE", null_count: 0, distinct_count: 10, min_value: "1", max_value: "7" },
+      { name: "place", data_type: "VARCHAR", null_count: 0, distinct_count: 20, min_value: null, max_value: null },
+      { name: "time", data_type: "TIMESTAMP", null_count: 0, distinct_count: 50, min_value: null, max_value: null },
+    ];
+    const a = recommendSourceStory("usgs", cols, null).charts[0]!.id;
+    const b = recommendSourceStory("usgs", cols, null).charts[0]!.id;
+    expect(a).toBe(b);
+    expect(a).toContain("usgs-");
+  });
+
+  it("does not add log-y extras when min y ≤ 0", () => {
+    const cols: ColumnInfo[] = [
+      { name: "day", data_type: "DATE", null_count: 0, distinct_count: 10, min_value: "2024-01-01", max_value: "2024-01-10" },
+      { name: "change_pct", data_type: "DOUBLE", null_count: 0, distinct_count: 10, min_value: "-4", max_value: "12" },
+    ];
+    const base = createChartRec("line", cols, "day", "change_pct", null, "crypto", {})!;
+    const expanded = expandRecommendationsWithExtras([base], cols);
+    expect(expanded.some((r) => r.yScale === "log")).toBe(false);
+  });
+});
+
+describe("stableLiveChartId", () => {
+  it("is deterministic for the same encoding", () => {
+    const a = stableLiveChartId("usgs", "bar", "place", "mag", null, "Quake map");
+    const b = stableLiveChartId("usgs", "bar", "place", "mag", null, "Quake map");
+    expect(a).toBe(b);
   });
 });

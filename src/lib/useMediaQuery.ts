@@ -1,43 +1,83 @@
 // =================================================================
-// useMediaQuery — client matchMedia hook
+// useMediaQuery — client matchMedia / viewport hooks
 // =================================================================
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { useLoomStore } from "./store";
+import { readBootstrapShellWidth } from "./shellBootstrap";
+import { shellModeFromWidth, type ShellMode } from "./shellLayout";
+
+function subscribeMediaQuery(query: string, onStoreChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const mq = window.matchMedia(query);
+  mq.addEventListener("change", onStoreChange);
+  return () => mq.removeEventListener("change", onStoreChange);
+}
+
+function getMediaQuerySnapshot(query: string): boolean {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia(query).matches;
+}
 
 export function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(false);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia(query);
-    const apply = () => setMatches(mq.matches);
-    apply();
-    mq.addEventListener("change", apply);
-    return () => mq.removeEventListener("change", apply);
-  }, [query]);
-
-  return matches;
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => subscribeMediaQuery(query, onStoreChange),
+    [query],
+  );
+  const getSnapshot = useCallback(() => getMediaQuerySnapshot(query), [query]);
+  const getServerSnapshot = useCallback(() => false, []);
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
-/** Tailwind `md` breakpoint — below this we treat the shell as mobile. */
-export function useIsMobile(): boolean {
-  return useMediaQuery("(max-width: 767px)");
+function subscribeViewportWidth(onStoreChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  let frame: number | null = null;
+  const emit = () => {
+    frame = null;
+    onStoreChange();
+  };
+  const onResize = () => {
+    if (frame != null) return;
+    frame = window.requestAnimationFrame(emit);
+  };
+  window.addEventListener("resize", onResize);
+  return () => {
+    window.removeEventListener("resize", onResize);
+    if (frame != null) window.cancelAnimationFrame(frame);
+  };
 }
 
-/** Viewport width for device presets (client-only; 1280 SSR fallback). */
+function getViewportWidthSnapshot(): number {
+  if (typeof window === "undefined") return 1280;
+  return readBootstrapShellWidth() ?? window.innerWidth;
+}
+
+/** Viewport width for device presets (SSR / server snapshot = 1280). */
 export function useViewportWidth(): number {
-  const [w, setW] = useState(1280);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const apply = () => setW(window.innerWidth);
-    apply();
-    window.addEventListener("resize", apply);
-    return () => window.removeEventListener("resize", apply);
-  }, []);
-  return w;
+  return useSyncExternalStore(
+    subscribeViewportWidth,
+    getViewportWidthSnapshot,
+    () => 1280,
+  );
+}
+
+/** Phone / tablet / desktop shell chrome mode (aligned with chartViewport). */
+export function useShellMode(): ShellMode {
+  const w = useViewportWidth();
+  return shellModeFromWidth(w);
+}
+
+/** True when shell is phone (<768px). */
+export function useIsMobile(): boolean {
+  return useShellMode() === "phone";
+}
+
+/** True when data sidebar should use overlay chrome (phone + tablet). */
+export function useSidebarOverlays(): boolean {
+  const mode = useShellMode();
+  return mode === "phone" || mode === "tablet";
 }
 
 /** Phone sheet height while editing a chart live (chart re-fits above it). */

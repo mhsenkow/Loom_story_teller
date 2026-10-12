@@ -128,7 +128,7 @@ describe("web source parsers (new feeds)", () => {
     ]);
     // Old `/latest` shape still works
     expect(parseSourceRows("fx", { base: "EUR", date: "2026-10-02", rates: { USD: 1.08 } })).toEqual([
-      ["2026-10-02", "EUR", "USD", 1.08, 0],
+      ["2026-10-02", "EUR", "USD", 1.08, null],
     ]);
   });
 
@@ -214,6 +214,20 @@ describe("web source parsers (new feeds)", () => {
       expect(rows.length, d.kind).toBeGreaterThan(0);
       expect(rows[0]!.length, d.kind).toBe(d.columns.length);
     }
+  });
+
+  it("spacex: null success for upcoming / unknown outcomes", () => {
+    const rows = parseSourceRows("spacex", [
+      { id: "1", name: "A", date_utc: "2026-01-01", success: true, upcoming: false },
+      { id: "2", name: "B", date_utc: "2026-02-01", success: true, upcoming: false },
+      { id: "3", name: "C", date_utc: "2026-03-01", success: null, upcoming: true },
+    ]);
+    expect(rows.map((r) => r[3])).toEqual([true, true, null]);
+  });
+
+  it("fx latest shape uses null change_pct", () => {
+    const rows = parseSourceRows("fx", { base: "EUR", date: "2026-10-01", rates: { USD: 1.08 } });
+    expect(rows[0]![4]).toBeNull();
   });
 
   it("columnar parser maps by name, coerces to registry types, nulls unknown columns", () => {

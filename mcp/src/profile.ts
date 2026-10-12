@@ -2,7 +2,7 @@
 // Loom MCP — CSV/JSON → ColumnInfo profiler (Workers-safe)
 // =================================================================
 
-import type { ColumnInfo } from "../../src/lib/store";
+import type { ColumnInfo } from "../../src/lib/queryTypes";
 
 const MAX_ROWS = 500;
 const MAX_BYTES = 400_000;
@@ -15,21 +15,35 @@ export interface ProfileResult {
   truncated: boolean;
 }
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/;
+
 function detectType(values: string[]): { data_type: string; nums: number; dates: number } {
   let nums = 0;
+  let ints = 0;
   let dates = 0;
   let nonEmpty = 0;
   for (const v of values) {
     if (v === "" || v == null) continue;
     nonEmpty++;
-    const n = Number(v);
-    if (!isNaN(n) && v.trim() !== "") nums++;
-    if (/^\d{4}-\d{2}-\d{2}/.test(v) || !isNaN(Date.parse(v))) dates++;
+    const t = v.trim();
+    if (t === "true" || t === "false") continue;
+    if (/^-?\d+$/.test(t)) ints++;
+    const n = Number(t);
+    if (!isNaN(n) && t !== "") nums++;
+    if (ISO_DATE.test(t) || ISO_TIMESTAMP.test(t)) dates++;
   }
   if (nonEmpty === 0) return { data_type: "VARCHAR", nums: 0, dates: 0 };
+  if (ints / nonEmpty >= 0.8) return { data_type: "INTEGER", nums, dates };
   if (nums / nonEmpty >= 0.8) return { data_type: "DOUBLE", nums, dates };
   if (dates / nonEmpty >= 0.7) return { data_type: "DATE", nums, dates };
   return { data_type: "VARCHAR", nums, dates };
+}
+
+function trimCsvToLastNewline(text: string): string {
+  const last = text.lastIndexOf("\n");
+  if (last <= 0) return text;
+  return text.slice(0, last + 1);
 }
 
 /** Minimal CSV splitter — handles quoted fields. */
@@ -41,10 +55,11 @@ export function parseCsv(text: string): { headers: string[]; rows: string[][] } 
     const ch = text[i]!;
     if (ch === '"') {
       if (inQuotes && text[i + 1] === '"') {
-        cur += '"';
+        cur += '""';
         i++;
       } else {
         inQuotes = !inQuotes;
+        cur += '"';
       }
       continue;
     }
@@ -131,7 +146,7 @@ export function profilePayload(input: {
   if (input.csv) {
     let text = input.csv;
     if (text.length > MAX_BYTES) {
-      text = text.slice(0, MAX_BYTES);
+      text = trimCsvToLastNewline(text.slice(0, MAX_BYTES));
       truncated = true;
     }
     const parsed = parseCsv(text);
@@ -139,10 +154,9 @@ export function profilePayload(input: {
     rawRows = parsed.rows.slice(0, MAX_ROWS);
     if (parsed.rows.length > MAX_ROWS) truncated = true;
   } else if (input.json) {
-    let text = input.json;
+    const text = input.json;
     if (text.length > MAX_BYTES) {
-      text = text.slice(0, MAX_BYTES);
-      truncated = true;
+      throw new Error(`JSON exceeds ${MAX_BYTES} byte cap (${text.length} chars)`);
     }
     const data = JSON.parse(text) as unknown;
     if (Array.isArray(data) && data.length > 0 && typeof data[0] === "object" && data[0] !== null) {
@@ -198,4 +212,14 @@ export function profilePayload(input: {
     rowCount: rawRows.length,
     truncated,
   };
+}
+
+export function profilePayloadSafe(
+  input: Parameters<typeof profilePayload>[0],
+): { ok: true; result: ProfileResult } | { ok: false; error: string } {
+  try {
+    return { ok: true, result: profilePayload(input) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Profile failed" };
+  }
 }

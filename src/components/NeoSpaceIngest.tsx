@@ -6,20 +6,13 @@
  */
 
 import { useEffect, useRef } from "react";
-import { parseCsvToInspectResult } from "@/lib/mock-data";
-import { createChartRec, recommend, type ChartKind } from "@/lib/recommendations";
+import { parseCsvToInspectResultAsync } from "@/lib/parseCsvAsync";
+import { createChartRec, parseChartKind, recommend } from "@/lib/recommendations";
+import { activateDataset } from "@/lib/datasetPipeline";
 import { useLoomStore, type FileEntry } from "@/lib/store";
-
-const NEOSPACE_ORIGINS = new Set([
-  "https://neospace.ibm.io",
-  "https://neospace-dc4.pages.dev",
-]);
-
-const BRUH_ORIGINS = new Set([
-  "https://bruh.ibm.io",
-  "https://bruh.mhsenkow.workers.dev",
-  "https://bruh-15b.pages.dev",
-]);
+import { WEB_VAULT_PATH } from "@/lib/webDataFolder";
+import { isAllowedNeoSpaceOrigin, safeNeoSpaceFileName } from "@/lib/neospace";
+import { leaveSourcesShowChart } from "@/lib/shellHandoff";
 
 type IncomingFile = { name: string; csv: string; label?: string };
 type Preferred = {
@@ -39,25 +32,6 @@ type Incoming = {
   preferred?: Preferred;
   source?: { label?: string; acct?: string; home?: string };
 };
-
-function isAllowedOrigin(origin: string): boolean {
-  if (NEOSPACE_ORIGINS.has(origin) || BRUH_ORIGINS.has(origin)) return true;
-  try {
-    const host = new URL(origin).hostname;
-    return (
-      host.endsWith(".neospace-dc4.pages.dev") ||
-      host === "localhost" ||
-      host === "127.0.0.1"
-    );
-  } catch {
-    return false;
-  }
-}
-
-function safeName(name: string): string {
-  const base = (name || "neospace-insights.csv").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
-  return base.toLowerCase().endsWith(".csv") ? base : `${base}.csv`;
-}
 
 export function NeoSpaceIngest() {
   const handledRef = useRef(false);
@@ -103,7 +77,7 @@ export function NeoSpaceIngest() {
       }
     };
 
-    const ingest = (msg: Incoming, origin: string) => {
+    const ingest = async (msg: Incoming, origin: string) => {
       if (handledRef.current) return;
       const files = Array.isArray(msg.files) ? msg.files.filter((f) => f?.csv && f?.name) : [];
       if (!files.length) return;
@@ -119,11 +93,12 @@ export function NeoSpaceIngest() {
       const credit = msg.source?.label || (fromBruhMsg ? "bruh page" : "NeoSpace insights");
       const home = msg.source?.home || (fromBruhMsg ? "https://bruh.ibm.io/" : "https://neospace.ibm.io/");
 
+      store.setToast("Parsing datasets…");
       for (const f of files) {
-        const name = safeName(f.name);
+        const name = safeNeoSpaceFileName(f.name);
         const path = `web://${name}`;
         try {
-          const inspect = parseCsvToInspectResult(name, f.csv);
+          const inspect = await parseCsvToInspectResultAsync(name, f.csv);
           const rowCount = inspect.sample.total_rows ?? inspect.sample.rows.length;
           cache[path] = inspect;
           entries.push({
@@ -146,50 +121,48 @@ export function NeoSpaceIngest() {
         return;
       }
 
-      const preferredName = msg.preferred?.file ? safeName(msg.preferred.file) : entries[0]!.name;
+      const preferredName = msg.preferred?.file ? safeNeoSpaceFileName(msg.preferred.file) : entries[0]!.name;
       const selected = entries.find((e) => e.name === preferredName) || entries[0]!;
       const inspect = cache[selected.path]!;
 
       store.setWebFileCache(cache);
-      store.setMountedFolder("web://");
+      store.setMountedFolder(WEB_VAULT_PATH);
       store.setFiles([
         ...store.files.filter((f) => f.path.startsWith("web://") && !entries.some((e) => e.path === f.path)),
         ...entries,
       ]);
-      store.setSelectedFile(selected);
-      store.addRecentFile(selected);
-      store.setLastSession({ folderPath: "web://", filePath: selected.path, viewMode: "chart" });
-      store.setColumnStats(inspect.stats);
-      store.setSampleRows(inspect.sample);
-
       const recs = recommend(inspect.stats, inspect.sample, selected.name);
       let active = recs[0] || null;
+      let charts = recs;
       if (msg.preferred?.kind && msg.preferred.xField) {
-        const forced = createChartRec(
-          msg.preferred.kind as ChartKind,
+        const kind = parseChartKind(msg.preferred.kind);
+        const forced = kind
+          ? createChartRec(
+          kind,
           inspect.stats,
           msg.preferred.xField,
           msg.preferred.yField || null,
           msg.preferred.colorField || null,
           selected.name,
-        );
+        )
+          : null;
         if (forced) {
           if (msg.preferred.title) forced.title = msg.preferred.title;
           if (msg.preferred.subtitle) forced.subtitle = msg.preferred.subtitle;
           active = forced;
-          store.setChartRecs([forced, ...recs.filter((r) => r.id !== forced.id)]);
-        } else {
-          store.setChartRecs(recs);
+          charts = [forced, ...recs.filter((r) => r.id !== forced.id)];
         }
       } else {
         if (msg.preferred?.title && active) active = { ...active, title: msg.preferred.title };
         if (msg.preferred?.subtitle && active) active = { ...active, subtitle: msg.preferred.subtitle };
-        store.setChartRecs(recs);
       }
-      store.setActiveChart(active);
+      activateDataset({ file: selected, stats: inspect.stats, sample: inspect.sample, charts, active });
+      store.addRecentFile(selected);
+      store.setLastSession({ folderPath: "web://", filePath: selected.path, viewMode: "chart" });
       store.setViewMode("chart");
       store.setDataRegionOpen(false);
       store.setDataSourcesExpanded(false);
+      leaveSourcesShowChart();
       store.setToast(
         fromBruhMsg
           ? `bruh · ${entries.length} dataset${entries.length > 1 ? "s" : ""} · ${selected.name}`
@@ -205,14 +178,15 @@ export function NeoSpaceIngest() {
       } catch {
         /* ignore */
       }
+      handledRef.current = false;
     };
 
     const onMessage = (event: MessageEvent) => {
-      if (!isAllowedOrigin(event.origin)) return;
+      if (!isAllowedNeoSpaceOrigin(event.origin)) return;
       const data = event.data as Incoming | null;
       if (!data || typeof data !== "object" || data.v !== 1) return;
       if (data.type !== "neospace-loom-data" && data.type !== "bruh-loom-data") return;
-      ingest(data, event.origin);
+      void ingest(data, event.origin);
     };
 
     window.addEventListener("message", onMessage);

@@ -17,6 +17,7 @@ import {
   openExternalUrl,
 } from "@/lib/tauri";
 import { useLoomStore } from "@/lib/store";
+import { Dialog } from "@/components/ui/Dialog";
 
 const KINDS = [
   { id: "ux", label: "UX" },
@@ -92,6 +93,8 @@ export function FeedbackNotes() {
   const [busy, setBusy] = useState(false);
   const [mounted, setMounted] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const noteTitleId = "loom-note-title";
 
   useEffect(() => {
     setMounted(true);
@@ -174,94 +177,101 @@ export function FeedbackNotes() {
         )}
       {open &&
         createPortal(
-          <div
-            className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-0 sm:p-4 loom-overlay animate-fade-in"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Leave a note"
-            onClick={() => setOpen(false)}
+          <Dialog
+            open={open}
+            onClose={() => setOpen(false)}
+            labelledBy={noteTitleId}
+            initialFocusRef={titleRef}
+            zIndex={70}
+            panelClassName="max-w-md p-4 sm:p-5 space-y-3"
           >
-            <div
-              className="loom-card w-full max-w-md p-4 sm:p-5 space-y-3 bg-loom-surface border border-loom-border shadow-loom-lg rounded-t-2xl sm:rounded-xl animate-slide-up mb-[var(--safe-bottom)] sm:mb-0"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="text-sm font-semibold text-loom-text">Leave a note</h2>
-                <button type="button" className="loom-btn-ghost p-1 rounded text-loom-muted" onClick={() => setOpen(false)} aria-label="Close">
-                  ×
-                </button>
-              </div>
-              <p className="text-2xs text-loom-muted">
-                Files as a GitHub issue on Loom — bugs, UX, ideas, data gaps.
-              </p>
-              <div className="flex flex-wrap gap-1">
-                {KINDS.map((k) => (
-                  <button
-                    key={k.id}
-                    type="button"
-                    onClick={() => setKind(k.id)}
-                    className={`px-2 py-1 text-2xs rounded border ${
-                      kind === k.id
-                        ? "border-loom-accent bg-loom-accent/15 text-loom-text"
-                        : "border-loom-border text-loom-muted hover:text-loom-text"
-                    }`}
-                  >
-                    {k.label}
-                  </button>
-                ))}
-              </div>
-              <input
-                type="text"
-                className="loom-input w-full text-xs"
-                placeholder="Short title"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                autoFocus
-              />
-              <textarea
-                className="loom-input w-full text-xs min-h-[88px] resize-y"
-                placeholder="What happened / what would help…"
-                value={body}
-                onChange={(e) => setBody(e.target.value)}
-                rows={4}
-              />
-              <div className="flex items-center gap-2 flex-wrap">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  id="loom-note-shot"
-                  onChange={(e) => onUpload(e.target.files?.[0])}
-                />
-                <label htmlFor="loom-note-shot" className="loom-btn-ghost text-2xs px-2 py-1 rounded border border-loom-border cursor-pointer">
-                  {shot ? "Replace screenshot" : "Attach screenshot"}
-                </label>
-                {shot && (
-                  <button type="button" className="text-2xs text-loom-muted hover:text-loom-text" onClick={() => setShot(null)}>
-                    Remove
-                  </button>
-                )}
-              </div>
-              {shot && (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={shot} alt="Screenshot preview" className="max-h-28 rounded border border-loom-border object-contain bg-loom-elevated" />
-              )}
-              <div className="flex justify-end gap-2 pt-1">
-                <button type="button" className="loom-btn-ghost text-xs px-3 py-1.5" onClick={() => setOpen(false)}>
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="loom-btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
-                  disabled={!title.trim() || busy}
-                  onClick={() => void submit()}
-                >
-                  {busy ? "Filing…" : "File note"}
-                </button>
-              </div>
+            <div className="flex items-center justify-between gap-2">
+              <h2 id={noteTitleId} className="text-sm font-semibold text-loom-text">
+                Leave a note
+              </h2>
+              <button type="button" className="loom-btn-ghost p-1 rounded text-loom-muted min-h-9 min-w-9" onClick={() => setOpen(false)} aria-label="Close">
+                ×
+              </button>
             </div>
-          </div>,
+            <p className="text-2xs text-loom-muted">
+              Files as a GitHub issue on Loom — bugs, UX, ideas, data gaps.
+            </p>
+            <div className="flex flex-wrap gap-1" role="group" aria-label="Note category">
+              {KINDS.map((k) => (
+                <button
+                  key={k.id}
+                  type="button"
+                  aria-pressed={kind === k.id}
+                  onClick={() => setKind(k.id)}
+                  className={`px-2 py-1 text-2xs rounded border ${
+                    kind === k.id
+                      ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                      : "border-loom-border text-loom-muted hover:text-loom-text"
+                  }`}
+                >
+                  {k.label}
+                </button>
+              ))}
+            </div>
+            <label htmlFor="loom-note-title-input" className="sr-only">
+              Short title
+            </label>
+            <input
+              ref={titleRef}
+              id="loom-note-title-input"
+              type="text"
+              className="loom-input w-full text-xs"
+              placeholder="Short title"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+            <label htmlFor="loom-note-body" className="sr-only">
+              Description
+            </label>
+            <textarea
+              id="loom-note-body"
+              className="loom-input w-full text-xs min-h-[88px] resize-y"
+              placeholder="What happened / what would help…"
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={4}
+            />
+            <div className="flex items-center gap-2 flex-wrap">
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                className="sr-only"
+                id="loom-note-shot"
+                onChange={(e) => onUpload(e.target.files?.[0])}
+              />
+              <label htmlFor="loom-note-shot" className="loom-btn-ghost text-2xs px-2 py-1 rounded border border-loom-border cursor-pointer">
+                {shot ? "Replace screenshot" : "Attach screenshot"}
+              </label>
+              {shot && (
+                <button type="button" className="text-2xs text-loom-muted hover:text-loom-text" onClick={() => setShot(null)}>
+                  Remove
+                </button>
+              )}
+            </div>
+            {shot && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={shot} alt="Screenshot preview" className="max-h-28 rounded border border-loom-border object-contain bg-loom-elevated" />
+            )}
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" className="loom-btn-ghost text-xs px-3 py-1.5" onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="loom-btn-primary text-xs px-3 py-1.5 disabled:opacity-50"
+                disabled={!title.trim() || busy}
+                onClick={() => void submit()}
+              >
+                {busy ? "Filing…" : "File note"}
+              </button>
+            </div>
+          </Dialog>,
           document.body,
         )}
     </>

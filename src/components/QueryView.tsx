@@ -8,12 +8,17 @@
 "use client";
 
 import { useLoomStore } from "@/lib/store";
+import { applyQueryResult } from "@/lib/datasetPipeline";
 import { queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
-import { recommend, STREAM_SQL_SNIPPETS, SOURCE_SQL_SNIPPETS } from "@/lib/recommendations";
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { STREAM_SQL_SNIPPETS, SOURCE_SQL_SNIPPETS } from "@/lib/recommendations";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { SqlEditor } from "@/components/SqlEditor";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { QueryResultsSkeleton } from "@/components/Skeleton";
 import { validateQuery } from "@/lib/queryValidate";
+import { sqlIdent } from "@/lib/dive";
+import { formatExplorerNumber } from "@/lib/tableExplorer";
+import { compareExplorerCells } from "@/lib/tableSort";
 import { StartHere } from "@/components/StartHere";
 import { sourceKindFromPath, sourceTable as sourceTableName } from "@/lib/sourceRegistry";
 
@@ -22,7 +27,6 @@ export function QueryView() {
     selectedFile, querySql, setQuerySql,
     queryResult, setQueryResult, queryError, setQueryError,
     isQuerying, setIsQuerying,
-    setSampleRows, setColumnStats, setChartRecs, setActiveChart,
     queryHistory, appendQueryHistory,
     querySnippets, addQuerySnippet, setPromptDialog,
     columnStats,
@@ -36,30 +40,43 @@ export function QueryView() {
   const isStream = selectedFile?.path === "stream://wiki";
   const pathSourceKind = sourceKindFromPath(selectedFile?.path);
   const sourceTable = pathSourceKind ? sourceTableName(pathSourceKind) : undefined;
+  const activeTable = isStream ? "wiki_stream" : sourceTable ?? "loom_active";
   const defaultSql = isStream
     ? "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT 100"
     : sourceTable
       ? `SELECT * FROM ${sourceTable} LIMIT 100`
       : "SELECT * FROM loom_active LIMIT 100";
   const [localSql, setLocalSql] = useState(querySql || defaultSql);
+  const filePath = selectedFile?.path ?? null;
+
+  useEffect(() => {
+    setLocalSql(defaultSql);
+    setQueryResult(null);
+    setQueryError(null);
+    setResultSort(null);
+    setQuerySql("");
+  }, [filePath, defaultSql, setQueryResult, setQueryError, setQuerySql]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number; colIndex: number } | null>(null);
   const [schemaOpen, setSchemaOpen] = useState(true);
   const [diffSnapshotId, setDiffSnapshotId] = useState<string | null>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [queryStatusMessage, setQueryStatusMessage] = useState("");
+  const [resultSort, setResultSort] = useState<{ col: number; dir: "asc" | "desc" } | null>(null);
+  const validationId = "query-validation-hint";
+
+  const sortedResultRows = useMemo(() => {
+    if (!queryResult) return [];
+    if (!resultSort) return queryResult.rows;
+    const { col, dir } = resultSort;
+    const mult = dir === "asc" ? 1 : -1;
+    return [...queryResult.rows].sort((a, b) => compareExplorerCells(a[col], b[col], mult));
+  }, [queryResult, resultSort]);
 
   const insertAtCursor = useCallback((text: string) => {
-    const ta = textareaRef.current;
-    if (!ta) return;
-    const start = ta.selectionStart;
-    const end = ta.selectionEnd;
-    const before = localSql.slice(0, start);
-    const after = localSql.slice(end);
-    setLocalSql(before + text + after);
-    setTimeout(() => {
-      ta.focus();
-      ta.setSelectionRange(start + text.length, start + text.length);
-    }, 0);
-  }, [localSql]);
+    setLocalSql((prev) => {
+      const sep = prev.length && !prev.endsWith(" ") && !prev.endsWith("\n") ? " " : "";
+      return prev + sep + text;
+    });
+  }, []);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -112,56 +129,43 @@ export function QueryView() {
           ? await sourceQuery(sourceKind, localSql, 10000)
           : await queryFile(selectedFile.path, localSql, 10000);
       setQueryResult(result);
+      setResultSort(null);
+      setQueryStatusMessage(
+        result.rows.length === 0
+          ? "Query finished: no rows returned"
+          : `Query finished: ${result.rows.length.toLocaleString()} rows returned`,
+      );
       appendQueryHistory(localSql);
-      // Sync chart + preview to query result so the chart reflects the query
-      const columns = result?.columns ?? [];
-      const types = result?.types ?? [];
-      if (columns.length > 0) {
-        setSampleRows(result);
-        const stats = columns.map((name, i) => ({
-          name,
-          data_type: types[i] ?? "VARCHAR",
-          null_count: 0,
-          distinct_count: 0,
-          min_value: null as string | null,
-          max_value: null as string | null,
-        }));
-        setColumnStats(stats);
-        try {
-          const recs = recommend(stats, result, selectedFile.name);
-          setChartRecs(recs);
-          setActiveChart(recs.length > 0 ? recs[0] : null);
-        } catch (_) {
-          setChartRecs([]);
-          setActiveChart(null);
-        }
-      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setQueryError(msg);
       setToast(msg);
       setQueryResult(null);
+      setQueryStatusMessage(`Query failed: ${msg}`);
     } finally {
       setIsQuerying(false);
     }
-  }, [selectedFile, localSql, setIsQuerying, setQueryError, setQuerySql, setQueryResult, setSampleRows, setColumnStats, setChartRecs, setActiveChart, appendQueryHistory]);
+  }, [selectedFile, localSql, validation.valid, validation.error, setIsQuerying, setQueryError, setQuerySql, setQueryResult, appendQueryHistory, setToast]);
 
   if (!selectedFile) {
     return (
       <StartHere
-        detail={<>Once something is open, run SQL against <code className="text-loom-accent">loom_active</code>.</>}
+        detail={<>Once something is open, run SQL against the active table (usually <code className="text-loom-accent">loom_active</code>).</>}
       />
     );
   }
 
   return (
     <div className="flex flex-col h-full animate-fade-in">
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {queryStatusMessage}
+      </p>
       {/* Editor */}
       <div className="border-b border-loom-border bg-loom-surface/50 p-2.5 sm:p-3 space-y-2">
         <div className="flex items-center gap-1.5 sm:gap-2 mb-1 sm:mb-2 flex-wrap">
           <span className="text-xs text-loom-muted font-mono shrink-0">SQL</span>
-          <span className="text-2xs text-loom-muted truncate min-w-0 max-w-[42vw] sm:max-w-none" title={`loom_active = ${selectedFile.name}`}>
-            <code className="text-loom-accent">loom_active</code>
+          <span className="text-2xs text-loom-muted truncate min-w-0 max-w-[42vw] sm:max-w-none" title={`${activeTable} = ${selectedFile.name}`}>
+            <code className="text-loom-accent">{activeTable}</code>
             <span className="hidden sm:inline"> = {selectedFile.name}</span>
           </span>
           <div className="flex-1 min-w-0" />
@@ -300,9 +304,9 @@ export function QueryView() {
             onKeyDown={(e) => {
               if (e.key === "Enter" && nlQueryInput.trim()) {
                 const cols = (columnStats ?? []).map((c) => `${c.name} (${c.data_type})`).join(", ");
-                const prompt = `Table: loom_active\nColumns: ${cols}\n\nGenerate a DuckDB SQL query for: ${nlQueryInput.trim()}\nReturn only the SQL, no explanation.`;
-                setLocalSql(`-- AI prompt: ${nlQueryInput.trim()}\n-- Columns: ${cols.slice(0, 120)}...\nSELECT * FROM loom_active LIMIT 100`);
-                setToast("NL-to-SQL: Edit the generated query above (AI sidecar required for full generation)");
+                const note = `-- NL request: ${nlQueryInput.trim()}\n-- Table: ${activeTable}\n-- Columns: ${cols.slice(0, 200)}${cols.length > 200 ? "…" : ""}\n-- (AI sidecar not connected — write SQL below)\n`;
+                setLocalSql((prev) => (prev.trim() ? `${note}\n${prev}` : `${note}\nSELECT * FROM ${sqlIdent(activeTable)} LIMIT 100`));
+                setToast("Added your plain-English note above the SQL (existing query kept)");
                 setNlQueryInput("");
               }
             }}
@@ -337,23 +341,19 @@ export function QueryView() {
         </div>
         <div className="flex gap-2">
           <div className="flex-1 min-w-0">
-            <textarea
-              ref={textareaRef}
+            <SqlEditor
               value={localSql}
-              onChange={(e) => setLocalSql(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  handleExecute();
-                }
-              }}
-              className="loom-input font-mono text-xs h-24 w-full resize-none"
-              aria-label="SQL query"
-              placeholder="SELECT * FROM loom_active WHERE ..."
-              spellCheck={false}
+              onChange={setLocalSql}
+              onRun={handleExecute}
+              activeTable={activeTable}
+              columnStats={columnStats ?? []}
+              placeholder={`SELECT * FROM ${activeTable} WHERE ...`}
+              describedBy={!validation.valid && validation.error ? validationId : undefined}
             />
             {!validation.valid && validation.error && (
-              <p className="text-2xs text-loom-warning mt-1 font-mono">{validation.error}</p>
+              <p id={validationId} className="text-2xs text-loom-warning mt-1 font-mono" role="status">
+                {validation.error}
+              </p>
             )}
           </div>
           {(columnStats?.length ?? 0) > 0 && (
@@ -369,15 +369,15 @@ export function QueryView() {
               {schemaOpen && (
                 <div className="max-h-48 overflow-y-auto py-1">
                   <p className="px-2 py-0.5 text-2xs text-loom-muted font-semibold">Tables</p>
-                  <button type="button" onClick={() => insertAtCursor("loom_active")} className="w-full px-2 py-0.5 text-left text-2xs font-mono text-loom-accent hover:bg-loom-accent/20 block">
-                    loom_active
+                  <button type="button" onClick={() => insertAtCursor(activeTable)} className="w-full px-2 py-0.5 text-left text-2xs font-mono text-loom-accent hover:bg-loom-accent/20 block">
+                    {activeTable}
                   </button>
                   <p className="px-2 py-0.5 text-2xs text-loom-muted font-semibold mt-1">Columns</p>
                   {columnStats.map((col) => (
                     <button
                       key={col.name}
                       type="button"
-                      onClick={() => insertAtCursor(col.name)}
+                      onClick={() => insertAtCursor(sqlIdent(col.name))}
                       className="w-full px-2 py-0.5 text-left text-2xs font-mono text-loom-text hover:bg-loom-accent/20 truncate"
                       title={`${col.name} (${col.data_type})`}
                     >
@@ -433,16 +433,20 @@ export function QueryView() {
           <QueryResultsSkeleton rows={8} cols={queryResult?.columns.length ?? 4} />
         ) : queryResult && queryResult.rows.length > 0 ? (
           <>
-            <div className="sticky max-md:static top-0 z-10 flex items-center gap-2 px-3 py-1 bg-loom-bg border-b border-loom-border flex-wrap">
+            <div className="sticky max-md:static top-0 z-20 bg-loom-bg border-b border-loom-border">
+            <div className="flex items-center gap-2 px-3 py-1 flex-wrap">
               <span className="text-2xs text-loom-muted font-mono">
-                {queryResult.total_rows.toLocaleString()} rows &middot; {queryResult.columns.length} cols
+                {queryResult.rows.length < queryResult.total_rows
+                  ? `First ${queryResult.rows.length.toLocaleString()} of ${queryResult.total_rows.toLocaleString()} rows (10k cap)`
+                  : `${queryResult.total_rows.toLocaleString()} rows`}
+                {" "}&middot; {queryResult.columns.length} cols
               </span>
-              {queryResult.rows.length > queryResultPageSize && (
+              {sortedResultRows.length > queryResultPageSize && (
                 <span className="text-2xs text-loom-muted font-mono flex items-center gap-1">
                   Page
                   <button type="button" onClick={() => setQueryResultPage(queryResultPage - 1)} disabled={queryResultPage <= 0} aria-label="Previous page" className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">←</button>
-                  <span>{queryResultPage + 1} of {Math.ceil(queryResult.rows.length / queryResultPageSize)}</span>
-                  <button type="button" onClick={() => setQueryResultPage(queryResultPage + 1)} disabled={queryResultPage >= Math.ceil(queryResult.rows.length / queryResultPageSize) - 1} aria-label="Next page" className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">→</button>
+                  <span>{queryResultPage + 1} of {Math.ceil(sortedResultRows.length / queryResultPageSize)}</span>
+                  <button type="button" onClick={() => setQueryResultPage(queryResultPage + 1)} disabled={queryResultPage >= Math.ceil(sortedResultRows.length / queryResultPageSize) - 1} aria-label="Next page" className="loom-btn-ghost px-1 py-0 max-md:min-w-9 disabled:opacity-50">→</button>
                 </span>
               )}
               <button
@@ -455,10 +459,14 @@ export function QueryView() {
               >
                 Export CSV
               </button>
-              {/* Running a query already re-recommends charts from these rows — jump to them. */}
               <button
                 type="button"
-                onClick={() => useLoomStore.getState().setViewMode("chart")}
+                onClick={() => {
+                  if (!queryResult) return;
+                  applyQueryResult(queryResult, selectedFile.name);
+                  setToast("Using query results for Chart and Explorer");
+                  useLoomStore.getState().setViewMode("chart");
+                }}
                 className="text-2xs px-2 py-0.5 max-md:min-h-9 max-md:px-3 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium"
               >
                 Chart this →
@@ -482,18 +490,34 @@ export function QueryView() {
             <table className="w-full text-xs font-mono border-collapse">
               <thead>
                 <tr>
-                  {queryResult.columns.map((col) => (
+                  {queryResult.columns.map((col, ci) => (
                     <th
-                      key={col}
-                      className="px-3 py-2 text-left text-2xs font-semibold text-loom-muted uppercase tracking-wider whitespace-nowrap sticky top-7 max-md:top-0 bg-loom-bg border-b border-loom-border"
+                      key={`${col}-${ci}`}
+                      className="px-3 py-2 text-left text-2xs font-semibold text-loom-muted uppercase tracking-wider whitespace-nowrap bg-loom-bg border-b border-loom-border"
                     >
-                      {col}
+                      <button
+                        type="button"
+                        className="hover:text-loom-text uppercase tracking-wider"
+                        onClick={() =>
+                          setResultSort((prev) =>
+                            prev?.col === ci
+                              ? { col: ci, dir: prev.dir === "asc" ? "desc" : "asc" }
+                              : { col: ci, dir: "asc" },
+                          )
+                        }
+                      >
+                        {col}
+                        {resultSort?.col === ci ? (resultSort.dir === "asc" ? " ↑" : " ↓") : ""}
+                      </button>
                     </th>
                   ))}
                 </tr>
               </thead>
+            </table>
+            </div>
+            <table className="w-full text-xs font-mono border-collapse">
               <tbody>
-                {queryResult.rows.slice(queryResultPage * queryResultPageSize, (queryResultPage + 1) * queryResultPageSize).map((row, ri) => {
+                {sortedResultRows.slice(queryResultPage * queryResultPageSize, (queryResultPage + 1) * queryResultPageSize).map((row, ri) => {
                   const absoluteRi = queryResultPage * queryResultPageSize + ri;
                   return (
                     <tr key={absoluteRi} className="border-b border-loom-border/30 hover:bg-loom-elevated/40">
@@ -510,7 +534,7 @@ export function QueryView() {
                           {cell === null ? (
                             <span className="text-loom-muted/60 italic">null</span>
                           ) : typeof cell === "number" ? (
-                            <span className="text-loom-accent">{cell.toLocaleString()}</span>
+                            <span className="text-loom-accent">{formatExplorerNumber(cell)}</span>
                           ) : (
                             String(cell)
                           )}

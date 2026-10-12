@@ -20,6 +20,11 @@ struct Uniforms {
   point_size: f32,
   opacity: f32,
   size_scale: f32,
+  /** Plot inset in the same units as viewport_* (device pixels). */
+  pad_x: f32,
+  pad_y: f32,
+  device_pixel_ratio: f32,
+  palette_size: f32,
 }
 
 struct DataPoint {
@@ -44,7 +49,8 @@ struct ScreenPoint {
 @group(0) @binding(3) var<storage, read> palette: array<f32>;
 
 fn get_color(category: u32) -> vec3<f32> {
-  let i = (category % 8u) * 3u;
+  let n = max(u32(uniforms.palette_size), 1u);
+  let i = (category % n) * 3u;
   return vec3<f32>(palette[i], palette[i + 1u], palette[i + 2u]);
 }
 
@@ -62,15 +68,21 @@ fn compute_positions(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 
   let dp = data_points[idx];
-  let x_range = uniforms.x_max - uniforms.x_min;
-  let y_range = uniforms.y_max - uniforms.y_min;
+  let x_range = max(uniforms.x_max - uniforms.x_min, 1e-12);
+  let y_range = max(uniforms.y_max - uniforms.y_min, 1e-12);
 
-  // Normalize to [0, 1] then to NDC [-1, 1]
-  let nx = ((dp.x - uniforms.x_min) / x_range) * 2.0 - 1.0;
-  let ny = ((dp.y - uniforms.y_min) / y_range) * 2.0 - 1.0;
+  // Data → [0,1] inside the padded plot rect, then to NDC (matches Canvas axes).
+  let tx = (dp.x - uniforms.x_min) / x_range;
+  let ty = (dp.y - uniforms.y_min) / y_range;
+  let vw = max(uniforms.viewport_width, 1.0);
+  let vh = max(uniforms.viewport_height, 1.0);
+  let pad_nx = 2.0 * uniforms.pad_x / vw;
+  let pad_ny = 2.0 * uniforms.pad_y / vh;
+  let nx = -1.0 + pad_nx + tx * (2.0 - 2.0 * pad_nx);
+  let ny = -1.0 + pad_ny + ty * (2.0 - 2.0 * pad_ny);
 
   let color = get_color(dp.category);
-  let pixel_size = uniforms.point_size * (0.4 + 0.6 * dp.size_norm) * uniforms.size_scale;
+  let pixel_size = uniforms.point_size * uniforms.device_pixel_ratio * (0.4 + 0.6 * dp.size_norm) * uniforms.size_scale;
 
   screen_points[idx] = ScreenPoint(
     nx, ny,

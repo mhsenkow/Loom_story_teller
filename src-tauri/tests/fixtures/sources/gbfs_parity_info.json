@@ -1,0 +1,16 @@
+{
+  "last_updated": 1790974028,
+  "ttl": 60,
+  "data": {
+    "stations": [
+      { "station_id": "full", "name": "Full Data St", "lat": 40.7, "lon": -74.0, "capacity": 20 },
+      { "station_id": "zero-cap", "name": "Zero Capacity St", "lat": 40.71, "lon": -74.01, "capacity": 0 },
+      { "station_id": "no-coords", "name": "No Coords St", "capacity": 10 },
+      { "station_id": "vehicle-types", "name": "Vehicle Types St", "lat": 40.72, "lon": -74.02, "capacity": 10 },
+      { "station_id": "sparse", "name": "Sparse St", "lat": 40.73, "lon": -74.03 },
+      { "station_id": "stale", "name": "Stale St", "lat": 40.74, "lon": -74.04, "capacity": 8 },
+      { "station_id": "overfull", "name": "Overfull St", "lat": 40.75, "lon": -74.05, "capacity": 20 },
+      { "station_id": "uninstalled", "name": "Uninstalled St", "lat": 40.76, "lon": -74.06, "capacity": 5 }
+    ]
+  }
+}

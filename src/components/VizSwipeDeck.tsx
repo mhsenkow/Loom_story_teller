@@ -8,16 +8,20 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useLoomStore } from "@/lib/store";
 import { ChartCard } from "@/components/ChartCard";
 import { getRecommendationReason } from "@/lib/recommendations";
 import { eventCount } from "@/lib/vizPreferences";
+import type { ChartRecommendation } from "@/lib/recommendations";
 
 const SWIPE_THRESHOLD = 88;
 const VELOCITY_THRESHOLD = 0.5;
 const EXIT_MS = 200;
 
 export function VizSwipeDeck() {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
   const open = useLoomStore((s) => s.vizSwipeOpen);
   const status = useLoomStore((s) => s.vizScanStatus);
   const message = useLoomStore((s) => s.vizScanMessage);
@@ -152,6 +156,19 @@ export function VizSwipeDeck() {
     }
   };
 
+  useFocusTrap(dialogRef, open);
+  const [liveMsg, setLiveMsg] = useState("");
+
+  useEffect(() => {
+    if (!open || status !== "ready" || !current) return;
+    keepRef.current?.focus();
+  }, [open, status, current?.id]);
+
+  useEffect(() => {
+    if (!open || !current) return;
+    setLiveMsg(`${current.title}. ${Math.min(index + 1, deck.length)} of ${deck.length}.`);
+  }, [open, current, index, deck.length]);
+
   if (!open) return null;
 
   const rot = reducedMotion ? 0 : dragX * 0.035;
@@ -176,6 +193,7 @@ export function VizSwipeDeck() {
 
   return (
     <div
+      ref={dialogRef}
       className="fixed inset-0 z-[80] flex flex-col bg-loom-bg/97 backdrop-blur-md"
       style={{
         paddingTop: "var(--safe-top)",
@@ -187,6 +205,9 @@ export function VizSwipeDeck() {
       aria-modal="true"
       aria-label="Deep scan chart suggestions"
     >
+      <p className="sr-only" aria-live="polite" aria-atomic="true">
+        {liveMsg}
+      </p>
       <header className="shrink-0 border-b border-loom-border">
         <div className="flex items-center gap-2 px-3 py-2.5">
           <div className="min-w-0 flex-1">
@@ -263,7 +284,7 @@ export function VizSwipeDeck() {
                 aria-hidden
               >
                 <div className="rounded-xl border border-loom-border bg-loom-elevated overflow-hidden">
-                  <ChartCard rec={next} data={data} isActive={false} onClick={() => {}} hero />
+                  <PeekChartStill rec={next} />
                 </div>
               </div>
             )}
@@ -347,6 +368,7 @@ export function VizSwipeDeck() {
             Skip
           </button>
           <button
+            ref={keepRef}
             type="button"
             onClick={() => commit("right")}
             disabled={!!exitDir}
@@ -361,6 +383,28 @@ export function VizSwipeDeck() {
       {status === "ready" && current && (
         <p className="sr-only">Swipe right or press K to keep, swipe left or press J to skip, Escape to close.</p>
       )}
+    </div>
+  );
+}
+
+function PeekChartStill({ rec }: { rec: ChartRecommendation }) {
+  return (
+    <div className="h-[26rem] max-h-[62vh] p-4 flex flex-col justify-between bg-loom-surface">
+      <div className="space-y-1">
+        <p className="text-2xs uppercase tracking-[0.18em] text-loom-muted">{rec.kind}</p>
+        <p className="text-sm font-semibold text-loom-text line-clamp-2">{rec.title}</p>
+        {rec.subtitle ? (
+          <p className="text-2xs text-loom-muted line-clamp-2">{rec.subtitle}</p>
+        ) : null}
+      </div>
+      <div className="h-40 rounded-lg border border-loom-border/70 bg-loom-bg/50 p-3 flex items-end gap-2 opacity-80">
+        <span className="flex-1 rounded-t bg-loom-accent/25 h-1/3" />
+        <span className="flex-1 rounded-t bg-loom-accent/35 h-1/2" />
+        <span className="flex-1 rounded-t bg-loom-accent/45 h-2/3" />
+        <span className="flex-1 rounded-t bg-loom-accent/30 h-5/12" />
+        <span className="flex-1 rounded-t bg-loom-accent/55 h-3/4" />
+      </div>
+      <p className="text-2xs text-loom-muted line-clamp-2">{getRecommendationReason(rec)}</p>
     </div>
   );
 }

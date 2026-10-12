@@ -18,9 +18,9 @@
 
 :root {
   /* ---- Typography (overridden by data-font / data-ui / data-theme) ---- */
-  --font-sans: var(--font-inter, "Inter"), system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains, "JetBrains Mono"), ui-monospace, monospace;
-  --font-serif: var(--font-libre, "Libre Baskerville"), Georgia, serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-serif: Georgia, "Times New Roman", serif;
   --app-font-scale: 1;
   /* Optical size nudge for faces that read small/large at UI sizes */
   --font-optical: 1;
@@ -95,10 +95,13 @@
   --loom-surface: var(--color-surface);
   --loom-elevated: var(--color-bg-elev);
   --loom-border: var(--color-border);
+  --loom-border-strong: color-mix(in srgb, var(--color-text) 28%, var(--color-border));
+  --loom-warning-text: var(--color-warning);
   --loom-text: var(--color-text);
   --loom-muted: var(--color-muted);
   --loom-label: var(--color-label);
   --loom-accent: var(--color-accent);
+  --loom-accent-text: var(--color-accent);
   --loom-accent-dim: var(--color-accent-2);
   --loom-success: var(--color-success);
   --loom-warning: var(--color-warning);
@@ -124,7 +127,10 @@ html.light {
   --color-border: #c4c4be;
   --color-success: #008f62;
   --color-warning: #b87a00;
+  --color-warning-text: #7a5200;
   --color-error: #c62828;
+  --loom-border-strong: #8a8a82;
+  --loom-warning-text: var(--color-warning-text);
   --btn-primary-fg: #ffffff;
   --selection-bg: rgba(184, 78, 31, 0.22);
   --selection-text: #141414;
@@ -149,6 +155,7 @@ html.light {
 html[data-theme="dark"],
 html.dark {
   color-scheme: dark;
+  --loom-accent-text: #b4adff;
   --color-bg: #0a0a0c;
   --color-surface: #121216;
   --color-bg-elev: #1c1c22;
@@ -484,16 +491,16 @@ html[data-ui="braun"] {
 }
 
 html[data-ui="monocle"] {
-  --font-sans: "Source Sans 3", "Avenir Next", system-ui, sans-serif;
-  --font-mono: "Source Code Pro", Menlo, monospace;
+  --font-sans: "Avenir Next", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --track-ui: 0.01em;
   --leading-ui: 1.42;
 }
 
 html[data-ui="bauhaus"] {
   /* Josefin is display-lean; pair with system UI metrics so dense panels stay readable */
-  --font-sans: "Josefin Sans", "IBM Plex Sans", Futura, "Century Gothic", sans-serif;
-  --font-mono: "Space Mono", Menlo, monospace;
+  --font-sans: Futura, "Century Gothic", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --track-ui: 0.02em;
   --leading-ui: 1.45;
   --font-optical: 1.06;
@@ -505,8 +512,8 @@ html[data-ui="bauhaus"] {
 }
 
 html[data-ui="noyes"] {
-  --font-sans: "IBM Plex Sans", Helvetica, Arial, sans-serif;
-  --font-mono: "IBM Plex Mono", Menlo, monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --leading-ui: 1.4;
 }
 
@@ -522,8 +529,8 @@ html[data-ui="ikea"] {
 
 html[data-ui="military"] {
   /* Oswald alone is too condensed for body UI — fall back through Plex */
-  --font-sans: Oswald, "IBM Plex Sans", "Arial Narrow", sans-serif;
-  --font-mono: "Share Tech Mono", "Courier New", monospace;
+  --font-sans: "Arial Narrow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Courier New", ui-monospace, monospace;
   --track-ui: 0.04em;
   --leading-ui: 1.4;
   --font-optical: 1.05;
@@ -536,8 +543,8 @@ html[data-ui="military"] {
 }
 
 html[data-ui="terminal"] {
-  --font-sans: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
-  --font-mono: "JetBrains Mono", "SF Mono", Menlo, Consolas, monospace;
+  --font-sans: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --track-ui: 0;
   --leading-ui: 1.45;
   --font-optical: 0.96;
@@ -549,7 +556,7 @@ html[data-ui="terminal"] {
 
 html[data-ui="nyt"] {
   --font-sans: Georgia, "Times New Roman", Times, serif;
-  --font-mono: "IBM Plex Mono", Menlo, monospace;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --track-ui: 0.01em;
   --leading-ui: 1.5;
   --font-optical: 1.03;
@@ -557,45 +564,45 @@ html[data-ui="nyt"] {
 
 /* App font overrides (data-font) — win over chrome for --font-sans/mono when set */
 html[data-font="libre-baskerville"] {
-  --font-sans: "Libre Baskerville", Georgia, serif;
-  --font-serif: "Libre Baskerville", Georgia, serif;
+  --font-sans: Georgia, "Times New Roman", serif;
+  --font-serif: Georgia, "Times New Roman", serif;
   --leading-ui: 1.55;
   --track-ui: 0.01em;
   --font-optical: 1.05;
 }
 html[data-font="lora"] {
-  --font-sans: Lora, Georgia, serif;
-  --font-serif: Lora, Georgia, serif;
+  --font-sans: Georgia, "Times New Roman", serif;
+  --font-serif: Georgia, "Times New Roman", serif;
   --leading-ui: 1.5;
   --track-ui: 0.005em;
   --font-optical: 1.04;
 }
 html[data-font="ibm-plex"] {
-  --font-sans: "IBM Plex Sans", Helvetica, Arial, sans-serif;
-  --font-mono: "IBM Plex Mono", Menlo, monospace;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --leading-ui: 1.4;
   --font-optical: 1;
 }
 html[data-font="inter"] {
-  --font-sans: Inter, system-ui, sans-serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --leading-ui: 1.4;
   --font-optical: 1;
 }
 html[data-font="geist"] {
-  --font-sans: Geist, Inter, system-ui, sans-serif;
+  --font-sans: system-ui, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
   --leading-ui: 1.4;
   --font-optical: 1;
 }
 html[data-font="jetbrains-mono"] {
-  --font-sans: "JetBrains Mono", ui-monospace, monospace;
-  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-sans: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --leading-ui: 1.45;
   --font-optical: 0.97;
   --track-ui: 0;
 }
 html[data-font="fira-code"] {
-  --font-sans: "Fira Code", ui-monospace, monospace;
-  --font-mono: "Fira Code", ui-monospace, monospace;
+  --font-sans: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --leading-ui: 1.45;
   --font-optical: 0.97;
   --track-ui: 0;
@@ -617,6 +624,33 @@ html[data-faces="local"][data-font="jetbrains-mono"],
 html[data-faces="local"][data-font="fira-code"] {
   --font-sans: ui-monospace, Menlo, Consolas, monospace;
   --font-mono: ui-monospace, Menlo, Consolas, monospace;
+}
+
+html[data-faces="web"][data-font="libre-baskerville"] {
+  --font-sans: "Libre Baskerville", Georgia, serif;
+  --font-serif: "Libre Baskerville", Georgia, serif;
+}
+html[data-faces="web"][data-font="lora"] {
+  --font-sans: Lora, Georgia, serif;
+  --font-serif: Lora, Georgia, serif;
+}
+html[data-faces="web"][data-font="ibm-plex"] {
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+html[data-faces="web"][data-font="inter"] {
+  --font-sans: Inter, system-ui, sans-serif;
+}
+html[data-faces="web"][data-font="geist"] {
+  --font-sans: Geist, Inter, system-ui, sans-serif;
+}
+html[data-faces="web"][data-font="jetbrains-mono"] {
+  --font-sans: "JetBrains Mono", ui-monospace, monospace;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+html[data-faces="web"][data-font="fira-code"] {
+  --font-sans: "Fira Code", ui-monospace, monospace;
+  --font-mono: "Fira Code", ui-monospace, monospace;
 }
 
 /* Subtle theme atmosphere */
@@ -693,7 +727,9 @@ html {
     font-feature-settings: "ss01", "cv01", "kern";
     font-kerning: normal;
     text-rendering: optimizeLegibility;
-    overflow: hidden;
+    /* Clip on desktop shell only; allow scroll at high zoom (LOOM-356). */
+    overflow-x: hidden;
+    overflow-y: auto;
     /* Prefer dynamic viewport on mobile browsers */
     min-height: 100%;
     min-height: 100dvh;
@@ -707,10 +743,19 @@ html {
     letter-spacing: calc(var(--track-ui) + 0.01em);
   }
 
+  /* Phone / tablet layout tokens — see also bottom @media blocks */
   @media (max-width: 767px) {
     :root {
-      --topbar-height: 44px;
+      --topbar-height: 52px;
+      --statusbar-height: 0px;
       --panel-width: 100%;
+      --sidebar-width: min(100vw - 2.5rem, 20rem);
+    }
+  }
+
+  @media (min-width: 768px) and (max-width: 1099px) {
+    :root {
+      --panel-width: 280px;
     }
   }
 
@@ -837,7 +882,7 @@ html {
            bg-loom-elevated
            text-loom-text
            focus:outline-none;
-    border: var(--panel-border-w) solid var(--loom-border);
+    border: var(--panel-border-w) solid var(--loom-border-strong, var(--loom-border));
     border-radius: var(--btn-radius);
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   }
@@ -951,6 +996,16 @@ html {
 }
 
 @layer utilities {
+  .text-loom-accent-text {
+    color: var(--loom-accent-text);
+  }
+
+  html[data-theme="dark"] a.text-loom-accent,
+  html.dark a.text-loom-accent,
+  html[data-theme="dark"] .text-loom-accent.hover\:underline {
+    color: var(--loom-accent-text);
+  }
+
   .transition-theme {
     transition: background-color var(--transition-base),
                 border-color var(--transition-base),
@@ -967,14 +1022,18 @@ html {
   }
 }
 
+/* Pre-hydration shell (inline bootstrap script sets data-shell-mode). */
+html[data-shell-mode="phone"] .loom-shell-drawer-overlay {
+  display: none;
+}
+
+html[data-shell-mode="phone"]:not([data-shell-ready="1"]) main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* Mobile exploration — larger taps, less chrome density */
 @media (max-width: 767px) {
-  :root {
-    --topbar-height: 52px;
-    --statusbar-height: 0px;
-    --sidebar-width: min(100vw - 2.5rem, 20rem);
-  }
-
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -999,6 +1058,15 @@ html {
 
   .loom-card {
     box-shadow: none;
+  }
+}
+
+@media (max-width: 767px) and (pointer: coarse) {
+  .loom-input,
+  .loom-btn-primary,
+  .loom-btn-ghost,
+  .loom-seg-item {
+    min-height: 2.75rem;
   }
 }
 
@@ -1027,5 +1095,20 @@ html {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+@media (forced-colors: active) {
+  .loom-input:focus,
+  .loom-input:focus-visible,
+  select:focus-visible,
+  .loom-btn:focus-visible {
+    outline: 2px solid CanvasText !important;
+    box-shadow: none !important;
+  }
+  .loom-seg-item[aria-pressed="true"],
+  .loom-seg-item[aria-current="page"] {
+    outline: 2px solid Highlight;
+    outline-offset: 1px;
   }
 }

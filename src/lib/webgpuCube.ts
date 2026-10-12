@@ -9,6 +9,7 @@
 // =================================================================
 
 import cubeWgslRaw from "@/shaders/cube.wgsl";
+import type { SharedGpuDeviceLease } from "./gpuDevice";
 import {
   cubeCellAlphaScale,
   cubeCellColor,
@@ -43,6 +44,7 @@ function unitCubeVertices(): Float32Array<ArrayBuffer> {
 }
 
 export class LoomCubeRenderer {
+  private deviceLease: SharedGpuDeviceLease | null = null;
   private device: GPUDevice | null = null;
   private context: GPUCanvasContext | null = null;
   private canvas: HTMLCanvasElement | null = null;
@@ -54,12 +56,11 @@ export class LoomCubeRenderer {
   private bindGroup: GPUBindGroup | null = null;
   private depthTexture: GPUTexture | null = null;
 
-  async init(canvas: HTMLCanvasElement): Promise<boolean> {
+  async init(canvas: HTMLCanvasElement, deviceLease: SharedGpuDeviceLease): Promise<boolean> {
     try {
       if (!navigator.gpu) return false;
-      const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
-      if (!adapter) return false;
-      this.device = await adapter.requestDevice();
+      this.deviceLease = deviceLease;
+      this.device = deviceLease.device;
       this.context = canvas.getContext("webgpu") as GPUCanvasContext | null;
       if (!this.context) return false;
       this.canvas = canvas;
@@ -241,6 +242,8 @@ export class LoomCubeRenderer {
     this.depthTexture?.destroy();
     this.instanceBuffer = null;
     this.depthTexture = null;
+    this.deviceLease?.release();
+    this.deviceLease = null;
     this.device = null;
     this.context = null;
     this.canvas = null;

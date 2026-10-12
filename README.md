@@ -8,7 +8,7 @@
 
 The desktop app (Tauri + DuckDB) adds folder mounting, millions of rows, SQL over CSV/Parquet, and WebGPU scatter. Charts are Vega-Lite specs drawn on Canvas / WebGPU; export PNG, SVG, or a link that reopens the exact chart.
 
-**Contributors & AI agents:** See [DOCS.md](DOCS.md) for architecture and [AGENTS.md](AGENTS.md) for a concise repo map and conventions.
+**Contributors & AI agents:** See [DOCS.md](DOCS.md) for architecture and [AGENTS.md](AGENTS.md) for a concise repo map and conventions. Platform support: [docs/CAPABILITY_MATRIX.md](docs/CAPABILITY_MATRIX.md). Verification gates: [docs/DEPLOYMENT_GATES.md](docs/DEPLOYMENT_GATES.md).
 
 ---
 

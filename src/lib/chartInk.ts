@@ -9,6 +9,7 @@
 // =================================================================
 
 import { getThemeUiColors } from "./chartPalettes";
+import { ensureContrast } from "./wcagColor";
 import { fitTextEllipsis } from "./chartLayout";
 import { formatAxisValue, formatDataValue, niceTicks } from "./chartAxes";
 
@@ -84,9 +85,10 @@ export function relativeLuminance(c: string): number {
   return 0.2126 * lin(p[0]) + 0.7152 * lin(p[1]) + 0.0722 * lin(p[2]);
 }
 
-/** Black-or-white label ink for text on a fill (WCAG luminance). */
+/** Label ink for text on a fill — WCAG AA where possible (LOOM-072). */
 export function inkOn(fill: string): string {
-  return relativeLuminance(fill) > 0.4 ? "#141414" : "#ffffff";
+  const base = relativeLuminance(fill) > 0.4 ? "#141414" : "#ffffff";
+  return ensureContrast(base, fill, false);
 }
 
 /** UI colors for whatever theme <html data-theme> currently shows. */

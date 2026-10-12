@@ -6,10 +6,12 @@
 // Values become chips; suggestions come from the data as you type
 // (most common first). Enter / Tab adds the highlighted suggestion or
 // the typed text, Backspace on empty removes the last chip, pasting a
-// comma- or newline-separated list adds one chip per item, ⧉ copies.
+// comma- or newline-separated list adds one chip per item (quoted CSV
+// and "City, ST" values stay whole), ⧉ copies.
 // =================================================================
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { splitChipPaste } from "@/lib/chipPaste";
 
 export function DiveChipInput({
   values,
@@ -78,7 +80,7 @@ export function DiveChipInput({
     const t = e.clipboardData.getData("text");
     if (!/[,\n\t]/.test(t)) return;
     e.preventDefault();
-    add(t.split(/[,\n\t]/));
+    add(splitChipPaste(t));
   };
 
   return (
@@ -92,7 +94,7 @@ export function DiveChipInput({
             <span className="truncate">{v}</span>
             <button
               type="button"
-              className="px-0.5 text-loom-muted hover:text-loom-text"
+              className="inline-flex items-center justify-center min-w-6 min-h-6 -m-1 px-1 text-loom-muted hover:text-loom-text"
               onClick={(e) => {
                 e.stopPropagation();
                 onChange(values.filter((_, j) => j !== i));

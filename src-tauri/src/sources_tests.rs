@@ -5,7 +5,11 @@ use super::*;
 use std::sync::Mutex;
 
 fn fixture(name: &str) -> Value {
-    let path = format!("{}/tests/fixtures/sources/{}", env!("CARGO_MANIFEST_DIR"), name);
+    let path = format!(
+        "{}/tests/fixtures/sources/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        name
+    );
     let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {}", path, e));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {}", path, e))
 }
@@ -31,13 +35,20 @@ fn query(db: &LoomDb, sql: &str) -> Vec<Vec<Option<String>>> {
     let mut out = Vec::new();
     while let Some(r) = rows.next().unwrap() {
         let n = r.as_ref().column_count();
-        out.push((0..n).map(|i| r.get::<_, Option<String>>(i).unwrap()).collect());
+        out.push(
+            (0..n)
+                .map(|i| r.get::<_, Option<String>>(i).unwrap())
+                .collect(),
+        );
     }
     out
 }
 
 fn one(db: &LoomDb, sql: &str) -> Option<String> {
-    query(db, sql).into_iter().next().and_then(|r| r.into_iter().next().flatten())
+    query(db, sql)
+        .into_iter()
+        .next()
+        .and_then(|r| r.into_iter().next().flatten())
 }
 
 fn s(v: &str) -> Cell {
@@ -90,7 +101,10 @@ fn registry() -> Vec<RegEntry> {
             columns: list(line_value(chunk, "columns")),
             types: list(line_value(chunk, "types")),
             order_by: unquote(line_value(chunk, "orderBy")),
-            poll_ms: line_value(chunk, "pollMs").replace('_', "").parse().unwrap(),
+            poll_ms: line_value(chunk, "pollMs")
+                .replace('_', "")
+                .parse()
+                .unwrap(),
         })
         .collect()
 }
@@ -100,7 +114,10 @@ fn specs_match_typescript_registry() {
     let reg = registry();
     let reg_kinds: Vec<&str> = reg.iter().map(|r| r.kind.as_str()).collect();
     let rust_kinds: Vec<&str> = SOURCE_SPECS.iter().map(|s| s.kind).collect();
-    assert_eq!(rust_kinds, reg_kinds, "kinds / order differ from sourceRegistry.ts");
+    assert_eq!(
+        rust_kinds, reg_kinds,
+        "kinds / order differ from sourceRegistry.ts"
+    );
     for r in &reg {
         let sp = spec(&r.kind);
         assert_eq!(sp.table, r.table, "{} table", r.kind);
@@ -126,7 +143,10 @@ fn state_and_lookups_cover_every_kind() {
     }
     assert!(st.get("nope").is_none());
     assert!(table_for_kind("nope").is_none());
-    assert_eq!(snapshot_sql("fx").unwrap(), "SELECT * FROM fx_rates ORDER BY as_of DESC, quote");
+    assert_eq!(
+        snapshot_sql("fx").unwrap(),
+        "SELECT * FROM fx_rates ORDER BY as_of DESC, quote"
+    );
 }
 
 #[test]
@@ -165,12 +185,22 @@ fn ensure_tables_migrates_drifted_tables() {
     let conn = db.conn.lock().unwrap();
     for kind in ["world_bank", "usgs"] {
         let sp = spec(kind);
-        assert!(schema_matches(&existing_columns(&conn, sp.table).unwrap(), sp), "{}", kind);
+        assert!(
+            schema_matches(&existing_columns(&conn, sp.table).unwrap(), sp),
+            "{}",
+            kind
+        );
     }
     drop(conn);
-    assert_eq!(one(&db, "SELECT COUNT(*) FROM world_bank").as_deref(), Some("0"));
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM world_bank").as_deref(),
+        Some("0")
+    );
     // Matching tables keep their rows.
-    assert_eq!(one(&db, "SELECT title FROM hn_stories").as_deref(), Some("kept"));
+    assert_eq!(
+        one(&db, "SELECT title FROM hn_stories").as_deref(),
+        Some("kept")
+    );
 }
 
 // ---------------------------------------------------------------
@@ -196,15 +226,42 @@ fn civil_date_roundtrip() {
 #[test]
 fn iso_parsing_normalizes_to_utc() {
     let p = |s: &str| parse_iso_utc(s);
-    assert_eq!(p("2026-10-02T16:43:00-04:00").as_deref(), Some("2026-10-02 20:43:00"));
-    assert_eq!(p("2026-10-02T22:30Z").as_deref(), Some("2026-10-02 22:30:00"));
-    assert_eq!(p("2026-10-02T03:54:00Z").as_deref(), Some("2026-10-02 03:54:00"));
-    assert_eq!(p("2026-09-20T00:00:00.000Z").as_deref(), Some("2026-09-20 00:00:00"));
-    assert_eq!(p("2026-10-02T01:23:45.000").as_deref(), Some("2026-10-02 01:23:45"));
-    assert_eq!(p("2026-09-30T00:00").as_deref(), Some("2026-09-30 00:00:00"));
-    assert_eq!(p("2026-10-02T23:30:00+0530").as_deref(), Some("2026-10-02 18:00:00"));
-    assert_eq!(p("2026-12-31T23:00:00-02:00").as_deref(), Some("2027-01-01 01:00:00"));
-    assert_eq!(p("2026-09-25 09:00:00").as_deref(), Some("2026-09-25 09:00:00"));
+    assert_eq!(
+        p("2026-10-02T16:43:00-04:00").as_deref(),
+        Some("2026-10-02 20:43:00")
+    );
+    assert_eq!(
+        p("2026-10-02T22:30Z").as_deref(),
+        Some("2026-10-02 22:30:00")
+    );
+    assert_eq!(
+        p("2026-10-02T03:54:00Z").as_deref(),
+        Some("2026-10-02 03:54:00")
+    );
+    assert_eq!(
+        p("2026-09-20T00:00:00.000Z").as_deref(),
+        Some("2026-09-20 00:00:00")
+    );
+    assert_eq!(
+        p("2026-10-02T01:23:45.000").as_deref(),
+        Some("2026-10-02 01:23:45")
+    );
+    assert_eq!(
+        p("2026-09-30T00:00").as_deref(),
+        Some("2026-09-30 00:00:00")
+    );
+    assert_eq!(
+        p("2026-10-02T23:30:00+0530").as_deref(),
+        Some("2026-10-02 18:00:00")
+    );
+    assert_eq!(
+        p("2026-12-31T23:00:00-02:00").as_deref(),
+        Some("2027-01-01 01:00:00")
+    );
+    assert_eq!(
+        p("2026-09-25 09:00:00").as_deref(),
+        Some("2026-09-25 09:00:00")
+    );
     assert_eq!(p("2026-10-01").as_deref(), Some("2026-10-01 00:00:00"));
     assert_eq!(p(""), None);
     assert_eq!(p("not a date"), None);
@@ -231,13 +288,24 @@ fn usgs_parses_and_upserts() {
     let mut revised = rows.clone();
     revised[0][1] = Cell::F64(2.0);
     assert_eq!(write_rows(&db, spec("usgs"), &revised).unwrap(), 0);
-    assert_eq!(one(&db, "SELECT COUNT(*) FROM usgs_quakes").as_deref(), Some("2"));
     assert_eq!(
-        one(&db, "SELECT magnitude FROM usgs_quakes WHERE id = 'hv75048562'").as_deref(),
+        one(&db, "SELECT COUNT(*) FROM usgs_quakes").as_deref(),
+        Some("2")
+    );
+    assert_eq!(
+        one(
+            &db,
+            "SELECT magnitude FROM usgs_quakes WHERE id = 'hv75048562'"
+        )
+        .as_deref(),
         Some("2.0")
     );
     assert_eq!(
-        one(&db, "SELECT CAST(ts AS VARCHAR) FROM usgs_quakes WHERE id = 'hv75048562'").as_deref(),
+        one(
+            &db,
+            "SELECT CAST(ts AS VARCHAR) FROM usgs_quakes WHERE id = 'hv75048562'"
+        )
+        .as_deref(),
         Some("2026-10-02 20:23:39")
     );
 }
@@ -257,7 +325,11 @@ fn nws_keeps_newest_with_utc_times() {
     let db = test_db();
     assert_eq!(write_rows(&db, spec("nws"), &rows).unwrap(), 3);
     assert_eq!(
-        one(&db, "SELECT COUNT(*) FROM nws_alerts WHERE expires > effective").as_deref(),
+        one(
+            &db,
+            "SELECT COUNT(*) FROM nws_alerts WHERE expires > effective"
+        )
+        .as_deref(),
         Some("3")
     );
 }
@@ -275,7 +347,10 @@ fn meteo_multi_city_parses_and_upserts() {
     let db = test_db();
     assert_eq!(write_rows(&db, spec("meteo"), &rows).unwrap(), 6);
     assert_eq!(write_rows(&db, spec("meteo"), &rows).unwrap(), 0);
-    assert_eq!(one(&db, "SELECT COUNT(*) FROM meteo_weather").as_deref(), Some("6"));
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM meteo_weather").as_deref(),
+        Some("6")
+    );
     assert_eq!(CITIES.len(), 12);
     assert!(meteo_url().contains("latitude=40.71,51.51,35.68"));
 }
@@ -299,7 +374,7 @@ fn aq_multi_city_parses() {
 fn fx_series_with_change_pct() {
     let rows = fx_rows(&fixture("fx.json")).unwrap();
     assert_eq!(rows.len(), 9); // 3 days × 3 quotes
-    // First day: no previous → NULL change.
+                               // First day: no previous → NULL change.
     assert_eq!(rows[0][0], s("2026-07-03"));
     assert_eq!(rows[0][4], Cell::Null);
     // 2026-07-06 USD: 1.1415 vs 1.1448.
@@ -308,16 +383,62 @@ fn fx_series_with_change_pct() {
         .find(|r| r[0] == s("2026-07-06") && r[2] == s("USD"))
         .unwrap();
     match usd[4] {
-        Cell::F64(c) => assert!((c - (1.1415 / 1.1448 - 1.0) * 100.0).abs() < 1e-9),
+        // change_pct is rounded to 4 decimals (parity with the web parser).
+        Cell::F64(c) => assert!((c - (1.1415 / 1.1448 - 1.0) * 100.0).abs() < 5e-5),
         ref other => panic!("{:?}", other),
     }
     let db = test_db();
     assert_eq!(write_rows(&db, spec("fx"), &rows).unwrap(), 9);
     assert_eq!(
-        one(&db, &format!("{} LIMIT 1", snapshot_sql("fx").unwrap().replace("SELECT *", "SELECT CAST(as_of AS VARCHAR)"))).as_deref(),
+        one(
+            &db,
+            &format!(
+                "{} LIMIT 1",
+                snapshot_sql("fx")
+                    .unwrap()
+                    .replace("SELECT *", "SELECT CAST(as_of AS VARCHAR)")
+            )
+        )
+        .as_deref(),
         Some("2026-07-07")
     );
-    assert_eq!(fx_url(days_from_civil(2026, 10, 2)), "https://api.frankfurter.app/2026-07-04..");
+    assert_eq!(
+        fx_url(days_from_civil(2026, 10, 2)),
+        "https://api.frankfurter.dev/v1/2026-07-04.."
+    );
+}
+
+/// Shared with `src/lib/__tests__/upstreamParity.test.ts` (LOOM-436): the web
+/// `parseFx` and desktop `fx_rows` must agree on the same Frankfurter body.
+#[test]
+fn fx_matches_shared_parity_fixture() {
+    let rows = fx_rows(&fixture("fx.json")).unwrap();
+    let expected = fixture("fx_parity_expected.json");
+    let mut got: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            Value::Array(
+                r.iter()
+                    .map(|c| match c {
+                        Cell::Null => Value::Null,
+                        Cell::Str(t) => Value::String(t.clone()),
+                        Cell::F64(f) => serde_json::json!(f),
+                        Cell::I64(i) => serde_json::json!(*i as f64),
+                        Cell::Bool(b) => Value::Bool(*b),
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    got.sort_by_key(|r| format!("{}|{}", r[0].as_str().unwrap(), r[2].as_str().unwrap()));
+    fn norm(v: &Value) -> Value {
+        match v {
+            Value::Number(n) => serde_json::json!(n.as_f64().unwrap()),
+            Value::Array(a) => Value::Array(a.iter().map(norm).collect()),
+            other => other.clone(),
+        }
+    }
+    assert_eq!(norm(&Value::Array(got)), norm(&expected["rows"]));
 }
 
 #[test]
@@ -331,7 +452,10 @@ fn opensky_parses_states() {
     let db = test_db();
     assert_eq!(write_rows(&db, spec("opensky"), &rows).unwrap(), 2);
     assert_eq!(write_rows(&db, spec("opensky"), &rows).unwrap(), 2); // append
-    assert_eq!(one(&db, "SELECT COUNT(*) FROM opensky_aircraft").as_deref(), Some("4"));
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM opensky_aircraft").as_deref(),
+        Some("4")
+    );
 }
 
 #[test]
@@ -383,7 +507,10 @@ fn spacex_from_launch_library() {
     assert_eq!(r[4], Cell::Bool(false));
     assert_eq!(r[5], s("Falcon Heavy"));
     assert_eq!(r[6], Cell::I64(735));
-    assert_eq!(r[7], s("Classified payload for the US National Reconnaissance Office."));
+    assert_eq!(
+        r[7],
+        s("Classified payload for the US National Reconnaissance Office.")
+    );
     // Missing pieces → NULL, rocket from the name.
     let bare = spacex_rows(&serde_json::json!({"results": [{"id": "x", "name": "Falcon 9 Block 5 | Starlink", "net": "2026-01-01T00:00:00Z", "status": {"abbrev": "Failure"}}]})).unwrap();
     assert_eq!(bare[0][3], Cell::Bool(false));
@@ -440,7 +567,16 @@ fn countries_join_world_bank_population() {
     let db = test_db();
     assert_eq!(write_rows(&db, spec("countries"), &rows).unwrap(), 4);
     assert_eq!(
-        one(&db, &format!("{} LIMIT 1", snapshot_sql("countries").unwrap().replace("SELECT *", "SELECT name"))).as_deref(),
+        one(
+            &db,
+            &format!(
+                "{} LIMIT 1",
+                snapshot_sql("countries")
+                    .unwrap()
+                    .replace("SELECT *", "SELECT name")
+            )
+        )
+        .as_deref(),
         Some("United States")
     );
 }
@@ -450,7 +586,10 @@ fn world_bank_pivots_wide_and_drops_aggregates() {
     let countries = wb_country_names(&fixture("wb_countries.json")).unwrap();
     assert!(countries.contains_key("USA"));
     assert!(countries.contains_key("XKX"));
-    assert!(!countries.contains_key("WLD"), "aggregates (region NA) are dropped");
+    assert!(
+        !countries.contains_key("WLD"),
+        "aggregates (region NA) are dropped"
+    );
     assert!(!countries.contains_key("AFE"));
 
     let pop = serde_json::json!([{"page": 1}, [
@@ -479,10 +618,14 @@ fn world_bank_pivots_wide_and_drops_aggregates() {
     let n = write_rows(&db, spec("world_bank"), &rows).unwrap();
     assert_eq!(n as usize, rows.len());
     assert_eq!(
-        one(&db, "SELECT COUNT(DISTINCT country_code || yr) = COUNT(*) FROM world_bank").as_deref(),
+        one(
+            &db,
+            "SELECT COUNT(DISTINCT country_code || yr) = COUNT(*) FROM world_bank"
+        )
+        .as_deref(),
         Some("true")
     );
-    assert!(wb_indicator_url("EN.GHG.CO2.PC.CE.AR5").contains("date=2000:2023"));
+    assert!(wb_indicator_url("EN.GHG.CO2.PC.CE.AR5").contains("date=2000:"));
 }
 
 #[test]
@@ -505,7 +648,12 @@ fn hn_fema_covid_nyc311_iss_parse() {
 
     let iss = iss_rows(&serde_json::json!([{"latitude": 1.0, "longitude": 2.0, "altitude": 420.1, "velocity": 27600.0, "visibility": "daylight", "timestamp": 1790974000}, {"latitude": 3.0, "longitude": 4.0, "timestamp": 1790974600}])).unwrap();
     assert_eq!(iss.len(), 2);
-    assert_eq!(iss_rows(&serde_json::json!({"latitude": 1.0, "longitude": 2.0, "timestamp": 1})).unwrap().len(), 1);
+    assert_eq!(
+        iss_rows(&serde_json::json!({"latitude": 1.0, "longitude": 2.0, "timestamp": 1}))
+            .unwrap()
+            .len(),
+        1
+    );
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("hn"), &hn).unwrap(), 1);
@@ -544,7 +692,64 @@ fn eonet_latest_geometry_points_and_polygons() {
     assert_eq!(write_rows(&db, spec("eonet"), &rows).unwrap(), 3);
     // Replace: a second poll swaps the snapshot.
     assert_eq!(write_rows(&db, spec("eonet"), &rows[..1]).unwrap(), 1);
-    assert_eq!(one(&db, "SELECT COUNT(*) FROM natural_events").as_deref(), Some("1"));
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM natural_events").as_deref(),
+        Some("1")
+    );
+}
+
+/// Shared with `src/lib/__tests__/citibikeParity.test.ts` (LOOM-435): the Worker
+/// and desktop paths must emit identical typed rows for the same GBFS payloads.
+#[test]
+fn citibike_matches_shared_parity_fixture() {
+    let info = citibike_info(&fixture("gbfs_parity_info.json")).unwrap();
+    let rows = citibike_rows(&fixture("gbfs_parity_status.json"), &info).unwrap();
+    let expected = fixture("gbfs_parity_expected.json");
+
+    let columns: Vec<&str> = expected["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c.as_str().unwrap())
+        .collect();
+    let spec_cols: Vec<&str> = spec("citibike").columns.iter().map(|c| c.0).collect();
+    assert_eq!(
+        columns, spec_cols,
+        "fixture columns drifted from the Rust table schema"
+    );
+
+    let got: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            Value::Array(
+                r.iter()
+                    .map(|c| match c {
+                        Cell::Null => Value::Null,
+                        Cell::Str(t) => {
+                            // fmt_ts "YYYY-MM-DD HH:MM:SS" → ISO-8601 UTC like the Worker.
+                            if t.len() == 19 && t.as_bytes()[10] == b' ' {
+                                Value::String(format!("{}.000Z", t.replacen(' ', "T", 1)))
+                            } else {
+                                Value::String(t.clone())
+                            }
+                        }
+                        Cell::F64(f) => serde_json::json!(f),
+                        Cell::I64(i) => serde_json::json!(i),
+                        Cell::Bool(b) => Value::Bool(*b),
+                    })
+                    .collect(),
+            )
+        })
+        .collect();
+    // JSON `75` and `75.0` are the same typed value (JS has one number type).
+    fn norm(v: &Value) -> Value {
+        match v {
+            Value::Number(n) => serde_json::json!(n.as_f64().unwrap()),
+            Value::Array(a) => Value::Array(a.iter().map(norm).collect()),
+            other => other.clone(),
+        }
+    }
+    assert_eq!(norm(&Value::Array(got)), norm(&expected["rows"]));
 }
 
 #[test]
@@ -554,19 +759,31 @@ fn citibike_joins_info_and_status() {
     let rows = citibike_rows(&fixture("gbfs_status.json"), &info).unwrap();
     // Not-installed dock and the station missing from info are skipped.
     assert_eq!(rows.len(), 2);
-    let vesey = rows.iter().find(|r| r[1] == s("Vesey St & Church St")).unwrap();
+    let vesey = rows
+        .iter()
+        .find(|r| r[1] == s("Vesey St & Church St"))
+        .unwrap();
     assert_eq!(vesey[4], Cell::I64(78));
     assert_eq!(vesey[5], Cell::I64(60));
     assert_eq!(vesey[6], Cell::I64(12));
     assert_eq!(vesey[7], Cell::I64(18));
     assert_eq!(vesey[8], Cell::F64(76.9)); // 60 / 78 → 76.9 %
     assert_eq!(vesey[9], Cell::Bool(true));
-    assert_eq!(vesey[10], s(&fmt_ts(1_790_974_027)));
+    assert_eq!(vesey[10], s(&fmt_ts(1_790_973_950))); // station last_reported wins over feed last_updated
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("citibike"), &rows).unwrap(), 2);
     assert_eq!(
-        one(&db, &format!("{} LIMIT 1", snapshot_sql("citibike").unwrap().replace("SELECT *", "SELECT bikes_available"))).as_deref(),
+        one(
+            &db,
+            &format!(
+                "{} LIMIT 1",
+                snapshot_sql("citibike")
+                    .unwrap()
+                    .replace("SELECT *", "SELECT bikes_available")
+            )
+        )
+        .as_deref(),
         Some("60")
     );
 }
@@ -582,7 +799,16 @@ fn space_weather_kp_and_storm_levels() {
 
     let rows = kp_rows(&fixture("kp.json")).unwrap();
     assert_eq!(rows.len(), 4);
-    assert_eq!(rows[0], vec![s("2026-09-25 00:00:00"), Cell::F64(3.67), Cell::I64(22), Cell::I64(8), s("G0")]);
+    assert_eq!(
+        rows[0],
+        vec![
+            s("2026-09-25 00:00:00"),
+            Cell::F64(3.67),
+            Cell::I64(22),
+            Cell::I64(8),
+            s("G0")
+        ]
+    );
     assert_eq!(rows[3][4], s("G3"));
 
     // Older SWPC shape: array of string arrays with a header row.
@@ -591,7 +817,16 @@ fn space_weather_kp_and_storm_levels() {
         ["2024-05-10 21:00:00.000", "9.00", "400", "8"]
     ]);
     let rows2 = kp_rows(&legacy).unwrap();
-    assert_eq!(rows2, vec![vec![s("2024-05-10 21:00:00"), Cell::F64(9.0), Cell::I64(400), Cell::I64(8), s("G5")]]);
+    assert_eq!(
+        rows2,
+        vec![vec![
+            s("2024-05-10 21:00:00"),
+            Cell::F64(9.0),
+            Cell::I64(400),
+            Cell::I64(8),
+            s("G5")
+        ]]
+    );
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("spaceweather"), &rows).unwrap(), 4);
@@ -601,7 +836,15 @@ fn space_weather_kp_and_storm_levels() {
 fn uk_carbon_merges_yesterday_and_today() {
     let rows = ukcarbon_rows(&[fixture("ukc_yesterday.json"), fixture("ukc_today.json")]).unwrap();
     assert_eq!(rows.len(), 4);
-    assert_eq!(rows[0], vec![s("2026-09-30 23:00:00"), Cell::I64(161), Cell::I64(181), s("high")]);
+    assert_eq!(
+        rows[0],
+        vec![
+            s("2026-09-30 23:00:00"),
+            Cell::I64(161),
+            Cell::I64(181),
+            s("high")
+        ]
+    );
     let last = rows.last().unwrap();
     assert_eq!(last[0], s("2026-10-02 22:30:00"));
     assert_eq!(last[2], Cell::Null);
@@ -619,7 +862,15 @@ fn pageviews_filters_and_reranks() {
     let rows = pageviews_rows(&fixture("pageviews.json")).unwrap();
     // 12 articles − Main_Page, Special:Search, Wikipedia:Featured_pictures.
     assert_eq!(rows.len(), 9);
-    assert_eq!(rows[0], vec![Cell::I64(1), s("Christa Pike"), Cell::I64(4_309_025), s("2026-10-01")]);
+    assert_eq!(
+        rows[0],
+        vec![
+            Cell::I64(1),
+            s("Christa Pike"),
+            Cell::I64(4_309_025),
+            s("2026-10-01")
+        ]
+    );
     assert_eq!(rows[1][1], s("USS Theodore Roosevelt (CVN-71)"));
     assert_eq!(rows[8][0], Cell::I64(9));
 
@@ -635,12 +886,18 @@ fn pageviews_filters_and_reranks() {
     let body = serde_json::json!({"items": [{"year": "2026", "month": "10", "day": "01", "articles": many}]});
     let top = pageviews_rows(&body).unwrap();
     assert_eq!(top.len(), 100);
-    assert!(top.iter().all(|r| matches!(&r[1], Cell::Str(a) if a.starts_with("A "))));
+    assert!(top
+        .iter()
+        .all(|r| matches!(&r[1], Cell::Str(a) if a.starts_with("A "))));
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("pageviews"), &rows).unwrap(), 9);
     assert_eq!(
-        one(&db, "SELECT CAST(day AS VARCHAR) FROM wiki_top_articles LIMIT 1").as_deref(),
+        one(
+            &db,
+            "SELECT CAST(day AS VARCHAR) FROM wiki_top_articles LIMIT 1"
+        )
+        .as_deref(),
         Some("2026-10-01")
     );
     assert_eq!(
@@ -653,20 +910,35 @@ fn pageviews_filters_and_reranks() {
 fn climate_monthly_anomalies() {
     let rows = climate_rows(&fixture("climate.json")).unwrap();
     assert_eq!(rows.len(), 5);
-    assert_eq!(rows[0], vec![s("1880-01-01"), Cell::I64(1880), Cell::I64(1), Cell::F64(-0.4)]);
+    assert_eq!(
+        rows[0],
+        vec![
+            s("1880-01-01"),
+            Cell::I64(1880),
+            Cell::I64(1),
+            Cell::F64(-0.4)
+        ]
+    );
     let last = rows.last().unwrap();
     assert_eq!(last[1], Cell::I64(2026));
     assert_eq!(last[2], Cell::I64(8));
     assert_eq!(last[3], Cell::F64(1.32));
     // Older shape: bare values, sometimes strings.
-    let alt = climate_rows(&serde_json::json!({"data": {"202001": "1.05", "202002": {"anomaly": 1.2}, "junk": 1}})).unwrap();
+    let alt = climate_rows(
+        &serde_json::json!({"data": {"202001": "1.05", "202002": {"anomaly": 1.2}, "junk": 1}}),
+    )
+    .unwrap();
     assert_eq!(alt.len(), 2);
     assert_eq!(alt[0][3], Cell::F64(1.05));
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("climate"), &rows).unwrap(), 5);
     assert_eq!(
-        one(&db, "SELECT CAST(ts AS VARCHAR) FROM global_temperature ORDER BY ts ASC LIMIT 1").as_deref(),
+        one(
+            &db,
+            "SELECT CAST(ts AS VARCHAR) FROM global_temperature ORDER BY ts ASC LIMIT 1"
+        )
+        .as_deref(),
         Some("1880-01-01")
     );
     assert!(climate_url(2026).ends_with("/1880-2026/data.json"));
@@ -677,13 +949,22 @@ fn climate_monthly_anomalies() {
 // ---------------------------------------------------------------
 
 fn fixture_text(name: &str) -> String {
-    let path = format!("{}/tests/fixtures/sources/{}", env!("CARGO_MANIFEST_DIR"), name);
+    let path = format!(
+        "{}/tests/fixtures/sources/{}",
+        env!("CARGO_MANIFEST_DIR"),
+        name
+    );
     std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {}", path, e))
 }
 
 fn approx(c: &Cell, want: f64) {
     match c {
-        Cell::F64(v) => assert!((v - want).abs() < 1e-6 * want.abs().max(1.0), "{} != {}", v, want),
+        Cell::F64(v) => assert!(
+            (v - want).abs() < 1e-6 * want.abs().max(1.0),
+            "{} != {}",
+            v,
+            want
+        ),
         other => panic!("expected {}, got {:?}", want, other),
     }
 }
@@ -699,18 +980,33 @@ fn gdacs_events_typed_and_deduped() {
     assert_eq!(tc[3], s("Green"));
     assert_eq!(tc[4], Cell::F64(1.0));
     assert_eq!(tc[5], s("United States"));
-    assert_eq!((tc[6].clone(), tc[7].clone()), (Cell::F64(23.3), Cell::F64(-167.8)));
+    assert_eq!(
+        (tc[6].clone(), tc[7].clone()),
+        (Cell::F64(23.3), Cell::F64(-167.8))
+    );
     assert_eq!(tc[8], s("2026-09-13 21:00:00"));
     assert_eq!(tc[9], s("2026-10-02 21:00:00"));
     assert_eq!(tc[10], Cell::F64(249.9984));
     assert_eq!(tc[11], s("km/h"));
     let types: Vec<Cell> = rows.iter().map(|r| r[1].clone()).collect();
-    assert_eq!(types, vec![s("Tropical cyclone"), s("Earthquake"), s("Drought"), s("Flood"), s("Wildfire")]);
+    assert_eq!(
+        types,
+        vec![
+            s("Tropical cyclone"),
+            s("Earthquake"),
+            s("Drought"),
+            s("Flood"),
+            s("Wildfire")
+        ]
+    );
     let dr = rows.iter().find(|r| r[0] == s("DR1018332")).unwrap();
     assert_eq!(dr[3], s("Orange"));
     assert_eq!(dr[11], s("km2"));
     // Empty severity unit → NULL.
-    assert_eq!(rows.iter().find(|r| r[0] == s("FL1103888")).unwrap()[11], Cell::Null);
+    assert_eq!(
+        rows.iter().find(|r| r[0] == s("FL1103888")).unwrap()[11],
+        Cell::Null
+    );
     assert_eq!(gdacs_event_type("VO"), "Volcano");
 
     // Same event twice: the later episode wins, first-seen order kept;
@@ -732,12 +1028,19 @@ fn gdacs_events_typed_and_deduped() {
     assert_eq!(d[0][3], s("Red"));
     assert_eq!(d[0][6], Cell::F64(21.0));
     assert_eq!(d[1][2], s("Flood somewhere"));
-    assert_eq!((d[1][6].clone(), d[1][7].clone()), (Cell::F64(1.0), Cell::F64(2.0)));
+    assert_eq!(
+        (d[1][6].clone(), d[1][7].clone()),
+        (Cell::F64(1.0), Cell::F64(2.0))
+    );
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("gdacs"), &rows).unwrap(), 5);
     assert_eq!(
-        one(&db, "SELECT id FROM disaster_alerts ORDER BY start_ts DESC LIMIT 1").as_deref(),
+        one(
+            &db,
+            "SELECT id FROM disaster_alerts ORDER BY start_ts DESC LIMIT 1"
+        )
+        .as_deref(),
         Some("EQ1569163")
     );
 }
@@ -749,9 +1052,18 @@ fn buoys_fixed_width_with_missing_values() {
     assert_eq!(
         rows[0],
         vec![
-            s("22101"), Cell::F64(37.24), Cell::F64(126.02), s("2026-10-02 23:00:00"),
-            Cell::F64(100.0), Cell::F64(4.0), Cell::Null, Cell::F64(0.0), Cell::F64(0.0),
-            Cell::Null, Cell::F64(18.0), Cell::F64(23.4),
+            s("22101"),
+            Cell::F64(37.24),
+            Cell::F64(126.02),
+            s("2026-10-02 23:00:00"),
+            Cell::F64(100.0),
+            Cell::F64(4.0),
+            Cell::Null,
+            Cell::F64(0.0),
+            Cell::F64(0.0),
+            Cell::Null,
+            Cell::F64(18.0),
+            Cell::F64(23.4),
         ]
     );
     let monterey = rows.iter().find(|r| r[0] == s("46042")).unwrap();
@@ -768,7 +1080,11 @@ fn buoys_fixed_width_with_missing_values() {
     let db = test_db();
     assert_eq!(write_rows(&db, spec("buoys"), &rows).unwrap(), 4);
     assert_eq!(
-        one(&db, "SELECT station FROM ocean_buoys ORDER BY wave_height_m DESC NULLS LAST LIMIT 1").as_deref(),
+        one(
+            &db,
+            "SELECT station FROM ocean_buoys ORDER BY wave_height_m DESC NULLS LAST LIMIT 1"
+        )
+        .as_deref(),
         Some("46042")
     );
 }
@@ -803,18 +1119,28 @@ fn mbta_vehicles_join_routes_and_humanize() {
     assert_eq!(ferry[1], Cell::Null);
     assert_eq!(ferry[2], s("Quincy Ferry"));
     assert_eq!(ferry[3], s("Ferry"));
-    assert_eq!(humanize_enum(Some(&serde_json::json!("INCOMING_AT"))), s("Incoming at"));
+    assert_eq!(
+        humanize_enum(Some(&serde_json::json!("INCOMING_AT"))),
+        s("Incoming at")
+    );
     assert_eq!(humanize_enum(Some(&serde_json::json!("FULL"))), s("Full"));
     // Route missing from `included` → its id, unknown type.
-    let orphan = mbta_rows(&serde_json::json!({"data": [{"id": "v1", "attributes": {"label": "1"},
-        "relationships": {"route": {"data": {"id": "Mattapan", "type": "route"}}}}]})).unwrap();
+    let orphan = mbta_rows(
+        &serde_json::json!({"data": [{"id": "v1", "attributes": {"label": "1"},
+        "relationships": {"route": {"data": {"id": "Mattapan", "type": "route"}}}}]}),
+    )
+    .unwrap();
     assert_eq!(orphan[0][2], s("Mattapan"));
     assert_eq!(orphan[0][3], Cell::Null);
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("mbta"), &rows).unwrap(), 7);
     assert_eq!(
-        one(&db, "SELECT COUNT(*) FROM mbta_vehicles WHERE speed_mph IS NOT NULL").as_deref(),
+        one(
+            &db,
+            "SELECT COUNT(*) FROM mbta_vehicles WHERE speed_mph IS NOT NULL"
+        )
+        .as_deref(),
         Some("2")
     );
 }
@@ -823,10 +1149,18 @@ fn mbta_vehicles_join_routes_and_humanize() {
 fn aurora_downsamples_to_two_degree_cells() {
     let rows = aurora_rows(&fixture("aurora.json")).unwrap();
     let ts = s("2026-10-03 01:50:00");
-    let cell = |lon: f64, lat: f64, p: i64| vec![Cell::F64(lon), Cell::F64(lat), Cell::I64(p), ts.clone()];
+    let cell =
+        |lon: f64, lat: f64, p: i64| vec![Cell::F64(lon), Cell::F64(lat), Cell::I64(p), ts.clone()];
     assert_eq!(
         rows,
-        vec![cell(0.0, 64.0, 9), cell(0.0, 66.0, 11), cell(2.0, 64.0, 8), cell(2.0, 66.0, 11), cell(-2.0, 64.0, 9), cell(-2.0, 66.0, 11)]
+        vec![
+            cell(0.0, 64.0, 9),
+            cell(0.0, 66.0, 11),
+            cell(2.0, 64.0, 8),
+            cell(2.0, 66.0, 11),
+            cell(-2.0, 64.0, 9),
+            cell(-2.0, 66.0, 11)
+        ]
     );
     // Max of the four 1° points; cells under 3 % dropped; 180 stays 180, 182 → −178.
     let body = serde_json::json!({"Forecast Time": "2026-10-03T01:50:00Z", "coordinates": [
@@ -842,7 +1176,10 @@ fn aurora_downsamples_to_two_degree_cells() {
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("aurora"), &rows).unwrap(), 6);
-    assert_eq!(one(&db, "SELECT MIN(longitude) FROM aurora_forecast").as_deref(), Some("-2.0"));
+    assert_eq!(
+        one(&db, "SELECT MIN(longitude) FROM aurora_forecast").as_deref(),
+        Some("-2.0")
+    );
 }
 
 #[test]
@@ -857,20 +1194,34 @@ fn asteroid_close_approaches() {
     approx(&r[4], 0.0156288744154242 * 149_597_870.7);
     approx(&r[5], 6.13940599510947);
     assert_eq!(r[6], Cell::F64(26.254));
-    approx(&r[7], 1329.0 / 0.14f64.sqrt() * 10f64.powf(-26.254 / 5.0) * 1000.0);
+    approx(
+        &r[7],
+        1329.0 / 0.14f64.sqrt() * 10f64.powf(-26.254 / 5.0) * 1000.0,
+    );
     match r[7] {
         Cell::F64(d) => assert!(d > 15.0 && d < 25.0, "{}", d),
         ref o => panic!("{:?}", o),
     }
-    assert_eq!(parse_cad_date("2026-Dec-31 23:59").as_deref(), Some("2026-12-31 23:59:00"));
+    assert_eq!(
+        parse_cad_date("2026-Dec-31 23:59").as_deref(),
+        Some("2026-12-31 23:59:00")
+    );
     assert_eq!(parse_cad_date("2026-Foo-01 00:00"), None);
     // Empty window: no `data` key.
-    assert!(asteroids_rows(&serde_json::json!({"fields": ["des"], "count": 0})).unwrap().is_empty());
+    assert!(
+        asteroids_rows(&serde_json::json!({"fields": ["des"], "count": 0}))
+            .unwrap()
+            .is_empty()
+    );
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("asteroids"), &rows).unwrap(), 3);
     assert_eq!(
-        one(&db, "SELECT designation FROM asteroid_approaches ORDER BY approach_ts ASC LIMIT 1").as_deref(),
+        one(
+            &db,
+            "SELECT designation FROM asteroid_approaches ORDER BY approach_ts ASC LIMIT 1"
+        )
+        .as_deref(),
         Some("2026 RP39")
     );
 }
@@ -901,7 +1252,11 @@ fn steam_top_games() {
     let db = test_db();
     assert_eq!(write_rows(&db, spec("steam"), &rows).unwrap(), 3);
     assert_eq!(
-        one(&db, "SELECT name FROM steam_games ORDER BY peak_players DESC LIMIT 1").as_deref(),
+        one(
+            &db,
+            "SELECT name FROM steam_games ORDER BY peak_players DESC LIMIT 1"
+        )
+        .as_deref(),
         Some("Counter-Strike: Global Offensive")
     );
 }
@@ -927,7 +1282,10 @@ fn bitcoin_blocks_from_pages() {
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("bitcoin"), &rows).unwrap(), 2);
-    assert_eq!(one(&db, "SELECT MAX(height) FROM bitcoin_blocks").as_deref(), Some("969650"));
+    assert_eq!(
+        one(&db, "SELECT MAX(height) FROM bitcoin_blocks").as_deref(),
+        Some("969650")
+    );
 }
 
 #[test]
@@ -946,7 +1304,11 @@ fn treasury_debt_to_the_penny() {
     let db = test_db();
     assert_eq!(write_rows(&db, spec("debt"), &rows).unwrap(), 3);
     assert_eq!(
-        one(&db, "SELECT CAST(record_date AS VARCHAR) FROM us_debt ORDER BY record_date ASC LIMIT 1").as_deref(),
+        one(
+            &db,
+            "SELECT CAST(record_date AS VARCHAR) FROM us_debt ORDER BY record_date ASC LIMIT 1"
+        )
+        .as_deref(),
         Some("1993-04-01")
     );
 }
@@ -961,7 +1323,10 @@ fn replace_with_no_rows_keeps_previous_snapshot() {
     let rows = kp_rows(&fixture("kp.json")).unwrap();
     write_rows(&db, spec("spaceweather"), &rows).unwrap();
     assert!(write_rows(&db, spec("spaceweather"), &[]).is_err());
-    assert_eq!(one(&db, "SELECT COUNT(*) FROM space_weather").as_deref(), Some("4"));
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM space_weather").as_deref(),
+        Some("4")
+    );
 }
 
 #[test]
@@ -975,26 +1340,146 @@ fn wrong_width_rows_are_rejected() {
 fn uncastable_cells_become_null() {
     let db = test_db();
     let rows = vec![
-        vec![s("2026-01-01 00:00:00"), Cell::F64(1.0), Cell::I64(1), Cell::I64(8), s("G0")],
-        vec![s("not a time"), Cell::F64(2.0), Cell::I64(1), Cell::I64(8), s("G0")],
+        vec![
+            s("2026-01-01 00:00:00"),
+            Cell::F64(1.0),
+            Cell::I64(1),
+            Cell::I64(8),
+            s("G0"),
+        ],
+        vec![
+            s("not a time"),
+            Cell::F64(2.0),
+            Cell::I64(1),
+            Cell::I64(8),
+            s("G0"),
+        ],
     ];
     assert_eq!(write_rows(&db, spec("spaceweather"), &rows).unwrap(), 2);
-    assert_eq!(one(&db, "SELECT COUNT(*) FROM space_weather WHERE ts IS NULL").as_deref(), Some("1"));
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM space_weather WHERE ts IS NULL").as_deref(),
+        Some("1")
+    );
 }
 
 #[test]
 fn query_json_formats_temporal_and_wide_ints() {
     let db = test_db();
-    let rows = vec![vec![s("2026-01-01 12:34:56"), Cell::F64(1.0), Cell::I64(1), Cell::I64(8), s("G0")]];
+    let rows = vec![vec![
+        s("2026-01-01 12:34:56"),
+        Cell::F64(1.0),
+        Cell::I64(1),
+        Cell::I64(8),
+        s("G0"),
+    ]];
     write_rows(&db, spec("spaceweather"), &rows).unwrap();
     let climate = climate_rows(&fixture("climate.json")).unwrap();
     write_rows(&db, spec("climate"), &climate).unwrap();
     let a = source_query(&db, "spaceweather", "", 5).unwrap();
     assert_eq!(a.rows[0][0], serde_json::json!("2026-01-01T12:34:56.000Z"));
-    let b = source_query(&db, "climate", "SELECT * FROM global_temperature ORDER BY ts", 5).unwrap();
+    let b = source_query(
+        &db,
+        "climate",
+        "SELECT * FROM global_temperature ORDER BY ts",
+        5,
+    )
+    .unwrap();
     assert_eq!(b.rows[0][0], serde_json::json!("1880-01-01"));
-    let c = source_query(&db, "spaceweather", "SELECT SUM(station_count::BIGINT) AS s, 1.5::DECIMAL(4,1) AS d FROM space_weather", 5).unwrap();
-    assert_eq!(c.rows[0], vec![serde_json::json!(8.0), serde_json::json!(1.5)]);
+    let c = source_query(
+        &db,
+        "spaceweather",
+        "SELECT SUM(station_count::BIGINT) AS s, 1.5::DECIMAL(4,1) AS d FROM space_weather",
+        5,
+    )
+    .unwrap();
+    assert_eq!(c.rows[0][0], serde_json::json!(8));
+    assert_eq!(c.rows[0][1], serde_json::json!(1.5));
+}
+
+#[test]
+fn starlink_debris_word_boundary_matches_worker() {
+    assert!(is_starlink_debris_name("STARLINK-1008 DEB 1"));
+    assert!(!is_starlink_debris_name("DEBRIS OBJECT"));
+    assert!(!is_starlink_debris_name("ADELE-1"));
+}
+
+#[test]
+fn nwis_timestamps_normalize_to_utc_wall_clock() {
+    let body = serde_json::json!({
+        "value": { "timeSeries": [{
+            "sourceInfo": {
+                "siteCode": [{"value": "01646500"}],
+                "siteName": "Test",
+                "geoLocation": { "geogLocation": { "latitude": 1.0, "longitude": 2.0 } }
+            },
+            "variable": { "variableCode": [{"value": "00060"}] },
+            "values": [{ "value": [{
+                "dateTime": "2024-06-01T12:00:00-04:00",
+                "value": "100"
+            }] }]
+        }] }
+    });
+    let rows = nwis_rows(&body).unwrap();
+    assert_eq!(rows.len(), 1);
+    match &rows[0][2] {
+        Cell::Str(ts) => assert!(ts.contains("16:00:00"), "expected UTC shift, got {ts}"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn nwis_sentinel_is_null_and_bad_timestamps_dropped() {
+    let body = serde_json::json!({
+        "value": { "timeSeries": [{
+            "sourceInfo": {
+                "siteCode": [{"value": "01646500"}],
+                "siteName": "Test",
+                "geoLocation": { "geogLocation": { "latitude": 1.0, "longitude": 2.0 } }
+            },
+            "variable": { "variableCode": [{"value": "00060"}] },
+            "values": [{ "value": [
+                { "dateTime": "2024-06-01T12:00:00Z", "value": "-999999" },
+                { "dateTime": "2024-06-01T12:15:00Z", "value": "42" },
+                { "dateTime": "not a time", "value": "7" }
+            ] }]
+        }] }
+    });
+    let rows = nwis_rows(&body).unwrap();
+    assert_eq!(rows.len(), 1, "sentinel-only and bad-ts rows are dropped");
+    match &rows[0][5] {
+        Cell::F64(q) => assert_eq!(*q, 42.0),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn firms_acq_ts_uses_parse_iso_utc() {
+    let csv = "latitude,longitude,bright_ti4,bright_ti5,frp,confidence,satellite,acq_date,acq_time,daynight\n\
+40.1,-120.2,300,310,12,n,VIIRS,2024-07-04,1530,D\n";
+    let rows = firms_rows(csv).unwrap();
+    match &rows[0][8] {
+        Cell::Str(ts) => assert_eq!(ts, "2024-07-04 15:30:00"),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn source_query_wraps_trailing_limit() {
+    let db = test_db();
+    write_rows(
+        &db,
+        spec("spaceweather"),
+        &kp_rows(&fixture("kp.json")).unwrap(),
+    )
+    .unwrap();
+    let r = source_query(
+        &db,
+        "spaceweather",
+        "SELECT * FROM space_weather ORDER BY ts LIMIT 2 OFFSET 1",
+        500,
+    )
+    .unwrap();
+    assert_eq!(r.rows.len(), 2);
 }
 
 /// Live network smoke test of every kind's real fetch → parse → write path.
@@ -1017,14 +1502,18 @@ async fn live_fetch_every_source() {
     };
     let mut failed = Vec::new();
     for sp in SOURCE_SPECS {
-        if only.as_ref().is_some_and(|o| !o.iter().any(|k| k == sp.kind)) {
+        if only
+            .as_ref()
+            .is_some_and(|o| !o.iter().any(|k| k == sp.kind))
+        {
             continue;
         }
         let t = std::time::Instant::now();
         match fetch_rows(sp, &mut ctx, &db).await {
             Ok(rows) => match write_rows(&db, sp, &rows) {
                 Ok(n) => {
-                    let sample = source_query(&db, sp.kind, &snapshot_sql(sp.kind).unwrap(), 1).unwrap();
+                    let sample =
+                        source_query(&db, sp.kind, &snapshot_sql(sp.kind).unwrap(), 1).unwrap();
                     eprintln!(
                         "LIVE {:<13} parsed {:>5} wrote {:>5} ({:.1}s) first: {:?}",
                         sp.kind,

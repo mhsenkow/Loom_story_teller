@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["@cloudflare/workers-types", "node"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["../src/*"]
+    }
+  },
+  "include": [
+    "catalog-proxy.ts",
+    "sourceTransforms.ts",
+    "__tests__/*.test.ts",
+    "../src/lib/openDataCatalog.ts",
+    "../src/lib/ssrfGuard.ts",
+    "../src/lib/securityHeaders.ts",
+    "../src/lib/workerCatalogPolicy.ts"
+  ]
+}

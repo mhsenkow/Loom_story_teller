@@ -66,6 +66,14 @@
       return {};
     }
   }
+  function safeHttpsUrl(u) {
+    if (typeof u !== "string" || !u) return null;
+    try {
+      var parsed = new URL(u);
+      if (parsed.protocol === "https:" || parsed.protocol === "http:") return parsed.href;
+    } catch (e) {}
+    return null;
+  }
   var data = seed();
   var recs = Array.isArray(data.recommendations) ? data.recommendations : [];
   var meta = document.getElementById("meta");
@@ -73,23 +81,40 @@
   var open = document.getElementById("open");
   if (data.fileName) meta.textContent = data.fileName;
   else if (data.rowCount != null) meta.textContent = data.rowCount + " rows";
-  if (data.loomUrl) open.href = data.loomUrl;
+  var loomHref = safeHttpsUrl(data.loomUrl);
+  if (loomHref) open.href = loomHref;
 
   if (!recs.length) {
-    list.innerHTML = '<p class="empty">No chart suggestions yet. Pass CSV or column schema to recommend_charts.</p>';
+    list.textContent = "";
+    var empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "No chart suggestions yet. Pass CSV or column schema to recommend_charts.";
+    list.appendChild(empty);
     return;
   }
-  list.innerHTML = recs.slice(0, 8).map(function (r) {
-    var kind = (r.kind || "chart").replace(/([A-Z])/g, " $1").trim();
-    return (
-      '<article class="card">' +
-        '<span class="score">' + (r.score != null ? r.score : "") + '</span>' +
-        '<div class="kind">' + kind + '</div>' +
-        '<div class="title">' + (r.title || "") + '</div>' +
-        '<div class="sub">' + (r.subtitle || r.reason || "") + '</div>' +
-      '</article>'
-    );
-  }).join("");
+  list.textContent = "";
+  recs.slice(0, 8).forEach(function (r) {
+    var kind = String(r.kind || "chart").replace(/([A-Z])/g, " $1").trim();
+    var article = document.createElement("article");
+    article.className = "card";
+    var score = document.createElement("span");
+    score.className = "score";
+    score.textContent = r.score != null ? String(r.score) : "";
+    var kindEl = document.createElement("div");
+    kindEl.className = "kind";
+    kindEl.textContent = kind;
+    var title = document.createElement("div");
+    title.className = "title";
+    title.textContent = r.title != null ? String(r.title) : "";
+    var sub = document.createElement("div");
+    sub.className = "sub";
+    sub.textContent = String(r.subtitle || r.reason || "");
+    article.appendChild(score);
+    article.appendChild(kindEl);
+    article.appendChild(title);
+    article.appendChild(sub);
+    list.appendChild(article);
+  });
 })();
 </script>
 </body>

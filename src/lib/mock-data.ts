@@ -8,16 +8,30 @@
 
 import type { FileEntry, ColumnInfo, QueryResult } from "./store";
 
-function gaussian(mean: number, std: number): number {
-  const u = 1 - Math.random();
-  const v = Math.random();
+/** Deterministic demo RNG (LOOM-153) — not used for production ingest. */
+function mulberry32(seed: number): () => number {
+  return () => {
+    seed |= 0;
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function gaussian(rng: () => number, mean: number, std: number): number {
+  const u = 1 - rng();
+  const v = rng();
   return mean + std * Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 }
 
 const CATEGORIES = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"];
 const CITIES = ["San Francisco", "New York", "London", "Tokyo", "Berlin", "Paris", "Sydney", "Toronto"];
 
-function generateScatterData(n: number): { columns: string[]; types: string[]; rows: (string | number | null)[][] } {
+function generateScatterData(
+  n: number,
+  rng: () => number,
+): { columns: string[]; types: string[]; rows: (string | number | null)[][] } {
   const centers = [
     [20, 30], [-15, 25], [10, -20], [-30, -10],
     [35, -15], [-5, 40], [25, 5], [-20, 35],
@@ -25,8 +39,8 @@ function generateScatterData(n: number): { columns: string[]; types: string[]; r
   const rows: (string | number | null)[][] = [];
   for (let i = 0; i < n; i++) {
     const [cx, cy] = centers[i % centers.length];
-    const x = Math.round((cx + gaussian(0, 8)) * 1000) / 1000;
-    const y = Math.round((cy + gaussian(0, 8)) * 1000) / 1000;
+    const x = Math.round((cx + gaussian(rng, 0, 8)) * 1000) / 1000;
+    const y = Math.round((cy + gaussian(rng, 0, 8)) * 1000) / 1000;
     const mag = Math.round(Math.sqrt(x * x + y * y) * 100) / 100;
     rows.push([x, y, CATEGORIES[i % CATEGORIES.length], mag, `pt_${i}`]);
   }
@@ -37,16 +51,19 @@ function generateScatterData(n: number): { columns: string[]; types: string[]; r
   };
 }
 
-function generateSalesData(n: number): { columns: string[]; types: string[]; rows: (string | number | null)[][] } {
+function generateSalesData(
+  n: number,
+  rng: () => number,
+): { columns: string[]; types: string[]; rows: (string | number | null)[][] } {
   const products = ["Widget A", "Widget B", "Gadget Pro", "Sensor V1", "Module X", "Board Rev3"];
   const rows: (string | number | null)[][] = [];
   const base = new Date("2023-01-01").getTime();
   for (let i = 0; i < n; i++) {
-    const date = new Date(base + Math.random() * 63072000000).toISOString().split("T")[0];
-    const city = CITIES[Math.floor(Math.random() * CITIES.length)];
-    const product = products[Math.floor(Math.random() * products.length)];
-    const units = Math.floor(Math.random() * 500) + 1;
-    const revenue = Math.round(units * (Math.random() * 200 + 10) * 100) / 100;
+    const date = new Date(base + rng() * 63072000000).toISOString().split("T")[0];
+    const city = CITIES[Math.floor(rng() * CITIES.length)];
+    const product = products[Math.floor(rng() * products.length)];
+    const units = Math.floor(rng() * 500) + 1;
+    const revenue = Math.round(units * (rng() * 200 + 10) * 100) / 100;
     rows.push([date, city, product, units, revenue]);
   }
   return {
@@ -56,27 +73,50 @@ function generateSalesData(n: number): { columns: string[]; types: string[]; row
   };
 }
 
-const scatterData = generateScatterData(2000);
-const salesData = generateSalesData(1000);
+const DEMO_SEED = 0x10_00_0153;
 
-const MOCK_FILES: FileEntry[] = [
-  { path: "mock://scatter.csv", name: "scatter_demo.csv", extension: "csv", row_count: 2000, size_bytes: 98000 },
-  { path: "mock://sales.csv", name: "sales_demo.csv", extension: "csv", row_count: 1000, size_bytes: 52000 },
-];
-
-const MOCK_DATA: Record<string, { columns: string[]; types: string[]; rows: (string | number | null)[][] }> = {
-  "mock://scatter.csv": scatterData,
-  "mock://sales.csv": salesData,
+type DemoBundle = {
+  files: FileEntry[];
+  data: Record<string, { columns: string[]; types: string[]; rows: (string | number | null)[][] }>;
 };
 
-function statsFromData(data: typeof scatterData): ColumnInfo[] {
+let demoBundle: DemoBundle | null = null;
+
+/** Lazy demo datasets — production import never touches this (LOOM-153). */
+export function getDemoBundle(): DemoBundle {
+  if (demoBundle) return demoBundle;
+  const rng = mulberry32(DEMO_SEED);
+  const scatterData = generateScatterData(2000, rng);
+  const salesData = generateSalesData(1000, rng);
+  demoBundle = {
+    files: [
+      { path: "mock://scatter.csv", name: "scatter_demo.csv", extension: "csv", row_count: 2000, size_bytes: 98000 },
+      { path: "mock://sales.csv", name: "sales_demo.csv", extension: "csv", row_count: 1000, size_bytes: 52000 },
+    ],
+    data: {
+      "mock://scatter.csv": scatterData,
+      "mock://sales.csv": salesData,
+    },
+  };
+  return demoBundle;
+}
+
+export function getMockFiles(): FileEntry[] {
+  return getDemoBundle().files;
+}
+
+export function statsFromData(data: {
+  columns: string[];
+  types: string[];
+  rows: (string | number | null)[][];
+}): ColumnInfo[] {
   return data.columns.map((name, i) => {
-    const type = data.types[i];
-    const values = data.rows.map(r => r[i]);
-    const nonNull = values.filter(v => v !== null);
+    const type = data.types[i]!;
+    const values = data.rows.map((r) => r[i]);
+    const nonNull = values.filter((v) => v !== null);
     const distinct = new Set(nonNull.map(String)).size;
     const isNum = ["DOUBLE", "INTEGER", "BIGINT", "FLOAT"].includes(type);
-    const nums = isNum ? nonNull.map(Number).filter(n => !isNaN(n)) : [];
+    const nums = isNum ? nonNull.map(Number).filter((n) => !isNaN(n)) : [];
 
     return {
       name,
@@ -89,10 +129,247 @@ function statsFromData(data: typeof scatterData): ColumnInfo[] {
   });
 }
 
-export const mockFiles = MOCK_FILES;
+/**
+ * Keep leading-zero codes, oversized digit strings, and named identifier
+ * columns as text so ZIP/FIPS/IDs survive ingest → chart → export.
+ */
+export function looksLikeIdentifierString(raw: string): boolean {
+  const s = raw.trim();
+  if (!s) return false;
+  if (/^0\d+$/.test(s)) return true;
+  // Beyond Number.MAX_SAFE_INTEGER precision (~15–16 digits)
+  if (/^\d{16,}$/.test(s)) return true;
+  return false;
+}
+
+export function columnSuggestsIdentifier(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  if (!n) return false;
+  if (/(^|_)(zip|zipcode|postal|fips|geoid|ssn|iban|uuid|guid)(_|$)/i.test(n)) return true;
+  if (/(^|_)id$/i.test(n) || /^id(_|$)/i.test(n)) return true;
+  if (/(^|_)code$/i.test(n) || /_code_/i.test(n)) return true;
+  return false;
+}
+
+/**
+ * Stable unique column keys for tabular import: trim, blank → col_1…col_n,
+ * duplicate names → name_2, name_3 (first occurrence keeps the base name).
+ */
+export function normalizeTabularHeaders(
+  raw: (string | number | null | undefined)[],
+): string[] {
+  const used = new Set<string>();
+  return raw.map((cell, i) => {
+    let base = cell == null ? "" : String(cell).trim();
+    if (!base) base = `col_${i + 1}`;
+    if (!used.has(base)) {
+      used.add(base);
+      return base;
+    }
+    let n = 2;
+    while (used.has(`${base}_${n}`)) n += 1;
+    const key = `${base}_${n}`;
+    used.add(key);
+    return key;
+  });
+}
+
+/** Scalar after parse stage — booleans become 0/1 for numeric inference. */
+export type TabularLexeme = string | number | null;
+
+export type TabularIncompatibleCell = {
+  row: number;
+  column: string;
+  value: string;
+  inferred_type: "DOUBLE";
+};
+
+export type TabularInspectDiagnostics = {
+  incompatible_cells: TabularIncompatibleCell[];
+  incompatible_count: number;
+};
+
+const INCOMPATIBLE_CELL_CAP = 8;
+
+const ISO_DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+const ISO_TIMESTAMP =
+  /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/;
+
+function isValidCalendarDate(y: number, m: number, d: number): boolean {
+  if (m < 1 || m > 12 || d < 1 || d > 31) return false;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d;
+}
+
+/** Strict ISO date (no epoch heuristics for bare numbers). */
+export function looksLikeIsoDateOnly(v: string): boolean {
+  const m = v.trim().match(ISO_DATE_ONLY);
+  if (!m) return false;
+  return isValidCalendarDate(Number(m[1]), Number(m[2]), Number(m[3]));
+}
+
+export function looksLikeIsoTimestamp(v: string): boolean {
+  const t = v.trim();
+  if (looksLikeIsoDateOnly(t)) return true;
+  const m = t.match(ISO_TIMESTAMP);
+  if (!m) return false;
+  return isValidCalendarDate(Number(m[1]), Number(m[2]), Number(m[3]));
+}
+
+/** Parse one cell: null/empty rules, finite numbers, booleans → 0/1, trimmed strings. */
+export function parseTabularCell(
+  raw: string | number | boolean | null | undefined,
+): TabularLexeme {
+  if (raw === null || raw === undefined || raw === "") return null;
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : null;
+  if (typeof raw === "boolean") return raw ? 1 : 0;
+  const v = String(raw).trim();
+  if (v === "" || v.toLowerCase() === "null") return null;
+  return v;
+}
+
+/** Build lexeme matrix without column-type coercion. */
+export function parseTabularLexemes(
+  columns: string[],
+  rawRows: (string | number | boolean | null | undefined)[][],
+): TabularLexeme[][] {
+  return rawRows.map((values) =>
+    columns.map((_, c) => parseTabularCell(values[c])),
+  );
+}
+
+/** Infer DuckDB-style column types from parsed lexemes. */
+export function inferTabularColumnTypes(
+  columns: string[],
+  lexemes: TabularLexeme[][],
+): string[] {
+  const idCols = columns.map((name) => columnSuggestsIdentifier(name));
+  return columns.map((name, i) => {
+    const cells = lexemes.map((r) => r[i] ?? null);
+    const nonNull = cells.filter((v) => v !== null);
+    if (nonNull.length === 0) return "VARCHAR";
+    if (idCols[i]) return "VARCHAR";
+    const hasIdentifier = nonNull.some(
+      (v) => typeof v === "string" && looksLikeIdentifierString(v),
+    );
+    if (hasIdentifier) return "VARCHAR";
+    const nums = nonNull.filter((v): v is number => typeof v === "number");
+    const stringNums = nonNull.filter(
+      (v): v is string => typeof v === "string" && coerceCsvNumber(v) != null,
+    );
+    if (nums.length + stringNums.length > nonNull.length * 0.5) return "DOUBLE";
+    const strings = nonNull.filter((v): v is string => typeof v === "string");
+    const dateOnlyHits = strings.filter((s) => looksLikeIsoDateOnly(s)).length;
+    const timestampHits = strings.filter(
+      (s) => looksLikeIsoTimestamp(s) && !looksLikeIsoDateOnly(s),
+    ).length;
+    if (dateOnlyHits >= nonNull.length * 0.7 && timestampHits === 0) return "DATE";
+    if (dateOnlyHits + timestampHits >= nonNull.length * 0.7) return "TIMESTAMP";
+    const n = name.toLowerCase();
+    if (
+      /(amount|award|budget|count|latitude|longitude|lat|lon|year|rate|percent|proportion|households)/i.test(
+        n,
+      )
+    ) {
+      if (nums.length + stringNums.length > nonNull.length * 0.4) return "DOUBLE";
+    }
+    return "VARCHAR";
+  });
+}
+
+/** Normalize lexemes to output row; track cells that stay text in DOUBLE columns. */
+export function normalizeTabularCells(
+  columns: string[],
+  lexemes: TabularLexeme[][],
+  types: string[],
+): { rows: (string | number | null)[][]; diagnostics: TabularInspectDiagnostics } {
+  const incompatible_cells: TabularIncompatibleCell[] = [];
+  let incompatible_count = 0;
+
+  const rows = lexemes.map((values, rowIndex) => {
+    const row: (string | number | null)[] = [];
+    for (let c = 0; c < columns.length; c++) {
+      const raw = values[c];
+      if (raw === null) {
+        row.push(null);
+        continue;
+      }
+      if (types[c] !== "VARCHAR" && typeof raw === "string" && isNullishCsvToken(raw)) {
+        row.push(null);
+        continue;
+      }
+      if (types[c] === "VARCHAR") {
+        row.push(String(raw));
+        continue;
+      }
+      if (typeof raw === "number") {
+        row.push(raw);
+        continue;
+      }
+      const num = coerceCsvNumber(String(raw));
+      if (num !== null) {
+        row.push(num);
+        continue;
+      }
+      incompatible_count += 1;
+      if (incompatible_cells.length < INCOMPATIBLE_CELL_CAP) {
+        incompatible_cells.push({
+          row: rowIndex,
+          column: columns[c]!,
+          value: String(raw),
+          inferred_type: "DOUBLE",
+        });
+      }
+      row.push(String(raw));
+    }
+    return row;
+  });
+
+  return {
+    rows,
+    diagnostics: { incompatible_cells, incompatible_count },
+  };
+}
+
+/** Cap rows by cell budget, infer types lightly, return inspect payload. */
+export function inspectFromTabular(
+  columns: string[],
+  rawRows: (string | number | boolean | null | undefined)[][],
+  maxRows?: number,
+): {
+  stats: ColumnInfo[];
+  sample: QueryResult;
+  diagnostics: TabularInspectDiagnostics;
+} {
+  columns = normalizeTabularHeaders(columns);
+  const totalRows = rawRows.length;
+  const rowCap =
+    maxRows ??
+    Math.min(
+      WEB_CSV_MAX_ROWS,
+      Math.max(1000, Math.floor(WEB_CSV_CELL_BUDGET / Math.max(1, columns.length))),
+    );
+  const slice = rawRows.slice(0, rowCap);
+
+  const lexemes = parseTabularLexemes(columns, slice);
+  const types = inferTabularColumnTypes(columns, lexemes);
+  const { rows, diagnostics } = normalizeTabularCells(columns, lexemes, types);
+
+  const data = { columns, types, rows };
+  return {
+    stats: statsFromData(data),
+    sample: { columns, types, rows, total_rows: totalRows },
+    diagnostics,
+  };
+}
 
 export function mockInspect(filePath: string): { stats: ColumnInfo[]; sample: QueryResult } {
-  const data = MOCK_DATA[filePath] ?? scatterData;
+  const data = getDemoBundle().data[filePath];
+  if (!data) {
+    throw new Error(
+      `Unknown demo path “${filePath}”. Upload a file or open a sample from Start here.`,
+    );
+  }
   const stats = statsFromData(data);
   const sample: QueryResult = {
     columns: data.columns,
@@ -105,7 +382,12 @@ export function mockInspect(filePath: string): { stats: ColumnInfo[]; sample: Qu
 }
 
 export function mockQuery(filePath: string, limit: number): QueryResult {
-  const data = MOCK_DATA[filePath] ?? scatterData;
+  const data = getDemoBundle().data[filePath];
+  if (!data) {
+    throw new Error(
+      `Unknown demo path “${filePath}”. Upload a file or open a sample from Start here.`,
+    );
+  }
   return {
     columns: data.columns,
     types: data.types,
@@ -153,14 +435,20 @@ export function sniffCsvDelimiter(text: string): CsvDelimiter {
  * RFC4180-ish CSV split that keeps delimiters/newlines inside quotes.
  * Returns rows of string cells (header included as row 0).
  */
-export function parseCsvRecords(text: string, delimiter: CsvDelimiter = ","): string[][] {
+export function parseCsvRecords(
+  text: string,
+  delimiter: CsvDelimiter = ",",
+  maxRecords?: number,
+): string[][] {
   const rows: string[][] = [];
   let row: string[] = [];
   let cur = "";
   let inQuotes = false;
   const src = trimToCompleteCsvRecords(text);
+  const cap = maxRecords != null && maxRecords > 0 ? maxRecords : Infinity;
 
   for (let i = 0; i < src.length; i++) {
+    if (rows.length >= cap) break;
     const ch = src[i]!;
     if (inQuotes) {
       if (ch === '"') {
@@ -187,7 +475,10 @@ export function parseCsvRecords(text: string, delimiter: CsvDelimiter = ","): st
     if (ch === "\n") {
       row.push(cur);
       cur = "";
-      if (row.some((c) => c.trim() !== "")) rows.push(row);
+      if (row.some((c) => c.trim() !== "")) {
+        rows.push(row);
+        if (rows.length >= cap) break;
+      }
       row = [];
       continue;
     }
@@ -228,10 +519,23 @@ export function trimToCompleteCsvRecords(text: string): string {
   return lastSafe > 0 ? src.slice(0, lastSafe) : src;
 }
 
+const NULLISH_TOKENS = new Set(["n/a", "na", "#n/a", "..", "—", "-", "null", "nan"]);
+
+export function isNullishCsvToken(raw: string): boolean {
+  const t = raw.trim().toLowerCase();
+  return t === "" || NULLISH_TOKENS.has(t);
+}
+
 /** Coerce CSV cell → number when it looks numeric (gov data often uses "1,203,514" / " 10.9 "). */
 export function coerceCsvNumber(raw: string): number | null {
   let s = raw.trim();
-  if (!s || s === "null" || s === "NULL" || s === "NaN" || s === "-") return null;
+  if (!s || isNullishCsvToken(s)) return null;
+  let accountingNeg = false;
+  if (/^\([0-9,.\s]+\)$/.test(s)) {
+    accountingNeg = true;
+    s = s.slice(1, -1).trim();
+  }
+  if (/^0x[0-9a-f]+$/i.test(s) || /^[+-]?0[0-7]+$/i.test(s)) return null;
   s = s.replace(/^[$£€]/, "").replace(/%$/, "").replace(/\u00a0/g, "").replace(/ /g, "").trim();
   // US thousands: 1,234,567.89
   if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) {
@@ -247,8 +551,10 @@ export function coerceCsvNumber(raw: string): number | null {
     // Decimal comma without thousands grouping: 10,9
     s = s.replace(",", ".");
   }
+  if (!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(s)) return null;
   const n = Number(s);
-  return Number.isFinite(n) ? n : null;
+  if (!Number.isFinite(n)) return null;
+  return accountingNeg ? -Math.abs(n) : n;
 }
 
 /**
@@ -263,72 +569,28 @@ export function parseCsvToInspectResult(
   _name: string,
   text: string,
   maxRows?: number,
-): { stats: ColumnInfo[]; sample: QueryResult } {
+): { stats: ColumnInfo[]; sample: QueryResult; diagnostics: TabularInspectDiagnostics } {
   if (looksLikeSpreadsheetBinary(text)) {
     throw new Error(
       "This download is an Excel workbook (xlsx), not CSV. Pick a CSV resource, or export CSV from the portal.",
     );
   }
 
-  const records = parseCsvRecords(text, sniffCsvDelimiter(text));
+  const delimiter = sniffCsvDelimiter(text);
+  const previewRows = parseCsvRecords(text, delimiter, 2);
+  const colCount = Math.max(1, previewRows[0]?.length ?? 1);
+  const rowCap =
+    maxRows ??
+    Math.min(WEB_CSV_MAX_ROWS, Math.max(1, Math.floor(WEB_CSV_CELL_BUDGET / colCount)) + 1);
+  const records = parseCsvRecords(text, delimiter, rowCap);
   if (records.length === 0) {
-    return { stats: [], sample: { columns: [], types: [], rows: [], total_rows: 0 } };
+    return {
+      stats: [],
+      sample: { columns: [], types: [], rows: [], total_rows: 0 },
+      diagnostics: { incompatible_cells: [], incompatible_count: 0 },
+    };
   }
 
   const columns = records[0]!.map((c) => c.trim());
-  const dataRows = records.slice(1);
-  const totalRows = dataRows.length;
-  const rowCap =
-    maxRows ?? Math.min(WEB_CSV_MAX_ROWS, Math.max(1000, Math.floor(WEB_CSV_CELL_BUDGET / Math.max(1, columns.length))));
-  const slice = dataRows.slice(0, rowCap);
-
-  const rows: (string | number | null)[][] = slice.map((values) => {
-    const row: (string | number | null)[] = [];
-    for (let c = 0; c < columns.length; c++) {
-      const v = (values[c] ?? "").trim();
-      if (v === "" || v.toLowerCase() === "null") {
-        row.push(null);
-        continue;
-      }
-      const num = coerceCsvNumber(v);
-      row.push(num !== null ? num : v);
-    }
-    return row;
-  });
-
-  const types = columns.map((name, i) => {
-    const cells = rows.map((r) => r[i]);
-    const nonNull = cells.filter((v) => v !== null);
-    if (nonNull.length === 0) return "VARCHAR";
-    const nums = nonNull.filter((v): v is number => typeof v === "number");
-    if (nums.length > nonNull.length * 0.5) return "DOUBLE";
-    // Name hints for years / amounts when sample was mostly null-ish strings
-    const n = name.toLowerCase();
-    if (/(amount|award|budget|count|latitude|longitude|lat|lon|year|rate|percent|proportion|households)/i.test(n)) {
-      const coerced = nonNull
-        .map((v) => (typeof v === "number" ? v : coerceCsvNumber(String(v))))
-        .filter((v): v is number => v != null);
-      if (coerced.length > nonNull.length * 0.4) {
-        for (let r = 0; r < rows.length; r++) {
-          const cell = rows[r]![i];
-          if (typeof cell === "string") {
-            const n2 = coerceCsvNumber(cell);
-            if (n2 != null) rows[r]![i] = n2;
-          }
-        }
-        return "DOUBLE";
-      }
-    }
-    return "VARCHAR";
-  });
-
-  const data = { columns, types, rows };
-  const stats = statsFromData(data);
-  const sample: QueryResult = {
-    columns,
-    types,
-    rows,
-    total_rows: totalRows,
-  };
-  return { stats, sample };
+  return inspectFromTabular(columns, records.slice(1), maxRows);
 }

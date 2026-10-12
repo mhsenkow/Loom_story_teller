@@ -1,3 +1,4 @@
+import type { ExportedHandler } from "@cloudflare/workers-types";
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
@@ -9,8 +10,8 @@ import {
   getRecommendationReason,
   type ChartKind,
 } from "../../src/lib/recommendations";
-import type { QueryResult } from "../../src/lib/store";
-import { profilePayload } from "./profile";
+import type { QueryResult } from "../../src/lib/queryTypes";
+import { profilePayload, profilePayloadSafe } from "./profile";
 // @ts-expect-error wrangler Text module rule
 import widgetHtmlRaw from "./widget.html";
 // @ts-expect-error wrangler Text module rule
@@ -28,10 +29,35 @@ const WIDGET_MIME = "text/html+skybridge";
 
 const widgetHtml = String(widgetHtmlRaw);
 
+/** Escape JSON for safe embedding inside a `<script>` element. */
+function jsonForScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function sanitizePreviewSeed(seed: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...seed };
+  if (typeof out.loomUrl === "string") {
+    try {
+      const u = new URL(out.loomUrl);
+      if (u.protocol !== "https:" && u.protocol !== "http:") delete out.loomUrl;
+      else out.loomUrl = u.href;
+    } catch {
+      delete out.loomUrl;
+    }
+  }
+  return out;
+}
+
 function widgetDocument(seed?: Record<string, unknown>) {
   let seedScript = "";
   if (seed) {
-    const escaped = JSON.stringify(seed);
+    const safe = sanitizePreviewSeed(seed);
+    const escaped = jsonForScript(safe);
     seedScript =
       "<script>window.openai={toolInput:" +
       escaped +
@@ -97,11 +123,22 @@ function resolveProfile(args: {
   json?: string;
   columns?: { name: string; data_type?: string; distinct_count?: number }[];
 }) {
-  return profilePayload({
+  const r = profilePayloadSafe({
     csv: args.csv,
     json: args.json,
     columns: args.columns,
   });
+  if (!r.ok) {
+    throw new Error(r.error);
+  }
+  return r.result;
+}
+
+function profileToolError(message: string) {
+  return {
+    isError: true as const,
+    content: [{ type: "text" as const, text: message }],
+  };
 }
 
 const dataInputFields = {
@@ -162,7 +199,12 @@ function createServer() {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async (args) => {
-      const profile = resolveProfile(args);
+      let profile;
+      try {
+        profile = resolveProfile(args);
+      } catch (e) {
+        return profileToolError(e instanceof Error ? e.message : "Invalid input");
+      }
       const summary = profile.columns
         .map((c) => `${c.name}:${c.data_type}(n≈${c.distinct_count})`)
         .join(", ");
@@ -202,7 +244,12 @@ function createServer() {
       _meta: widgetToolMeta,
     },
     async ({ csv, json, columns, fileName, limit }) => {
-      const profile = resolveProfile({ csv, json, columns });
+      let profile;
+      try {
+        profile = resolveProfile({ csv, json, columns });
+      } catch (e) {
+        return profileToolError(e instanceof Error ? e.message : "Invalid input");
+      }
       if (profile.columns.length === 0) {
         return {
           content: [{ type: "text" as const, text: "No columns found — paste CSV with a header row." }],
@@ -253,7 +300,12 @@ function createServer() {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async (args) => {
-      const profile = resolveProfile(args);
+      let profile;
+      try {
+        profile = resolveProfile(args);
+      } catch (e) {
+        return profileToolError(e instanceof Error ? e.message : "Invalid input");
+      }
       const kinds = CHART_KIND_OPTIONS.map((opt) => {
         const support = chartKindDataSupport(profile.columns, opt.value);
         return { kind: opt.value, label: opt.label, ok: support.ok, reason: support.reason || null };
@@ -300,7 +352,12 @@ function createServer() {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ csv, json, columns, kind, xField, yField, colorField, sizeField, fileName }) => {
-      const profile = resolveProfile({ csv, json, columns });
+      let profile;
+      try {
+        profile = resolveProfile({ csv, json, columns });
+      } catch (e) {
+        return profileToolError(e instanceof Error ? e.message : "Invalid input");
+      }
       const kindOk = CHART_KIND_OPTIONS.some((o) => o.value === kind);
       if (!kindOk) {
         return {
@@ -473,7 +530,7 @@ export default {
 
     return mcpHandler(request, env, ctx);
   },
-} satisfies ExportedHandler;
+} satisfies ExportedHandler<Env>;
 
 interface Env {
   OPENAI_APPS_CHALLENGE?: string;

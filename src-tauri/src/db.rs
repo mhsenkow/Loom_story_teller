@@ -10,7 +10,7 @@
 // DuckDB runs in-process (no server) — perfect for local-first.
 // =================================================================
 
-use duckdb::{Connection, params};
+use duckdb::{params, Connection};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -33,7 +33,10 @@ pub(crate) fn table_expr_for_path(file_path: &str) -> String {
             format!("read_parquet('{}')", escaped)
         } else if file_path.ends_with(".csv") {
             format!("read_csv_auto('{}')", escaped)
-        } else if file_path.ends_with(".json") || file_path.ends_with(".ndjson") || file_path.ends_with(".jsonl") {
+        } else if file_path.ends_with(".json")
+            || file_path.ends_with(".ndjson")
+            || file_path.ends_with(".jsonl")
+        {
             format!("read_json_auto('{}')", escaped)
         } else if file_path.ends_with(".xlsx") {
             format!("read_xlsx('{}')", escaped)
@@ -76,13 +79,53 @@ pub struct QueryResult {
     pub total_rows: u64,
 }
 
+fn lock_conn(conn: &Mutex<Connection>) -> std::sync::MutexGuard<'_, Connection> {
+    match conn.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn should_skip_scan_path(path: &Path) -> bool {
+    path.components().any(|c| {
+        let s = c.as_os_str().to_string_lossy();
+        matches!(
+            s.as_ref(),
+            "node_modules" | ".git" | "target" | "__pycache__" | ".next" | "out"
+        )
+    })
+}
+
 impl LoomDb {
+    pub(crate) fn lock_connection(&self) -> std::sync::MutexGuard<'_, Connection> {
+        lock_conn(&self.conn)
+    }
+
+    /// Clone the shared in-memory connection so long scans don't block polls.
+    pub fn with_cloned_conn<F, T>(&self, f: F) -> Result<T, String>
+    where
+        F: FnOnce(&Connection) -> Result<T, String>,
+    {
+        let conn = {
+            let guard = lock_conn(&self.conn);
+            guard.try_clone().map_err(|e| e.to_string())?
+        };
+        f(&conn)
+    }
+
     pub fn new() -> Result<Self, duckdb::Error> {
         let conn = Connection::open_in_memory()?;
-        conn.execute_batch("INSTALL parquet; LOAD parquet;")?;
-        // Optional extensions for JSON, Excel (ignore errors if offline or missing)
-        let _ = conn.execute_batch("INSTALL json; LOAD json;");
-        let _ = conn.execute_batch("INSTALL excel; LOAD excel;");
+        // Prefer bundled/ cached extensions — avoid network INSTALL on first launch (LOOM-083).
+        for sql in [
+            "LOAD parquet;",
+            "INSTALL parquet; LOAD parquet;",
+            "LOAD json;",
+            "INSTALL json; LOAD json;",
+            "LOAD excel;",
+            "INSTALL excel; LOAD excel;",
+        ] {
+            let _ = conn.execute_batch(sql);
+        }
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -91,7 +134,6 @@ impl LoomDb {
     /// Discover data files in a folder (recursive): parquet, csv, json/ndjson/jsonl, xlsx, db/sqlite.
     /// SQLite files yield one entry per table (path stored as "file_path|table_name").
     pub fn scan_folder(&self, folder: &Path) -> Result<Vec<FileEntry>, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
         let mut entries = Vec::new();
 
         let patterns: &[(&str, &str)] = &[
@@ -107,7 +149,12 @@ impl LoomDb {
             let pattern_str = folder.join(glob_suffix).to_string_lossy().to_string();
             if let Ok(paths) = glob::glob(&pattern_str) {
                 for path_result in paths.flatten() {
-                    if let Ok(e) = Self::probe_file(&conn, &path_result, ext) {
+                    if should_skip_scan_path(&path_result) {
+                        continue;
+                    }
+                    if let Ok(e) =
+                        self.with_cloned_conn(|conn| Self::probe_file(conn, &path_result, ext))
+                    {
                         entries.push(e);
                     }
                 }
@@ -120,6 +167,9 @@ impl LoomDb {
             let pattern_str = folder.join(glob_suffix).to_string_lossy().to_string();
             if let Ok(paths) = glob::glob(&pattern_str) {
                 for path_result in paths.flatten() {
+                    if should_skip_scan_path(&path_result) {
+                        continue;
+                    }
                     if let Ok(mut sqlite_entries) = Self::probe_sqlite(&path_result) {
                         entries.append(&mut sqlite_entries);
                     }
@@ -131,30 +181,23 @@ impl LoomDb {
         Ok(entries)
     }
 
-    fn probe_file(
-        conn: &Connection,
-        path: &PathBuf,
-        ext: &str,
-    ) -> Result<FileEntry, String> {
+    fn probe_file(conn: &Connection, path: &PathBuf, ext: &str) -> Result<FileEntry, String> {
         let path_str = path.to_string_lossy().to_string();
         let escaped = escape_path_for_sql(&path_str);
 
-        let size_bytes = std::fs::metadata(path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
-        let count_sql = match ext {
-            "parquet" => format!("SELECT COUNT(*) FROM read_parquet('{}')", escaped),
-            "csv" => format!("SELECT COUNT(*) FROM read_csv_auto('{}')", escaped),
-            "json" | "ndjson" | "jsonl" => format!("SELECT COUNT(*) FROM read_json_auto('{}')", escaped),
-            "xlsx" => format!("SELECT COUNT(*) FROM read_xlsx('{}')", escaped),
+        let row_count: u64 = match ext {
+            "parquet" => {
+                let count_sql = format!("SELECT COUNT(*) FROM read_parquet('{}')", escaped);
+                conn.query_row(&count_sql, params![], |row| row.get(0))
+                    .map(|v: i64| v as u64)
+                    .unwrap_or(0)
+            }
+            // Defer full parse counts for text/tabular files — metadata only at mount time.
+            "csv" | "json" | "ndjson" | "jsonl" | "xlsx" => 0,
             _ => return Err(format!("Unsupported file type: {}", ext)),
         };
-
-        let row_count: u64 = conn
-            .query_row(&count_sql, params![], |row| row.get(0))
-            .map(|v: i64| v as u64)
-            .unwrap_or(0);
 
         let name = path
             .file_name()
@@ -228,33 +271,35 @@ impl LoomDb {
         sql: &str,
         limit: u32,
     ) -> Result<QueryResult, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        Self::query_inner(&conn, file_path, sql, limit)
+        self.with_cloned_conn(|conn| Self::query_inner(conn, file_path, sql, limit))
     }
 
     /// Get column-level statistics for a file.
     pub fn get_column_stats(&self, file_path: &str) -> Result<Vec<ColumnInfo>, String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
-        Self::column_stats_inner(&conn, file_path)
+        self.with_cloned_conn(|conn| Self::column_stats_inner(conn, file_path))
     }
 
     /// Combined: stats + sample rows in a single lock acquisition.
     /// Avoids Mutex contention from concurrent IPC calls.
-    pub fn inspect_file(&self, file_path: &str, sample_limit: u32) -> Result<(Vec<ColumnInfo>, QueryResult), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+    pub fn inspect_file(
+        &self,
+        file_path: &str,
+        sample_limit: u32,
+    ) -> Result<(Vec<ColumnInfo>, QueryResult), String> {
+        self.with_cloned_conn(|conn| {
+            Self::ensure_sqlite_attached(conn, file_path)?;
+            let table_expr = Self::table_expr(file_path);
+            conn.execute_batch(&format!(
+                "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
+                table_expr
+            ))
+            .map_err(|e| e.to_string())?;
 
-        Self::ensure_sqlite_attached(&conn, file_path)?;
-        let table_expr = Self::table_expr(file_path);
-        conn.execute_batch(&format!(
-            "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
-            table_expr
-        ))
-        .map_err(|e| e.to_string())?;
-
-        let stats = Self::column_stats_inner(&conn, file_path)?;
-        let sample = Self::query_inner(&conn, file_path, "SELECT * FROM loom_active", sample_limit)?;
-
-        Ok((stats, sample))
+            let stats = Self::column_stats_inner(conn, file_path)?;
+            let sample =
+                Self::query_inner(conn, file_path, "SELECT * FROM loom_active", sample_limit)?;
+            Ok((stats, sample))
+        })
     }
 
     /// For SQLite (path format "file_path|table_name"), attach the DB so table_expr can reference it.
@@ -283,78 +328,12 @@ impl LoomDb {
     fn column_stats_inner(conn: &Connection, file_path: &str) -> Result<Vec<ColumnInfo>, String> {
         Self::ensure_sqlite_attached(conn, file_path)?;
         let table_expr = Self::table_expr(file_path);
-
         conn.execute_batch(&format!(
-            "CREATE OR REPLACE TEMP VIEW loom_stats AS SELECT * FROM {}",
+            "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
             table_expr
         ))
         .map_err(|e| e.to_string())?;
-
-        let schema_sql = "DESCRIBE loom_stats";
-        let mut stmt = conn.prepare(schema_sql).map_err(|e| e.to_string())?;
-        let schema_rows = stmt
-            .query_map(params![], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-
-        let mut columns = Vec::new();
-
-        for row in schema_rows.flatten() {
-            let (col_name, data_type) = row;
-            let col_quoted = format!("\"{}\"", col_name.replace('"', "\"\""));
-
-            let stats_sql = format!(
-                "SELECT \
-                 COUNT(*) - COUNT({}) AS nulls, \
-                 APPROX_COUNT_DISTINCT({}) AS distinct_ct, \
-                 TRY_CAST(MIN({}) AS VARCHAR) AS min_val, \
-                 TRY_CAST(MAX({}) AS VARCHAR) AS max_val \
-                 FROM loom_stats",
-                col_quoted, col_quoted, col_quoted, col_quoted
-            );
-
-            if let Ok(mut stats_stmt) = conn.prepare(&stats_sql) {
-                let result = stats_stmt.query_row(params![], |sr| {
-                    Ok(ColumnInfo {
-                        name: col_name.clone(),
-                        data_type: data_type.clone(),
-                        null_count: sr.get::<_, i64>(0).unwrap_or(0) as u64,
-                        distinct_count: sr.get::<_, i64>(1).unwrap_or(0) as u64,
-                        min_value: sr.get::<_, Option<String>>(2).unwrap_or(None),
-                        max_value: sr.get::<_, Option<String>>(3).unwrap_or(None),
-                    })
-                });
-
-                if let Ok(info) = result {
-                    columns.push(info);
-                }
-            }
-        }
-
-        Ok(columns)
-    }
-
-    /// Strip trailing "LIMIT n" and return (sql_without_limit, user_limit_if_any).
-    /// Caller should use min(user_limit, backend_limit) so the user's LIMIT is respected.
-    fn strip_trailing_limit(sql: &str) -> (String, Option<u32>) {
-        let s = sql.trim().trim_end_matches(';').trim();
-        if s.is_empty() {
-            return (String::new(), None);
-        }
-        let s_upper = s.to_uppercase();
-        if let Some(pos) = s_upper.rfind(" LIMIT ") {
-            let after = s_upper.get(pos + 7..).unwrap_or("");
-            if !after.is_empty() && after.chars().all(|c| c.is_ascii_digit()) {
-                let base = s.get(..pos).unwrap_or(s).trim().to_string();
-                let n: u32 = after.parse().unwrap_or(0);
-                return (base, Some(n));
-            }
-        }
-        (s.to_string(), None)
+        crate::query_engine::column_stats_for_table(conn, "loom_active")
     }
 
     fn query_inner(
@@ -363,6 +342,7 @@ impl LoomDb {
         sql: &str,
         limit: u32,
     ) -> Result<QueryResult, String> {
+        crate::sql_policy::validate_user_sql(sql)?;
         Self::ensure_sqlite_attached(conn, file_path)?;
         let table_expr = Self::table_expr(file_path);
 
@@ -372,92 +352,116 @@ impl LoomDb {
         ))
         .map_err(|e| e.to_string())?;
 
-        let full_sql = if sql.trim().is_empty() {
-            format!("SELECT * FROM loom_active LIMIT {}", limit)
-        } else {
-            let (base, user_limit) = Self::strip_trailing_limit(sql);
-            let effective_limit = user_limit
-                .map(|n| n.min(limit))
-                .unwrap_or(limit);
-            format!("{} LIMIT {}", base, effective_limit)
-        };
-
-        let meta_sql = format!(
-            "SELECT column_name, column_type FROM (DESCRIBE ({}))",
-            full_sql
-        );
-        let mut meta_stmt = conn.prepare(&meta_sql).map_err(|e| e.to_string())?;
-        let meta_rows = meta_stmt
-            .query_map(params![], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                ))
-            })
-            .map_err(|e| e.to_string())?;
-
-        let mut columns = Vec::new();
-        let mut types = Vec::new();
-        for mr in meta_rows.flatten() {
-            columns.push(mr.0);
-            types.push(mr.1);
-        }
-
-        let column_count = columns.len();
-
-        let mut stmt = conn.prepare(&full_sql).map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![], |row| {
-                let mut row_vec = Vec::new();
-                for i in 0..column_count {
-                    let val: duckdb::types::Value = row.get(i)?;
-                    let json_val = duckdb_value_to_json(val);
-                    row_vec.push(json_val);
-                }
-                Ok(row_vec)
-            })
-            .map_err(|e| e.to_string())?;
-
-        let mut rows_out: Vec<Vec<serde_json::Value>> = Vec::new();
-        for row in rows {
-            if let Ok(r) = row {
-                rows_out.push(r);
-            }
-        }
-
-        let total_rows = rows_out.len() as u64;
-
-        Ok(QueryResult {
-            columns,
-            types,
-            rows: rows_out,
-            total_rows,
-        })
+        crate::query_engine::run_user_query(
+            conn,
+            sql,
+            limit,
+            "SELECT * FROM loom_active LIMIT {limit}",
+        )
     }
 }
 
-pub(crate) fn duckdb_value_to_json(val: duckdb::types::Value) -> serde_json::Value {
+fn json_i64_lossless(i: i64) -> serde_json::Value {
+    if i.abs() > crate::query_engine::JS_MAX_SAFE_INTEGER {
+        serde_json::Value::String(i.to_string())
+    } else {
+        serde_json::json!(i)
+    }
+}
+
+fn json_u64_lossless(i: u64) -> serde_json::Value {
+    if i > crate::query_engine::JS_MAX_SAFE_INTEGER as u64 {
+        serde_json::Value::String(i.to_string())
+    } else {
+        serde_json::json!(i)
+    }
+}
+
+fn json_i128_lossless(i: i128) -> serde_json::Value {
+    if i.abs() > crate::query_engine::JS_MAX_SAFE_INTEGER as i128 {
+        serde_json::Value::String(i.to_string())
+    } else if i >= i64::MIN as i128 && i <= i64::MAX as i128 {
+        serde_json::json!(i as i64)
+    } else {
+        serde_json::Value::String(i.to_string())
+    }
+}
+
+fn duckdb_value_to_json_inner(val: duckdb::types::Value) -> serde_json::Value {
+    use duckdb::types::Value;
+    match val {
+        Value::List(items) => {
+            serde_json::Value::Array(items.into_iter().map(duckdb_value_to_json).collect())
+        }
+        Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(duckdb_value_to_json).collect())
+        }
+        Value::Struct(fields) => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in fields.iter() {
+                map.insert(k.clone(), duckdb_value_to_json(v.clone()));
+            }
+            serde_json::Value::Object(map)
+        }
+        Value::Map(fields) => {
+            let mut map = serde_json::Map::new();
+            for (k, v) in fields.iter() {
+                let key = match k {
+                    Value::Text(s) => s.clone(),
+                    other => format!("{:?}", other),
+                };
+                map.insert(key, duckdb_value_to_json(v.clone()));
+            }
+            serde_json::Value::Object(map)
+        }
+        Value::Blob(bytes) => {
+            use base64::Engine;
+            serde_json::Value::String(base64::engine::general_purpose::STANDARD.encode(bytes))
+        }
+        Value::Time64(unit, v) => {
+            let micros = unit.to_micros(v);
+            let secs = micros.div_euclid(1_000_000);
+            let micro = micros.rem_euclid(1_000_000);
+            serde_json::Value::String(format!(
+                "{:02}:{:02}:{:02}.{:06}",
+                (secs / 3600) % 24,
+                (secs / 60) % 60,
+                secs % 60,
+                micro
+            ))
+        }
+        Value::Interval {
+            months,
+            days,
+            nanos,
+        } => serde_json::Value::String(format!("P{}M{}DT{}S", months, days, nanos as f64 / 1e9)),
+        Value::Enum(s) => serde_json::Value::String(s),
+        Value::Union(inner) => duckdb_value_to_json(*inner),
+        other => duckdb_value_to_json_inner_scalar(other),
+    }
+}
+
+fn duckdb_value_to_json_inner_scalar(val: duckdb::types::Value) -> serde_json::Value {
     match val {
         duckdb::types::Value::Null => serde_json::Value::Null,
         duckdb::types::Value::Boolean(b) => serde_json::Value::Bool(b),
         duckdb::types::Value::TinyInt(i) => serde_json::json!(i),
         duckdb::types::Value::SmallInt(i) => serde_json::json!(i),
         duckdb::types::Value::Int(i) => serde_json::json!(i),
-        duckdb::types::Value::BigInt(i) => serde_json::json!(i),
+        duckdb::types::Value::BigInt(i) => json_i64_lossless(i),
         duckdb::types::Value::Float(f) => serde_json::json!(f),
         duckdb::types::Value::Double(f) => serde_json::json!(f),
         duckdb::types::Value::Text(s) => serde_json::Value::String(s),
-        duckdb::types::Value::HugeInt(i) => serde_json::json!(i as f64),
+        duckdb::types::Value::HugeInt(i) => json_i128_lossless(i),
         duckdb::types::Value::UTinyInt(i) => serde_json::json!(i),
         duckdb::types::Value::USmallInt(i) => serde_json::json!(i),
         duckdb::types::Value::UInt(i) => serde_json::json!(i),
-        duckdb::types::Value::UBigInt(i) => serde_json::json!(i),
+        duckdb::types::Value::UBigInt(i) => json_u64_lossless(i),
         duckdb::types::Value::Decimal(d) => d
             .to_string()
             .parse::<f64>()
             .map(|f| serde_json::json!(f))
             .unwrap_or_else(|_| serde_json::Value::String(d.to_string())),
-        // ISO-8601 UTC, like the web buffers (`Date#toISOString`).
         duckdb::types::Value::Timestamp(unit, v) => {
             let micros = unit.to_micros(v);
             let secs = micros.div_euclid(1_000_000);
@@ -468,8 +472,12 @@ pub(crate) fn duckdb_value_to_json(val: duckdb::types::Value) -> serde_json::Val
         duckdb::types::Value::Date32(days) => {
             serde_json::Value::String(crate::sources::fmt_date(days as i64))
         }
-        _ => serde_json::Value::String(format!("{:?}", val)),
+        other => serde_json::Value::String(format!("{:?}", other)),
     }
+}
+
+pub(crate) fn duckdb_value_to_json(val: duckdb::types::Value) -> serde_json::Value {
+    duckdb_value_to_json_inner(val)
 }
 
 #[cfg(test)]
@@ -529,10 +537,7 @@ mod tests {
             table_expr_for_path("/path/to/db.db|my_table"),
             r#"sqlite_src.main."my_table""#
         );
-        assert_eq!(
-            table_expr_for_path("/a|b|c"),
-            r#"sqlite_src.main."b|c""#
-        );
+        assert_eq!(table_expr_for_path("/a|b|c"), r#"sqlite_src.main."b|c""#);
     }
 
     #[test]
@@ -588,7 +593,7 @@ mod tests {
         assert!(!result.is_empty());
         let entry = result.iter().find(|e| e.name == "data.csv").unwrap();
         assert_eq!(entry.extension, "csv");
-        assert_eq!(entry.row_count, 2);
+        assert_eq!(entry.row_count, 0);
     }
 
     #[test]
@@ -611,5 +616,57 @@ mod tests {
         assert_eq!(stats.len(), 2);
         assert_eq!(sample.columns, vec!["x", "y"]);
         assert_eq!(sample.rows.len(), 3);
+    }
+
+    #[test]
+    fn bigint_above_js_safe_integer_is_string_json() {
+        let db = LoomDb::new().unwrap();
+        db.with_cloned_conn(|conn| {
+            conn.execute_batch(
+                "CREATE TABLE loom_bigint_test AS SELECT 9007199254740993::BIGINT AS id",
+            )
+            .map_err(|e| e.to_string())?;
+            let r = crate::query_engine::run_query(conn, "SELECT id FROM loom_bigint_test")?;
+            assert_eq!(r.rows[0][0], serde_json::json!("9007199254740993"));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn json_list_column_renders_as_array() {
+        let db = LoomDb::new().unwrap();
+        let tmp = std::env::temp_dir().join("loom_json_list_test");
+        let _ = std::fs::create_dir_all(&tmp);
+        let path = tmp.join("arr.json");
+        std::fs::write(&path, r#"[{"tags":[1,2]}]"#).unwrap();
+        let path_str = path.to_string_lossy().into_owned();
+        let sample = db
+            .query_file(&path_str, "SELECT tags FROM loom_active", 10)
+            .unwrap();
+        assert_eq!(sample.rows[0][0], serde_json::json!([1, 2]));
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn query_file_rejects_disallowed_sql() {
+        let db = LoomDb::new().unwrap();
+        let tmp = std::env::temp_dir().join("loom_test_query_policy");
+        let _ = std::fs::create_dir_all(&tmp);
+        let csv_path = tmp.join("data.csv");
+        std::fs::write(&csv_path, "x\n1\n").unwrap();
+        let path_str = csv_path.to_string_lossy().into_owned();
+        let ok = db
+            .query_file(&path_str, "SELECT x FROM loom_active", 10)
+            .unwrap();
+        assert_eq!(ok.rows.len(), 1);
+        let err = db
+            .query_file(&path_str, "SELECT * FROM read_parquet('/etc/passwd')", 10)
+            .unwrap_err();
+        assert!(
+            err.contains("READ_PARQUET") || err.to_lowercase().contains("not allowed"),
+            "unexpected error: {err}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COLOR_PALETTES,
   VIZ_CATEGORICAL,
+  describeChartColorStatus,
   discretizeContinuous,
   formatChartColorStatus,
   getPaletteById,
@@ -72,6 +73,19 @@ describe("chartPalettes catalog", () => {
         { paletteId: "auto" },
       ),
     ).toBeNull();
+  });
+
+  it("describeChartColorStatus returns stops for a glanceable ramp", () => {
+    const info = describeChartColorStatus(
+      { kind: "treemap", xField: "article", yField: "views", colorField: "views" },
+      { paletteId: "div-hot-cold", channelLabel: "Nest" },
+    );
+    expect(info).not.toBeNull();
+    expect(info!.fieldLabel).toBe("nest: views");
+    expect(info!.paletteName).toBe("Diverging Hot–Cold");
+    expect(info!.continuous).toBe(true);
+    expect(info!.stops.length).toBeGreaterThanOrEqual(5);
+    expect(info!.stops.every((c) => /^#[0-9a-fA-F]{6}$/.test(c))).toBe(true);
   });
 
   it("auto waterfall → semantic", () => {
