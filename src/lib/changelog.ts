@@ -25,6 +25,25 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-13n",
+    date: "2026-10-13",
+    title: "Save, go to Dashboards",
+    summary:
+      "Save a chart view and jump straight to Dashboards — or just save. Why and Data now open beside the cell so you can see them.",
+    items: [
+      {
+        title: "Save · Save and go",
+        detail:
+          "Name the view, then Save, or Save and go to Dashboards to place it on a board.",
+      },
+      {
+        title: "Why + Data tables",
+        detail:
+          "The ? card explains the recommendation next to the rail. The grid opens a real values table over the stage.",
+      },
+    ],
+  },
+  {
     id: "2026-10-13m",
     date: "2026-10-13",
     title: "Chart as a floating cell",

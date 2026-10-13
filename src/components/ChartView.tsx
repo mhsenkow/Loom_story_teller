@@ -80,6 +80,7 @@ import {
   IconSave,
   IconWhy,
 } from "@/components/ChartCellChrome";
+import { goToDashboardsAfterSave, saveChartView } from "@/lib/saveChartView";
 import { DEFAULT_PAD, isNumericType, offsetHitTargets, pointInPolygon, scatterYDomain } from "@/lib/canvasCharts/shared";
 import { drawAxisTicks, drawGridLines, drawSmartOverlays } from "@/lib/canvasCharts/primitives";
 import { renderFullScatter } from "@/lib/canvasCharts/scatter";
@@ -130,7 +131,7 @@ export function ChartView() {
     barStackMode, connectScatterTrail, showMarginals,
     selectedRowIndices,
     rulerPins, setRulerPins,
-    addChartView, setPromptDialog, querySql,
+    setPromptDialog, querySql,
     createStoryDashboard, setDashboardsExpanded,
     startDeepScan,
     chartChromeFocus, setChartChromeFocus, setChartPanelSection, setPanelOpen,
@@ -179,7 +180,6 @@ export function ChartView() {
       selectedRowIndices: s.selectedRowIndices,
       rulerPins: s.rulerPins,
       setRulerPins: s.setRulerPins,
-      addChartView: s.addChartView,
       setPromptDialog: s.setPromptDialog,
       querySql: s.querySql,
       createStoryDashboard: s.createStoryDashboard,
@@ -409,50 +409,40 @@ export function ChartView() {
 
   const saveActiveChartView = useCallback(() => {
     if (!selectedFile || !activeChart) return;
+    const base = {
+      filePath: selectedFile.path,
+      fileName: selectedFile.name,
+      chart: activeChart,
+      visualOverrides: chartVisualOverrides,
+      querySql,
+      sampleRows,
+    };
     setPromptDialog({
-      title: "Name for this chart view",
+      title: "Save chart view",
+      message: "Name this view, then save it — or save and jump to Dashboards to place it.",
       defaultValue: activeChart.title || "Chart view",
+      confirmLabel: "Save",
+      secondaryConfirmLabel: "Save and go to Dashboards",
       onConfirm: async (name) => {
         if (name == null || !name.trim()) return;
-        let snapshotImageDataUrl: string | null = null;
-        if (useLoomStore.getState().pngExportHandler) {
-          try {
-            const blob = await useLoomStore.getState().pngExportHandler!();
-            if (blob) {
-              snapshotImageDataUrl = await new Promise<string>((res, rej) => {
-                const r = new FileReader();
-                r.onload = () => res(r.result as string);
-                r.onerror = rej;
-                r.readAsDataURL(blob);
-              });
-            }
-          } catch (_) { /* ignore */ }
+        const id = await saveChartView({ ...base, name });
+        setToast(id ? "Chart view saved" : "Could not save chart view");
+      },
+      onSecondaryConfirm: async (name) => {
+        if (!name.trim()) return;
+        const id = await saveChartView({ ...base, name });
+        if (!id) {
+          setToast("Could not save chart view");
+          return;
         }
-        const sample = sampleRows
-          ? { columns: sampleRows.columns, types: sampleRows.types ?? [], rows: sampleRows.rows, total_rows: sampleRows.total_rows }
-          : undefined;
-        const ok = addChartView(
-          name.trim(),
-          selectedFile.path,
-          selectedFile.name,
-          activeChart,
-          { ...chartVisualOverrides },
-          querySql,
-          sample,
-          snapshotImageDataUrl,
-        );
-        setToast(
-          ok
-            ? "Chart view saved. Open the Dashboards tab and use \"Add to dashboard\" or \"+ Add view\"."
-            : "Could not save chart view",
-        );
+        goToDashboardsAfterSave();
+        setToast("Saved — add it to a dashboard");
       },
     });
   }, [
     selectedFile,
     activeChart,
     sampleRows,
-    addChartView,
     chartVisualOverrides,
     querySql,
     setPromptDialog,
@@ -658,8 +648,8 @@ export function ChartView() {
         aspectLocked: true,
       };
     }
-    // Desktop cell rail sits beside the plot — don't let the frame eat that strip.
-    const railReserve = !isMobile ? 44 : 0;
+    // Desktop cell rail (+ why card) sits beside the plot — don't let the frame eat that strip.
+    const railReserve = !isMobile ? 200 : 0;
     return fitChartFrame({
       hostW: Math.max(40, hostSize.w - railReserve),
       hostH: hostSize.h,
@@ -3629,13 +3619,6 @@ export function ChartView() {
             />
           </div>
         )}
-        {!socialExportReady && whyReasonOpen && activeChart && (
-          <div className="px-3 py-1.5 border-b border-loom-border/70 bg-loom-surface/40">
-            <p className="text-2xs text-loom-label max-w-xl leading-snug" role="note">
-              {aiSuggestionReason ?? getRecommendationReason(activeChart)}
-            </p>
-          </div>
-        )}
         {!socialExportReady && activeChart?.kind === "scatter" && (
           <div className="flex items-center gap-1 px-3 py-1 border-b border-loom-border/50 bg-transparent" role="group" aria-label="Chart interaction mode">
             {([
@@ -3708,29 +3691,54 @@ export function ChartView() {
               {chartDrawError}
             </div>
           )}
-          {chartDataTableOpen && dataTableRows.length > 0 && (
-            <div className="sr-only">
-              <table>
-                <caption>{displayTitle} data</caption>
-                <thead>
-                  <tr>
-                    {dataTableRows[0]!.columns.map((c) => (
-                      <th key={c} scope="col">
-                        {c}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {dataTableRows.map((row) => (
-                    <tr key={row.key}>
-                      {row.cells.map((cell, ci) => (
-                        <td key={`${row.key}-${ci}`}>{cell == null ? "—" : String(cell)}</td>
+          {chartDataTableOpen && !socialExportReady && (
+            <div
+              className="absolute z-20 left-3 right-3 sm:right-16 bottom-3 max-h-[min(42%,18rem)] overflow-auto rounded-lg border border-loom-border bg-[color-mix(in_srgb,var(--loom-surface)_94%,transparent)] backdrop-blur-md shadow-lg"
+              role="region"
+              aria-label="Chart data table"
+            >
+              <div className="sticky top-0 z-[1] flex items-center justify-between gap-2 px-2.5 py-1.5 border-b border-loom-border/80 bg-loom-surface/90">
+                <span className="text-2xs font-medium text-loom-text truncate">
+                  Chart data{dataTableRows.length ? ` · ${dataTableRows.length}` : ""}
+                </span>
+                <button
+                  type="button"
+                  className="text-loom-muted hover:text-loom-text text-xs px-1.5 py-0.5 rounded"
+                  onClick={() => setChartDataTableOpen(false)}
+                  aria-label="Close data table"
+                >
+                  ×
+                </button>
+              </div>
+              {dataTableRows.length === 0 ? (
+                <p className="px-3 py-3 text-2xs text-loom-muted leading-relaxed">
+                  No mark summaries yet — wait for the chart to finish painting, then try Refresh.
+                </p>
+              ) : (
+                <table className="w-full text-2xs font-mono text-loom-text">
+                  <caption className="sr-only">{displayTitle} data</caption>
+                  <thead>
+                    <tr className="border-b border-loom-border/60 text-loom-muted">
+                      {dataTableRows[0]!.columns.map((c) => (
+                        <th key={c} scope="col" className="px-2 py-1 text-left font-medium whitespace-nowrap">
+                          {c}
+                        </th>
                       ))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {dataTableRows.map((row) => (
+                      <tr key={row.key} className="border-b border-loom-border/40 last:border-0">
+                        {row.cells.map((cell, ci) => (
+                          <td key={`${row.key}-${ci}`} className="px-2 py-1 whitespace-nowrap max-w-[10rem] truncate">
+                            {cell == null ? "—" : String(cell)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
           <div
@@ -3739,7 +3747,29 @@ export function ChartView() {
             }`}
           >
           {!socialExportReady && activeChart && isMobile && (
-            <div className="flex justify-end">
+            <div className="flex flex-col items-stretch gap-1.5">
+              {whyReasonOpen && (
+                <div
+                  className="rounded-lg border border-loom-border bg-loom-surface/95 p-2.5 shadow-sm"
+                  role="note"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <span className="text-2xs font-medium text-loom-text">Why this chart</span>
+                    <button
+                      type="button"
+                      className="text-loom-muted hover:text-loom-text text-xs leading-none px-1"
+                      onClick={() => setWhyReasonOpen(false)}
+                      aria-label="Close why"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <p className="text-2xs text-loom-muted leading-snug">
+                    {aiSuggestionReason ?? getRecommendationReason(activeChart)}
+                  </p>
+                </div>
+              )}
+              <div className="flex justify-end">
               <ChartCellRail orientation="horizontal">
                 <CellIconBtn label="Redraw chart" title="Redraw chart" onClick={handleRefresh}>
                   <IconRefresh />
@@ -3751,7 +3781,7 @@ export function ChartView() {
                 )}
                 <CellIconBtn
                   label="Data table"
-                  title="Show aggregated values as a table"
+                  title="Show chart values as a table"
                   pressed={chartDataTableOpen}
                   onClick={() => setChartDataTableOpen((o) => !o)}
                 >
@@ -3769,6 +3799,7 @@ export function ChartView() {
                   <IconEditTitle />
                 </CellIconBtn>
               </ChartCellRail>
+              </div>
             </div>
           )}
           <div
@@ -4231,35 +4262,58 @@ export function ChartView() {
           ))}
           </div>
           {!socialExportReady && activeChart && !isMobile && (
-            <ChartCellRail orientation="vertical">
-              <CellIconBtn label="Redraw chart" title="Redraw chart" onClick={handleRefresh}>
-                <IconRefresh />
-              </CellIconBtn>
-              {selectedFile && (
-                <CellIconBtn label="Save chart view" title="Save this chart for dashboards" onClick={saveActiveChartView}>
-                  <IconSave />
-                </CellIconBtn>
+            <div className="flex flex-col gap-1.5 self-start w-[11.5rem] shrink-0">
+              {whyReasonOpen && (
+                <div
+                  className="rounded-lg border border-loom-border bg-[color-mix(in_srgb,var(--loom-surface)_95%,transparent)] backdrop-blur-md p-2.5 shadow-sm"
+                  role="note"
+                >
+                  <div className="flex items-start justify-between gap-2 mb-1">
+                    <span className="text-2xs font-medium text-loom-text">Why this chart</span>
+                    <button
+                      type="button"
+                      className="text-loom-muted hover:text-loom-text text-xs leading-none px-1"
+                      onClick={() => setWhyReasonOpen(false)}
+                      aria-label="Close why"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <p className="text-2xs text-loom-muted leading-snug">
+                    {aiSuggestionReason ?? getRecommendationReason(activeChart)}
+                  </p>
+                </div>
               )}
-              <CellIconBtn
-                label="Data table"
-                title="Show aggregated values as a table"
-                pressed={chartDataTableOpen}
-                onClick={() => setChartDataTableOpen((o) => !o)}
-              >
-                <IconDataTable />
-              </CellIconBtn>
-              <CellIconBtn
-                label="Why this chart"
-                title="Why this chart?"
-                pressed={whyReasonOpen}
-                onClick={() => setWhyReasonOpen((o) => !o)}
-              >
-                <IconWhy />
-              </CellIconBtn>
-              <CellIconBtn label="Edit chart title" title="Edit title" onClick={handleTitleStartEdit}>
-                <IconEditTitle />
-              </CellIconBtn>
-            </ChartCellRail>
+              <ChartCellRail orientation="vertical">
+                <CellIconBtn label="Redraw chart" title="Redraw chart" onClick={handleRefresh}>
+                  <IconRefresh />
+                </CellIconBtn>
+                {selectedFile && (
+                  <CellIconBtn label="Save chart view" title="Save this chart for dashboards" onClick={saveActiveChartView}>
+                    <IconSave />
+                  </CellIconBtn>
+                )}
+                <CellIconBtn
+                  label="Data table"
+                  title="Show chart values as a table"
+                  pressed={chartDataTableOpen}
+                  onClick={() => setChartDataTableOpen((o) => !o)}
+                >
+                  <IconDataTable />
+                </CellIconBtn>
+                <CellIconBtn
+                  label="Why this chart"
+                  title="Why this chart?"
+                  pressed={whyReasonOpen}
+                  onClick={() => setWhyReasonOpen((o) => !o)}
+                >
+                  <IconWhy />
+                </CellIconBtn>
+                <CellIconBtn label="Edit chart title" title="Edit title" onClick={handleTitleStartEdit}>
+                  <IconEditTitle />
+                </CellIconBtn>
+              </ChartCellRail>
+            </div>
           )}
           </div>
         </div>

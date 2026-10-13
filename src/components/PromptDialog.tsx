@@ -2,6 +2,7 @@
 // PromptDialog — Modal text input (Zustand-driven)
 // =================================================================
 // `setPromptDialog({ title, defaultValue, onConfirm })` opens this UI.
+// Optional secondaryConfirmLabel / onSecondaryConfirm for Save + go-to.
 // Inner form is keyed per open so defaultValue resets without effects.
 // =================================================================
 
@@ -13,6 +14,12 @@ import { Dialog } from "@/components/ui/Dialog";
 
 type PromptDialogConfig = NonNullable<ReturnType<typeof useLoomStore.getState>["promptDialog"]>;
 
+async function settle(result: void | Promise<unknown>): Promise<void> {
+  if (typeof result === "object" && result != null && typeof (result as Promise<unknown>).then === "function") {
+    await result;
+  }
+}
+
 function PromptDialogForm({
   dialog,
   setPromptDialog,
@@ -21,17 +28,29 @@ function PromptDialogForm({
   setPromptDialog: (v: PromptDialogConfig | null) => void;
 }) {
   const [value, setValue] = useState(dialog.defaultValue ?? "");
+  const [busy, setBusy] = useState(false);
   const confirmOnly = dialog.defaultValue === undefined;
   const inputRef = useRef<HTMLInputElement>(null);
   const titleId = useId();
+  const hasSecondary = Boolean(dialog.secondaryConfirmLabel && dialog.onSecondaryConfirm);
+
+  const closeAfter = async (fn: () => void | Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await settle(fn());
+      setPromptDialog(null);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleConfirm = () => {
-    const result = dialog.onConfirm(value) as void | Promise<unknown>;
-    if (typeof result === "object" && result != null && typeof (result as Promise<unknown>).then === "function") {
-      (result as Promise<unknown>).then(() => setPromptDialog(null));
-    } else {
-      setPromptDialog(null);
-    }
+    void closeAfter(() => dialog.onConfirm(value));
+  };
+
+  const handleSecondary = () => {
+    if (!dialog.onSecondaryConfirm) return;
+    void closeAfter(() => dialog.onSecondaryConfirm!(value));
   };
 
   const handleCancel = () => {
@@ -65,6 +84,7 @@ function PromptDialogForm({
             type="text"
             className="loom-input w-full px-3 py-2 text-xs"
             value={value}
+            disabled={busy}
             onChange={(e) => setValue(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -75,11 +95,29 @@ function PromptDialogForm({
           />
         </>
       ) : null}
-      <div className="flex justify-end gap-2">
-        <button type="button" onClick={handleCancel} className="loom-btn-ghost px-3 py-1.5 text-xs">
+      <div className={`flex gap-2 ${hasSecondary ? "flex-col-reverse sm:flex-row sm:justify-end sm:flex-wrap" : "justify-end"}`}>
+        <button type="button" onClick={handleCancel} disabled={busy} className="loom-btn-ghost px-3 py-1.5 text-xs order-last sm:order-none">
           Cancel
         </button>
-        <button type="button" onClick={() => { if (confirmOnly) dialog.onConfirm(""); else handleConfirm(); }} className="loom-btn-primary px-3 py-1.5 text-xs">
+        {hasSecondary && (
+          <button
+            type="button"
+            disabled={busy || !value.trim()}
+            onClick={handleSecondary}
+            className="loom-btn-ghost px-3 py-1.5 text-xs border border-loom-border hover:border-loom-accent"
+          >
+            {dialog.secondaryConfirmLabel}
+          </button>
+        )}
+        <button
+          type="button"
+          disabled={busy || (!confirmOnly && !value.trim())}
+          onClick={() => {
+            if (confirmOnly) void closeAfter(() => dialog.onConfirm(""));
+            else handleConfirm();
+          }}
+          className="loom-btn-primary px-3 py-1.5 text-xs"
+        >
           {dialog.confirmLabel ?? "OK"}
         </button>
       </div>

@@ -124,7 +124,10 @@ export type PromptDialogConfig = {
   defaultValue?: string;
   message?: string;
   confirmLabel?: string;
+  /** Optional second confirm (e.g. “Save and go to Dashboards”). */
+  secondaryConfirmLabel?: string;
   onConfirm: (val: string | null) => void | Promise<void>;
+  onSecondaryConfirm?: (val: string) => void | Promise<void>;
 };
 
 export type AppTheme =

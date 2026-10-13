@@ -13,6 +13,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
 import { ChartKindPicker } from "@/components/ChartKindPicker";
+import { goToDashboardsAfterSave, saveChartView } from "@/lib/saveChartView";
 import {
   AXIS_LABEL_COLOR_SWATCHES,
   AXIS_LINE_COLOR_SWATCHES,
@@ -663,40 +664,44 @@ function SaveChartViewButton() {
   const selectedFile = useLoomStore((s) => s.selectedFile);
   const activeChart = useLoomStore((s) => s.activeChart);
   const chartVisualOverrides = useLoomStore((s) => s.chartVisualOverrides);
-  const addChartView = useLoomStore((s) => s.addChartView);
   const setToast = useLoomStore((s) => s.setToast);
   const setPromptDialog = useLoomStore((s) => s.setPromptDialog);
   const querySql = useLoomStore((s) => s.querySql);
   const sampleRows = useLoomStore((s) => s.sampleRows);
-  const pngExportHandler = useLoomStore((s) => s.pngExportHandler);
   if (!selectedFile || !activeChart) return null;
   return (
     <button
       type="button"
       onClick={() => {
+        const base = {
+          filePath: selectedFile.path,
+          fileName: selectedFile.name,
+          chart: activeChart,
+          visualOverrides: chartVisualOverrides,
+          querySql,
+          sampleRows,
+        };
         setPromptDialog({
-          title: "Name for this chart view",
+          title: "Save chart view",
+          message: "Name this view, then save it — or save and jump to Dashboards to place it.",
           defaultValue: activeChart.title || "Chart view",
+          confirmLabel: "Save",
+          secondaryConfirmLabel: "Save and go to Dashboards",
           onConfirm: async (name) => {
             if (name == null || !name.trim()) return;
-            let snapshotImageDataUrl: string | null = null;
-            if (pngExportHandler) {
-              try {
-                const blob = await pngExportHandler();
-                if (blob) {
-                  snapshotImageDataUrl = await new Promise<string>((res, rej) => {
-                    const r = new FileReader();
-                    r.onload = () => res(r.result as string);
-                    r.onerror = rej;
-                    r.readAsDataURL(blob);
-                  });
-                }
-              } catch (_) { /* ignore */ }
+            const id = await saveChartView({ ...base, name });
+            setToast(id ? "Chart view saved" : "Could not save chart view");
+          },
+          onSecondaryConfirm: async (name) => {
+            if (!name.trim()) return;
+            const id = await saveChartView({ ...base, name });
+            if (!id) {
+              setToast("Could not save chart view");
+              return;
             }
-            const sample = sampleRows ? { columns: sampleRows.columns, types: sampleRows.types ?? [], rows: sampleRows.rows, total_rows: sampleRows.total_rows } : undefined;
-            const ok = addChartView(name.trim(), selectedFile.path, selectedFile.name, activeChart, { ...chartVisualOverrides }, querySql, sample, snapshotImageDataUrl);
-            setToast(ok ? "Chart view saved. Add it in the Dashboards tab with \"Add to dashboard\" or \"+ Add view\"." : "Could not save chart view");
-          }
+            goToDashboardsAfterSave();
+            setToast("Saved — add it to a dashboard");
+          },
         });
       }}
       className="text-2xs py-0.5 px-1.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent"
