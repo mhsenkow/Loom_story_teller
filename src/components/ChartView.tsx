@@ -648,8 +648,8 @@ export function ChartView() {
         aspectLocked: true,
       };
     }
-    // Desktop cell rail (+ why card) sits beside the plot — don't let the frame eat that strip.
-    const railReserve = !isMobile ? 200 : 0;
+    // Desktop cell rail sits beside the plot — hug the icons (~40px + gap).
+    const railReserve = !isMobile ? 48 : 0;
     return fitChartFrame({
       hostW: Math.max(40, hostSize.w - railReserve),
       hostH: hostSize.h,
@@ -4262,10 +4262,10 @@ export function ChartView() {
           ))}
           </div>
           {!socialExportReady && activeChart && !isMobile && (
-            <div className="flex flex-col gap-1.5 self-start w-[11.5rem] shrink-0">
+            <div className="flex flex-col gap-1.5 self-start items-start shrink-0">
               {whyReasonOpen && (
                 <div
-                  className="rounded-lg border border-loom-border bg-[color-mix(in_srgb,var(--loom-surface)_95%,transparent)] backdrop-blur-md p-2.5 shadow-sm"
+                  className="w-[11.5rem] rounded-lg border border-loom-border bg-[color-mix(in_srgb,var(--loom-surface)_95%,transparent)] backdrop-blur-md p-2.5 shadow-sm"
                   role="note"
                 >
                   <div className="flex items-start justify-between gap-2 mb-1">

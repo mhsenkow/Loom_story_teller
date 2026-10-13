@@ -28,7 +28,7 @@ export function CellIconBtn({ label, title, onClick, pressed, disabled, children
       aria-pressed={pressed}
       title={title}
       className={`
-        inline-flex items-center justify-center size-8 rounded-md border transition-colors
+        inline-flex items-center justify-center size-7 rounded-md border transition-colors
         disabled:opacity-40 disabled:pointer-events-none
         ${
           pressed
@@ -97,10 +97,10 @@ export function ChartCellRail({ orientation = "vertical", children }: ChartCellR
       role="toolbar"
       aria-label="Chart cell actions"
       className={`
-        shrink-0 flex gap-0.5 p-1 rounded-lg border border-loom-border/80
+        self-start shrink-0 flex gap-0.5 p-1 rounded-lg border border-loom-border/80 w-auto
         bg-[color-mix(in_srgb,var(--loom-surface)_92%,transparent)] backdrop-blur-md
         shadow-[0_1px_0_color-mix(in_srgb,var(--loom-border)_55%,transparent),0_8px_24px_-12px_rgba(0,0,0,0.35)]
-        ${orientation === "vertical" ? "flex-col" : "flex-row items-center"}
+        ${orientation === "vertical" ? "flex-col items-stretch" : "flex-row items-center"}
       `}
     >
       {children}
