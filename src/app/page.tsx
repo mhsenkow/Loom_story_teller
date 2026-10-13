@@ -198,8 +198,8 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
       <div className="flex flex-col items-center justify-center flex-1 p-8 text-center">
         <p className="text-sm text-loom-muted">No dashboard selected</p>
         <p className="text-2xs text-loom-muted mt-1">Open the Dashboards tab in the panel and select or create one.</p>
-        <button type="button" onClick={onCollapse} className="mt-4 text-xs px-3 py-1.5 rounded border border-loom-border text-loom-muted hover:text-loom-text">
-          Collapse
+        <button type="button" onClick={onCollapse} className="mt-4 text-xs min-h-9 px-3 rounded-md border border-loom-border text-loom-muted hover:text-loom-text">
+          Hide board
         </button>
       </div>
     );
@@ -265,9 +265,10 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
           type="button"
           onClick={onCollapse}
           className="text-xs min-h-9 px-2.5 rounded-md border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
-          title="Collapse to panel"
+          title="Hide board and return to editing slots"
+          aria-pressed={false}
         >
-          Collapse
+          Hide board
         </button>
       </div>
       <div className="flex-1 overflow-y-auto p-4">

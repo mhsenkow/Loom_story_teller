@@ -136,6 +136,7 @@ export default function DashboardsTab() {
     removeDashboardSlot,
     setDashboardLayout,
     moveDashboardSlot,
+    dashboardsExpanded,
     setDashboardsExpanded,
     applyTableView,
     applyChartView,
@@ -164,6 +165,7 @@ export default function DashboardsTab() {
       removeDashboardSlot: s.removeDashboardSlot,
       setDashboardLayout: s.setDashboardLayout,
       moveDashboardSlot: s.moveDashboardSlot,
+      dashboardsExpanded: s.dashboardsExpanded,
       setDashboardsExpanded: s.setDashboardsExpanded,
       applyTableView: s.applyTableView,
       applyChartView: s.applyChartView,
@@ -333,6 +335,17 @@ export default function DashboardsTab() {
     </li>
   );
 
+  const toggleSeeBoard = () => {
+    if (!active) return;
+    setDashboardsExpanded(!dashboardsExpanded);
+  };
+
+  const selectBoard = (id: string) => {
+    setActiveDashboardId(id);
+    // Switching boards while viewing keeps the canvas on the new board
+    if (dashboardsExpanded) setDashboardsExpanded(true);
+  };
+
   return (
     <div className="p-3 space-y-3 flex flex-col min-h-0">
       <div className="flex items-center gap-2 flex-wrap">
@@ -341,41 +354,95 @@ export default function DashboardsTab() {
           onClick={() => addDashboard("New dashboard")}
           className="loom-btn-primary text-xs min-h-9 px-3"
         >
-          + New dashboard
+          + New board
         </button>
         {active && (
           <button
             type="button"
-            onClick={() => setDashboardsExpanded(true)}
-            className={`${touchBtn} border-loom-accent text-loom-accent hover:bg-loom-accent/10`}
-            title="Expand dashboard to main area"
+            onClick={toggleSeeBoard}
+            aria-pressed={dashboardsExpanded}
+            className={`${touchBtn} ${
+              dashboardsExpanded
+                ? "border-loom-accent bg-loom-accent/20 text-loom-text"
+                : "border-loom-accent text-loom-accent hover:bg-loom-accent/10"
+            }`}
+            title={dashboardsExpanded ? "Hide the board canvas" : "Show this board in the main area"}
           >
-            Expand
+            {dashboardsExpanded ? "Hide board" : "See board"}
           </button>
         )}
-        <button
-          type="button"
-          onClick={handleCreateStoryDashboard}
-          className={`${touchBtn} border-loom-accent/40 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20`}
-          title="Auto-create a dashboard of charts that tell a story"
-        >
-          Tell a story
-        </button>
-        <button
-          type="button"
-          onClick={handleCreateStreamDashboard}
-          className={`${touchBtn} border-loom-success/50 bg-loom-success/10 text-loom-success hover:bg-loom-success/20`}
-          title="Create a live analytics dashboard from the Wikipedia event stream"
-        >
-          Stream
-        </button>
       </div>
 
-      {/* Active board first — after Save-and-go this is what you need */}
+      <div className="space-y-1">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Boards</span>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleCreateStoryDashboard}
+              className="text-2xs min-h-8 px-2 rounded border border-transparent text-loom-muted hover:text-loom-accent hover:border-loom-accent/40"
+              title="Auto-create a story board from the open dataset"
+            >
+              Story
+            </button>
+            <button
+              type="button"
+              onClick={handleCreateStreamDashboard}
+              className="text-2xs min-h-8 px-2 rounded border border-transparent text-loom-muted hover:text-loom-success hover:border-loom-success/40"
+              title="Create a live stream board"
+            >
+              Stream
+            </button>
+          </div>
+        </div>
+        {dashboards.length === 0 ? (
+          <p className="text-2xs text-loom-muted py-1">No boards yet — create one above.</p>
+        ) : (
+          <ul className="space-y-1" role="listbox" aria-label="Boards">
+            {dashboards.map((d) => {
+              const selected = activeDashboardId === d.id;
+              return (
+                <li key={d.id} className="flex items-center gap-1 min-h-10">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selected}
+                    onClick={() => selectBoard(d.id)}
+                    className={`flex-1 min-w-0 min-h-9 text-left text-xs px-2.5 rounded-md truncate transition-colors ${
+                      selected
+                        ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                        : "text-loom-muted hover:text-loom-text hover:bg-loom-elevated/50 border border-transparent"
+                    }`}
+                  >
+                    {d.name}
+                    {selected && dashboardsExpanded ? (
+                      <span className="ml-1.5 text-2xs text-loom-accent font-normal">· showing</span>
+                    ) : null}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeDashboard(d.id)}
+                    className="shrink-0 min-h-9 min-w-9 text-loom-muted hover:text-loom-text text-sm rounded"
+                    aria-label={`Remove ${d.name}`}
+                  >
+                    ×
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
       {active && (
         <>
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Slots</span>
+          <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-loom-border/50">
+            <div className="min-w-0">
+              <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Slots</span>
+              <p className="text-2xs text-loom-muted truncate" title={active.name}>
+                on {active.name}
+              </p>
+            </div>
             <AddViewDropdown
               dashboardId={active.id}
               addDashboardSlot={addDashboardSlot}
@@ -478,56 +545,11 @@ export default function DashboardsTab() {
             Save a view from Chart, Query, or Explorer — it shows up here to add to a board.
           </p>
         ) : (
-          <ul className="space-y-0.5 max-h-[min(40vh,16rem)] overflow-y-auto pr-0.5 -mr-0.5">
+          <ul className="space-y-0.5 max-h-[min(36vh,14rem)] overflow-y-auto pr-0.5 -mr-0.5">
             {tableViews.map((v) => renderSavedRow("table", v, "Table"))}
             {chartViews.map((v) => renderSavedRow("chart", v, "Chart"))}
             {queryViews.map((v) => renderSavedRow("query", v, "Query"))}
             {querySnapshots.map((v) => renderSavedRow("snapshot", v, "Snap"))}
-          </ul>
-        )}
-      </div>
-
-      <div className="space-y-1">
-        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Dashboards</span>
-        {dashboards.length === 0 ? (
-          <p className="text-2xs text-loom-muted py-1">No dashboards yet. Create one above.</p>
-        ) : (
-          <ul className="space-y-1">
-            {dashboards.map((d) => (
-              <li key={d.id} className="flex items-center gap-1 min-h-10">
-                <button
-                  type="button"
-                  onClick={() => setActiveDashboardId(activeDashboardId === d.id ? null : d.id)}
-                  className={`flex-1 min-w-0 min-h-9 text-left text-xs px-2.5 rounded-md truncate transition-colors ${
-                    activeDashboardId === d.id
-                      ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                      : "text-loom-muted hover:text-loom-text hover:bg-loom-elevated/50 border border-transparent"
-                  }`}
-                >
-                  {d.name}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setActiveDashboardId(d.id);
-                    setDashboardsExpanded(true);
-                  }}
-                  className={`${touchBtn} shrink-0 border-loom-accent text-loom-accent hover:bg-loom-accent/10`}
-                  title={`Expand ${d.name}`}
-                >
-                  Expand
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeDashboard(d.id)}
-                  className="shrink-0 min-h-9 min-w-9 text-loom-muted hover:text-loom-text text-sm rounded"
-                  aria-label={`Remove ${d.name}`}
-                >
-                  ×
-                </button>
-              </li>
-            ))}
           </ul>
         )}
       </div>

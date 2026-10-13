@@ -25,6 +25,20 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-13p",
+    date: "2026-10-13",
+    title: "See board, hide board",
+    summary:
+      "Dashboards drop the confusing Expand labels — one See board / Hide board toggle, boards pick first, then slots.",
+    items: [
+      {
+        title: "Clearer board language",
+        detail:
+          "Pick a board, toggle See board. Hide board returns you to editing. New boards get unique names automatically.",
+      },
+    ],
+  },
+  {
     id: "2026-10-13o",
     date: "2026-10-13",
     title: "Dashboards easier on a tablet",

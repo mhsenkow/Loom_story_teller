@@ -23,7 +23,28 @@ export function createDashboardSlice(set: Setter) {
     addDashboard: (name: string) =>
       set((s) => {
         const id = newLoomId("db-");
-        return { dashboards: [{ id, name: name.trim() || "Dashboard", slots: [], layoutTemplate: "auto" as const, refreshInterval: "manual" as const, lastRefreshedAt: Date.now() }, ...s.dashboards.slice(0, 19)], activeDashboardId: id };
+        const base = (name.trim() || "New dashboard").replace(/\s+\d+$/, "") || "New dashboard";
+        const taken = new Set(s.dashboards.map((d) => d.name));
+        let unique = base;
+        if (taken.has(unique)) {
+          let n = 2;
+          while (taken.has(`${base} ${n}`)) n += 1;
+          unique = `${base} ${n}`;
+        }
+        return {
+          dashboards: [
+            {
+              id,
+              name: unique,
+              slots: [],
+              layoutTemplate: "auto" as const,
+              refreshInterval: "manual" as const,
+              lastRefreshedAt: Date.now(),
+            },
+            ...s.dashboards.slice(0, 19),
+          ],
+          activeDashboardId: id,
+        };
       }),
     removeDashboard: (id: string) =>
       set((s) => ({
