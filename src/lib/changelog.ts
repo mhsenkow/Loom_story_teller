@@ -25,6 +25,20 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-13o",
+    date: "2026-10-13",
+    title: "Dashboards easier on a tablet",
+    summary:
+      "Slots sit up top after you save, Add buttons are finger-sized, and Update/Export tuck into a quiet drawer.",
+    items: [
+      {
+        title: "Board first",
+        detail:
+          "Active slots and layout come before the long saved-views list. Deletes and reorder stay visible without hover.",
+      },
+    ],
+  },
+  {
     id: "2026-10-13n",
     date: "2026-10-13",
     title: "Save, go to Dashboards",

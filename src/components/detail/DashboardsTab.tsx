@@ -304,34 +304,42 @@ export default function DashboardsTab() {
   };
 
   const hasAnySavedViews = tableViews.length > 0 || chartViews.length > 0 || queryViews.length > 0 || querySnapshots.length > 0;
+  const touchBtn =
+    "inline-flex items-center justify-center min-h-9 px-2.5 rounded-md border text-xs font-medium transition-colors";
+
+  const renderSavedRow = (
+    kind: "table" | "chart" | "query" | "snapshot",
+    v: { id: string; name: string },
+    kindLabel: string,
+  ) => (
+    <li key={v.id} className="flex items-center gap-2 min-h-10">
+      <span className="text-2xs text-loom-muted shrink-0 w-11">{kindLabel}</span>
+      <span className="flex-1 text-xs text-loom-text truncate min-w-0" title={v.name}>
+        {v.name}
+      </span>
+      {active && (
+        <button
+          type="button"
+          onClick={() => {
+            addDashboardSlot(active.id, kind, v.id);
+            setToast("Added to dashboard");
+          }}
+          className={`${touchBtn} shrink-0 border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent`}
+          title={`Add “${v.name}” to ${active.name}`}
+        >
+          Add
+        </button>
+      )}
+    </li>
+  );
 
   return (
     <div className="p-3 space-y-3 flex flex-col min-h-0">
-      <p className="text-2xs text-loom-muted">
-        Quickly build dashboards from your existing chart, query, and table views. Saved views are persisted in your local storage so you don&apos;t lose them.
-      </p>
-
       <div className="flex items-center gap-2 flex-wrap">
         <button
           type="button"
-          onClick={handleCreateStoryDashboard}
-          className="text-xs py-1.5 px-2 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium"
-          title="Auto-create a dashboard of charts that tell a story (trend, breakdown, distribution, relationship)"
-        >
-          Tell a story
-        </button>
-        <button
-          type="button"
-          onClick={handleCreateStreamDashboard}
-          className="text-xs py-1.5 px-2 rounded border border-loom-success/50 bg-loom-success/10 text-loom-success hover:bg-loom-success/20 font-medium"
-          title="Create a live analytics dashboard from the Wikipedia event stream (connect in Data &amp; sources first)"
-        >
-          Stream dashboard
-        </button>
-        <button
-          type="button"
           onClick={() => addDashboard("New dashboard")}
-          className="loom-btn-primary text-xs py-1.5 px-2"
+          className="loom-btn-primary text-xs min-h-9 px-3"
         >
           + New dashboard
         </button>
@@ -339,221 +347,34 @@ export default function DashboardsTab() {
           <button
             type="button"
             onClick={() => setDashboardsExpanded(true)}
-            className="text-xs py-1.5 px-2 rounded border border-loom-accent text-loom-accent hover:bg-loom-accent/10"
+            className={`${touchBtn} border-loom-accent text-loom-accent hover:bg-loom-accent/10`}
             title="Expand dashboard to main area"
           >
             Expand
           </button>
         )}
+        <button
+          type="button"
+          onClick={handleCreateStoryDashboard}
+          className={`${touchBtn} border-loom-accent/40 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20`}
+          title="Auto-create a dashboard of charts that tell a story"
+        >
+          Tell a story
+        </button>
+        <button
+          type="button"
+          onClick={handleCreateStreamDashboard}
+          className={`${touchBtn} border-loom-success/50 bg-loom-success/10 text-loom-success hover:bg-loom-success/20`}
+          title="Create a live analytics dashboard from the Wikipedia event stream"
+        >
+          Stream
+        </button>
       </div>
 
-      {active && (
-        <div className="space-y-1">
-          <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Update</span>
-          <div className="flex items-center gap-2 flex-wrap">
-            <select
-              value={active.refreshInterval ?? "manual"}
-              onChange={(e) => setDashboardRefresh(active.id, (e.target.value as import("@/lib/store").DashboardRefreshInterval) || "manual")}
-              className="text-2xs px-1.5 py-0.5 rounded border border-loom-border bg-loom-surface text-loom-text"
-            >
-              <option value="manual">Manual</option>
-              <option value="1m">1 min</option>
-              <option value="5m">5 min</option>
-              <option value="15m">15 min</option>
-              <option value="1h">1 hour</option>
-              <option value="1d">1 day</option>
-            </select>
-            <button
-              type="button"
-              onClick={() => setDashboardRefresh(active.id, null, Date.now())}
-              className="text-2xs px-2 py-0.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
-            >
-              Refresh now
-            </button>
-            {active.lastRefreshedAt != null && (
-              <span className="text-2xs text-loom-muted">
-                Last updated {new Date(active.lastRefreshedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-              </span>
-            )}
-          </div>
-          <p className="text-2xs text-loom-muted/80">Refresh interval is a hint for when data might be stale; use &quot;Refresh now&quot; to update.</p>
-        </div>
-      )}
-
-      {active && active.slots.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={handleExportMicrosite}
-            className="text-xs py-1.5 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated hover:border-loom-accent"
-            title="Export dashboard as a self-contained HTML file (data lineage included)"
-          >
-            Export as microsite
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const { exportStoryCarouselZip } = await import("@/lib/exportStoryCarousel");
-                const presetId = useLoomStore.getState().socialPresetId;
-                const result = await exportStoryCarouselZip(active.id, presetId);
-                if (!result) {
-                  setToast("Could not capture story slides");
-                  return;
-                }
-                const name = `${active.name.replace(/[^\w\-]+/g, "_")}-carousel.zip`;
-                const { saveBinaryAndReveal, isDesktop: desktop } = await import("@/lib/tauri");
-                const { shareOrDownloadFile } = await import("@/lib/socialExport");
-                if (desktop()) {
-                  const path = await saveBinaryAndReveal(result.blob, name);
-                  setToast(path ? `Saved ${result.count}-slide pack` : "Save cancelled");
-                } else {
-                  await shareOrDownloadFile(result.blob, name, active.name);
-                  setToast(`Exported ${result.count}-slide carousel ZIP`);
-                }
-              } catch (e) {
-                console.error(e);
-                setToast("Carousel export failed");
-              }
-            }}
-            className="text-xs py-1.5 px-2 rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10"
-            title="Export chart slots as numbered PNGs for Instagram carousel / Stories"
-          >
-            Export carousel ZIP
-          </button>
-        </div>
-      )}
-
-      {/* Saved views — always visible so users see what they have and can add to dashboard */}
-      <div className="space-y-1">
-        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Your saved views</span>
-        {!hasAnySavedViews ? (
-          <p className="text-2xs text-loom-muted py-1">
-            No saved views yet. In the <strong>Chart</strong> tab click &quot;Save view&quot; above the chart; in <strong>Query</strong> use &quot;Save view&quot;; in <strong>Explorer</strong> open Views → &quot;Save current view&quot;.
-          </p>
-        ) : (
-          <ul className="space-y-1">
-            {tableViews.map((v) => (
-              <li key={v.id} className="flex items-center gap-2 group">
-                <span className="text-2xs text-loom-muted shrink-0 w-12">Table</span>
-                <span className="flex-1 text-xs text-loom-text truncate">{v.name}</span>
-                {active && (
-                  <button
-                    type="button"
-                    onClick={() => { addDashboardSlot(active.id, "table", v.id); setToast("Added to dashboard"); }}
-                    className="text-2xs py-0.5 px-1.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent shrink-0"
-                  >
-                    Add to dashboard
-                  </button>
-                )}
-              </li>
-            ))}
-            {chartViews.map((v) => (
-              <li key={v.id} className="flex items-center gap-2 group">
-                <span className="text-2xs text-loom-muted shrink-0 w-12">Chart</span>
-                <span className="flex-1 text-xs text-loom-text truncate">{v.name}</span>
-                {active && (
-                  <button
-                    type="button"
-                    onClick={() => { addDashboardSlot(active.id, "chart", v.id); setToast("Added to dashboard"); }}
-                    className="text-2xs py-0.5 px-1.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent shrink-0"
-                  >
-                    Add to dashboard
-                  </button>
-                )}
-              </li>
-            ))}
-            {queryViews.map((v) => (
-              <li key={v.id} className="flex items-center gap-2 group">
-                <span className="text-2xs text-loom-muted shrink-0 w-12">Query</span>
-                <span className="flex-1 text-xs text-loom-text truncate">{v.name}</span>
-                {active && (
-                  <button
-                    type="button"
-                    onClick={() => { addDashboardSlot(active.id, "query", v.id); setToast("Added to dashboard"); }}
-                    className="text-2xs py-0.5 px-1.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent shrink-0"
-                  >
-                    Add to dashboard
-                  </button>
-                )}
-              </li>
-            ))}
-            {querySnapshots.map((v) => (
-              <li key={v.id} className="flex items-center gap-2 group">
-                <span className="text-2xs text-loom-muted shrink-0 w-12">Snapshot</span>
-                <span className="flex-1 text-xs text-loom-text truncate">{v.name}</span>
-                {active && (
-                  <button
-                    type="button"
-                    onClick={() => { addDashboardSlot(active.id, "snapshot", v.id); setToast("Added to dashboard"); }}
-                    className="text-2xs py-0.5 px-1.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent shrink-0"
-                  >
-                    Add to dashboard
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
-      <div className="space-y-1">
-        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Dashboards</span>
-        {dashboards.length === 0 ? (
-          <p className="text-2xs text-loom-muted py-1">No dashboards yet. Create one above.</p>
-        ) : (
-          <ul className="space-y-1">
-            {dashboards.map((d) => (
-              <li key={d.id} className="flex items-center gap-1 group">
-                <button
-                  type="button"
-                  onClick={() => setActiveDashboardId(activeDashboardId === d.id ? null : d.id)}
-                  className={`flex-1 min-w-0 text-left text-xs px-2 py-1.5 rounded truncate transition-colors ${activeDashboardId === d.id ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50" : "text-loom-muted hover:text-loom-text hover:bg-loom-elevated/50 border border-transparent"
-                    }`}
-                >
-                  {d.name}
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setActiveDashboardId(d.id); setDashboardsExpanded(true); }}
-                  className="shrink-0 text-xs px-2 py-1 rounded border border-loom-accent text-loom-accent hover:bg-loom-accent/10"
-                  title={`Expand ${d.name} to main area`}
-                >
-                  Expand
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeDashboard(d.id)}
-                  className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 text-loom-muted hover:text-loom-text text-xs p-1 rounded"
-                  aria-label={`Remove ${d.name}`}
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-
+      {/* Active board first — after Save-and-go this is what you need */}
       {active && (
         <>
-          <div className="space-y-1">
-            <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Layout</span>
-            <select
-              value={active.layoutTemplate ?? "auto"}
-              onChange={(e) => setDashboardLayout(active.id, (e.target.value as import("@/lib/store").DashboardLayoutTemplate) || "auto")}
-              className="text-2xs w-full px-2 py-1 rounded border border-loom-border bg-loom-surface text-loom-text"
-            >
-              <option value="auto">Auto (responsive)</option>
-              <option value="1x1">1×1</option>
-              <option value="2x1">2×1</option>
-              <option value="2x2">2×2</option>
-              <option value="3x2">3×2</option>
-              <option value="1+2">1 large + 2</option>
-              <option value="stream">Stream (hero + grid)</option>
-            </select>
-          </div>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Slots</span>
             <AddViewDropdown
               dashboardId={active.id}
@@ -566,12 +387,10 @@ export default function DashboardsTab() {
           </div>
           {active.slots.length === 0 ? (
             <div className="text-2xs text-loom-muted py-1 space-y-1">
-              <p>No views in this dashboard yet.</p>
-              {hasAnySavedViews ? (
-                <p>Use <strong>&quot;Add to dashboard&quot;</strong> next to any saved view above, or open <strong>&quot;+ Add view&quot;</strong> to pick one.</p>
-              ) : (
-                <p>Save a view first from the Chart, Query, or Explorer tab (see &quot;Your saved views&quot; above for how).</p>
-              )}
+              <p>No views on this board yet.</p>
+              <p>
+                Tap <strong>Add</strong> next to a saved view below, or <strong>+ Add view</strong>.
+              </p>
             </div>
           ) : (
             <ul className="space-y-1.5">
@@ -579,13 +398,13 @@ export default function DashboardsTab() {
                 const chartView = slot.viewType === "chart" ? chartViews.find((x) => x.id === slot.viewId) : null;
                 const snapshotUrl = chartView?.snapshotImageDataUrl ?? null;
                 return (
-                  <li key={slot.id} className="flex items-center gap-1 group loom-card px-2 py-1.5">
-                    <div className="flex flex-col shrink-0 opacity-60 group-hover:opacity-100">
+                  <li key={slot.id} className="flex items-center gap-1.5 loom-card px-2 py-1.5 min-h-11">
+                    <div className="flex flex-col shrink-0">
                       <button
                         type="button"
                         onClick={() => moveDashboardSlot(active.id, slot.id, "up")}
                         disabled={idx === 0}
-                        className="p-0.5 text-loom-muted hover:text-loom-text disabled:opacity-30"
+                        className="min-h-7 min-w-7 text-loom-muted hover:text-loom-text disabled:opacity-30"
                         aria-label="Move up"
                       >
                         ▲
@@ -594,7 +413,7 @@ export default function DashboardsTab() {
                         type="button"
                         onClick={() => moveDashboardSlot(active.id, slot.id, "down")}
                         disabled={idx === active.slots.length - 1}
-                        className="p-0.5 text-loom-muted hover:text-loom-text disabled:opacity-30"
+                        className="min-h-7 min-w-7 text-loom-muted hover:text-loom-text disabled:opacity-30"
                         aria-label="Move down"
                       >
                         ▼
@@ -610,14 +429,14 @@ export default function DashboardsTab() {
                     <button
                       type="button"
                       onClick={() => handleApplySlot(slot.viewType, slot.viewId)}
-                      className="flex-1 text-left text-xs text-loom-text truncate hover:underline min-w-0"
+                      className="flex-1 text-left text-xs text-loom-text truncate hover:underline min-w-0 min-h-9"
                     >
                       {getSlotLabel(slot.viewType, slot.viewId)}
                     </button>
                     <button
                       type="button"
                       onClick={() => removeDashboardSlot(active.id, slot.id)}
-                      className="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 text-loom-muted hover:text-loom-text text-xs p-0.5 shrink-0"
+                      className="shrink-0 min-h-9 min-w-9 text-loom-muted hover:text-loom-text text-sm rounded"
                       aria-label="Remove slot"
                     >
                       ×
@@ -627,7 +446,178 @@ export default function DashboardsTab() {
               })}
             </ul>
           )}
+
+          <div className="space-y-1">
+            <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Layout</span>
+            <select
+              value={active.layoutTemplate ?? "auto"}
+              onChange={(e) =>
+                setDashboardLayout(
+                  active.id,
+                  (e.target.value as import("@/lib/store").DashboardLayoutTemplate) || "auto",
+                )
+              }
+              className="text-xs w-full min-h-9 px-2 py-1.5 rounded border border-loom-border bg-loom-surface text-loom-text"
+            >
+              <option value="auto">Auto (responsive)</option>
+              <option value="1x1">1×1</option>
+              <option value="2x1">2×1</option>
+              <option value="2x2">2×2</option>
+              <option value="3x2">3×2</option>
+              <option value="1+2">1 large + 2</option>
+              <option value="stream">Stream (hero + grid)</option>
+            </select>
+          </div>
         </>
+      )}
+
+      <div className="space-y-1">
+        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Your saved views</span>
+        {!hasAnySavedViews ? (
+          <p className="text-2xs text-loom-muted py-1">
+            Save a view from Chart, Query, or Explorer — it shows up here to add to a board.
+          </p>
+        ) : (
+          <ul className="space-y-0.5 max-h-[min(40vh,16rem)] overflow-y-auto pr-0.5 -mr-0.5">
+            {tableViews.map((v) => renderSavedRow("table", v, "Table"))}
+            {chartViews.map((v) => renderSavedRow("chart", v, "Chart"))}
+            {queryViews.map((v) => renderSavedRow("query", v, "Query"))}
+            {querySnapshots.map((v) => renderSavedRow("snapshot", v, "Snap"))}
+          </ul>
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Dashboards</span>
+        {dashboards.length === 0 ? (
+          <p className="text-2xs text-loom-muted py-1">No dashboards yet. Create one above.</p>
+        ) : (
+          <ul className="space-y-1">
+            {dashboards.map((d) => (
+              <li key={d.id} className="flex items-center gap-1 min-h-10">
+                <button
+                  type="button"
+                  onClick={() => setActiveDashboardId(activeDashboardId === d.id ? null : d.id)}
+                  className={`flex-1 min-w-0 min-h-9 text-left text-xs px-2.5 rounded-md truncate transition-colors ${
+                    activeDashboardId === d.id
+                      ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                      : "text-loom-muted hover:text-loom-text hover:bg-loom-elevated/50 border border-transparent"
+                  }`}
+                >
+                  {d.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setActiveDashboardId(d.id);
+                    setDashboardsExpanded(true);
+                  }}
+                  className={`${touchBtn} shrink-0 border-loom-accent text-loom-accent hover:bg-loom-accent/10`}
+                  title={`Expand ${d.name}`}
+                >
+                  Expand
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeDashboard(d.id)}
+                  className="shrink-0 min-h-9 min-w-9 text-loom-muted hover:text-loom-text text-sm rounded"
+                  aria-label={`Remove ${d.name}`}
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {active && (
+        <details className="rounded-md border border-loom-border/70 bg-loom-surface/40 open:pb-2">
+          <summary className="cursor-pointer select-none text-2xs font-semibold text-loom-muted uppercase tracking-wider px-2.5 py-2.5 min-h-9">
+            Update &amp; export
+          </summary>
+          <div className="px-2.5 space-y-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={active.refreshInterval ?? "manual"}
+                onChange={(e) =>
+                  setDashboardRefresh(
+                    active.id,
+                    (e.target.value as import("@/lib/store").DashboardRefreshInterval) || "manual",
+                  )
+                }
+                className="text-xs min-h-9 px-2 py-1.5 rounded border border-loom-border bg-loom-surface text-loom-text"
+              >
+                <option value="manual">Manual</option>
+                <option value="1m">1 min</option>
+                <option value="5m">5 min</option>
+                <option value="15m">15 min</option>
+                <option value="1h">1 hour</option>
+                <option value="1d">1 day</option>
+              </select>
+              <button
+                type="button"
+                onClick={() => setDashboardRefresh(active.id, null, Date.now())}
+                className={`${touchBtn} border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated`}
+              >
+                Refresh now
+              </button>
+              {active.lastRefreshedAt != null && (
+                <span className="text-2xs text-loom-muted">
+                  Updated{" "}
+                  {new Date(active.lastRefreshedAt).toLocaleTimeString([], {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
+            </div>
+            {active.slots.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleExportMicrosite}
+                  className={`${touchBtn} w-full border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent`}
+                  title="Export as a self-contained HTML file"
+                >
+                  Export microsite
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      const { exportStoryCarouselZip } = await import("@/lib/exportStoryCarousel");
+                      const presetId = useLoomStore.getState().socialPresetId;
+                      const result = await exportStoryCarouselZip(active.id, presetId);
+                      if (!result) {
+                        setToast("Could not capture story slides");
+                        return;
+                      }
+                      const name = `${active.name.replace(/[^\w\-]+/g, "_")}-carousel.zip`;
+                      const { saveBinaryAndReveal, isDesktop: desktop } = await import("@/lib/tauri");
+                      const { shareOrDownloadFile } = await import("@/lib/socialExport");
+                      if (desktop()) {
+                        const path = await saveBinaryAndReveal(result.blob, name);
+                        setToast(path ? `Saved ${result.count}-slide pack` : "Save cancelled");
+                      } else {
+                        await shareOrDownloadFile(result.blob, name, active.name);
+                        setToast(`Exported ${result.count}-slide carousel ZIP`);
+                      }
+                    } catch (e) {
+                      console.error(e);
+                      setToast("Carousel export failed");
+                    }
+                  }}
+                  className={`${touchBtn} w-full border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10`}
+                  title="Export chart slots as numbered PNGs for Instagram carousel / Stories"
+                >
+                  Export carousel ZIP
+                </button>
+              </div>
+            )}
+          </div>
+        </details>
       )}
     </div>
   );
@@ -668,7 +658,7 @@ function AddViewDropdown({
         aria-expanded={open}
         aria-haspopup="menu"
         aria-controls={open ? menuId : undefined}
-        className="text-2xs py-1 px-2 rounded border border-loom-border text-loom-muted hover:text-loom-text disabled:opacity-50"
+        className="inline-flex items-center justify-center min-h-9 px-2.5 rounded-md border border-loom-border text-xs text-loom-muted hover:text-loom-text disabled:opacity-50"
       >
         + Add view
       </button>
@@ -685,7 +675,7 @@ function AddViewDropdown({
               <>
                 <p className="px-2 py-0.5 text-2xs text-loom-muted uppercase">Table</p>
                 {tableViews.map((v) => (
-                  <button key={v.id} type="button" role="menuitem" onClick={() => { addDashboardSlot(dashboardId, "table", v.id); setOpen(false); }} className="w-full text-left text-xs px-2 py-1 hover:bg-loom-elevated text-loom-text truncate">
+                  <button key={v.id} type="button" role="menuitem" onClick={() => { addDashboardSlot(dashboardId, "table", v.id); setOpen(false); }} className="w-full text-left text-xs px-2.5 min-h-9 py-2 hover:bg-loom-elevated text-loom-text truncate">
                     {v.name}
                   </button>
                 ))}
@@ -695,7 +685,7 @@ function AddViewDropdown({
               <>
                 <p className="px-2 py-0.5 text-2xs text-loom-muted uppercase mt-1">Chart</p>
                 {chartViews.map((v) => (
-                  <button key={v.id} type="button" onClick={() => { addDashboardSlot(dashboardId, "chart", v.id); setOpen(false); }} className="w-full text-left text-xs px-2 py-1 hover:bg-loom-elevated text-loom-text truncate">
+                  <button key={v.id} type="button" role="menuitem" onClick={() => { addDashboardSlot(dashboardId, "chart", v.id); setOpen(false); }} className="w-full text-left text-xs px-2.5 min-h-9 py-2 hover:bg-loom-elevated text-loom-text truncate">
                     {v.name}
                   </button>
                 ))}
@@ -705,7 +695,7 @@ function AddViewDropdown({
               <>
                 <p className="px-2 py-0.5 text-2xs text-loom-muted uppercase mt-1">Query</p>
                 {queryViews.map((v) => (
-                  <button key={v.id} type="button" onClick={() => { addDashboardSlot(dashboardId, "query", v.id); setOpen(false); }} className="w-full text-left text-xs px-2 py-1 hover:bg-loom-elevated text-loom-text truncate">
+                  <button key={v.id} type="button" role="menuitem" onClick={() => { addDashboardSlot(dashboardId, "query", v.id); setOpen(false); }} className="w-full text-left text-xs px-2.5 min-h-9 py-2 hover:bg-loom-elevated text-loom-text truncate">
                     {v.name}
                   </button>
                 ))}
@@ -715,7 +705,7 @@ function AddViewDropdown({
               <>
                 <p className="px-2 py-0.5 text-2xs text-loom-muted uppercase mt-1">Snapshot</p>
                 {querySnapshots.map((v) => (
-                  <button key={v.id} type="button" onClick={() => { addDashboardSlot(dashboardId, "snapshot", v.id); setOpen(false); }} className="w-full text-left text-xs px-2 py-1 hover:bg-loom-elevated text-loom-text truncate">
+                  <button key={v.id} type="button" role="menuitem" onClick={() => { addDashboardSlot(dashboardId, "snapshot", v.id); setOpen(false); }} className="w-full text-left text-xs px-2.5 min-h-9 py-2 hover:bg-loom-elevated text-loom-text truncate">
                     {v.name}
                   </button>
                 ))}

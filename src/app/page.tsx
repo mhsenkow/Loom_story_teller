@@ -223,13 +223,13 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border bg-loom-surface/50 flex-shrink-0 flex-wrap">
-        <h2 className="text-sm font-semibold text-loom-text">{active.name}</h2>
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-2xs text-loom-muted">Refresh:</span>
+        <h2 className="text-sm font-semibold text-loom-text min-w-0 truncate">{active.name}</h2>
+        <div className="flex items-center gap-1.5 flex-wrap">
           <select
             value={active.refreshInterval ?? "manual"}
             onChange={(e) => setDashboardRefresh(active.id, (e.target.value as typeof active.refreshInterval) || "manual")}
-            className="text-2xs px-1.5 py-0.5 rounded border border-loom-border bg-loom-surface text-loom-text"
+            className="text-xs min-h-9 px-2 py-1.5 rounded border border-loom-border bg-loom-surface text-loom-text"
+            aria-label="Refresh interval"
           >
             {refreshIntervalOptions.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -238,7 +238,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
           <button
             type="button"
             onClick={() => setDashboardRefresh(active.id, null, Date.now())}
-            className="text-2xs px-2 py-0.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
+            className="text-xs min-h-9 px-2.5 rounded-md border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
             title="Mark as refreshed now"
           >
             Refresh
@@ -250,13 +250,13 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
               setToast("Recapturing all chart previews…");
               await captureStoryDashboardPreviews(active.id);
             }}
-            className="text-2xs px-2 py-0.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated disabled:opacity-50"
+            className="text-xs min-h-9 px-2.5 rounded-md border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated disabled:opacity-50"
             title="Re-render PNG thumbnails for every chart in this story"
           >
-            Recapture previews
+            Recapture
           </button>
           {lastRefreshed && (
-            <span className="text-2xs text-loom-muted" title={lastRefreshed.toLocaleString()}>
+            <span className="text-2xs text-loom-muted hidden sm:inline" title={lastRefreshed.toLocaleString()}>
               Updated {lastRefreshed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </span>
           )}
@@ -264,7 +264,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
         <button
           type="button"
           onClick={onCollapse}
-          className="text-xs px-2 py-1 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
+          className="text-xs min-h-9 px-2.5 rounded-md border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
           title="Collapse to panel"
         >
           Collapse
@@ -317,19 +317,19 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
                   <p className="text-xs font-medium text-loom-text truncate shrink-0 mt-1.5" title={label}>
                     {label}
                   </p>
-                  <div className="flex items-center justify-between gap-1.5 mt-0.5 shrink-0 flex-wrap">
+                  <div className="flex items-center justify-between gap-1.5 mt-1 shrink-0 flex-wrap">
                     <button
                       type="button"
                       onClick={() => openLiveView(slot)}
-                      className="text-2xs text-loom-accent hover:underline font-medium"
+                      className="text-xs min-h-9 px-2 rounded-md text-loom-accent hover:bg-loom-accent/10 font-medium"
                     >
                       {isChart ? "Open chart" : slot.viewType === "query" ? "Open query" : "Open"}
                     </button>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       {snapshotUrl && (
                         <button
                           type="button"
-                          className="text-2xs text-loom-muted hover:text-loom-text hover:underline"
+                          className="text-xs min-h-9 px-2 rounded-md text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
                           onClick={() => setFocusedSlot(slot)}
                           title="Fullscreen snapshot preview"
                         >
@@ -339,7 +339,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
                       {isChart && !busy && (
                         <button
                           type="button"
-                          className="text-2xs text-loom-muted hover:text-loom-accent hover:underline disabled:opacity-50"
+                          className="text-xs min-h-9 px-2 rounded-md text-loom-muted hover:text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50"
                           disabled={!!previewCapture || retryingId !== null}
                           onClick={async () => {
                             setRetryingId(slot.viewId);
