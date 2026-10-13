@@ -54,7 +54,7 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         CFBundleShortVersionString: 0.1.0
-        CFBundleVersion: "8"
+        CFBundleVersion: "9"
         ITSAppUsesNonExemptEncryption: false
     entitlements:
       path: loom_iOS/loom_iOS.entitlements

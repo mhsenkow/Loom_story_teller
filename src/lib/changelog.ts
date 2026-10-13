@@ -25,6 +25,25 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-13m",
+    date: "2026-10-13",
+    title: "Chart as a floating cell",
+    summary:
+      "Save and Refresh sit as icon actions beside the plot. Time chips match the window the chart actually uses.",
+    items: [
+      {
+        title: "Cell chrome",
+        detail:
+          "The stage treats the chart like a cell — soft float, shadow, and a glass icon rail for redraw, save, data table, why, and title.",
+      },
+      {
+        title: "Honest time chips",
+        detail:
+          "If a chart is already sliced to last 24h, the View strip highlights 24h — not All. Link only shows when brush can apply.",
+      },
+    ],
+  },
+  {
     id: "2026-10-13l",
     date: "2026-10-13",
     title: "One view, both surfaces",

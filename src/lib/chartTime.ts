@@ -187,6 +187,23 @@ export function chartTimeWindowLabel(
   }
 }
 
+/** Shared cohort window wins; otherwise the chart’s own Encoding time slice. */
+export function resolveEffectiveTimeRec(
+  viewTimeWindow: ChartTimeRange | null | undefined,
+  viewTimeField: string | null | undefined,
+  chart: { timeWindowField?: string | null; timeWindow?: ChartTimeRange | string | null } | null | undefined,
+): { timeWindowField: string | null; timeWindow: ChartTimeRange } {
+  if (viewTimeWindow && viewTimeWindow !== "all" && viewTimeField) {
+    return { timeWindowField: viewTimeField, timeWindow: viewTimeWindow };
+  }
+  const ct = chart?.timeWindow;
+  const cf = chart?.timeWindowField;
+  if (ct && ct !== "all" && cf) {
+    return { timeWindowField: cf, timeWindow: ct as ChartTimeRange };
+  }
+  return { timeWindowField: null, timeWindow: "all" };
+}
+
 export function applyChartTimeWindow<T extends unknown[]>(
   rows: T[],
   columns: string[],

@@ -68,9 +68,18 @@ import { plotOf, valueTitle } from "@/lib/canvasCharts/plumbing";
 import { renderFullSunburst } from "@/lib/canvasCharts/sunburst";
 import { CHART_KIND_CATALOG } from "@/lib/chartKindSearch";
 import { invScaleY, scaleDomain, scaleY, type YScaleKind } from "@/lib/dsTransforms";
-import { applyChartTimeWindow, composeChartFootnote, formatChartTimeFootnote } from "@/lib/chartTime";
+import { applyChartTimeWindow, composeChartFootnote, formatChartTimeFootnote, resolveEffectiveTimeRec } from "@/lib/chartTime";
 import { applyExplorerViewToRows, explorerFiltersActive } from "@/lib/explorerViewRows";
 import { ViewCohortBar } from "@/components/ViewCohortBar";
+import {
+  CellIconBtn,
+  ChartCellRail,
+  IconDataTable,
+  IconEditTitle,
+  IconRefresh,
+  IconSave,
+  IconWhy,
+} from "@/components/ChartCellChrome";
 import { DEFAULT_PAD, isNumericType, offsetHitTargets, pointInPolygon, scatterYDomain } from "@/lib/canvasCharts/shared";
 import { drawAxisTicks, drawGridLines, drawSmartOverlays } from "@/lib/canvasCharts/primitives";
 import { renderFullScatter } from "@/lib/canvasCharts/scatter";
@@ -341,18 +350,12 @@ export function ChartView() {
     let rows = view.rows;
     let sourceIndices = view.sourceIndices;
     let changed = view.changed;
-    // Shared time window wins; fall back to chart-local window.
-    const timeRec =
-      viewTimeWindow && viewTimeWindow !== "all" && viewTimeField
-        ? { timeWindowField: viewTimeField, timeWindow: viewTimeWindow }
-        : activeChart;
-    if (timeRec) {
-      const sliced = applyChartTimeWindow(rows, sampleRows.columns, timeRec);
-      if (sliced.filtered) {
-        rows = sliced.rows;
-        sourceIndices = sliced.sourceIndices.map((i) => view.sourceIndices[i]!);
-        changed = true;
-      }
+    const timeRec = resolveEffectiveTimeRec(viewTimeWindow, viewTimeField, activeChart);
+    const sliced = applyChartTimeWindow(rows, sampleRows.columns, timeRec);
+    if (sliced.filtered) {
+      rows = sliced.rows;
+      sourceIndices = sliced.sourceIndices.map((i) => view.sourceIndices[i]!);
+      changed = true;
     }
     if (!changed) return sampleRows;
     return { ...sampleRows, rows, rowSourceIndices: sourceIndices };
@@ -371,10 +374,16 @@ export function ChartView() {
   /** Source credit + “when?” under the plot (palette is a ramp on the right, not text). */
   const chartFootnoteText = useMemo(() => {
     const rows = chartSampleRows ?? sampleRows;
+    const timeRec = resolveEffectiveTimeRec(viewTimeWindow, viewTimeField, activeChart);
     const timeLine = formatChartTimeFootnote(
       rows?.rows,
       rows?.columns,
-      activeChart,
+      {
+        timeWindowField: timeRec.timeWindowField,
+        timeWindow: timeRec.timeWindow,
+        timeField: activeChart?.timeField,
+        xField: activeChart?.xField,
+      },
       columnStats,
     );
     const footMode = chartVisualOverrides.sourceFootnote ?? "credit";
@@ -394,6 +403,60 @@ export function ChartView() {
     columnStats,
     chartVisualOverrides.sourceFootnote,
     selectedFile,
+    viewTimeWindow,
+    viewTimeField,
+  ]);
+
+  const saveActiveChartView = useCallback(() => {
+    if (!selectedFile || !activeChart) return;
+    setPromptDialog({
+      title: "Name for this chart view",
+      defaultValue: activeChart.title || "Chart view",
+      onConfirm: async (name) => {
+        if (name == null || !name.trim()) return;
+        let snapshotImageDataUrl: string | null = null;
+        if (useLoomStore.getState().pngExportHandler) {
+          try {
+            const blob = await useLoomStore.getState().pngExportHandler!();
+            if (blob) {
+              snapshotImageDataUrl = await new Promise<string>((res, rej) => {
+                const r = new FileReader();
+                r.onload = () => res(r.result as string);
+                r.onerror = rej;
+                r.readAsDataURL(blob);
+              });
+            }
+          } catch (_) { /* ignore */ }
+        }
+        const sample = sampleRows
+          ? { columns: sampleRows.columns, types: sampleRows.types ?? [], rows: sampleRows.rows, total_rows: sampleRows.total_rows }
+          : undefined;
+        const ok = addChartView(
+          name.trim(),
+          selectedFile.path,
+          selectedFile.name,
+          activeChart,
+          { ...chartVisualOverrides },
+          querySql,
+          sample,
+          snapshotImageDataUrl,
+        );
+        setToast(
+          ok
+            ? "Chart view saved. Open the Dashboards tab and use \"Add to dashboard\" or \"+ Add view\"."
+            : "Could not save chart view",
+        );
+      },
+    });
+  }, [
+    selectedFile,
+    activeChart,
+    sampleRows,
+    addChartView,
+    chartVisualOverrides,
+    querySql,
+    setPromptDialog,
+    setToast,
   ]);
 
   const footnoteOpts = useCallback(
@@ -595,14 +658,16 @@ export function ChartView() {
         aspectLocked: true,
       };
     }
+    // Desktop cell rail sits beside the plot — don't let the frame eat that strip.
+    const railReserve = !isMobile ? 44 : 0;
     return fitChartFrame({
-      hostW: hostSize.w,
+      hostW: Math.max(40, hostSize.w - railReserve),
       hostH: hostSize.h,
       aspectId: chartAspect,
       device: chartDevice,
       gutter: 10,
     });
-  }, [hostSize.w, hostSize.h, chartAspect, chartDevice, socialExportTarget]);
+  }, [hostSize.w, hostSize.h, chartAspect, chartDevice, socialExportTarget, isMobile]);
   const rendererRef = useRef<GpuScatterRenderer | null>(null);
   const sceneRendererRef = useRef<GpuSceneRenderer | null>(null);
   const cubeRendererRef = useRef<GpuCubeRenderer | null>(null);
@@ -919,8 +984,6 @@ export function ChartView() {
   const canvas2DHitRef = useRef<Canvas2DHitContext | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
   const [titleEditValue, setTitleEditValue] = useState("");
-  const [showTitleEditButton, setShowTitleEditButton] = useState(false);
-  const titleHoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [whyReasonOpen, setWhyReasonOpen] = useState(false);
   const [chartDataTableOpen, setChartDataTableOpen] = useState(false);
   const [keyboardMarkIndex, setKeyboardMarkIndex] = useState(-1);
@@ -3551,201 +3614,72 @@ export function ChartView() {
         `}
       >
         {!socialExportReady && <ViewCohortBar surface="chart" />}
-        {!socialExportReady && (
-        <div className="flex items-center gap-1.5 sm:gap-3 px-2 sm:px-4 py-1.5 sm:py-2 border-b border-loom-border bg-loom-surface/50 flex-wrap">
-          <div className="flex flex-col gap-0.5 min-w-0 flex-1">
-            <div
-              className="flex items-center gap-2 min-w-0 group focus-within:outline-none"
-              onMouseEnter={() => {
-                if (!activeChart || titleEditing) return;
-                titleHoverTimerRef.current = setTimeout(() => setShowTitleEditButton(true), 1000);
-              }}
-              onMouseLeave={() => {
-                if (titleHoverTimerRef.current) {
-                  clearTimeout(titleHoverTimerRef.current);
-                  titleHoverTimerRef.current = null;
-                }
-                setShowTitleEditButton(false);
-              }}
-            >
-              <span className="w-2 h-2 rounded-full bg-loom-accent shrink-0" />
-              {titleEditing ? (
-                <input
-                  type="text"
-                  value={titleEditValue}
-                  onChange={(e) => setTitleEditValue(e.target.value)}
-                  onBlur={handleTitleSave}
-                  onKeyDown={handleTitleKeyDown}
-                  className="flex-1 min-w-0 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded px-2 py-0.5 font-mono focus:outline-none focus:ring-1 focus:ring-loom-accent focus:border-loom-accent"
-                  placeholder="Chart title"
-                  autoFocus
-                  aria-label="Chart title"
-                />
-              ) : (
-                <>
-                  <span
-                    className="text-xs font-medium text-loom-text truncate cursor-text select-text"
-                    onDoubleClick={activeChart ? handleTitleStartEdit : undefined}
-                    // Phones can't hover or double-click comfortably — a tap edits.
-                    onClick={activeChart && isMobile ? handleTitleStartEdit : undefined}
-                    title={activeChart ? "Double-click or hover for edit" : undefined}
-                  >
-                    {displayTitle}
-                  </span>
-                  {activeChart && (
-                    <button
-                      type="button"
-                      onClick={handleTitleStartEdit}
-                      className={`shrink-0 p-1 max-md:p-2 max-md:-my-1.5 rounded text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors focus-visible:opacity-100 ${
-                        isMobile || showTitleEditButton
-                          ? "opacity-100"
-                          : "opacity-50 group-hover:opacity-100 group-focus-within:opacity-100"
-                      }`}
-                      title="Edit title"
-                      aria-label="Edit chart title"
-                    >
-                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                      </svg>
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
-            {activeChart && !titleEditing && (
-              <div className="pl-2 sm:pl-4 flex flex-col gap-0.5 min-w-0">
+        {!socialExportReady && titleEditing && (
+          <div className="flex items-center gap-2 px-3 py-1.5 border-b border-loom-border bg-loom-surface/60">
+            <input
+              type="text"
+              value={titleEditValue}
+              onChange={(e) => setTitleEditValue(e.target.value)}
+              onBlur={handleTitleSave}
+              onKeyDown={handleTitleKeyDown}
+              className="flex-1 min-w-0 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded px-2 py-1 font-mono focus:outline-none focus:ring-1 focus:ring-loom-accent focus:border-loom-accent"
+              placeholder="Chart title"
+              autoFocus
+              aria-label="Chart title"
+            />
+          </div>
+        )}
+        {!socialExportReady && whyReasonOpen && activeChart && (
+          <div className="px-3 py-1.5 border-b border-loom-border/70 bg-loom-surface/40">
+            <p className="text-2xs text-loom-label max-w-xl leading-snug" role="note">
+              {aiSuggestionReason ?? getRecommendationReason(activeChart)}
+            </p>
+          </div>
+        )}
+        {!socialExportReady && activeChart?.kind === "scatter" && (
+          <div className="flex items-center gap-1 px-3 py-1 border-b border-loom-border/50 bg-transparent" role="group" aria-label="Chart interaction mode">
+            {([
+              { mode: "pan" as const, label: "Pan", tip: "Drag to pan · pinch to zoom · Shift+drag brush" },
+              { mode: "crosshair" as const, label: "Cross", tip: "Read values · tap to pin ruler" },
+              ...(isMobile
+                ? [{ mode: "select" as const, label: "Select", tip: "Drag to brush-select points" }]
+                : [{ mode: "lasso" as const, label: "Lasso", tip: "Draw to select points (G)" }]),
+            ]).map(({ mode, label, tip }) => (
+              <button
+                key={mode}
+                type="button"
+                onClick={() => setChartInteractionMode(mode)}
+                aria-pressed={chartInteractionMode === mode}
+                title={tip}
+                className={`px-2 py-1 text-2xs rounded min-h-8 sm:min-h-0 ${chartInteractionMode === mode ? "bg-loom-accent/25 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
+              >
+                {label}
+              </button>
+            ))}
+            {densityHint && (
+              <>
+                <span
+                  className="ml-auto loom-badge text-2xs text-loom-accent border-loom-accent/30 max-w-[140px] truncate"
+                  title="Point size and opacity scale down when many rows would overplot. Zoom in to reveal more points."
+                >
+                  {densityHint}
+                </span>
                 <button
                   type="button"
-                  className="text-2xs text-loom-muted text-left border-b border-dotted border-loom-muted/50 hover:text-loom-text w-fit"
-                  aria-expanded={whyReasonOpen}
-                  onClick={() => setWhyReasonOpen((o) => !o)}
+                  onClick={applyClarity}
+                  className="px-2 py-1 text-2xs font-medium rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent min-h-8"
+                  title="One-click Clarity preset: small marks, low opacity, no stroke"
                 >
-                  Why?
+                  Clarity
                 </button>
-                {whyReasonOpen && (
-                  <p className="text-2xs text-loom-label max-w-md leading-snug" role="note">
-                    {aiSuggestionReason ?? getRecommendationReason(activeChart)}
-                  </p>
-                )}
-              </div>
+              </>
             )}
           </div>
-          <div className="flex-1 min-w-2" />
-          {activeChart && (
-            <div className="flex items-center gap-1 sm:gap-1.5 flex-wrap justify-end">
-              {activeChart.kind === "scatter" && (
-                <div className="flex items-center gap-0.5 mr-0.5 sm:mr-1" role="group" aria-label="Chart interaction mode">
-                  {([
-                    { mode: "pan" as const, label: "Pan", tip: "Drag to pan · pinch to zoom · Shift+drag brush" },
-                    { mode: "crosshair" as const, label: "Cross", tip: "Read values · tap to pin ruler" },
-                    ...(isMobile
-                      ? [{ mode: "select" as const, label: "Select", tip: "Drag to brush-select points" }]
-                      : [{ mode: "lasso" as const, label: "Lasso", tip: "Draw to select points (G)" }]),
-                  ]).map(({ mode, label, tip }) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      onClick={() => setChartInteractionMode(mode)}
-                      aria-pressed={chartInteractionMode === mode}
-                      title={tip}
-                      className={`px-2.5 py-1.5 sm:px-1.5 sm:py-0.5 text-2xs rounded min-h-9 sm:min-h-0 ${chartInteractionMode === mode ? "bg-loom-accent/25 text-loom-text border border-loom-accent/50" : "text-loom-muted border border-transparent hover:border-loom-border"}`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              )}
-              <button
-                type="button"
-                onClick={() => setChartDataTableOpen((o) => !o)}
-                aria-pressed={chartDataTableOpen}
-                className="hidden sm:inline-flex px-1.5 py-0.5 text-2xs text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded"
-                title="Show aggregated values as a table"
-              >
-                Data
-              </button>
-              <button
-                type="button"
-                onClick={handleRefresh}
-                className="hidden sm:inline-flex px-1.5 py-0.5 text-2xs font-mono text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded"
-                title="Redraw chart"
-              >
-                Refresh
-              </button>
-              {selectedFile && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPromptDialog({
-                      title: "Name for this chart view",
-                      defaultValue: activeChart.title || "Chart view",
-                      onConfirm: async (name) => {
-                        if (name == null || !name.trim()) return;
-                        let snapshotImageDataUrl: string | null = null;
-                        if (useLoomStore.getState().pngExportHandler) {
-                          try {
-                            const blob = await useLoomStore.getState().pngExportHandler!();
-                            if (blob) {
-                              snapshotImageDataUrl = await new Promise<string>((res, rej) => {
-                                const r = new FileReader();
-                                r.onload = () => res(r.result as string);
-                                r.onerror = rej;
-                                r.readAsDataURL(blob);
-                              });
-                            }
-                          } catch (_) { /* ignore */ }
-                        }
-                        const sample = sampleRows ? { columns: sampleRows.columns, types: sampleRows.types ?? [], rows: sampleRows.rows, total_rows: sampleRows.total_rows } : undefined;
-                        const ok = addChartView(name.trim(), selectedFile.path, selectedFile.name, activeChart, { ...chartVisualOverrides }, querySql, sample, snapshotImageDataUrl);
-                        setToast(ok ? "Chart view saved. Open the Dashboards tab and use \"Add to dashboard\" or \"+ Add view\"." : "Could not save chart view");
-                      }
-                    });
-                  }}
-                  className="inline-flex px-1.5 py-0.5 text-2xs text-loom-muted hover:text-loom-text border border-loom-border hover:border-loom-accent rounded min-h-9 sm:min-h-0"
-                  title="Save this chart for dashboards"
-                >
-                  Save view
-                </button>
-              )}
-              <span className="loom-badge text-2xs hidden sm:inline-flex" title={aggregationHint || undefined}>{useWebGPUScatter || useWebGpuScene || useWebGpuCube ? "Accelerated" : "Standard"}</span>
-              {!useWebGPUScatter &&
-                (!!chartVisualOverrides.markStroke ||
-                  !!chartVisualOverrides.glowEnabled ||
-                  (chartVisualOverrides.markJitter ?? 0) > 0 ||
-                  (!!chartVisualOverrides.markShape && chartVisualOverrides.markShape !== "circle")) && (
-                <span className="text-2xs text-loom-muted hidden md:inline" title="Mark style / glow / stroke use the Canvas renderer">
-                  Canvas look
-                </span>
-              )}
-              <span className="loom-badge text-2xs max-w-[200px] truncate hidden sm:inline-flex" title={`${sampleHonestyLabel}${aggregationHint ? ` · ${aggregationHint}` : ""}`}>
-                {sampleHonestyLabel || "—"}
-              </span>
-              {densityHint && !isMobile && (
-                <>
-                  <span
-                    className="loom-badge text-2xs text-loom-accent border-loom-accent/30 max-w-[140px] truncate"
-                    title="Point size and opacity scale down when many rows would overplot. Zoom in to reveal more points."
-                  >
-                    {densityHint}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={applyClarity}
-                    className="px-2 py-1 text-2xs font-medium rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent min-h-8"
-                    title="One-click Clarity preset: small marks, low opacity, no stroke"
-                  >
-                    Clarity
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
         )}
 
         <div
           ref={stageHostRef}
-          className={`flex-1 relative min-h-0 min-h-[200px] flex items-center justify-center ${socialExportReady ? "px-0 py-0 overflow-auto" : "px-2 py-2"}`}
+          className={`flex-1 relative min-h-0 min-h-[200px] flex items-center justify-center ${socialExportReady ? "px-0 py-0 overflow-auto" : "px-3 py-3 sm:px-4 sm:py-4"}`}
           style={{
             // Letterbox matte — reads as a stage, not a broken black void
             backgroundColor: socialExportReady
@@ -3800,6 +3734,44 @@ export function ChartView() {
             </div>
           )}
           <div
+            className={`relative flex max-w-full max-h-full ${
+              isMobile ? "flex-col items-stretch gap-1.5" : "flex-row items-start gap-1.5"
+            }`}
+          >
+          {!socialExportReady && activeChart && isMobile && (
+            <div className="flex justify-end">
+              <ChartCellRail orientation="horizontal">
+                <CellIconBtn label="Redraw chart" title="Redraw chart" onClick={handleRefresh}>
+                  <IconRefresh />
+                </CellIconBtn>
+                {selectedFile && (
+                  <CellIconBtn label="Save chart view" title="Save this chart for dashboards" onClick={saveActiveChartView}>
+                    <IconSave />
+                  </CellIconBtn>
+                )}
+                <CellIconBtn
+                  label="Data table"
+                  title="Show aggregated values as a table"
+                  pressed={chartDataTableOpen}
+                  onClick={() => setChartDataTableOpen((o) => !o)}
+                >
+                  <IconDataTable />
+                </CellIconBtn>
+                <CellIconBtn
+                  label="Why this chart"
+                  title="Why this chart?"
+                  pressed={whyReasonOpen}
+                  onClick={() => setWhyReasonOpen((o) => !o)}
+                >
+                  <IconWhy />
+                </CellIconBtn>
+                <CellIconBtn label="Edit chart title" title="Edit title" onClick={handleTitleStartEdit}>
+                  <IconEditTitle />
+                </CellIconBtn>
+              </ChartCellRail>
+            </div>
+          )}
+          <div
             ref={containerRef}
             role="img"
             aria-label={chartA11yLabel}
@@ -3826,8 +3798,8 @@ export function ChartView() {
               }
             }}
             className={`relative overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-loom-accent/60 ${
-              !socialExportReady && (chartFrameSize.aspectLocked || chartDevice !== "desktop")
-                ? "rounded-md border border-loom-border shadow-sm"
+              !socialExportReady
+                ? "rounded-lg border border-loom-border/90 shadow-[0_1px_0_color-mix(in_srgb,var(--loom-border)_40%,transparent),0_18px_40px_-28px_rgba(0,0,0,0.45)]"
                 : ""
             } ${orbitEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
             onPointerDown={(e) => {
@@ -4258,6 +4230,38 @@ export function ChartView() {
             </div>
           ))}
           </div>
+          {!socialExportReady && activeChart && !isMobile && (
+            <ChartCellRail orientation="vertical">
+              <CellIconBtn label="Redraw chart" title="Redraw chart" onClick={handleRefresh}>
+                <IconRefresh />
+              </CellIconBtn>
+              {selectedFile && (
+                <CellIconBtn label="Save chart view" title="Save this chart for dashboards" onClick={saveActiveChartView}>
+                  <IconSave />
+                </CellIconBtn>
+              )}
+              <CellIconBtn
+                label="Data table"
+                title="Show aggregated values as a table"
+                pressed={chartDataTableOpen}
+                onClick={() => setChartDataTableOpen((o) => !o)}
+              >
+                <IconDataTable />
+              </CellIconBtn>
+              <CellIconBtn
+                label="Why this chart"
+                title="Why this chart?"
+                pressed={whyReasonOpen}
+                onClick={() => setWhyReasonOpen((o) => !o)}
+              >
+                <IconWhy />
+              </CellIconBtn>
+              <CellIconBtn label="Edit chart title" title="Edit title" onClick={handleTitleStartEdit}>
+                <IconEditTitle />
+              </CellIconBtn>
+            </ChartCellRail>
+          )}
+          </div>
         </div>
         {tooltipPresentation !== "off" && (scatterTooltip || chartTooltip) && (
           <ChartTooltipCard
@@ -4279,15 +4283,30 @@ export function ChartView() {
 
         {activeChart && !isMobile && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 min-h-[var(--statusbar-height)] py-0.5 border-t border-loom-border text-2xs text-loom-muted font-mono">
-            <span className="truncate max-w-[min(28rem,55vw)]" title={activeChart.subtitle ?? undefined}>
+            <span className="truncate max-w-[min(28rem,45vw)]" title={activeChart.subtitle ?? undefined}>
               {CHART_KIND_CATALOG.find((e) => e.value === activeChart.kind)?.label ?? activeChart.kind}
               {" · "}
               {activeChart.xField}
               {activeChart.yField ? ` × ${activeChart.yField}` : ""}
             </span>
-            {/* Color ramp lives on the chart (footnote / legend) — don’t repeat it here. */}
             <span className="text-loom-border">·</span>
-            <span title="Press L while hovering to lock tooltip across charts">L = link</span>
+            <span title={aggregationHint || undefined}>
+              {useWebGPUScatter || useWebGpuScene || useWebGpuCube ? "Accelerated" : "Standard"}
+            </span>
+            {sampleHonestyLabel && (
+              <>
+                <span className="text-loom-border">·</span>
+                <span className="tabular-nums" title={`${sampleHonestyLabel}${aggregationHint ? ` · ${aggregationHint}` : ""}`}>
+                  {sampleHonestyLabel}
+                </span>
+              </>
+            )}
+            {(activeChart.kind === "scatter" || activeChart.kind === "bubble") && (
+              <>
+                <span className="text-loom-border">·</span>
+                <span title="Press L while hovering to lock tooltip across charts">L = link</span>
+              </>
+            )}
             {tooltipLink && (
               <>
                 <span className="text-loom-accent truncate max-w-[160px]">

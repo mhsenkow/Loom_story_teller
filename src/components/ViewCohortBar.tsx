@@ -9,7 +9,13 @@
 
 import { useMemo } from "react";
 import { useLoomStore } from "@/lib/store";
-import { CHART_TIME_RANGES, pickDefaultTimeField, temporalColumnNames, type ChartTimeRange } from "@/lib/chartTime";
+import {
+  CHART_TIME_RANGES,
+  pickDefaultTimeField,
+  resolveEffectiveTimeRec,
+  temporalColumnNames,
+  type ChartTimeRange,
+} from "@/lib/chartTime";
 import { describeViewCohort } from "@/lib/viewCohort";
 import { createChartRec } from "@/lib/recommendations";
 
@@ -86,8 +92,24 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
     () => viewTimeField ?? pickDefaultTimeField(columnStats, activeChart) ?? timeCols[0] ?? null,
     [viewTimeField, columnStats, activeChart, timeCols],
   );
+  const effectiveTime = useMemo(
+    () => resolveEffectiveTimeRec(viewTimeWindow, viewTimeField, activeChart),
+    [viewTimeWindow, viewTimeField, activeChart],
+  );
+  const brushable =
+    surface === "explorer" ||
+    activeChart?.kind === "scatter" ||
+    activeChart?.kind === "bubble" ||
+    activeChart?.kind === "hexbin";
 
-  if (!cohort.active && timeCols.length === 0) return null;
+  const summary = useMemo(() => {
+    if (cohort.hasTimeWindow || effectiveTime.timeWindow === "all") return cohort.summary;
+    const bit = `${effectiveTime.timeWindow}${effectiveTime.timeWindowField ? ` · ${effectiveTime.timeWindowField}` : ""}`;
+    if (cohort.summary === "Full sample") return bit;
+    return `${cohort.summary} · ${bit}`;
+  }, [cohort.hasTimeWindow, cohort.summary, effectiveTime]);
+
+  if (!cohort.active && timeCols.length === 0 && effectiveTime.timeWindow === "all") return null;
 
   return (
     <div
@@ -99,17 +121,17 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
         className="shrink-0 size-1.5 rounded-full bg-loom-accent shadow-[0_0_8px_color-mix(in_srgb,var(--loom-accent)_70%,transparent)]"
         aria-hidden
       />
-      <p className="min-w-0 flex-1 text-2xs font-mono text-loom-text truncate" title={cohort.summary}>
+      <p className="min-w-0 flex-1 text-2xs font-mono text-loom-text truncate" title={summary}>
         <span className="text-loom-muted uppercase tracking-[0.14em] mr-1.5">
           {surface === "chart" ? "View" : "Cohort"}
         </span>
-        {cohort.summary}
+        {summary}
       </p>
 
       {timeCols.length > 0 && (
         <div className="hidden sm:flex items-center gap-0.5 shrink-0">
           {CHART_TIME_RANGES.filter((r) => ["all", "24h", "7d", "30d"].includes(r.value)).map((r) => {
-            const on = (viewTimeWindow ?? "all") === r.value;
+            const on = effectiveTime.timeWindow === r.value;
             return (
               <button
                 key={r.value}
@@ -136,6 +158,7 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
         </div>
       )}
 
+      {brushable && (
       <button
         type="button"
         title={brushLinksFilter ? "Brush filters the table (on)" : "Brush only selects (off)"}
@@ -152,6 +175,7 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
       >
         link
       </button>
+      )}
 
       {selectedRowIndices.length > 0 && !cohort.hasRowFilter && (
         <button

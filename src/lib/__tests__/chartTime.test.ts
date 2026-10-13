@@ -15,6 +15,7 @@ import {
   formatChartTimeFootnote,
   formatChartTimeSpanRange,
   parseChartTime,
+  resolveEffectiveTimeRec,
   suggestedChartTimeWindows,
   timeColumnSpanMs,
 } from "../chartTime";
@@ -169,5 +170,18 @@ describe("chartTime", () => {
     );
     expect(composeChartFootnote(null, "Oct 6, 2026")).toBe("Oct 6, 2026");
     expect(composeChartFootnote("FEMA", null)).toBe("FEMA");
+  });
+
+  it("resolveEffectiveTimeRec prefers shared cohort, then chart Encoding", () => {
+    expect(
+      resolveEffectiveTimeRec("24h", "ts", { timeWindowField: "other", timeWindow: "7d" }),
+    ).toEqual({ timeWindowField: "ts", timeWindow: "24h" });
+    expect(
+      resolveEffectiveTimeRec("all", null, { timeWindowField: "ts", timeWindow: "24h" }),
+    ).toEqual({ timeWindowField: "ts", timeWindow: "24h" });
+    expect(resolveEffectiveTimeRec("all", null, { timeWindow: "all" })).toEqual({
+      timeWindowField: null,
+      timeWindow: "all",
+    });
   });
 });
