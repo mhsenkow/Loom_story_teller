@@ -25,6 +25,240 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-13l",
+    date: "2026-10-13",
+    title: "One view, both surfaces",
+    summary:
+      "Explorer and Chart share a living cohort — brush, filters, sort, and time window — with a quiet Reset view strip, color lock, column explain, and a mic on ⌘K.",
+    items: [
+      {
+        title: "Brush both ways",
+        detail:
+          "Lasso or shift-drag on the chart filters the table when Link is on. Select rows in Explorer, then Show selected. Esc clears the cohort brush.",
+      },
+      {
+        title: "Shared time · color lock · explain",
+        detail:
+          "Last 24h / 7d / 30d chips sit on both surfaces. Lock color in Encoding (or say “color by site”). Right-click Explain column — or ⌘K “explain discharge_cfs”.",
+      },
+      {
+        title: "Speak to search",
+        detail:
+          "The glass field has a mic — say “distribution” or “over time” and Loom ranks the same vernacular intents.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13k",
+    date: "2026-10-13",
+    title: "Search talks like analysis",
+    summary:
+      "⌘K understands data-science and everyday chart talk — “distribution”, “over time”, “share of total”, “map it”, “tufte”, “site vs discharge” — and jumps to the right chart, look, or action.",
+    items: [
+      {
+        title: "Say what you mean",
+        detail:
+          "Phrases map to chart types and options (log Y, stacked %, residuals, rolling average). Named columns become encodings when you type “X vs Y”.",
+      },
+      {
+        title: "Looks and chores too",
+        detail:
+          "Try tufte / clarity, clear filters, deep scan, encoding, or export — same glass field as dataset search.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13j",
+    date: "2026-10-13",
+    title: "Explorer filters follow you to Chart",
+    summary:
+      "Column filters, anomaly filters, and sort from Explorer now shape the Chart (and Preview). Search also finds saved uploads and open-data datasets by name.",
+    items: [
+      {
+        title: "Same cohort on Chart",
+        detail:
+          "Filter or sort in Explorer, switch to Chart — the plot uses that filtered set. The row count says “filtered” when a table filter is active.",
+      },
+      {
+        title: "Search opens datasets",
+        detail:
+          "⌘K: type a file or catalog name — Loom matches Recent, saved uploads, live sources, and Data.gov / data.gov.uk CSVs, then opens them.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13i",
+    date: "2026-10-13",
+    title: "Search & commands beside Tools",
+    summary:
+      "A glass search next to the Tools waffle (or ⌘K / Ctrl+K) jumps views, opens share, switches chart types, loads live sources, and turns short sentences into actions.",
+    items: [
+      {
+        title: "Type a word or a sentence",
+        detail:
+          "Try share, schema, usgs, bar chart, or “ask how many…” — Loom ranks the match and runs it. Chips under the field cover the common jumps.",
+      },
+      {
+        title: "Same dock as Tools",
+        detail:
+          "The magnifying glass sits next to the ibm.io Tools waffle above Preview, so search and suite stay one quiet corner.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13h",
+    date: "2026-10-13",
+    title: "Share links for anyone on loom.ibm.io",
+    summary:
+      "Shared stories and reopen links always use loom.ibm.io — never a personal workers.dev host or the iPad app’s localhost — so anyone can open the chart in the browser or App Store app path.",
+    items: [
+      {
+        title: "Public share URLs",
+        detail:
+          "Get link / Share image publish https://loom.ibm.io/s/… with “Open in Loom” pointing at loom.ibm.io/#story=…, including from the iPad app.",
+      },
+      {
+        title: "Clearer Share sheet",
+        detail:
+          "Centered image preview, chart title in the header and under the image, caption preview, and a tidier format + actions column.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13g",
+    date: "2026-10-13",
+    title: "Share image keeps a LinkedIn-ready link",
+    summary:
+      "Share image now publishes a short-lived story page first, then hands the OS both the PNG and that URL — so LinkedIn/X can unfurl the chart and recipients can reopen it.",
+    items: [
+      {
+        title: "Image + link in one share",
+        detail:
+          "LinkedIn often drops bare image files from the share sheet. Loom now attaches a public chart link (with Open Graph preview) alongside the PNG, and falls back to copying the link if a target rejects the file.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13f",
+    date: "2026-10-13",
+    title: "iPad Explore reaches the CSV proxy",
+    summary:
+      "Explore on iPad was blocked by the Worker’s cross-site check (Capacitor calls loom.ibm.io as cross-site from localhost). Allowed Origins now work, so catalog CSVs load into Chart.",
+    items: [
+      {
+        title: "Data.gov Explore on iPad",
+        detail:
+          "Tap Explore → full CSV via the Loom Worker → Chart. Also fixed the earlier bug where the app shell HTML was saved as a fake 16.7 KB file.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13e",
+    date: "2026-10-13",
+    title: "iPad Explore loads real catalog CSVs",
+    summary:
+      "Open-data Explore on iPhone/iPad was saving the app shell (~17 KB, 0 rows) instead of the CSV. It now fetches through the Loom Worker like live feeds do.",
+    items: [
+      {
+        title: "Data.gov / UK Explore works on iPad",
+        detail:
+          "Tapping Explore on a catalog CSV pulls the full file (capped by the Worker), so Query and Chart see real rows — not an empty 16.7 KB placeholder.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13d",
+    date: "2026-10-13",
+    title: "Share sheet that fits the device",
+    summary: "Share uses the full stage on iPad and desktop, stacks actions for clear tab order, and warms the PNG so the preview is often ready when the sheet opens.",
+    items: [
+      {
+        title: "Wider on tablet & desktop",
+        detail:
+          "Share is no longer a narrow phone dialog on iPad — preview sits beside formats and a vertical action rail, with a larger preview when there’s room.",
+      },
+      {
+        title: "Image ready sooner",
+        detail:
+          "Tapping Share starts rendering immediately; Share image, Save, Get link, and NeoSpace all use that same PNG. Reopening the same format reuses the warm preview.",
+      },
+      {
+        title: "iPad share labels fixed",
+        detail:
+          "On iPad the primary action is Share image (system share sheet with the file), not a desktop Save dialog — NeoSpace and chart link stay available.",
+      },
+      {
+        title: "Share keeps the legend",
+        detail:
+          "Map share-outs keep the city color key, size scale, title, and footnote — the same chrome as the main chart, not a bare basemap.",
+      },
+      {
+        title: "Export tab, less overlap",
+        detail:
+          "Share chart / image / download no longer triple the same job — Share sheet posts the image; Export keeps framing, story packs, video, SVG, and CSV.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13c",
+    date: "2026-10-13",
+    title: "iPad room · Discover that opens",
+    summary: "Charts keep their real size after relaunch, What’s interesting fills the stage, and the button opens even when a session was saved.",
+    items: [
+      {
+        title: "Not stuck on phone size",
+        detail:
+          "Closing and reopening on iPad no longer locks the chart into a narrow phone frame — Loom remeasures the real viewport after launch.",
+      },
+      {
+        title: "What’s interesting, roomy",
+        detail:
+          "The discover grid uses almost the whole screen (with a slim gutter), so more story cards fit at once.",
+      },
+      {
+        title: "Tap opens every time",
+        detail:
+          "What’s interesting right now opens even if Onboarding wasn’t mounted yet or you already have a saved session — no more dead taps.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13b",
+    date: "2026-10-13",
+    title: "Ideas rail · quieter chrome",
+    summary: "The chart ideas strip can tuck away, encodings match their marks, and the chart footers stop stacking on each other.",
+    items: [
+      {
+        title: "Ideas, not Suggestions",
+        detail:
+          "The left rail is now Ideas, with the count as a quiet subtitle. Hide it with the chevron; a slim Ideas tab brings it back. Ask AI is shorter too.",
+      },
+      {
+        title: "Less overlapping foot ink",
+        detail:
+          "Data-cube tips sit above the source/time footnote instead of on top of it, and the status bar drops the duplicate color ramp — color stays on the chart.",
+      },
+      {
+        title: "Encoding matches the mark",
+        detail:
+          "Force bubbles say Category/Value, geo bubbles and globe expose Size, radar/parallel only ask for Series, and bubble size no longer reappears after you clear it.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-13",
+    date: "2026-10-13",
+    title: "iPad launch fix",
+    summary: "The App Store build no longer crashes on open under Safari’s WebKit.",
+    items: [
+      {
+        title: "Opens cleanly on iPad",
+        detail:
+          "Chart thumbnails no longer trip a missing browser API that Safari on older iPadOS doesn’t ship — Loom stays up instead of flashing an application error.",
+      },
+    ],
+  },
+  {
     id: "2026-10-12",
     date: "2026-10-12",
     title: "Responsive shell for iPad and iPhone",

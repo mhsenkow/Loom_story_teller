@@ -20,6 +20,12 @@ import { WEB_VAULT_LABEL, WEB_VAULT_PATH, canLinkDeviceFolder, clearLinkedDirect
 import { reconcileLinkedFolder, formatLinkedFolderReconcileToast, type LinkedFileFingerprint } from "@/lib/linkedFolderReconcile";
 import { formatWebBatchImportToast } from "@/lib/webBatchImport";
 import { ipcErrorMessage, leaveSourcesShowChart } from "./shared";
+import {
+  LOOM_LOAD_CSV_EVENT,
+  LOOM_OPEN_RECENT_EVENT,
+  type LoomLoadCsvDetail,
+  type LoomOpenRecentDetail,
+} from "@/lib/loomDatasetEvents";
 
 export function useSidebarController() {
   const {
@@ -645,8 +651,8 @@ export function useSidebarController() {
     url: string,
     filename: string,
     opts?: { rowLimit?: number; sourceCredit?: string; sourceHome?: string },
-  ) {
-    const safeName = (filename || "dataset.csv").replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 80);
+  ): Promise<boolean> {
+    const safeName = (filename || "dataset.csv").replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80);
     const name = safeName.toLowerCase().endsWith(".csv") ? safeName : `${safeName}.csv`;
     setIsScanning(true);
     try {
@@ -675,8 +681,10 @@ export function useSidebarController() {
             ? `Exploring ${name} — first ${kept.toLocaleString()} rows (the portal has more)`
             : `Exploring ${name} — ${rowCount.toLocaleString()} rows`,
       );
+      return true;
     } catch (e) {
       setToast(ipcErrorMessage(e) || "Failed to load CSV in browser");
+      return false;
     } finally {
       setIsScanning(false);
     }
@@ -686,6 +694,34 @@ export function useSidebarController() {
     ? webVaultDisplayName(mountedFolder ?? WEB_VAULT_PATH, linkedMeta) ?? WEB_VAULT_LABEL
     : mountedFolder?.split("/").pop() ?? null;
   const webVaultFileCount = files.filter((f) => f.path.startsWith("web://")).length;
+
+  const openRecentRef = useRef(handleOpenRecentFile);
+  openRecentRef.current = handleOpenRecentFile;
+  const loadCsvRef = useRef(handleLoadRemoteCsv);
+  loadCsvRef.current = handleLoadRemoteCsv;
+
+  useEffect(() => {
+    const onRecent = (e: Event) => {
+      const detail = e instanceof CustomEvent ? (e.detail as LoomOpenRecentDetail | undefined) : undefined;
+      if (!detail?.file) return;
+      void openRecentRef.current(detail.file);
+    };
+    const onCsv = (e: Event) => {
+      const detail = e instanceof CustomEvent ? (e.detail as LoomLoadCsvDetail | undefined) : undefined;
+      if (!detail?.url) return;
+      void loadCsvRef.current(detail.url, detail.filename, {
+        rowLimit: detail.rowLimit,
+        sourceCredit: detail.sourceCredit,
+        sourceHome: detail.sourceHome,
+      });
+    };
+    window.addEventListener(LOOM_OPEN_RECENT_EVENT, onRecent);
+    window.addEventListener(LOOM_LOAD_CSV_EVENT, onCsv);
+    return () => {
+      window.removeEventListener(LOOM_OPEN_RECENT_EVENT, onRecent);
+      window.removeEventListener(LOOM_LOAD_CSV_EVENT, onCsv);
+    };
+  }, []);
 
   const closeDrawer = () => {
     if (dataSourcesExpanded) setDataSourcesExpanded(false);

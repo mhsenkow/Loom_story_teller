@@ -26,6 +26,9 @@ import { TableSkeleton } from "@/components/Skeleton";
 import { StartHere } from "@/components/StartHere";
 import { useIsMobile } from "@/lib/useMediaQuery";
 import { Dialog } from "@/components/ui/Dialog";
+import { encodingChannelLabels } from "@/lib/chartSupport";
+import { ViewCohortBar } from "@/components/ViewCohortBar";
+import { applyChartTimeWindow } from "@/lib/chartTime";
 
 function colWidthStorageKey(filePath: string): string {
   return `loom-col-widths:${filePath}`;
@@ -167,8 +170,20 @@ const DEFAULT_TABLE_ENHANCE = {
 };
 
 export function ExplorerView() {
-  const { selectedFile, sampleRows, columnStats, tablePrefs, setTablePrefs, setViewMode, setPanelTab, panelOpen, togglePanel, smartResults, tableFilterRowIndices, setTableFilterRowIndices, tableColumnFilters, setTableColumnFilter, setTableColumnFilters, selectedRowIndices, setSelectedRowIndices, tableViews, addTableView, removeTableView, applyTableView, tableUndoStack, tableRedoStack, pushTableUndo, undoTable, redoTable, hoveredRowIndex, setHoveredRowIndex, setToast, setPromptDialog, querySql } = useLoomStore();
+  const { selectedFile, sampleRows, columnStats, tablePrefs, setTablePrefs, setViewMode, setPanelTab, panelOpen, togglePanel, smartResults, tableFilterRowIndices, setTableFilterRowIndices, tableColumnFilters, setTableColumnFilter, setTableColumnFilters, tableSortColumn, tableSortDir, setTableSort, selectedRowIndices, setSelectedRowIndices, tableViews, addTableView, removeTableView, applyTableView, tableUndoStack, tableRedoStack, pushTableUndo, undoTable, redoTable, hoveredRowIndex, setHoveredRowIndex, setToast, setPromptDialog, querySql, activeChart, viewTimeField, viewTimeWindow, setStatsFocusColumn, setPanelOpen } = useLoomStore();
   const isMobile = useIsMobile();
+
+  /** Same accent-as-signal as PreviewFooter: which columns are on the active chart. */
+  const chartRoleByCol = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!activeChart) return map;
+    const labels = encodingChannelLabels(activeChart.kind);
+    if (activeChart.xField) map.set(activeChart.xField, labels.x);
+    if (activeChart.yField) map.set(activeChart.yField, labels.y);
+    if (activeChart.colorField) map.set(activeChart.colorField, labels.color);
+    if (activeChart.sizeField) map.set(activeChart.sizeField, labels.size);
+    return map;
+  }, [activeChart]);
   const [displayOpen, setDisplayOpen] = useState(false);
   /** Column filter row is opt-in on phones so the grid gets more vertical room. */
   const [showColumnFilters, setShowColumnFilters] = useState(false);
@@ -246,8 +261,8 @@ export function ExplorerView() {
     [allColumns, tablePrefs.visibleColumns, tablePrefs.columnOrder],
   );
 
-  const [sortCol, setSortCol] = useState<number | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>(null);
+  const sortCol = tableSortColumn ? columns.indexOf(tableSortColumn) : -1;
+  const sortDir: SortDir = tableSortDir;
   const [tableEnhance, setTableEnhance] = useState(DEFAULT_TABLE_ENHANCE);
   // On phones, keep header cells lean so columns stay scannable
   const enhance = isMobile
@@ -309,7 +324,7 @@ export function ExplorerView() {
   }, [columnsOpen]);
 
   const { sortedRows, sortedOriginalIndices } = useMemo(() => {
-    if (sortCol === null || sortDir === null || sortCol < 0 || sortCol >= columns.length) {
+    if (sortDir === null || sortCol < 0 || sortCol >= columns.length) {
       return { sortedRows: rawRows, sortedOriginalIndices: rawRows.map((_, i) => i) };
     }
     const colName = columns[sortCol];
@@ -358,49 +373,71 @@ export function ExplorerView() {
     }
     const effectiveFilters = tableColumnFilters ?? {};
     const colFilters = Object.keys(effectiveFilters).some((k) => (effectiveFilters[k] ?? "").trim());
-    if (!colFilters) return { displayRows: rows, displayOriginalIndices: indices };
-    const passed: { row: (string | number | boolean | null)[]; idx: number }[] = [];
-    rows.forEach((row, i) => {
-      let ok = true;
-      for (const col of columns) {
-        const filterVal = (effectiveFilters[col] ?? "").trim();
-        if (!filterVal) continue;
-        const rawIdx = allColumns.indexOf(col);
-        if (rawIdx < 0) continue;
-        const cell = row[rawIdx];
-        const str = String(cell ?? "").toLowerCase();
-        const f = filterVal.toLowerCase();
-        if (f === "null" || f === "is null") {
-          if (cell != null && cell !== "") {
-            ok = false;
-            break;
-          }
-          continue;
-        }
-        const stat = columnStats.find((s) => s.name === col);
-        const isNum = stat && (NUMERIC_TYPES.has(stat.data_type.toUpperCase()) || /int|float|double|decimal|real/i.test(stat.data_type));
-        if (isNum) {
-          const parsed = parseExplorerNumericFilter(filterVal);
-          if (parsed) {
-            if (!cellMatchesExplorerNumericFilter(cell, parsed)) {
+    let displayRows = rows;
+    let displayOriginalIndices = indices;
+    if (colFilters) {
+      const passed: { row: (string | number | boolean | null)[]; idx: number }[] = [];
+      rows.forEach((row, i) => {
+        let ok = true;
+        for (const col of columns) {
+          const filterVal = (effectiveFilters[col] ?? "").trim();
+          if (!filterVal) continue;
+          const rawIdx = allColumns.indexOf(col);
+          if (rawIdx < 0) continue;
+          const cell = row[rawIdx];
+          const str = String(cell ?? "").toLowerCase();
+          const f = filterVal.toLowerCase();
+          if (f === "null" || f === "is null") {
+            if (cell != null && cell !== "") {
               ok = false;
               break;
             }
             continue;
           }
+          const stat = columnStats.find((s) => s.name === col);
+          const isNum = stat && (NUMERIC_TYPES.has(stat.data_type.toUpperCase()) || /int|float|double|decimal|real/i.test(stat.data_type));
+          if (isNum) {
+            const parsed = parseExplorerNumericFilter(filterVal);
+            if (parsed) {
+              if (!cellMatchesExplorerNumericFilter(cell, parsed)) {
+                ok = false;
+                break;
+              }
+              continue;
+            }
+          }
+          if (!str.includes(f)) {
+            ok = false;
+            break;
+          }
         }
-        if (!str.includes(f)) {
-          ok = false;
-          break;
-        }
+        if (ok) passed.push({ row, idx: indices[i]! });
+      });
+      displayRows = passed.map((p) => p.row);
+      displayOriginalIndices = passed.map((p) => p.idx);
+    }
+    if (viewTimeWindow && viewTimeWindow !== "all" && viewTimeField) {
+      const timed = applyChartTimeWindow(displayRows, allColumns, {
+        timeWindowField: viewTimeField,
+        timeWindow: viewTimeWindow,
+      });
+      if (timed.filtered) {
+        displayOriginalIndices = timed.sourceIndices.map((i) => displayOriginalIndices[i]!);
+        displayRows = timed.rows;
       }
-      if (ok) passed.push({ row, idx: indices[i] });
-    });
-    return {
-      displayRows: passed.map((p) => p.row),
-      displayOriginalIndices: passed.map((p) => p.idx),
-    };
-  }, [sortedRows, sortedOriginalIndices, filterSet, tableColumnFilters, columns, allColumns, columnStats]);
+    }
+    return { displayRows, displayOriginalIndices };
+  }, [
+    sortedRows,
+    sortedOriginalIndices,
+    filterSet,
+    tableColumnFilters,
+    columns,
+    allColumns,
+    columnStats,
+    viewTimeField,
+    viewTimeWindow,
+  ]);
 
   const useVirtual = displayRows.length > VIRTUALIZE_THRESHOLD;
 
@@ -450,15 +487,16 @@ export function ExplorerView() {
   }, [columns, allColumns, types, columnStats]);
 
   const handleSort = useCallback((ci: number) => {
-    setSortCol((prev) => {
-      if (prev === ci) {
-        setSortDir((d) => (d === "asc" ? "desc" : d === "desc" ? null : "asc"));
-        return ci;
-      }
-      setSortDir("asc");
-      return ci;
-    });
-  }, []);
+    const colName = columns[ci];
+    if (!colName) return;
+    if (tableSortColumn === colName) {
+      if (tableSortDir === "asc") setTableSort(colName, "desc");
+      else if (tableSortDir === "desc") setTableSort(null, null);
+      else setTableSort(colName, "asc");
+      return;
+    }
+    setTableSort(colName, "asc");
+  }, [columns, tableSortColumn, tableSortDir, setTableSort]);
 
   const handleSortKey = useCallback(
     (e: React.KeyboardEvent, ci: number) => {
@@ -615,7 +653,7 @@ export function ExplorerView() {
       </Dialog>
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-[120px] py-1 bg-loom-surface border border-loom-border rounded shadow-lg text-xs"
+          className="loom-menu fixed z-50 min-w-[120px] py-1 rounded text-xs"
           style={{
             // Keep the menu on-screen near the right / bottom edges
             left: Math.max(4, Math.min(contextMenu.x, (typeof window !== "undefined" ? window.innerWidth : 9999) - 136)),
@@ -640,8 +678,26 @@ export function ExplorerView() {
           >
             Copy row
           </button>
+          {columns[contextMenu.colIndex] && (
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full px-3 py-1.5 text-left text-loom-accent hover:bg-loom-elevated"
+              onClick={() => {
+                const col = columns[contextMenu.colIndex]!;
+                setStatsFocusColumn(col);
+                setPanelTab("stats");
+                setPanelOpen(true);
+                setContextMenu(null);
+                setToast(`Explain · ${col}`);
+              }}
+            >
+              Explain column
+            </button>
+          )}
         </div>
       )}
+      <ViewCohortBar surface="explorer" />
       {/* Compact File Header */}
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-loom-border bg-loom-surface/50 text-2xs min-h-0 min-w-0 shrink-0">
         <h2 className="text-xs font-semibold text-loom-text truncate max-w-[140px] sm:max-w-[280px]" title={selectedFile.name}>{selectedFile.name}</h2>
@@ -796,7 +852,7 @@ export function ExplorerView() {
             </button>
             {columnsOpen && (
               <>
-                <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] max-h-64 overflow-y-auto py-2 bg-loom-surface border border-loom-border rounded shadow-lg">
+                <div className="loom-menu absolute left-0 top-full mt-1 z-50 min-w-[180px] max-h-64 overflow-y-auto py-2 rounded">
                   <div className="px-2 pb-1 border-b border-loom-border/50 text-2xs font-semibold text-loom-muted">Show columns</div>
                   {allColumns.map((col) => {
                     const visible = tablePrefs.visibleColumns == null || tablePrefs.visibleColumns.includes(col);
@@ -850,7 +906,7 @@ export function ExplorerView() {
             </button>
             {viewsOpen && (
               <>
-                <div className="absolute left-0 top-full mt-1 z-50 min-w-[160px] py-2 bg-loom-surface border border-loom-border rounded shadow-lg">
+                <div className="loom-menu absolute left-0 top-full mt-1 z-50 min-w-[160px] py-2 rounded">
                   <button
                     type="button"
                     onClick={() => {
@@ -1002,6 +1058,7 @@ export function ExplorerView() {
                   const isSorted = sortCol === ci;
                   const nullP = enhance.showNullRate ? nullPct(col) : null;
                   const trend = isNum && colData && enhance.showTrendCue ? trendDirection(colData.values) : null;
+                  const chartRole = chartRoleByCol.get(col);
                   return (
                     <th
                       key={col}
@@ -1012,7 +1069,13 @@ export function ExplorerView() {
                       onDragOver={handleColumnDragOver}
                       onDrop={(e) => handleColumnDrop(e, col)}
                       onDragEnd={handleColumnDragEnd}
-                      className={`relative px-2 py-1 text-left text-2xs font-semibold text-loom-muted whitespace-nowrap sticky top-0 bg-loom-bg border-b border-loom-border cursor-pointer hover:bg-loom-elevated/60 select-none ${draggedCol === col ? "opacity-50" : ""}`}
+                      className={`relative px-2 py-1 text-left text-2xs font-semibold whitespace-nowrap sticky top-0 cursor-pointer hover:bg-loom-elevated/60 select-none ${
+                        draggedCol === col ? "opacity-50" : ""
+                      } ${
+                        chartRole
+                          ? "text-loom-text bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-bg))] border-b border-loom-accent/35 shadow-[inset_0_-2px_0_0_color-mix(in_srgb,var(--loom-accent)_55%,transparent)]"
+                          : "text-loom-muted bg-loom-bg border-b border-loom-border"
+                      }`}
                       onKeyDown={(e) => handleSortKey(e, ci)}
                       onClick={() => {
                         // A long-press already opened the profile — don't also sort.
@@ -1037,12 +1100,21 @@ export function ExplorerView() {
                       onTouchEnd={() => {
                         if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
                       }}
-                      title="Click to sort, right-click or long-press to profile, drag to reorder"
+                      title={
+                        chartRole
+                          ? `${col} — on chart as ${chartRole}. Click to sort, right-click or long-press to profile, drag to reorder`
+                          : "Click to sort, right-click or long-press to profile, drag to reorder"
+                      }
                       aria-sort={isSorted ? (sortDir === "asc" ? "ascending" : "descending") : undefined}
                     >
                       <div className="flex flex-col gap-0.5">
                         <span className="inline-flex items-center gap-1">
                           {col}
+                          {chartRole && (
+                            <span className="text-[9px] font-medium normal-case tracking-normal text-loom-accent" aria-label={`Chart ${chartRole}`}>
+                              {chartRole}
+                            </span>
+                          )}
                           {isSorted && (
                             <span className="text-loom-accent font-normal" aria-hidden>
                               {sortDir === "asc" ? "↑" : "↓"}

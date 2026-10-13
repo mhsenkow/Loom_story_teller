@@ -121,9 +121,14 @@ export function fitEncodingToKind(
   kind: ChartKind,
   columns: ColumnInfo[],
   enc: { xField: string; yField: string | null; colorField: string | null },
+  opts?: { lockedColorField?: string | null },
 ): { xField: string; yField: string | null; colorField: string | null } {
   const byName = new Map(columns.map((c) => [c.name, c]));
   const typeOf = (c: ColumnInfo) => inferType(c.data_type, c.name, c.min_value, c.max_value);
+  const lockedColor = opts?.lockedColorField?.trim() || null;
+  if (lockedColor && byName.has(lockedColor)) {
+    enc = { ...enc, colorField: lockedColor };
+  }
   /** A column that reads well as discrete groups. */
   const isCategory = (name: string | null, max = 40): boolean => {
     const c = name ? byName.get(name) : undefined;
@@ -191,15 +196,32 @@ export function fitEncodingToKind(
 
   // One mark per category: a color field that isn't the category would color each mark by
   // whichever row came first — meaningless (e.g. a lollipop per product colored by city)
-  if (["lollipop", "funnel", "waterfall", "pie", "radialBar", "isotype", "waffle", "isoBars"].includes(kind) && colorField !== xField) {
+  if (
+    ["lollipop", "funnel", "waterfall", "pie", "radialBar", "isotype", "waffle", "isoBars"].includes(kind) &&
+    colorField !== xField &&
+    colorField !== lockedColor
+  ) {
     colorField = null;
   }
 
   // Color must be a small set of groups; required kinds get the next-best category
-  if (colorField && colorField !== xField && !isCategory(colorField, 12)) colorField = null;
+  // Locked color is allowed a wider cardinality so “color by site” survives mark switches.
+  if (colorField && colorField !== xField && !isCategory(colorField, colorField === lockedColor ? 80 : 12)) {
+    if (colorField !== lockedColor) colorField = null;
+  }
   if (CATEGORY_COLOR_KINDS.has(kind) && (!colorField || colorField === xField)) {
     // Flows show their top nodes, so a large category (e.g. 142 countries) still works
-    colorField = bestCategory(new Set([xField, yField])) ?? bestCategory(new Set([xField, yField]), true) ?? colorField;
+    colorField =
+      (lockedColor && lockedColor !== xField ? lockedColor : null) ??
+      bestCategory(new Set([xField, yField])) ??
+      bestCategory(new Set([xField, yField]), true) ??
+      colorField;
+  }
+  if (lockedColor && byName.has(lockedColor) && colorField !== lockedColor) {
+    // Prefer lock unless this mark kind forced color === x (pie etc.)
+    if (!["pie", "radialBar", "funnel", "waterfall"].includes(kind) || lockedColor === xField) {
+      colorField = lockedColor;
+    }
   }
   return { xField, yField, colorField };
 }
@@ -242,7 +264,9 @@ export function createChartRec(
   const numCols = measureColumns(columns);
   const nomCols = columns.filter((c) => inferType(c.data_type, c.name, c.min_value, c.max_value) === "nominal");
   const timeCols = columns.filter((c) => inferType(c.data_type, c.name, c.min_value, c.max_value) === "temporal");
-  let sizeField = extra?.sizeField ?? null;
+  // undefined = unset (may auto-fill for bubble/dumbbell); null = explicitly cleared
+  const sizeFieldProvided = extra != null && "sizeField" in extra;
+  let sizeField = sizeFieldProvided ? (extra!.sizeField ?? null) : undefined;
   const rowField = extra?.rowField ?? null;
   const glowField = extra?.glowField ?? null;
   const outlineField = extra?.outlineField ?? null;
@@ -416,14 +440,15 @@ export function createChartRec(
       break;
     case "strip":
       if (!yField) return null;
+      // Canvas strip ignores size — keep encoding honest
+      sizeField = null;
       enc.x = { field: xField, type: "quantitative" };
       enc.y = { field: yField, type: "nominal" };
       enc.color = colorField
         ? { field: colorField, type: "nominal", scale: { range: COLORS } }
         : { field: yField, type: "nominal", scale: { range: COLORS }, legend: null };
-      if (sizeField) enc.size = { field: sizeField, type: "quantitative", scale: { range: [2, 12] } };
       title = `${xField} by ${yField}`;
-      subtitle = colorField ? `colored by ${colorField}` : (sizeField ? `size by ${sizeField}` : "strip plot");
+      subtitle = colorField ? `colored by ${colorField}` : "strip plot";
       break;
     case "box":
       if (!yField) return null;
@@ -462,11 +487,13 @@ export function createChartRec(
     }
     case "bubble": {
       if (!yField) return null;
-      // Compare like with like: skip time-ish numbers (year) as the "end" measure
-      sizeField = sizeField
-        ?? numCols.find(c => c.name !== xField && c.name !== yField && !/^(year|yr|month|day|week|hour)$/i.test(c.name))?.name
-        ?? numCols.find(c => c.name !== xField && c.name !== yField)?.name
-        ?? null;
+      // Auto-pick size only when recommending (sizeField unset) — never overwrite a cleared size
+      if (sizeField === undefined) {
+        sizeField =
+          numCols.find(c => c.name !== xField && c.name !== yField && !/^(year|yr|month|day|week|hour)$/i.test(c.name))?.name
+          ?? numCols.find(c => c.name !== xField && c.name !== yField)?.name
+          ?? null;
+      }
       enc.x = { field: xField, type: "quantitative" };
       enc.y = { field: yField, type: "quantitative" };
       if (sizeField) enc.size = { field: sizeField, type: "quantitative", scale: { range: [16, 120] } };
@@ -519,9 +546,9 @@ export function createChartRec(
     }
     case "dumbbell": {
       if (!yField) return null;
-      sizeField = sizeField
-        ?? numCols.find(c => c.name !== xField && c.name !== yField)?.name
-        ?? null;
+      if (sizeField === undefined) {
+        sizeField = numCols.find(c => c.name !== xField && c.name !== yField)?.name ?? null;
+      }
       if (!sizeField || sizeField === yField) return null;
       enc.x = { field: xField, type: "nominal" };
       enc.y = { field: yField, type: "quantitative", aggregate: yAggregate ?? "mean" };
@@ -551,11 +578,12 @@ export function createChartRec(
     }
     case "funnel": {
       const agg = aggForMeasure("sum");
+      // Canvas funnel ignores colorField
+      colorField = null;
       enc.x = { field: xField, type: "nominal", sort: "-y" };
       enc.y = yField
         ? { field: yField, type: "quantitative", aggregate: agg }
         : { aggregate: "count", type: "quantitative" };
-      if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${aggLabel(agg)} of ${yField} funnel` : `Count funnel by ${xField}`;
       subtitle = "funnel — stage conversion";
       break;
@@ -587,9 +615,17 @@ export function createChartRec(
       enc.theta = yField
         ? { field: yField, type: "quantitative", aggregate: agg }
         : { aggregate: "count", type: "quantitative" };
-      enc.color = { field: xField, type: "nominal", scale: { range: COLORS } };
+      // Outer leaf = xField; Nest (colorField) drives the inner ring when set
+      enc.color = {
+        field: colorField && colorField !== xField ? colorField : xField,
+        type: "nominal",
+        scale: { range: COLORS },
+      };
+      if (colorField && colorField !== xField) {
+        enc.detail = { field: xField, type: "nominal" };
+      }
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = colorField ? `inner ring: ${colorField}` : "sunburst";
+      subtitle = colorField && colorField !== xField ? `inner ring: ${colorField}` : "sunburst";
       break;
     }
     case "choropleth": {
@@ -647,7 +683,7 @@ export function createChartRec(
     default: {
       if (isGpuSceneKind(kind)) {
         const gpu = buildGpuSceneRec(kind, columns, xField, yField, colorField, {
-          sizeField,
+          sizeField: sizeField ?? null,
           zField: extra?.zField,
           timeField: extra?.timeField,
           trailId: extra?.trailId,
@@ -664,7 +700,7 @@ export function createChartRec(
       }
       if (isGeoMapKind(kind)) {
         const geo = buildGeoMapRec(kind, columns, xField, yField, colorField, {
-          sizeField,
+          sizeField: sizeField ?? null,
           yAggregate,
         });
         if (!geo) return null;
@@ -678,7 +714,7 @@ export function createChartRec(
       }
       if (isOddChartKind(kind)) {
         const odd = buildOddChartRec(kind, columns, xField, yField, colorField, tableName, {
-          sizeField,
+          sizeField: sizeField ?? null,
           yAggregate,
         });
         if (!odd) return null;

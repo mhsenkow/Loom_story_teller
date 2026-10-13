@@ -308,6 +308,25 @@ describe("handlePublishStory", () => {
     expect(body.url).toContain("/s/");
   });
 
+  it("returns loom.ibm.io story URLs even when POSTed on workers.dev", async () => {
+    const { handlePublishStory } = await importHandlers();
+    const html = "<html><body>Cap publish</body></html>";
+    const req = makeRequest("https://loom-storyteller.mhsenkow.workers.dev/api/stories", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: "https://localhost",
+      },
+      body: JSON.stringify({ html }),
+    });
+    const env = makeEnv({ STORY_ADMIN_TOKEN: undefined });
+    const res = await handlePublishStory(req, env);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { url: string };
+    expect(body.url.startsWith("https://loom.ibm.io/s/")).toBe(true);
+    expect(body.url).not.toContain("mhsenkow");
+  });
+
   it("allows publish from approved Origin", async () => {
     const { handlePublishStory } = await importHandlers();
     const html = "<html><body>Story from web</body></html>";
@@ -421,12 +440,20 @@ describe("fetchCsvAuthorized", () => {
     expect(fetchCsvAuthorized(req)).toBe(true);
   });
 
-  it("blocks cross-site", async () => {
+  it("blocks cross-site without an allowed Origin", async () => {
     const { fetchCsvAuthorized } = await importHandlers();
     const req = makeRequest("https://loom.ibm.io/api/fetch-csv", {
       headers: { "Sec-Fetch-Site": "cross-site" },
     });
     expect(fetchCsvAuthorized(req)).toBe(false);
+  });
+
+  it("allows Capacitor cross-site with https://localhost Origin", async () => {
+    const { fetchCsvAuthorized } = await importHandlers();
+    const req = makeRequest("https://loom.ibm.io/api/fetch-csv", {
+      headers: { "Sec-Fetch-Site": "cross-site", Origin: "https://localhost" },
+    });
+    expect(fetchCsvAuthorized(req)).toBe(true);
   });
 
   it("allows approved Origin when Sec-Fetch-Site is absent", async () => {

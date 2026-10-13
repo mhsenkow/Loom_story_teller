@@ -1,11 +1,10 @@
 // =================================================================
 // ShareSheet — one-tap "post this chart" flow
 // =================================================================
-// Bottom sheet on phones, dialog on desktop. Renders the chart at a
-// social size as soon as it opens (so the native share sheet fires
-// inside the tap — iOS drops navigator.share after slow async work),
-// then offers Share image / Save / Get link / Copy caption.
-// The Export tab keeps the long tail (SVG, carousel, video, CSV…).
+// Phone: full-width bottom sheet. Tablet / desktop: wide stage with
+// preview + vertical action rail. PNG is warmed on Share tap
+// (sharePreviewCache) so the image is often ready when the sheet opens;
+// every image share-out uses that same blob.
 // =================================================================
 
 "use client";
@@ -26,7 +25,7 @@ import {
 import { getThemeUiColors } from "@/lib/chartPalettes";
 import { downloadBlob } from "@/lib/zipStore";
 import { buildChartSharePageHtml } from "@/lib/dashboardMicrosite";
-import { isTauri } from "@/lib/tauri";
+import { isDesktop } from "@/lib/tauri";
 import { chartLinkFromState, chartLinkSrc, isPortableChartLink } from "@/lib/chartLink";
 import { currentChartShareUrl } from "./ChartLinkSync";
 import {
@@ -35,6 +34,13 @@ import {
   defaultIncludeShareData,
 } from "@/lib/shareLineage";
 import { getFocusableElements, trapTabKey } from "@/lib/focusTrap";
+import { useShellMode } from "@/lib/useMediaQuery";
+import { useKeyboardBottomInset } from "@/lib/useVisualViewport";
+import {
+  peekSharePreview,
+  sharePreviewKeyFromStore,
+  warmSharePreview,
+} from "@/lib/sharePreviewCache";
 
 const FORMATS: { id: SocialPresetId; label: string; hint: string }[] = [
   { id: "ig-square", label: "Square", hint: "Feed posts" },
@@ -79,13 +85,24 @@ function ShareSheetBody() {
     setToast,
   } = useLoomStore();
 
+  const shellMode = useShellMode();
+  const keyboardInset = useKeyboardBottomInset();
+  const wide = shellMode !== "phone";
+  const split = shellMode === "tablet" || shellMode === "desktop";
+
   const presetId: SocialPresetId = FORMATS.some((f) => f.id === socialPresetId) ? socialPresetId : "ig-square";
   const preset = getSocialPreset(presetId);
   const chartTitle = activeChart ? (chartTitleOverrides[activeChart.id] ?? activeChart.title) : "";
   const [draftTitle, setDraftTitle] = useState(chartTitle);
-  const [blob, setBlob] = useState<Blob | null>(null);
+  const [blob, setBlob] = useState<Blob | null>(() => {
+    const key = sharePreviewKeyFromStore(presetId);
+    return key ? peekSharePreview(key) : null;
+  });
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [capturing, setCapturing] = useState(false);
+  const [capturing, setCapturing] = useState(() => {
+    const key = sharePreviewKeyFromStore(presetId);
+    return !(key && peekSharePreview(key));
+  });
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const [busy, setBusy] = useState<null | "share" | "link" | "neospace">(null);
@@ -96,7 +113,8 @@ function ShareSheetBody() {
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const nativeShare = useMemo(canShareFiles, []);
-  const desktop = useMemo(isTauri, []);
+  /** Mac/Windows Tauri only — iPad app is not “desktop” for share labels / NeoSpace. */
+  const desktopApp = useMemo(isDesktop, []);
   const close = useCallback(() => {
     setShareSheetOpen(false);
     returnFocusRef.current?.focus();
@@ -105,6 +123,11 @@ function ShareSheetBody() {
   useEffect(() => {
     setIncludeData(defaultIncludeShareData(selectedFile));
   }, [selectedFile?.path, selectedFile?.sourceUrl]);
+
+  // Keep headline field aligned with the chart title (overrides / rec changes).
+  useEffect(() => {
+    setDraftTitle(chartTitle);
+  }, [chartTitle]);
 
   const shareDataPreview = useMemo(() => {
     const chart = chartLinkFromState(useLoomStore.getState());
@@ -126,21 +149,29 @@ function ShareSheetBody() {
     });
   }, [activeChart, chartTitle, aiSuggestionReason, selectedFile, exportBurnIn]);
 
-  // Render the chart at the chosen size whenever the format, headline, or credit line changes.
+  // Prefer warm cache; otherwise capture (and stash) for this key.
   useEffect(() => {
     if (!activeChart) return;
     const seq = ++captureSeq.current;
+    const key = sharePreviewKeyFromStore(presetId);
+    const cached = key ? peekSharePreview(key) : null;
+    if (cached) {
+      setBlob(cached);
+      setCapturing(false);
+      setFailed(false);
+      return;
+    }
     setCapturing(true);
     setFailed(false);
-    setBlob(null);
+    // Keep the prior preview dimmed while the new format renders (don't flash empty).
     setLink(null);
     void (async () => {
-      const { capturePlatformPng } = await import("@/lib/capturePlatformPng");
-      const out = await capturePlatformPng(presetId, { shouldRun: () => seq === captureSeq.current });
+      const out = await warmSharePreview(presetId);
       if (seq !== captureSeq.current) return;
       setCapturing(false);
       if (!out) {
         setFailed(true);
+        setBlob(null);
         return;
       }
       setBlob(out);
@@ -148,7 +179,10 @@ function ShareSheetBody() {
   }, [activeChart, presetId, chartTitle, exportBurnIn.includeLoomMark, exportBurnIn.includeSource, retry]);
 
   useEffect(() => {
-    if (!blob) return;
+    if (!blob) {
+      setPreviewUrl(null);
+      return;
+    }
     const url = URL.createObjectURL(blob);
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
@@ -160,14 +194,22 @@ function ShareSheetBody() {
     const focusables = getFocusableElements(root);
     (focusables[0] ?? root)?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+        return;
+      }
       if (root) trapTabKey(root, e);
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    const prevOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      document.documentElement.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey, true);
+    };
   }, [close]);
 
-  // Bump the sequence on unmount so a capture finishing late is ignored.
   useEffect(() => () => void captureSeq.current++, []);
 
   const commitTitle = () => {
@@ -186,22 +228,47 @@ function ShareSheetBody() {
     if (!blob) return;
     setBusy("share");
     try {
-      if (desktop) {
+      if (desktopApp) {
         const { saveBinaryAndReveal } = await import("@/lib/tauri");
         const path = await saveBinaryAndReveal(blob, filename);
         setToast(path ? "Saved — revealed in Finder" : "Save cancelled");
         return;
       }
-      if (nativeShare) {
+      if (nativeShare || typeof navigator.share === "function") {
+        // Publish first so LinkedIn/X get an OG image + reopen link — bare PNG
+        // files are often dropped by those share targets on iOS.
+        const published = await publishStory();
+        const storyUrl = published?.url ?? null;
+        if (storyUrl) setLink(storyUrl);
+        const { shareWithFallback, buildImageShareAttempts } = await import("@/lib/nativeExport");
         const file = new File([blob], filename, { type: "image/png" });
-        await navigator.share({ files: [file], title: chartTitle, text: caption });
-        return;
+        const outcome = await shareWithFallback(
+          buildImageShareAttempts({
+            file,
+            title: chartTitle,
+            caption,
+            url: storyUrl,
+          }),
+        );
+        if (outcome === "cancelled") return;
+        if (outcome === "shared") {
+          setToast(
+            storyUrl
+              ? "Shared with image + link — LinkedIn/X can unfurl the chart"
+              : "Shared image (link publish failed — try Get link)",
+          );
+          return;
+        }
+        if (storyUrl && (await copyTextToClipboard(`${caption}\n\n${storyUrl}`.trim()))) {
+          downloadBlob(blob, filename);
+          setToast("Image saved · story link copied — paste into LinkedIn if the share sheet dropped it");
+          return;
+        }
       }
       downloadBlob(blob, filename);
       setToast("Image saved");
     } catch (e) {
       if (e instanceof Error && e.name === "AbortError") return;
-      // Activation expired or share target refused — fall back to a download.
       downloadBlob(blob, filename);
       setToast("Image saved");
     } finally {
@@ -243,13 +310,14 @@ function ShareSheetBody() {
             columns: encodedCols.length ? encodedCols : null,
           })
         : null;
+    const { publicLoomWebOrigin } = await import("@/lib/publicOrigin");
     const html = buildChartSharePageHtml({
       title: chartTitle,
       caption,
       imageDataUrl: image,
       sourceLabel: selectedFile?.name,
-      appUrl: typeof window !== "undefined" && !desktop ? window.location.origin : null,
-      openUrl: desktop ? null : currentChartShareUrl(),
+      appUrl: desktopApp ? null : publicLoomWebOrigin(),
+      openUrl: desktopApp ? null : currentChartShareUrl(),
       lineage: snapshot
         ? {
             capturedAt: snapshot.capturedAt,
@@ -271,8 +339,6 @@ function ShareSheetBody() {
   const handleGetLink = () => {
     if (!blob) return;
     setBusy("link");
-    // Resolve publish inside the click, then feed ClipboardItem a promise so
-    // iOS keeps user-activation for the eventual URL (LOOM-413).
     const publishedPromise = publishStory();
     const urlPromise = publishedPromise.then((published) => {
       if (!published?.url) {
@@ -286,7 +352,7 @@ function ShareSheetBody() {
         const published = await publishedPromise;
         if (!published?.url) {
           setToast(
-            desktop
+            desktopApp
               ? "Links need the web app — save the image instead"
               : published?.error || "Couldn’t publish right now — share the image instead",
           );
@@ -313,14 +379,9 @@ function ShareSheetBody() {
 
   const NEOSPACE_ORIGIN = "https://neospace.ibm.io";
 
-  /**
-   * One tap: publish chart to Loom KV (`/s/{id}.img` JPEG), then open NeoSpace
-   * with the story URL. NeoSpace fetches the hosted JPEG over HTTPS — postMessage
-   * of the sheet PNG is best-effort only.
-   */
   const handlePostToNeoSpace = async () => {
-    if (!blob || desktop) {
-      setToast(desktop ? "Post to NeoSpace from the web app at loom.ibm.io" : "Render the chart first");
+    if (!blob || desktopApp) {
+      setToast(desktopApp ? "Post to NeoSpace from the web app at loom.ibm.io" : "Render the chart first");
       return;
     }
     setBusy("neospace");
@@ -348,18 +409,16 @@ function ShareSheetBody() {
         return;
       }
 
-      // Best-effort: pump the preview PNG until NeoSpace acks ready.
-      // Story URL in the query is authoritative — NeoSpace fetches /s/{id}.img if this fails.
       try {
         const buffer = await blob.arrayBuffer();
-        const filename = `${slugifyFilename(chartTitle || "chart")}.png`;
+        const nsName = `${slugifyFilename(chartTitle || "chart")}.png`;
         const payload = {
           type: "loom-neospace-share" as const,
           v: 1 as const,
           text: body,
           story: storyUrl,
           image: {
-            name: filename,
+            name: nsName,
             type: "image/png",
             buffer,
           },
@@ -400,8 +459,6 @@ function ShareSheetBody() {
     }
   };
 
-  // Loom link (#chart=…): built synchronously from the store so the clipboard
-  // write stays inside the tap on iOS.
   const handleCopyLoomLink = async () => {
     const url = currentChartShareUrl();
     if (!url) return;
@@ -417,7 +474,7 @@ function ShareSheetBody() {
 
   const handleShareLink = async () => {
     if (!link) return;
-    if (typeof navigator.share === "function" && !desktop) {
+    if (typeof navigator.share === "function" && !desktopApp) {
       try {
         await navigator.share({ url: link, title: chartTitle, text: chartTitle });
         return;
@@ -441,10 +498,316 @@ function ShareSheetBody() {
 
   const aspect = `${preset.width ?? 1} / ${preset.height ?? 1}`;
   const ready = !!blob && !capturing && !failed;
+  const primaryLabel = busy === "share"
+    ? "Preparing link…"
+    : desktopApp
+      ? "Save image…"
+      : nativeShare || (typeof navigator !== "undefined" && typeof navigator.share === "function")
+        ? "Share image"
+        : "Download image";
+
+  const overlayAlign =
+    shellMode === "phone" ? "items-end" : "items-center";
+  const panelShape =
+    shellMode === "phone"
+      ? "rounded-t-2xl max-h-[94dvh]"
+      : shellMode === "tablet"
+        ? "rounded-2xl max-h-[min(92dvh,58rem)] w-full max-w-[min(56rem,calc(100vw-1.25rem))]"
+        : "rounded-2xl max-h-[min(90dvh,54rem)] w-full max-w-[min(68rem,calc(100vw-2rem))]";
+  const overlayPad =
+    shellMode === "phone" ? "p-0" : "p-2 sm:p-3";
+  const previewMaxH = shellMode === "phone"
+    ? "min(38dvh, 22rem)"
+    : shellMode === "tablet"
+      ? "min(62dvh, 34rem)"
+      : "min(66dvh, 38rem)";
+  const canNativeShare =
+    nativeShare || (typeof navigator !== "undefined" && typeof navigator.share === "function");
+
+  const formatPicker = (
+    <div
+      className={split ? "flex flex-col gap-1" : "grid grid-cols-5 gap-1.5"}
+      role="radiogroup"
+      aria-label="Image format"
+      onKeyDown={(e) => {
+        const idx = FORMATS.findIndex((f) => f.id === presetId);
+        if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+          e.preventDefault();
+          setSocialPresetId(FORMATS[(idx + 1) % FORMATS.length]!.id);
+        } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+          e.preventDefault();
+          setSocialPresetId(FORMATS[(idx - 1 + FORMATS.length) % FORMATS.length]!.id);
+        }
+      }}
+    >
+      {FORMATS.map((f) => (
+        <button
+          key={f.id}
+          type="button"
+          role="radio"
+          aria-checked={presetId === f.id}
+          tabIndex={presetId === f.id ? 0 : -1}
+          onClick={() => setSocialPresetId(f.id)}
+          className={
+            split
+              ? `min-h-10 w-full rounded-lg border px-3 py-2 flex items-baseline justify-between gap-2 text-left transition-colors ${
+                  presetId === f.id
+                    ? "border-loom-accent bg-loom-accent/10 text-loom-text"
+                    : "border-transparent bg-loom-elevated/40 text-loom-muted hover:text-loom-text hover:border-loom-border"
+                }`
+              : `min-h-12 rounded-lg border px-1 py-1.5 flex flex-col items-center justify-center gap-0.5 transition-colors ${
+                  presetId === f.id
+                    ? "border-loom-accent bg-loom-accent/10 text-loom-text"
+                    : "border-loom-border text-loom-muted hover:text-loom-text"
+                }`
+          }
+        >
+          <span className={`font-semibold ${split ? "text-sm" : "text-xs"}`}>{f.label}</span>
+          <span className={`leading-tight ${split ? "text-2xs text-loom-muted shrink-0" : "text-2xs text-center opacity-75"}`}>
+            {f.hint}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+
+  const optionsBlock = (
+    <div className="space-y-4">
+      <label className="block">
+        <span className="text-2xs font-medium text-loom-muted uppercase tracking-wider">Chart title</span>
+        <input
+          type="text"
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          onBlur={commitTitle}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          }}
+          className="loom-input w-full mt-1.5 text-sm font-medium"
+          placeholder="Title on the shared image"
+          enterKeyHint="done"
+          maxLength={120}
+          aria-describedby="share-title-hint"
+        />
+        <span id="share-title-hint" className="mt-1 block text-2xs text-loom-muted leading-snug">
+          Shown on the image and in the post caption. Blur or press Enter to update the preview.
+        </span>
+      </label>
+
+      {caption ? (
+        <div className="rounded-lg border border-loom-border/70 bg-loom-bg/50 px-3 py-2.5">
+          <p className="text-2xs font-medium text-loom-muted uppercase tracking-wider mb-1">Caption</p>
+          <p className="text-xs text-loom-text whitespace-pre-wrap leading-relaxed line-clamp-4">{caption}</p>
+        </div>
+      ) : null}
+
+      <div className="space-y-2.5">
+        <label className="flex items-start gap-2.5 text-xs text-loom-text min-h-9 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={exportBurnIn.includeLoomMark}
+            onChange={(e) =>
+              setExportBurnIn((prev) => ({ ...prev, includeLoomMark: e.target.checked }))
+            }
+          />
+          <span>
+            “Made with Loom” footer
+            <span className="block text-2xs text-loom-muted mt-0.5">Burned into the PNG corner</span>
+          </span>
+        </label>
+
+        <label className="flex items-start gap-2.5 text-xs text-loom-text min-h-9 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={includeData}
+            disabled={shareDataPreview.rows === 0 || shareDataPreview.cols === 0}
+            onChange={(e) => setIncludeData(e.target.checked)}
+          />
+          <span>
+            Include data with public link
+            <span className="block text-2xs text-loom-muted mt-0.5 leading-snug">
+              {shareDataPreview.rows.toLocaleString()} rows · {shareDataPreview.cols} column
+              {shareDataPreview.cols === 1 ? "" : "s"}
+              {shareDataPreview.columnNames.length
+                ? ` (${shareDataPreview.columnNames.slice(0, 4).join(", ")}${
+                    shareDataPreview.columnNames.length > 4 ? "…" : ""
+                  })`
+                : ""}
+              . Anyone on loom.ibm.io can reopen the chart.
+            </span>
+          </span>
+        </label>
+      </div>
+
+      {link && (
+        <div className="rounded-lg border border-loom-accent/40 bg-loom-accent/5 p-3 space-y-2">
+          <p className="text-2xs text-loom-muted leading-snug">
+            Public on <span className="text-loom-text/90 font-medium">loom.ibm.io</span> for 7 days
+            {includeData ? " · image + data snapshot" : " · image only"}.
+          </p>
+          <p className="text-xs font-mono text-loom-text break-all select-all">{link}</p>
+          <button type="button" onClick={handleShareLink} className="loom-btn-primary w-full min-h-10 text-sm rounded-lg">
+            {copied === "link" ? "Link copied" : canNativeShare ? "Share link" : "Copy link"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+
+  const previewBlock = (
+    <div className={`flex flex-col ${split ? "h-full min-h-0" : ""}`}>
+      <div
+        className="relative flex-1 min-h-0 flex items-center justify-center rounded-xl border border-loom-border/80 bg-loom-bg p-3 sm:p-5"
+        style={{
+          minHeight: split ? "14rem" : "11rem",
+          maxHeight: previewMaxH,
+          backgroundImage:
+            "linear-gradient(45deg, color-mix(in srgb, var(--loom-border) 28%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--loom-border) 28%, transparent) 75%), linear-gradient(45deg, color-mix(in srgb, var(--loom-border) 28%, transparent) 25%, transparent 25%, transparent 75%, color-mix(in srgb, var(--loom-border) 28%, transparent) 75%)",
+          backgroundSize: "14px 14px",
+          backgroundPosition: "0 0, 7px 7px",
+        }}
+      >
+        <div
+          className="relative w-full max-w-full overflow-hidden rounded-lg shadow-loom-md bg-loom-surface mx-auto"
+          style={{
+            aspectRatio: aspect,
+            maxHeight: "100%",
+            maxWidth: "100%",
+            width: "auto",
+            height: "auto",
+          }}
+        >
+          {previewUrl ? (
+            <img
+              src={previewUrl}
+              alt={`${chartTitle || activeChart.title} — ${preset.label} preview`}
+              className={`block w-full h-full object-contain transition-opacity ${capturing ? "opacity-45" : ""}`}
+            />
+          ) : (
+            <div className="w-full h-full min-h-[8rem]" style={{ aspectRatio: aspect }} aria-hidden />
+          )}
+          {capturing && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-loom-surface/50" role="status" aria-live="polite">
+              <span className="w-6 h-6 rounded-full border-2 border-loom-border border-t-loom-accent animate-spin" aria-hidden />
+              <span className="text-2xs text-loom-muted">
+                {blob ? "Updating title…" : `Rendering ${preset.width}×${preset.height}…`}
+              </span>
+            </div>
+          )}
+          {failed && !capturing && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center bg-loom-surface">
+              <p className="text-xs text-loom-muted">Couldn’t render this chart.</p>
+              <button type="button" onClick={() => setRetry((n) => n + 1)} className="text-xs text-loom-accent min-h-9 px-3">
+                Try again
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="mt-2.5 px-1 text-center space-y-0.5 shrink-0">
+        <p className="text-sm font-semibold text-loom-text truncate" title={chartTitle || undefined}>
+          {chartTitle || "Untitled chart"}
+        </p>
+        <p className="text-2xs text-loom-muted tabular-nums">
+          {preset.label} · {preset.width}×{preset.height}
+          {selectedFile?.name ? ` · ${selectedFile.name}` : ""}
+        </p>
+      </div>
+    </div>
+  );
+
+  const actionsRail = (
+    <div className="flex flex-col gap-2" role="group" aria-label="Share actions">
+      <button
+        type="button"
+        onClick={handleShare}
+        disabled={!ready || busy !== null}
+        className="loom-btn-primary w-full min-h-12 text-sm font-semibold rounded-lg disabled:opacity-50"
+        title="Publishes a loom.ibm.io story link, then opens the system share sheet with image + URL"
+      >
+        {primaryLabel}
+      </button>
+      {!desktopApp && canNativeShare ? (
+        <p className="text-2xs text-loom-muted text-center leading-snug px-0.5 -mt-0.5">
+          PNG + public loom.ibm.io link — works for anyone, not just your device.
+        </p>
+      ) : null}
+
+      <div className="grid grid-cols-2 gap-2">
+        {nativeShare && !desktopApp ? (
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={!ready}
+            className="loom-btn-ghost min-h-11 text-sm rounded-lg border border-loom-border disabled:opacity-50"
+          >
+            Save image
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={handleGetLink}
+          disabled={!ready || busy !== null || !!link}
+          className={`loom-btn-ghost min-h-11 text-sm rounded-lg border border-loom-border disabled:opacity-50 ${
+            nativeShare && !desktopApp ? "" : "col-span-2"
+          }`}
+        >
+          {busy === "link" ? "Publishing…" : link ? "Link ready" : "Get link"}
+        </button>
+        <button
+          type="button"
+          onClick={handleCopyCaption}
+          disabled={!caption}
+          className="loom-btn-ghost min-h-11 text-sm rounded-lg border border-loom-border disabled:opacity-50"
+        >
+          {copied === "caption" ? "Copied" : "Copy caption"}
+        </button>
+        {!desktopApp ? (
+          <button
+            type="button"
+            onClick={handleCopyLoomLink}
+            className="loom-btn-ghost min-h-11 text-sm rounded-lg border border-loom-border"
+            title="Copies a loom.ibm.io link that reopens this chart"
+          >
+            {copied === "loom" ? "Copied" : "Chart link"}
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={openMoreExports}
+            className="loom-btn-ghost min-h-11 text-sm rounded-lg border border-loom-border text-loom-muted"
+          >
+            More…
+          </button>
+        )}
+      </div>
+
+      {!desktopApp && (
+        <button
+          type="button"
+          onClick={handlePostToNeoSpace}
+          disabled={!ready || busy !== null}
+          className="w-full min-h-11 text-sm font-medium rounded-lg border border-loom-border text-loom-text hover:bg-loom-elevated/60 disabled:opacity-50"
+          title="Publishes a public chart link for 7 days, then opens NeoSpace"
+        >
+          {busy === "neospace" ? "Sending to NeoSpace…" : "Post to NeoSpace"}
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={openMoreExports}
+        className="w-full min-h-9 text-2xs text-loom-muted hover:text-loom-accent rounded-lg"
+      >
+        More export options…
+      </button>
+    </div>
+  );
 
   return (
     <div
-      className="fixed inset-0 z-[120] flex items-end sm:items-center justify-center loom-overlay animate-fade-in"
+      className={`fixed inset-0 z-[120] flex ${overlayAlign} justify-center loom-overlay animate-fade-in ${overlayPad}`}
       onClick={close}
       role="dialog"
       aria-modal="true"
@@ -452,216 +815,76 @@ function ShareSheetBody() {
     >
       <div
         ref={panelRef}
-        className="w-full sm:max-w-md bg-loom-surface border border-loom-border shadow-loom-lg rounded-t-2xl sm:rounded-xl animate-slide-up flex flex-col max-h-[94dvh]"
-        style={{ paddingBottom: "max(0.75rem, var(--safe-bottom))" }}
+        className={`bg-loom-surface border border-loom-border shadow-loom-lg animate-slide-up flex flex-col min-h-0 ${panelShape} ${wide ? "" : "w-full"}`}
+        style={{
+          paddingBottom: keyboardInset > 0
+            ? `max(0.75rem, var(--safe-bottom), ${keyboardInset}px)`
+            : "max(0.75rem, var(--safe-bottom))",
+        }}
         onClick={(e) => e.stopPropagation()}
+        tabIndex={-1}
       >
-        <div className="flex items-center gap-2 px-4 pt-3 pb-2 shrink-0">
-          <h2 id="share-sheet-title" className="text-base font-semibold text-loom-text flex-1">
-            Share chart
-          </h2>
+        <div className="flex items-center gap-2 px-4 pt-3.5 pb-2 shrink-0 border-b border-loom-border/50">
+          <div className="flex-1 min-w-0">
+            <h2 id="share-sheet-title" className="text-base font-semibold text-loom-text truncate">
+              Share
+            </h2>
+            <p className="text-2xs text-loom-muted truncate mt-0.5" title={chartTitle || undefined}>
+              {chartTitle || "Untitled chart"}
+            </p>
+          </div>
+          {ready && (
+            <span className="text-2xs text-loom-muted tabular-nums shrink-0 hidden sm:inline">
+              {preset.width}×{preset.height}
+            </span>
+          )}
           <button
             type="button"
             onClick={close}
-            className="loom-btn-ghost min-h-10 min-w-10 flex items-center justify-center text-lg rounded-md"
+            className="loom-btn-ghost min-h-10 min-w-10 flex items-center justify-center text-lg rounded-md shrink-0"
             aria-label="Close"
           >
             ×
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-4 space-y-3">
-          {/* Preview — this exact image is what gets shared */}
-          <div className="flex justify-center">
-            <div
-              className="relative rounded-lg overflow-hidden border border-loom-border bg-loom-bg"
-              style={{ aspectRatio: aspect, height: "min(38dvh, 22rem)", maxWidth: "100%" }}
-            >
-              {previewUrl && (
-                <img
-                  src={previewUrl}
-                  alt={`${chartTitle || activeChart.title} — ${preset.label} preview`}
-                  className={`w-full h-full object-contain transition-opacity ${capturing ? "opacity-40" : ""}`}
-                />
-              )}
-              {capturing && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2" role="status" aria-live="polite">
-                  <span className="w-6 h-6 rounded-full border-2 border-loom-border border-t-loom-accent animate-spin" aria-hidden />
-                  <span className="text-2xs text-loom-muted">Rendering {preset.width}×{preset.height}…</span>
-                </div>
-              )}
-              {failed && !capturing && (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 p-4 text-center">
-                  <p className="text-xs text-loom-muted">Couldn’t render this chart.</p>
-                  <button type="button" onClick={() => setRetry((n) => n + 1)} className="text-xs text-loom-accent min-h-9 px-3">
-                    Try again
-                  </button>
-                </div>
-              )}
+        {split ? (
+          <div className="flex-1 min-h-0 grid grid-cols-[minmax(0,1.2fr)_minmax(16.5rem,0.8fr)] gap-0 overflow-hidden">
+            <div className="min-h-0 overflow-hidden flex flex-col px-4 py-3 border-r border-loom-border/50">
+              {previewBlock}
+            </div>
+            <div className="min-h-0 overflow-y-auto overscroll-y-contain flex flex-col gap-4 px-4 py-3">
+              <section>
+                <p className="text-2xs font-medium text-loom-muted uppercase tracking-wider mb-1.5">Format</p>
+                {formatPicker}
+              </section>
+              <section>
+                <p className="text-2xs font-medium text-loom-muted uppercase tracking-wider mb-1.5">Details</p>
+                {optionsBlock}
+              </section>
+              <section className="mt-auto pt-3 border-t border-loom-border/60 sticky bottom-0 bg-loom-surface pb-0.5">
+                {actionsRail}
+              </section>
             </div>
           </div>
-
-          <div
-            className="grid grid-cols-5 gap-1.5"
-            role="radiogroup"
-            aria-label="Image format"
-            onKeyDown={(e) => {
-              const idx = FORMATS.findIndex((f) => f.id === presetId);
-              if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-                e.preventDefault();
-                setSocialPresetId(FORMATS[(idx + 1) % FORMATS.length]!.id);
-              } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-                e.preventDefault();
-                setSocialPresetId(FORMATS[(idx - 1 + FORMATS.length) % FORMATS.length]!.id);
-              }
-            }}
-          >
-            {FORMATS.map((f) => (
-              <button
-                key={f.id}
-                type="button"
-                role="radio"
-                aria-checked={presetId === f.id}
-                tabIndex={presetId === f.id ? 0 : -1}
-                onClick={() => setSocialPresetId(f.id)}
-                className={`min-h-12 rounded-lg border px-1 py-1.5 flex flex-col items-center justify-center gap-0.5 transition-colors ${
-                  presetId === f.id
-                    ? "border-loom-accent bg-loom-accent/10 text-loom-text"
-                    : "border-loom-border text-loom-muted hover:text-loom-text"
-                }`}
-              >
-                <span className="text-xs font-semibold">{f.label}</span>
-                <span className="text-2xs opacity-75 leading-tight text-center">{f.hint}</span>
-              </button>
-            ))}
-          </div>
-
-          <label className="block">
-            <span className="text-2xs font-medium text-loom-muted uppercase tracking-wider">Headline</span>
-            <input
-              type="text"
-              value={draftTitle}
-              onChange={(e) => setDraftTitle(e.target.value)}
-              onBlur={commitTitle}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-              }}
-              className="loom-input w-full mt-1 text-sm"
-              enterKeyHint="done"
-              maxLength={120}
-            />
-          </label>
-
-          <label className="flex items-center gap-2 text-xs text-loom-text min-h-9">
-            <input
-              type="checkbox"
-              checked={exportBurnIn.includeLoomMark}
-              onChange={(e) =>
-                setExportBurnIn((prev) => ({ ...prev, includeLoomMark: e.target.checked }))
-              }
-            />
-            “Made with Loom” footer
-            <span className="text-2xs text-loom-muted">(source note is Chart → Visual → Footnote)</span>
-          </label>
-
-          <label className="flex items-start gap-2 text-xs text-loom-text min-h-9">
-            <input
-              type="checkbox"
-              className="mt-0.5"
-              checked={includeData}
-              disabled={shareDataPreview.rows === 0 || shareDataPreview.cols === 0}
-              onChange={(e) => setIncludeData(e.target.checked)}
-            />
-            <span>
-              Include data ({shareDataPreview.rows.toLocaleString()} rows,{" "}
-              {shareDataPreview.cols} column{shareDataPreview.cols === 1 ? "" : "s"})
-              <span className="block text-2xs text-loom-muted mt-0.5 leading-snug">
-                Off by default for local and uploaded files. When on, only chart-encoded columns
-                leave the device with the public link.
-              </span>
-            </span>
-          </label>
-
-          {link && (
-            <div className="rounded-lg border border-loom-accent/40 bg-loom-accent/5 p-2.5 space-y-2">
-              <p className="text-2xs text-loom-muted">
-                Public for 7 days — anyone with the link can open the chart image
-                {includeData ? " and the opted-in data snapshot" : ""}.
-              </p>
-              <p className="text-xs font-mono text-loom-text break-all">{link}</p>
-              <button type="button" onClick={handleShareLink} className="loom-btn-primary w-full min-h-10 text-sm rounded-lg">
-                {copied === "link" ? "Link copied" : nativeShare || (typeof navigator !== "undefined" && typeof navigator.share === "function") ? "Share link" : "Copy link"}
-              </button>
+        ) : (
+          <>
+            <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-4">
+              {previewBlock}
+              <section>
+                <p className="text-2xs font-medium text-loom-muted uppercase tracking-wider mb-1.5">Format</p>
+                {formatPicker}
+              </section>
+              <section>
+                <p className="text-2xs font-medium text-loom-muted uppercase tracking-wider mb-1.5">Details</p>
+                {optionsBlock}
+              </section>
             </div>
-          )}
-        </div>
-
-        <div className="px-4 pt-3 space-y-2 shrink-0 border-t border-loom-border/60 mt-3">
-          {!desktop && (
-            <>
-              <button
-                type="button"
-                onClick={handlePostToNeoSpace}
-                disabled={!ready || busy !== null}
-                className="w-full min-h-12 text-sm font-semibold rounded-lg border border-loom-accent/50 bg-loom-accent/15 text-loom-text hover:bg-loom-accent/25 disabled:opacity-50"
-                title="Publishes a public chart link for 7 days, then opens NeoSpace ready to post"
-              >
-                {busy === "neospace" ? "Sending to NeoSpace…" : "Post to NeoSpace"}
-              </button>
-              <p className="text-2xs text-loom-muted text-center leading-snug px-1">
-                Publishes a <strong className="font-medium text-loom-text/80">public</strong> link
-                for 7 days (chart image
-                {includeData ? " + opted-in data snapshot" : " only"}). Don’t share private or PII
-                datasets.
-              </p>
-            </>
-          )}
-          <button
-            type="button"
-            onClick={handleShare}
-            disabled={!ready || busy !== null}
-            className="loom-btn-primary w-full min-h-12 text-sm font-semibold rounded-lg disabled:opacity-50"
-          >
-            {busy === "share" ? "Opening…" : desktop ? "Save image…" : nativeShare ? "Share image" : "Download image"}
-          </button>
-          <div className="grid grid-cols-3 gap-2">
-            {nativeShare && !desktop ? (
-              <button type="button" onClick={handleSave} disabled={!ready} className="loom-btn-ghost min-h-11 text-xs rounded-lg border border-loom-border disabled:opacity-50">
-                Save
-              </button>
-            ) : (
-              <button type="button" onClick={openMoreExports} className="loom-btn-ghost min-h-11 text-xs rounded-lg border border-loom-border">
-                More…
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={handleGetLink}
-              disabled={!ready || busy !== null || !!link}
-              className="loom-btn-ghost min-h-11 text-xs rounded-lg border border-loom-border disabled:opacity-50"
-            >
-              {busy === "link" ? "Publishing…" : link ? "Link ready" : "Get link"}
-            </button>
-            <button type="button" onClick={handleCopyCaption} disabled={!caption} className="loom-btn-ghost min-h-11 text-xs rounded-lg border border-loom-border disabled:opacity-50">
-              {copied === "caption" ? "Copied" : "Caption"}
-            </button>
-          </div>
-          {!desktop && (
-            <button
-              type="button"
-              onClick={handleCopyLoomLink}
-              className="w-full min-h-10 text-xs text-loom-text rounded-lg border border-loom-border loom-btn-ghost"
-              title="Copies a Loom link that reopens this chart — same data, settings, and look"
-            >
-              {copied === "loom" ? "Link copied" : "🔗 Copy chart link"}
-            </button>
-          )}
-          {nativeShare && !desktop && (
-            <button type="button" onClick={openMoreExports} className="w-full text-2xs text-loom-muted hover:text-loom-accent py-1.5">
-              More export options (SVG, video, story pack…)
-            </button>
-          )}
-        </div>
+            <div className="px-4 pt-3 shrink-0 border-t border-loom-border/60">
+              {actionsRail}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

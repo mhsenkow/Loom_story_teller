@@ -6,8 +6,19 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 import { useLoomStore } from "./store";
-import { readBootstrapShellWidth } from "./shellBootstrap";
 import { shellModeFromWidth, type ShellMode } from "./shellLayout";
+
+/** Keep <html data-shell-*> in sync after bootstrap (iPad WKWebView often starts narrow). */
+function syncShellDatasetFromWindow(): number {
+  const w = window.innerWidth;
+  try {
+    document.documentElement.dataset.shellWidth = String(w);
+    document.documentElement.dataset.shellMode = shellModeFromWidth(w);
+  } catch {
+    /* ignore */
+  }
+  return w;
+}
 
 function subscribeMediaQuery(query: string, onStoreChange: () => void): () => void {
   if (typeof window === "undefined") return () => {};
@@ -36,22 +47,36 @@ function subscribeViewportWidth(onStoreChange: () => void): () => void {
   let frame: number | null = null;
   const emit = () => {
     frame = null;
+    syncShellDatasetFromWindow();
     onStoreChange();
   };
   const onResize = () => {
     if (frame != null) return;
     frame = window.requestAnimationFrame(emit);
   };
+  // Cold-start on Capacitor/iPad can stamp a phone-sized bootstrap width before
+  // the webview lays out — remeasure on the next frames and orientation changes.
+  syncShellDatasetFromWindow();
+  frame = window.requestAnimationFrame(emit);
   window.addEventListener("resize", onResize);
+  window.addEventListener("orientationchange", onResize);
+  // bfcache / iOS restore can revive a narrow bootstrap stamp without a full reload.
+  window.addEventListener("pageshow", onResize);
+  window.visualViewport?.addEventListener("resize", onResize);
   return () => {
     window.removeEventListener("resize", onResize);
+    window.removeEventListener("orientationchange", onResize);
+    window.removeEventListener("pageshow", onResize);
+    window.visualViewport?.removeEventListener("resize", onResize);
     if (frame != null) window.cancelAnimationFrame(frame);
   };
 }
 
 function getViewportWidthSnapshot(): number {
   if (typeof window === "undefined") return 1280;
-  return readBootstrapShellWidth() ?? window.innerWidth;
+  // Always prefer the live viewport. Bootstrap width is only for pre-React paint;
+  // locking to it left iPad stuck in phone framing after relaunch.
+  return window.innerWidth;
 }
 
 /** Viewport width for device presets (SSR / server snapshot = 1280). */

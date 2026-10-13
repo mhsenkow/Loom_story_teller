@@ -75,6 +75,26 @@ export interface Env {
   STORY_ADMIN_TOKEN?: string;
   /** Comma-separated hostnames; defaults to loom.ibm.io + localhost + workers.dev. */
   ALLOWED_ORIGIN_HOSTS?: string;
+  /**
+   * Absolute origin for public story / OG URLs (default https://loom.ibm.io).
+   * Keeps Cap / workers.dev publishes off personal *.workers.dev hostnames.
+   */
+  PUBLIC_WEB_ORIGIN?: string;
+}
+
+/** Product host for share links — never mint mhsenkow.workers.dev URLs for recipients. */
+export const DEFAULT_PUBLIC_WEB_ORIGIN = "https://loom.ibm.io";
+
+export function publicWebOrigin(env?: Env): string {
+  const raw = env?.PUBLIC_WEB_ORIGIN?.trim();
+  if (raw) {
+    try {
+      return new URL(raw).origin;
+    } catch {
+      /* fall through */
+    }
+  }
+  return DEFAULT_PUBLIC_WEB_ORIGIN;
 }
 
 const GITHUB_REPO = "mhsenkow/Loom_story_teller";
@@ -261,19 +281,21 @@ function corsHeadersFor(request: Request, env?: Env): Record<string, string> {
 
 /**
  * Browser same-site / approved-Origin gate for `/api/fetch-csv`.
- * Blocks cross-site and anonymous script abuse; allows same-origin GETs
- * (often no Origin) and approved Loom webview Origins.
+ * Allows same-origin GETs and approved Loom Origins (web + Capacitor/Tauri
+ * webviews). Capacitor iPad hits the Worker as Sec-Fetch-Site: cross-site from
+ * https://localhost — Origin allowlist must win over that, or Explore 403s.
+ * Still blocks anonymous curl and unknown cross-site Origins.
  */
 export function fetchCsvAuthorized(request: Request, env?: Env): boolean {
   const site = (request.headers.get("Sec-Fetch-Site") || "").toLowerCase();
-  if (site === "cross-site") return false;
-  if (site === "same-origin" || site === "same-site") return true;
   const origin = request.headers.get("Origin");
   const hosts = env ? allowedOriginHostsFromEnv(env) : DEFAULT_ALLOWED_ORIGIN_HOSTS;
-  if (origin) return originAllowed(origin, hosts);
-  // No Sec-Fetch-Site and no Origin → treat as non-browser / curl
+  if (origin && originAllowed(origin, hosts)) return true;
+  if (site === "same-origin" || site === "same-site") return true;
+  // Unknown / missing Origin: never allow cross-site or headerless clients.
+  if (site === "cross-site") return false;
   if (!site) return false;
-  // Sec-Fetch-Site: none (user navigation / some webviews) — require Origin
+  // Sec-Fetch-Site: none without an allowed Origin
   return false;
 }
 
@@ -1210,7 +1232,9 @@ export async function handlePublishStory(request: Request, env: Env): Promise<Re
   }
 
   const id = storyId();
-  const origin = new URL(request.url).origin;
+  // Always publish under loom.ibm.io so anyone can open the link (not Cap localhost
+  // or loom-storyteller.mhsenkow.workers.dev).
+  const origin = publicWebOrigin(env);
   const ttl = STORY_TTL_SECONDS;
 
   // Optional data lineage companion — the rows that built the chart at share time.

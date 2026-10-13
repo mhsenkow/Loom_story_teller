@@ -38,4 +38,12 @@ describe("searchChartKinds", () => {
     const bar = CHART_KIND_CATALOG.find((e) => e.value === "bar")!;
     expect(scoreChartKind(bar, "globe")).toBe(0);
   });
+
+  it("matches DS / layman vernacular synonyms", () => {
+    expect(searchChartKinds("time series")[0]?.value).toBe("line");
+    expect(searchChartKinds("part whole").map((e) => e.value)).toEqual(
+      expect.arrayContaining(["pie", "treemap"]),
+    );
+    expect(searchChartKinds("overplotting")[0]?.value).toBe("hexbin");
+  });
 });

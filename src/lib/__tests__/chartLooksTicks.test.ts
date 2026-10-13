@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { drawChartTicks } from "../chartLooks";
+import { chartFootnoteReservePx, drawChartTicks } from "../chartLooks";
 
 function mockCtx() {
   const texts: { x: number; y: number; label: string }[] = [];
@@ -75,5 +75,13 @@ describe("drawChartTicks (LOOM-675)", () => {
     const { ctx, texts } = mockCtx();
     drawChartTicks(ctx, 0, 100, 0, 1, 400, 200, 40, { tickCount: 8, tickRotation: 45 }, { y: false });
     expect(texts.length).toBeGreaterThan(2);
+  });
+
+  it("reserves more bottom space for multi-line footnotes", () => {
+    expect(chartFootnoteReservePx(null)).toBe(0);
+    const one = chartFootnoteReservePx("Source only");
+    const two = chartFootnoteReservePx("Source\nOct 2026");
+    expect(two).toBeGreaterThan(one);
+    expect(chartFootnoteReservePx(null, { hasColorRamp: true })).toBeGreaterThan(0);
   });
 });

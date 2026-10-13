@@ -122,6 +122,8 @@ export default function StatsTab() {
   const columnStats = useLoomStore((s) => s.columnStats);
   const sampleRows = useLoomStore((s) => s.sampleRows);
   const selectedFile = useLoomStore((s) => s.selectedFile);
+  const statsFocusColumn = useLoomStore((s) => s.statsFocusColumn);
+  const setStatsFocusColumn = useLoomStore((s) => s.setStatsFocusColumn);
   const stats = columnStats ?? [];
   const dq = useMemo(() => computeDataQualityHints(stats, sampleRows), [stats, sampleRows]);
   const provenance = useMemo(
@@ -132,6 +134,21 @@ export default function StatsTab() {
       }),
     [selectedFile, sampleRows],
   );
+
+  useEffect(() => {
+    if (!statsFocusColumn) return;
+    const el = document.getElementById(`loom-stat-${CSS.escape(statsFocusColumn)}`);
+    if (el) {
+      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      el.classList.add("ring-1", "ring-loom-accent", "ring-offset-1", "ring-offset-loom-bg");
+      const t = window.setTimeout(() => {
+        el.classList.remove("ring-1", "ring-loom-accent", "ring-offset-1", "ring-offset-loom-bg");
+        setStatsFocusColumn(null);
+      }, 2200);
+      return () => window.clearTimeout(t);
+    }
+    setStatsFocusColumn(null);
+  }, [statsFocusColumn, setStatsFocusColumn, stats]);
 
   if (stats.length === 0 && !provenance) {
     return (
@@ -172,7 +189,11 @@ export default function StatsTab() {
             </div>
           )}
           {stats.map((col) => (
-            <div key={String(col.name)} className="loom-card space-y-1.5">
+            <div
+              key={String(col.name)}
+              id={col.name ? `loom-stat-${col.name}` : undefined}
+              className="loom-card space-y-1.5 scroll-mt-3 transition-shadow"
+            >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-mono font-medium text-loom-text">{col.name ?? "—"}</span>
                 <span className="loom-badge">{col.data_type ?? "?"}</span>

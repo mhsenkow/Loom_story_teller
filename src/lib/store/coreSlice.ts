@@ -66,7 +66,9 @@ export function snapshotTableState(s: LoomState) {
 
 /** Keys cleared whenever the active dataset identity changes. */
 const DATASET_SCOPED_KEYS = [
-  "tableFilterRowIndices", "tableColumnFilters", "tableUndoStack", "tableRedoStack",
+  "tableFilterRowIndices", "tableColumnFilters", "tableSortColumn", "tableSortDir",
+  "viewTimeField", "viewTimeWindow", "lockedColorField", "statsFocusColumn",
+  "tableUndoStack", "tableRedoStack",
   "tablePrefs", "selectedRowIndices", "smartResults", "hoveredRowIndex", "tooltipLink",
   "pinnedTooltips", "crosshairPos", "rulerPins", "lassoPoints", "chartAnnotations",
   "customRefLines", "chartTitleOverrides", "chartVisualOverrides", "querySql",
@@ -106,6 +108,8 @@ export function coreInitialState() {
     panelOpen: false,
     dataRegionOpen: false,
     dataSourcesExpanded: false,
+    // Chart suggestions rail (left of canvas — “before” the chart)
+    suggestionsRailOpen: true,
   };
 }
 
@@ -156,5 +160,7 @@ export function createCoreSlice(set: Setter, _get: Getter, initialState: Record<
     togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
     setDataRegionOpen: (open: boolean) => set({ dataRegionOpen: open }),
     setDataSourcesExpanded: (v: boolean) => set({ dataSourcesExpanded: v }),
+    setSuggestionsRailOpen: (open: boolean) => set({ suggestionsRailOpen: open }),
+    toggleSuggestionsRail: () => set((s) => ({ suggestionsRailOpen: !s.suggestionsRailOpen })),
   };
 }

@@ -117,6 +117,8 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       setToast(shareDisabledReason);
       return;
     }
+    // Start PNG capture immediately so the sheet often opens with the image ready.
+    void import("@/lib/sharePreviewCache").then((m) => m.warmSharePreview());
     setShareSheetOpen(true);
   };
 

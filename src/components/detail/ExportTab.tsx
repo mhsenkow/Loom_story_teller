@@ -1,111 +1,22 @@
+// =================================================================
+// ExportTab — capture settings + story / video / SVG / CSV long-tail
+// =================================================================
+// One-tap Share lives in the Share sheet (TopBar / “Share chart…”).
+// This panel authors platform size / burn-in, then exports what Share
+// doesn’t: dashboard packs, video, SVG, config JSON, and CSV.
+// =================================================================
+
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
-import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
-import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
-import { clampSmartFloat, clampSmartInt, SMART_TOP_N, SMART_Z } from "@/lib/smartInputClamp";
-import { useIsMobile, useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
-import { useFocusTrap } from "@/lib/useFocusTrap";
-import { clearPersistedPreferences } from "@/lib/persist";
-import { Button } from "@/components/ui/Button";
-import { WorkspaceBackupControls } from "@/components/WorkspaceBackupControls";
+import { useState, useCallback, useMemo } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
-import { formatNumber } from "@/lib/format";
-import { ChartKindPicker } from "@/components/ChartKindPicker";
-import {
-  AXIS_LABEL_COLOR_SWATCHES,
-  AXIS_LINE_COLOR_SWATCHES,
-  COLOR_PALETTES,
-  palettesGrouped,
-  resolveChartColors,
-  type PaletteKind,
-} from "@/lib/chartPalettes";
-import {
-  THEMES,
-  THEME_LABEL,
-  UI_CHROMES,
-  UI_CHROME_LABEL,
-  APP_FONTS,
-  APP_FONT_LABEL,
-  FACES_SOURCES,
-  VISUAL_PRESETS,
-  VISUAL_PRESET_BLURB,
-  shuffleVisualOverrides,
-  VISUAL_SHUFFLE_SECTIONS,
-  type VisualPresetId,
-  type VisualShuffleLocks,
-  type VisualShuffleSection,
-  normalizeTheme,
-  type LookTheme,
-  type UiChrome,
-  type AppFont,
-  type FacesSource,
-} from "@/lib/lookSystem";
-import { requestDiscoverScan } from "@/lib/discoverStories";
-import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
-import {
-  createChartRec,
-  fitEncodingToKind,
-  Y_AGGREGATE_OPTIONS,
-  getRecommendationReason,
-  getRandomEncoding,
-  applyEncodingLocks,
-  chartKindDataSupport,
-  tryBuildRandomChartRec,
-  randomEncodingToExtra,
-  recommendStorySequence,
-  recommendStreamStory,
-  type ChartKind,
-  type YAggregateOption,
-  type EncodingShuffleLocks,
-} from "@/lib/recommendations";
-import {
-  computeDataQualityHints,
-  formatChartAggregationSummary,
-  chartCapabilities,
-  encodingChannelLabels,
-  CHART_LAYOUT_DIRECTIONS,
-  CHART_Y_SCALE_OPTIONS,
-  type ChartLayoutDirection,
-  type ChartYScaleOption,
-} from "@/lib/chartSupport";
-import {
-  chromeDomId,
-  chromeSectionFor,
-  type ChartChromeTarget,
-} from "@/lib/chartChromeLink";
-import { CHART_TOOLTIP_MODES, type ChartTooltipMode } from "@/lib/chartTooltipMode";
-import {
-  resolveDataProvenance,
-  provenanceKindLabel,
-  type DataProvenance,
-} from "@/lib/dataProvenance";
-import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
-import {
-  CHART_TIME_RANGES,
-  applyChartTimeWindow,
-  chartTimeRangeOptions,
-  pickDefaultTimeField,
-  temporalColumnNames,
-  timeColumnSpanMs,
-  type ChartTimeRange,
-} from "@/lib/chartTime";
-import {
-  runAnomaly,
-  runForecast,
-  runTrend,
-  runReferenceLines,
-  runClustering,
-  runCorrelationMatrix,
-  type AnomalyMethod,
-} from "@/lib/smartAnalytics";
-import { corrCellInk, corrFillT, sampleCorrDiverging, DEFAULT_CORR_DIVERGING } from "@/lib/corrMatrixStyle";
+import { useLoomStore } from "@/lib/store";
+import { getRecommendationReason } from "@/lib/recommendations";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
-import { exportDashboardMicrosite, streamSnapshot, isDesktop, isTauri, openExternalUrl } from "@/lib/tauri";
-import { isNumericColumnType } from "@/lib/dataCubeSchema";
-import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
+import { isDesktop } from "@/lib/tauri";
+import { beginShareReadyAspect, endShareReadyAspect } from "@/lib/shareReadySession";
+import { invalidateSharePreview, warmSharePreview } from "@/lib/sharePreviewCache";
 import {
   SOCIAL_PRESETS,
   getSocialPreset,
@@ -175,13 +86,10 @@ export default function ExportTab() {
   const [pngFeedback, setPngFeedback] = useState(false);
   const [svgFeedback, setSvgFeedback] = useState(false);
   const [configFeedback, setConfigFeedback] = useState(false);
-  const [captionFeedback, setCaptionFeedback] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const clearError = useCallback(() => {
-    setCopyError(null);
-  }, []);
+  const clearError = useCallback(() => setCopyError(null), []);
 
   const displayTitle = activeChart
     ? (chartTitleOverrides[activeChart.id] ?? activeChart.title)
@@ -199,9 +107,25 @@ export default function ExportTab() {
   }, [activeChart, displayTitle, aiSuggestionReason, selectedFile, exportBurnIn]);
 
   const runPlatformPng = useCallback(async (): Promise<Blob | null> => {
+    // Prefer the warm Share cache so Export clipboard matches the Share preview.
+    const cached = await warmSharePreview(socialPresetId);
+    if (cached) return cached;
     const { capturePlatformPng } = await import("@/lib/capturePlatformPng");
     return capturePlatformPng(socialPresetId, { supersample: exportSupersample });
   }, [socialPresetId, exportSupersample]);
+
+  const openShareSheet = useCallback(() => {
+    if (!activeChart) {
+      setToast("Pick or create a chart before sharing");
+      return;
+    }
+    if (!sampleRows?.rows.length && !selectedFile) {
+      setToast("Open data before sharing a chart");
+      return;
+    }
+    void warmSharePreview(socialPresetId);
+    useLoomStore.getState().setShareSheetOpen(true);
+  }, [activeChart, sampleRows, selectedFile, socialPresetId, setToast]);
 
   const handleCopyPng = useCallback(async () => {
     setCopyError(null);
@@ -239,55 +163,6 @@ export default function ExportTab() {
     }
   }, [svgExportHandler]);
 
-  const handleDownloadPng = useCallback(async () => {
-    setCopyError(null);
-    setBusy("download");
-    try {
-      const blob = (await runPlatformPng()) ?? (pngExportHandler ? await pngExportHandler() : null);
-      if (blob) {
-        const preset = getSocialPreset(socialPresetId);
-        const name = `${slugifyFilename(displayTitle || "chart")}-${preset.id}.png`;
-        downloadBlob(blob, name);
-        setToast(`Downloaded ${preset.label} PNG`);
-      } else {
-        setCopyError("Could not capture chart PNG.");
-      }
-    } catch (e) {
-      console.warn("Download PNG failed:", e);
-      setCopyError("Export failed.");
-    } finally {
-      setBusy(null);
-    }
-  }, [runPlatformPng, pngExportHandler, socialPresetId, displayTitle, setToast]);
-
-  const handleSharePng = useCallback(async () => {
-    setCopyError(null);
-    setBusy("share");
-    try {
-      const blob = (await runPlatformPng()) ?? (pngExportHandler ? await pngExportHandler() : null);
-      if (!blob) {
-        setCopyError("Could not capture chart PNG.");
-        return;
-      }
-      const preset = getSocialPreset(socialPresetId);
-      const name = `${slugifyFilename(displayTitle || "chart")}-${preset.id}.png`;
-      const { saveBinaryAndReveal } = await import("@/lib/tauri");
-      if (isDesktop()) {
-        const path = await saveBinaryAndReveal(blob, name);
-        setToast(path ? "Saved — revealed in Finder" : "Save cancelled");
-      } else {
-        const result = await shareOrDownloadFile(blob, name, displayTitle || "Loom chart");
-        setToast(result === "shared" ? "Opened share sheet" : "Downloaded PNG");
-      }
-    } catch (e) {
-      if (e instanceof Error && e.name === "AbortError") return;
-      console.warn("Share PNG failed:", e);
-      setCopyError("Share failed.");
-    } finally {
-      setBusy(null);
-    }
-  }, [runPlatformPng, pngExportHandler, socialPresetId, displayTitle, setToast]);
-
   const handleDownloadSvg = useCallback(async () => {
     if (!svgExportHandler) return;
     setCopyError(null);
@@ -302,17 +177,6 @@ export default function ExportTab() {
       setCopyError("Export failed.");
     }
   }, [svgExportHandler, displayTitle]);
-
-  const handleCopyCaption = useCallback(async () => {
-    if (!captionText) return;
-    const ok = await copyTextToClipboard(captionText);
-    if (ok) {
-      setCaptionFeedback(true);
-      setTimeout(() => setCaptionFeedback(false), 2000);
-    } else {
-      setCopyError("Clipboard access denied.");
-    }
-  }, [captionText]);
 
   const handleCopyChartConfig = useCallback(async () => {
     if (!activeChart) return;
@@ -343,20 +207,19 @@ export default function ExportTab() {
     setSocialExportReady(next);
     if (next) {
       setViewMode("chart");
-      const preset = getSocialPreset(socialPresetId);
-      if (preset.width && preset.height) {
+      const nextPreset = getSocialPreset(socialPresetId);
+      if (nextPreset.width && nextPreset.height) {
         setSocialExportTarget({
-          width: preset.width,
-          height: preset.height,
+          width: nextPreset.width,
+          height: nextPreset.height,
           pixelRatio: exportSupersample,
           presetId: socialPresetId,
         });
-        if (preset.aspectId) {
-          useLoomStore.getState().setAppSettings((s) => ({ ...s, chartAspect: preset.aspectId! }));
-        }
+        beginShareReadyAspect(nextPreset.aspectId ?? undefined);
       }
-      setToast("Share ready — Esc to exit");
+      setToast("Share ready — Esc to exit (panel hides while framing)");
     } else {
+      endShareReadyAspect();
       setSocialExportTarget(null);
     }
   }, [
@@ -386,8 +249,8 @@ export default function ExportTab() {
       }
       const dash = useLoomStore.getState().dashboards.find((d) => d.id === dashId);
       const name = `${slugifyFilename(dash?.name || "story")}-carousel.zip`;
-      const { saveBinaryAndReveal, isDesktop: desktop } = await import("@/lib/tauri");
-      if (desktop()) {
+      const { saveBinaryAndReveal } = await import("@/lib/tauri");
+      if (isDesktop()) {
         const path = await saveBinaryAndReveal(result.blob, name);
         setToast(path ? `Saved ${result.count}-slide pack` : "Save cancelled");
       } else {
@@ -461,8 +324,14 @@ export default function ExportTab() {
       ) as ArrayBuffer;
       const blob = new Blob([ab], { type: "application/zip" });
       const name = `${slugifyFilename(dash.name)}-story-bundle.zip`;
-      downloadBlob(blob, name);
-      setToast("Story bundle downloaded");
+      if (isDesktop()) {
+        const { saveBinaryAndReveal } = await import("@/lib/tauri");
+        const path = await saveBinaryAndReveal(blob, name);
+        setToast(path ? "Story bundle saved" : "Save cancelled");
+      } else {
+        downloadBlob(blob, name);
+        setToast("Story bundle downloaded");
+      }
     } catch (e) {
       console.warn(e);
       setCopyError("Story bundle failed.");
@@ -479,7 +348,7 @@ export default function ExportTab() {
     }
     if (
       typeof window !== "undefined" &&
-      !window.confirm("Publish a public link? Anyone with the URL can view this story.")
+      !window.confirm("Publish a public dashboard story link? Anyone with the URL can view it.")
     ) {
       return;
     }
@@ -513,7 +382,7 @@ export default function ExportTab() {
       });
       if (published?.url) {
         await copyTextToClipboard(published.url);
-        setToast(`Published — URL copied`);
+        setToast("Dashboard story published — URL copied");
       } else {
         setCopyError(published?.error || "Publish unavailable offline — download the story bundle instead.");
       }
@@ -530,20 +399,17 @@ export default function ExportTab() {
     setCopyError(null);
     try {
       setViewMode("chart");
-      const preset = getSocialPreset(socialPresetId === "current" ? "stories" : socialPresetId);
-      if (preset.width && preset.height) {
+      const nextPreset = getSocialPreset(socialPresetId === "current" ? "stories" : socialPresetId);
+      if (nextPreset.width && nextPreset.height) {
         setSocialExportTarget({
-          width: preset.width,
-          height: preset.height,
+          width: nextPreset.width,
+          height: nextPreset.height,
           pixelRatio: 1,
-          presetId: preset.id,
+          presetId: nextPreset.id,
         });
-        if (preset.aspectId) {
-          useLoomStore.getState().setAppSettings((s) => ({ ...s, chartAspect: preset.aspectId! }));
-        }
+        beginShareReadyAspect(nextPreset.aspectId ?? undefined);
       }
       await new Promise((r) => setTimeout(r, 600));
-      // Prefer the 2D canvas (always painted during social export)
       const canvas =
         document.querySelector<HTMLCanvasElement>("[data-loom-chart-canvas2d]") ||
         document.querySelector<HTMLCanvasElement>("main canvas");
@@ -567,6 +433,7 @@ export default function ExportTab() {
       setCopyError("Video export failed.");
       setSocialExportTarget(null);
     } finally {
+      endShareReadyAspect();
       setBusy(null);
     }
   }, [socialPresetId, setSocialExportTarget, setViewMode, displayTitle, setToast]);
@@ -575,20 +442,22 @@ export default function ExportTab() {
   const hasTableData = sampleRows && sampleRows.rows.length > 0 && selectedFile;
   const hasQueryData = queryResult && queryResult.rows.length > 0;
   const preset = getSocialPreset(socialPresetId);
+  const hasStory = dashboards.length > 0;
 
   return (
     <div className="p-3 space-y-4">
       {hasChartExport && (
         <button
           type="button"
-          onClick={() => useLoomStore.getState().setShareSheetOpen(true)}
+          onClick={openShareSheet}
           className="loom-btn-primary w-full min-h-10 text-sm font-semibold rounded-lg"
         >
           Share chart…
         </button>
       )}
-      <p className="text-2xs text-loom-muted">
-        Or fine-tune post-ready images, story carousels, video, and data (CSV) below.
+      <p className="text-2xs text-loom-muted leading-snug">
+        Share sheet handles image, caption, link, and NeoSpace. Below: platform framing,
+        story packs, video, SVG, and CSV.
       </p>
       {copyError && (
         <p role="alert" className="text-2xs text-loom-warning bg-loom-warning/10 border border-loom-warning/30 rounded px-2 py-1.5 flex items-center justify-between gap-2">
@@ -597,16 +466,19 @@ export default function ExportTab() {
         </p>
       )}
 
-      {/* Social / platform */}
+      {/* Capture settings — authoring for Share + story/video */}
       <div className="space-y-1.5">
-        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Social</span>
+        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Capture settings</span>
         <div className="loom-card space-y-2">
           <label className="block text-2xs text-loom-muted">
             Platform size
             <select
               className="loom-input w-full mt-1 text-xs"
               value={socialPresetId}
-              onChange={(e) => setSocialPresetId(e.target.value as typeof socialPresetId)}
+              onChange={(e) => {
+                invalidateSharePreview();
+                setSocialPresetId(e.target.value as typeof socialPresetId);
+              }}
             >
               {SOCIAL_PRESETS.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -620,7 +492,10 @@ export default function ExportTab() {
             <input
               type="checkbox"
               checked={exportSupersample === 2}
-              onChange={(e) => setExportSupersample(e.target.checked ? 2 : 1)}
+              onChange={(e) => {
+                invalidateSharePreview();
+                setExportSupersample(e.target.checked ? 2 : 1);
+              }}
             />
             2× supersample (sharper feed posts)
           </label>
@@ -635,6 +510,9 @@ export default function ExportTab() {
           >
             {socialExportReady ? "Exit share-ready frame" : "Share-ready preview"}
           </button>
+          <p className="text-2xs text-loom-muted leading-snug">
+            Frames the chart at the platform size on canvas. Esc exits; the side panels hide while framing.
+          </p>
           <div className="border-t border-loom-border/50 pt-2 space-y-1.5">
             <span className="text-2xs text-loom-muted">Burn-in footer</span>
             {(
@@ -649,9 +527,10 @@ export default function ExportTab() {
                 <input
                   type="checkbox"
                   checked={!!exportBurnIn[key]}
-                  onChange={(e) =>
-                    setExportBurnIn((prev) => ({ ...prev, [key]: e.target.checked }))
-                  }
+                  onChange={(e) => {
+                    invalidateSharePreview();
+                    setExportBurnIn((prev) => ({ ...prev, [key]: e.target.checked }));
+                  }}
                 />
                 {label}
               </label>
@@ -662,61 +541,62 @@ export default function ExportTab() {
                 className="loom-input w-full text-xs"
                 placeholder="@handle"
                 value={exportBurnIn.handleText}
-                onChange={(e) =>
-                  setExportBurnIn((prev) => ({ ...prev, handleText: e.target.value }))
-                }
+                onChange={(e) => {
+                  invalidateSharePreview();
+                  setExportBurnIn((prev) => ({ ...prev, handleText: e.target.value }));
+                }}
               />
             )}
           </div>
-          <button
-            type="button"
-            onClick={handleCopyCaption}
-            disabled={!captionText}
-            className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
-          >
-            {captionFeedback ? "Caption copied!" : "Copy post caption"}
-          </button>
-          <button
-            type="button"
-            onClick={handleDownloadPng}
-            disabled={!hasChartExport || !!busy}
-            className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
-          >
-            {busy === "download" ? "Capturing…" : `Download ${preset.label} PNG`}
-          </button>
-          <button
-            type="button"
-            onClick={handleSharePng}
-            disabled={!hasChartExport || !!busy}
-            className="w-full px-3 py-2 text-xs font-medium text-loom-accent bg-loom-accent/10 border border-loom-accent/40 rounded hover:bg-loom-accent/20 disabled:opacity-50"
-          >
-            {busy === "share" ? "Preparing…" : "Share image…"}
-          </button>
+        </div>
+      </div>
+
+      {/* Story dashboard — multi-chart packs Share sheet doesn’t do */}
+      <div className="space-y-1.5">
+        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Story dashboard</span>
+        <div className="loom-card space-y-2">
+          {!hasStory && (
+            <p className="text-2xs text-loom-muted py-1">
+              Build a story under Dashboards → Tell a story, then export slides here.
+            </p>
+          )}
           <button
             type="button"
             onClick={handleCarouselZip}
-            disabled={!!busy}
+            disabled={!!busy || !hasStory}
             className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
-            title="Export active story dashboard as numbered PNGs in a ZIP"
+            title="Fresh PNG of each story slide at the platform size"
           >
-            {busy === "carousel" ? "Building carousel…" : "Story → carousel ZIP"}
+            {busy === "carousel" ? "Building carousel…" : "Download carousel ZIP (fresh slides)"}
           </button>
           <button
             type="button"
             onClick={handleStoryBundle}
-            disabled={!!busy}
+            disabled={!!busy || !hasStory}
             className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+            title="Offline HTML + saved view snapshots (not a live re-capture)"
           >
-            {busy === "bundle" ? "Bundling…" : "Download story bundle"}
+            {busy === "bundle" ? "Bundling…" : "Download offline bundle (HTML + snapshots)"}
           </button>
           <button
             type="button"
             onClick={handlePublishStory}
-            disabled={!!busy}
+            disabled={!!busy || !hasStory}
             className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+            title="Public multi-slide story page — for a single chart link use Share → Get link"
           >
-            {busy === "publish" ? "Publishing…" : "Publish story link"}
+            {busy === "publish" ? "Publishing…" : "Publish dashboard story link"}
           </button>
+          <p className="text-2xs text-loom-muted leading-snug">
+            For one chart + optional data snapshot, use Share → Get link instead.
+          </p>
+        </div>
+      </div>
+
+      {/* Video */}
+      <div className="space-y-1.5">
+        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Video</span>
+        <div className="loom-card space-y-2">
           <button
             type="button"
             onClick={handleExportVideo}
@@ -725,63 +605,67 @@ export default function ExportTab() {
           >
             {busy === "video" ? "Recording…" : "Export short video (Reel)"}
           </button>
+          <p className="text-2xs text-loom-muted leading-snug">
+            Records the canvas for ~6s. Best on canvas-painted charts; WebGPU-only scenes may look empty.
+          </p>
         </div>
       </div>
 
-      {/* Chart export */}
+      {/* Chart files */}
       <div className="space-y-1.5">
-        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Chart</span>
+        <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Chart files</span>
         <div className="loom-card space-y-2">
           {!hasChartExport ? (
-            <p className="text-2xs text-loom-muted py-1">Select a chart to export as PNG or SVG.</p>
+            <p className="text-2xs text-loom-muted py-1">Select a chart to export PNG, SVG, or config.</p>
           ) : (
             <>
               <button
                 type="button"
                 onClick={handleCopyPng}
                 disabled={!pngExportHandler || !!busy}
-                aria-label="Copy chart as PNG to clipboard"
-                className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent hover:bg-loom-elevated/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                aria-label={`Copy ${preset.label} PNG to clipboard`}
+                className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
               >
-                {pngFeedback ? "Copied!" : busy === "png" ? "Capturing…" : "Copy as PNG"}
+                {pngFeedback ? "Copied!" : busy === "png" ? "Capturing…" : `Copy ${preset.label} PNG`}
               </button>
+              <p className="text-2xs text-loom-muted leading-snug -mt-1">
+                Clipboard only — Share / Save image live in the Share sheet.
+              </p>
               <button
                 type="button"
                 onClick={handleCopySvg}
                 disabled={!svgExportHandler}
                 aria-label="Copy chart as SVG to clipboard"
-                className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent hover:bg-loom-elevated/80 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
               >
-                {svgFeedback ? "Copied!" : svgExportLabel ? "Copy as SVG (Vega approx.)" : "Copy as SVG"}
+                {svgFeedback ? "Copied!" : svgExportLabel ? "Copy SVG (Vega approx.)" : "Copy SVG"}
               </button>
+              <button
+                type="button"
+                onClick={handleDownloadSvg}
+                disabled={!svgExportHandler}
+                aria-label="Download chart as SVG file"
+                className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
+              >
+                Download SVG
+              </button>
+              {svgExportLabel && (
+                <p className="text-2xs text-loom-muted leading-snug">{svgExportLabel}</p>
+              )}
               <button
                 type="button"
                 onClick={handleCopyChartConfig}
                 aria-label="Copy chart and visual config as JSON"
-                className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent transition-colors"
+                className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent"
               >
-                {configFeedback ? "Copied!" : "Copy chart config (JSON)"}
+                {configFeedback ? "Copied!" : "Copy encoding + look (JSON)"}
               </button>
-              <div className="border-t border-loom-border/50 pt-2 mt-2 space-y-2">
-                <button
-                  type="button"
-                  onClick={handleDownloadSvg}
-                  disabled={!svgExportHandler}
-                  aria-label="Download chart as SVG file"
-                  className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent transition-colors disabled:opacity-50"
-                >
-                  Download SVG
-                </button>
-                {svgExportLabel && (
-                  <p className="text-2xs text-loom-muted leading-snug px-0.5">{svgExportLabel}</p>
-                )}
-              </div>
             </>
           )}
         </div>
       </div>
 
-      {/* Data export (CSV) */}
+      {/* Data */}
       <div className="space-y-1.5">
         <span className="text-2xs font-semibold text-loom-muted uppercase tracking-wider">Data</span>
         <div className="loom-card space-y-2">
@@ -793,7 +677,7 @@ export default function ExportTab() {
                 downloadCsv(csv, selectedFile?.name?.replace(/\.[^.]+$/, "") || "table");
               }}
               aria-label="Export current table data as CSV file"
-              className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent hover:bg-loom-elevated/80 transition-colors"
+              className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent"
             >
               Export table to CSV
             </button>
@@ -806,7 +690,7 @@ export default function ExportTab() {
                 downloadCsv(csv, selectedFile ? `query-${selectedFile.name.replace(/\.[^.]+$/, "")}` : "query-results");
               }}
               aria-label="Export query results as CSV file"
-              className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent hover:bg-loom-elevated/80 transition-colors"
+              className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent"
             >
               Export query results to CSV
             </button>

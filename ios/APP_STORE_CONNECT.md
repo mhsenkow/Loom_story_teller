@@ -13,9 +13,9 @@ Loom Storyteller
 Data stories on your iPad
 
 ## Promotional text (≤170)
-Open live earthquakes, flights, Wikipedia, crypto, and weather — or drop in a CSV. Make a readable chart and share it. Free. Data stays on your device except the live feeds you choose.
+Live quakes, flights, Wikipedia, crypto, weather — or a CSV. Chart it and share. Paid download; data stays on device except feeds you open.
 
-## Description
+## Description (live in ASC)
 Loom turns interesting data into charts you can actually read — and share.
 
 On iPad and iPhone you get the same storytelling surface as loom.ibm.io:
@@ -27,7 +27,7 @@ On iPad and iPhone you get the same storytelling surface as loom.ibm.io:
 
 Load a CSV from Files, or tap a curated pack / open-data catalog. No account required.
 
-The macOS Loom app adds folder mount, DuckDB SQL over millions of rows, and WebGPU scatter. This App Store build is the chart + story companion.
+This App Store build is a one-time paid download ($4.95) with no in-app purchases and no login. The separate macOS Loom app adds folder mount, DuckDB SQL, and WebGPU scatter.
 
 ## Keywords
 data,chart,csv,visualization,story,earthquake,flights,wikipedia,productivity,ipad
@@ -39,30 +39,43 @@ https://github.com/mhsenkow/Loom_story_teller
 https://loom.ibm.io
 
 ## Privacy policy URL
-https://loom.ibm.io/privacy.html  
-(create this page before submit if it 404s — “Data Not Collected” / local-first + optional live HTTPS feeds)
+https://loom.ibm.io/privacy  
+(`privacy.html` redirects here; use the canonical `/privacy` URL in App Store Connect)
 
 ## Age rating
-4+ (no unrestricted UGC, no violence). Complete the questionnaire honestly.
+4+ (questionnaire complete in ASC).
 
-## App Privacy
-- Live feeds: contact third-party HTTPS APIs / Cloudflare Worker when you open a source  
-- Local CSV: stays on device  
-- Prefer **Data Not Collected** if you don’t analytics-track; disclose network use for live feeds if required
+## App Privacy (portal — API cannot set nutrition labels)
+In App Store Connect → App Privacy, set **Data Not Collected** if you do not analytics-track.
+Disclose only if you later add SDKs that collect. Live HTTPS feeds the user opens are network requests to third parties / the Worker, not “data collected by you” for Apple’s nutrition labels when you don’t retain identity.
 
-## Review notes
-Loom is free. No login.
+## Content rights
+`USES_THIRD_PARTY_CONTENT` (open-data / live upstreams).
 
-1. Launch → “What’s interesting right now” or Data & sources → pick Earthquakes / Wikipedia.  
-2. Chart opens with a headline. Change encoding or look via Edit.  
-3. Share → export a PNG (Square or Story).  
+## Review notes (live in ASC)
+Paid one-time ($4.95). No login. Build **1.0 (8)**. Icon = woven loom cube mark.
 
-Outbound HTTPS only for live feeds and open-data catalogs the user selects. Offline demo/mock data works without network.
+1. Launch → “What’s interesting right now” or Data & sources → Earthquakes / Wikipedia.  
+2. Chart opens; optional Edit encoding/look.  
+3. Share → export PNG.  
 
-## Screenshots (required)
-- iPad 13" (and iPhone 6.7" if Universal)  
-- Capture: live quake map or bar chart, Dive view, Share sheet  
-- No “coming soon”
+Privacy: https://loom.ibm.io/privacy
+
+## Screenshots (live)
+- iPhone 6.7" + iPad 13": 5 COMPLETE shots each (`01`–`05`)  
+- Adding a 6th requires leaving READY_FOR_REVIEW first
+
+## Icon / logo
+Yes — build **8** includes the App Store icon (`iconAssetToken` present). Home screen, TestFlight, and ASC use the woven cube + “loom” wordmark from `ios/store/AppIcon-1024.png` / Capacitor assets.
+
+## Live ASC status (2026-10-13)
+- Version **1.0** · build **8** · **WAITING_FOR_REVIEW**
+- Price **$4.95** equalized across **175** territories · Category Productivity (+ Utilities) · 4+ · IDFA off
+- Content rights: third-party content · Privacy + accessibility URLs → https://loom.ibm.io/privacy
+- TestFlight: beta description, privacy/marketing URLs, review notes filled
+- Accessibility declarations drafted (iPhone + iPad: dark interface, larger text, sufficient contrast) — Apple only lets you **publish** them after the app is live on the Store
+- Build encryption: `usesNonExemptEncryption=false` (HTTPS-only; no extra declaration needed)
+- Portal-only leftover: **App Privacy** nutrition labels (public API JWT cannot set; needs ASC web) — choose **Data Not Collected** in ASC → App Privacy
 
 ## One-time portal setup
 1. Xcode → Settings → Accounts → Michael Senkow (team WC44W2QVE4) signed in  

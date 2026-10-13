@@ -124,14 +124,26 @@ describe("/api/fetch-csv", () => {
     headers: { "Sec-Fetch-Site": "same-origin", "CF-Connecting-IP": ip },
   });
 
-  it("rejects cross-site and anonymous (no Origin / Sec-Fetch-Site) callers", async () => {
+  it("rejects anonymous / unknown-origin callers; allows Cap cross-site", async () => {
     const cross = await call(csvUrl(), { headers: { "Sec-Fetch-Site": "cross-site", "CF-Connecting-IP": freshIp() } });
     expect(cross.status).toBe(403);
     const curl = await call(csvUrl(), { headers: { "CF-Connecting-IP": freshIp() } });
     expect(curl.status).toBe(403);
-    const badOrigin = await call(csvUrl(), { headers: { Origin: "https://evil.example", "CF-Connecting-IP": freshIp() } });
+    const badOrigin = await call(csvUrl(), {
+      headers: { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site", "CF-Connecting-IP": freshIp() },
+    });
     expect(badOrigin.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
+
+    fetchMock.mockResolvedValueOnce(new Response("a,b\n1,2\n"));
+    const cap = await call(csvUrl(), {
+      headers: {
+        Origin: "https://localhost",
+        "Sec-Fetch-Site": "cross-site",
+        "CF-Connecting-IP": freshIp(),
+      },
+    });
+    expect(cap.status).toBe(200);
   });
 
   it("accepts an approved Origin and reflects it in CORS", async () => {

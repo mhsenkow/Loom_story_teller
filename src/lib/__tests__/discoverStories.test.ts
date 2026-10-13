@@ -9,11 +9,14 @@ import {
   DISCOVER_STORY_LIMIT_MOBILE,
   VARIANTS_PER_SOURCE,
   VARIANTS_PER_SOURCE_MOBILE,
+  clearDiscoverForceRequest,
   clearDiscoverStoryCache,
+  consumeDiscoverForceRequest,
   discoverHookFor,
   discoverStoryLimit,
   getDiscoverScanSummary,
   getDiscoverStoryCache,
+  requestDiscoverScan,
   setDiscoverStoryCache,
   type DiscoverStory,
 } from "../discoverStories";
@@ -24,7 +27,21 @@ import { SOURCE_BY_KIND, SOURCE_DEFS, sortRowsByOrderBy } from "../sourceRegistr
 describe("discoverStories", () => {
   afterEach(() => {
     clearDiscoverStoryCache();
+    clearDiscoverForceRequest();
     vi.unstubAllGlobals();
+  });
+
+  it("requestDiscoverScan leaves a pending force for late-mounted Onboarding", () => {
+    const dispatch = vi.fn();
+    vi.stubGlobal("window", {
+      localStorage: { removeItem: vi.fn() },
+      dispatchEvent: dispatch,
+    });
+    expect(consumeDiscoverForceRequest()).toBe(false);
+    requestDiscoverScan();
+    expect(dispatch).toHaveBeenCalled();
+    expect(consumeDiscoverForceRequest()).toBe(true);
+    expect(consumeDiscoverForceRequest()).toBe(false);
   });
 
   it("exports the dismiss key used by Onboarding", () => {

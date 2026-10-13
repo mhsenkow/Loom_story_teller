@@ -28,6 +28,7 @@ import { isGpuSceneKind, extractGpuScenePoints, renderGpuSceneCanvas, GPU_SCENE_
 import { buildDataCube, renderDataCubeCanvas } from "@/lib/dataCube";
 import { isGeoFamilyKind, isGeoMapKind, renderGeoMapCanvas, GEO_MAP_KIND_OPTIONS } from "@/lib/geoMaps";
 import { partitionRowsByFacet, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
+import { cancelScheduledIdleCallback, scheduleIdleCallback } from "@/lib/idleCallback";
 import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
 import { buildCorrMatrix, buildPareto, residualYs, rollingMean, normalizeSeriesValues } from "@/lib/dsTransforms";
 import { applyChartTimeWindow } from "@/lib/chartTime";
@@ -244,8 +245,8 @@ export function ChartCard({
     let idle = 0;
     const scheduleDraw = () => {
       if (!visible) return;
-      cancelIdleCallback(idle);
-      idle = requestIdleCallback(() => draw(), { timeout: 120 });
+      cancelScheduledIdleCallback(idle);
+      idle = scheduleIdleCallback(() => draw(), { timeout: 120 });
     };
     const io = new IntersectionObserver(
       (entries) => {
@@ -260,7 +261,7 @@ export function ChartCard({
     return () => {
       io.disconnect();
       ro.disconnect();
-      cancelIdleCallback(idle);
+      cancelScheduledIdleCallback(idle);
     };
   }, [draw]);
 

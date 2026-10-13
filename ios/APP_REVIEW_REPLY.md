@@ -77,7 +77,7 @@ Loom Storyteller is **not** a regulated financial, health, gambling, or governme
 
 It displays **public open-data / publicly licensed feeds** the user chooses (e.g. USGS earthquakes, Wikipedia public recent changes, weather APIs). We do not claim ownership of upstream data. Content rights in App Store Connect are declared as **Uses Third-Party Content** for those public sources. No special industry credentials are required.
 
-Privacy policy: https://loom.ibm.io/privacy.html  
+Privacy policy: https://loom.ibm.io/privacy  
 Support: https://github.com/mhsenkow/Loom_story_teller  
 Marketing: https://loom.ibm.io
 

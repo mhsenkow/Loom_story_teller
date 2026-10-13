@@ -49,15 +49,36 @@ export interface DiscoverStory {
 /** localStorage flag — after first dismiss, intro scan stays quiet until cleared. */
 export const DISCOVER_SEEN_KEY = "loom-discover-v1";
 
+/**
+ * Set when the user taps “What’s interesting” so a just-mounted Onboarding
+ * still opens even if it missed the `loom-discover` event (common on iPad
+ * when the modal wasn’t mounted yet) and even when a last session would
+ * otherwise suppress cold-start onboarding.
+ */
+let pendingDiscoverForce = false;
+
 /** Clear the dismiss flag and ask Onboarding to scan again. */
 export function requestDiscoverScan(): void {
   if (typeof window === "undefined") return;
+  pendingDiscoverForce = true;
   try {
     window.localStorage.removeItem(DISCOVER_SEEN_KEY);
   } catch {
     /* ignore */
   }
   window.dispatchEvent(new Event("loom-discover"));
+}
+
+/** True once per explicit Discover request (button / menu). */
+export function consumeDiscoverForceRequest(): boolean {
+  if (!pendingDiscoverForce) return false;
+  pendingDiscoverForce = false;
+  return true;
+}
+
+/** Test helper — reset the pending force flag. */
+export function clearDiscoverForceRequest(): void {
+  pendingDiscoverForce = false;
 }
 
 /** All poll sources (same set as Sidebar live cards). */

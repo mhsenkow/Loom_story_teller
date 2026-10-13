@@ -362,9 +362,9 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
   const gpu = isGpuSceneKind(kind);
   return {
     cartesian,
-    // Radar/parallel draw every numeric column as an axis; X/Y slots are identity-only for parallel
-    xChannel: kind !== "radar" && kind !== "parallel",
-    yChannel: kind !== "histogram" && kind !== "radar" && kind !== "parallel",
+    // Radar/parallel draw every numeric column as an axis; only Color (series) is user-driven
+    xChannel: kind !== "radar" && kind !== "parallel" && kind !== "corrMatrix",
+    yChannel: kind !== "histogram" && kind !== "radar" && kind !== "parallel" && kind !== "corrMatrix",
     zChannel: kind === "scatter3d" || kind === "dataCube",
     // Show Color only when the canvas reads colorField / cIdx for this kind
     colorChannel: ![
@@ -373,7 +373,23 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       // Canvas ignores color for these
       "dumbbell", "funnel",
     ].includes(kind),
-    sizeChannel: scatterLike || bubbleLike || kind === "dumbbell" || kind === "bucketField" || kind === "beeswarm" || kind === "isoScatter" || kind === "pyramid" || kind === "slope" || kind === "chernoff" || kind === "glyphStar" || kind === "flower" || gpu,
+    // Size: bubble/scatter + endpoint kinds + geo bubbles/globe + GPU scenes
+    sizeChannel:
+      scatterLike ||
+      bubbleLike ||
+      kind === "dumbbell" ||
+      kind === "bucketField" ||
+      kind === "beeswarm" ||
+      kind === "isoScatter" ||
+      kind === "pyramid" ||
+      kind === "slope" ||
+      kind === "chernoff" ||
+      kind === "glyphStar" ||
+      kind === "flower" ||
+      kind === "geoBubbles" ||
+      kind === "globe" ||
+      kind === "globeTrail" ||
+      gpu,
     aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind),
     facetRow: kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble",
     // Only kinds whose canvas path actually ranks/caps categories (see ChartView / oddCharts).
@@ -411,8 +427,10 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
   const base = (x: string, y: string, color: string, size = "Size") => ({ x, y, color, size });
   switch (kind) {
     case "pie":
-    case "forceBubble":
       return base("Slice", "Value", "Color");
+    case "forceBubble":
+      // Radius comes from aggregated Y — not a sizeField channel
+      return base("Category", "Value", "Color");
     case "treemap":
     case "sunburst":
       return base("Leaf", "Value", "Nest");
@@ -431,9 +449,9 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
     case "corrMatrix":
       return base("Measure A", "Measure B", "Color");
     case "radar":
-      return base("Axis", "Value", "Series");
     case "parallel":
-      return base("Axis A", "Axis B", "Series");
+      // Axes = all numeric columns; Color splits series
+      return base("Axes", "Axes", "Series");
     case "box":
     case "violin":
       return base("Group", "Value", "Color");

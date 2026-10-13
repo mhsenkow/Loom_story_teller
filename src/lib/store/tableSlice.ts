@@ -5,6 +5,8 @@
 import type { LoomState, TableViewItem, ViewMode } from "./types";
 import { snapshotTableState } from "./coreSlice";
 import { newLoomId } from "../loomId";
+import type { ChartTimeRange } from "../chartTime";
+import { resetViewCohortPatch } from "../viewCohort";
 
 export const TABLE_UNDO_LIMIT = 20;
 export const TABLE_VIEW_LIMIT = 20;
@@ -14,6 +16,13 @@ export function tableInitialState() {
     tablePrefs: { visibleColumns: null as string[] | null, columnOrder: null as string[] | null },
     tableFilterRowIndices: null as number[] | null,
     tableColumnFilters: {} as Record<string, string>,
+    tableSortColumn: null as string | null,
+    tableSortDir: null as "asc" | "desc" | null,
+    viewTimeField: null as string | null,
+    viewTimeWindow: "all" as ChartTimeRange,
+    lockedColorField: null as string | null,
+    brushLinksFilter: true,
+    statsFocusColumn: null as string | null,
     tableUndoStack: [] as LoomState["tableUndoStack"],
     tableRedoStack: [] as LoomState["tableRedoStack"],
     selectedRowIndices: [] as number[],
@@ -41,6 +50,28 @@ export function createTableSlice(set: Setter) {
         if (same) return s;
         return { tableColumnFilters: next, tableUndoStack: [snapshotTableState(s), ...s.tableUndoStack].slice(0, 20), tableRedoStack: [] };
       }),
+    setTableSort: (column: string | null, dir: "asc" | "desc" | null) =>
+      set({ tableSortColumn: column, tableSortDir: dir }),
+    setViewTimeWindow: (field: string | null, range: ChartTimeRange) =>
+      set({
+        viewTimeField: range === "all" ? null : field,
+        viewTimeWindow: range,
+      }),
+    setLockedColorField: (field: string | null) =>
+      set({ lockedColorField: field?.trim() || null }),
+    setBrushLinksFilter: (v: boolean) => set({ brushLinksFilter: v }),
+    setStatsFocusColumn: (column: string | null) => set({ statsFocusColumn: column }),
+    /** Chart brush/lasso → Explorer (+ Chart) cohort when linking is on. */
+    applyBrushSelection: (indices: number[]) =>
+      set((s) => {
+        const next: Partial<LoomState> = { selectedRowIndices: indices };
+        if (s.brushLinksFilter) {
+          next.tableFilterRowIndices = indices.length > 0 ? indices : null;
+        }
+        return next;
+      }),
+    resetViewCohort: () => set((s) => ({ ...resetViewCohortPatch(), lockedColorField: s.lockedColorField })),
+    unlockColorAndResetLocks: () => set({ lockedColorField: null }),
     pushTableUndo: () =>
       set((s) => ({ tableUndoStack: [snapshotTableState(s), ...s.tableUndoStack].slice(0, 20), tableRedoStack: [] })),
     undoTable: () =>

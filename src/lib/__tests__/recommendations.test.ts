@@ -250,6 +250,11 @@ describe("recommendations", () => {
       expect(chartCapabilities("bubble").sizeChannel).toBe(true);
       expect(chartCapabilities("bubble").markPoints).toBe(false);
       expect(chartCapabilities("bubble").scatterExtras).toBe(false);
+      expect(chartCapabilities("geoBubbles").sizeChannel).toBe(true);
+      expect(chartCapabilities("globe").sizeChannel).toBe(true);
+      expect(chartCapabilities("radar").xChannel).toBe(false);
+      expect(chartCapabilities("parallel").yChannel).toBe(false);
+      expect(encodingChannelLabels("forceBubble").x).toBe("Category");
       // Color UI must not claim kinds that ignore cIdx
       expect(chartCapabilities("dumbbell").colorChannel).toBe(false);
       expect(chartCapabilities("funnel").colorChannel).toBe(false);
@@ -786,5 +791,17 @@ describe("stableLiveChartId", () => {
     const a = stableLiveChartId("usgs", "bar", "place", "mag", null, "Quake map");
     const b = stableLiveChartId("usgs", "bar", "place", "mag", null, "Quake map");
     expect(a).toBe(b);
+  });
+});
+
+describe("bubble sizeField", () => {
+  it("respects explicit null sizeField (no auto-fill on rebuild)", () => {
+    const auto = createChartRec("bubble", richColumns, "x", "y", null, "t");
+    expect(auto?.sizeField).toBeTruthy();
+    const cleared = createChartRec("bubble", richColumns, "x", "y", null, "t", {
+      sizeField: null,
+    });
+    expect(cleared?.sizeField).toBeUndefined();
+    expect((cleared?.spec as { encoding?: { size?: unknown } })?.encoding?.size).toBeUndefined();
   });
 });

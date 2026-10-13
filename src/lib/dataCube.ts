@@ -618,6 +618,11 @@ export interface DataCubeRenderOpts extends CubeCellStyle {
   hovered?: { xi: number; yi: number; zi: number | null } | null;
   /** Thumbnail mode — no labels / legend. */
   mini?: boolean;
+  /**
+   * Pixels reserved at the canvas bottom for source/time footnote.
+   * Interaction hint draws above this so lines don’t stack on each other.
+   */
+  footerReserve?: number;
 }
 
 /** Face definitions: outward normal + 4 corner sign triples (CCW seen from outside). */
@@ -981,11 +986,17 @@ export function drawDataCubeFrontLayer(
 
   if (opts.showLegend !== false) drawCubeLegend(ctx, cube, v, opts);
 
+  // Short hint above the source/time footnote band (ChartView passes footerReserve).
+  const reserve = Math.max(0, opts.footerReserve ?? 0);
+  const hint =
+    opts.slice != null ? "Slice on · Esc all · [ ] step" : "Drag · click voxel to slice";
   ctx.fillStyle = muted;
-  ctx.font = `10px ${font}, sans-serif`;
+  ctx.font = `500 9px ${font}, sans-serif`;
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.fillText(fitTextEllipsis(ctx, opts.slice != null ? "Slice · click a voxel or Esc for all layers · [ ] to step" : "Data cube · drag to orbit · click a voxel to slice", v.w - 24), 12, v.h - 10);
+  ctx.globalAlpha = 0.85;
+  ctx.fillText(fitTextEllipsis(ctx, hint, v.w - 24), 12, v.h - 10 - reserve);
+  ctx.globalAlpha = 1;
   ctx.restore();
 }
 

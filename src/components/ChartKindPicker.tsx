@@ -204,7 +204,7 @@ export function ChartKindPicker({
 
       {open && (
         <div
-          className="fixed z-[120] loom-card border border-loom-border shadow-lg overflow-hidden bg-loom-surface"
+          className="fixed z-[120] loom-menu loom-card overflow-hidden"
           style={pos ? { left: pos.left, top: pos.top, width: pos.width } : { visibility: "hidden" }}
         >
           <div className="p-2 border-b border-loom-border space-y-1.5">

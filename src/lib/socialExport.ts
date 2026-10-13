@@ -469,7 +469,9 @@ export async function publishStoryToWorker(input: {
     if (!data.url || !data.id) {
       return { url: "", id: "", error: data.error || "Publish returned no URL" };
     }
-    return { url: data.url, id: data.id, hasData: !!data.hasData };
+    const { toPublicLoomUrl } = await import("./publicOrigin");
+    // Never hand recipients a workers.dev / localhost URL (Cap API host).
+    return { url: toPublicLoomUrl(data.url), id: data.id, hasData: !!data.hasData };
   } catch {
     return { url: "", id: "", error: "Couldn’t reach the publish service" };
   }

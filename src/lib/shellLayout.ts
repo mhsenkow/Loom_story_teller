@@ -15,6 +15,8 @@ export type ShellDrawerState = {
 };
 
 export const SHELL_DESKTOP_PREFS_KEY = "loom-shell-desktop-prefs";
+/** Chart suggestions rail open/closed (session). */
+export const SUGGESTIONS_RAIL_PREFS_KEY = "loom-suggestions-rail";
 
 /** Map chart device band → shell chrome mode (same cutoffs). */
 export function shellModeFromWidth(width: number): ShellMode {
@@ -97,6 +99,27 @@ export function writeDesktopPrefsToSession(prefs: ShellDrawerState): void {
     window.sessionStorage.setItem(SHELL_DESKTOP_PREFS_KEY, serializeDesktopPrefs(prefs));
   } catch {
     /* private mode / quota — ignore */
+  }
+}
+
+export function readSuggestionsRailFromSession(): boolean | null {
+  if (typeof window === "undefined" || !window.sessionStorage) return null;
+  try {
+    const v = window.sessionStorage.getItem(SUGGESTIONS_RAIL_PREFS_KEY);
+    if (v === "0") return false;
+    if (v === "1") return true;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSuggestionsRailToSession(open: boolean): void {
+  if (typeof window === "undefined" || !window.sessionStorage) return;
+  try {
+    window.sessionStorage.setItem(SUGGESTIONS_RAIL_PREFS_KEY, open ? "1" : "0");
+  } catch {
+    /* ignore */
   }
 }
 

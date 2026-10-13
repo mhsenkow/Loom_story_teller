@@ -1,6 +1,6 @@
 import React from "react";
 import { act } from "react";
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useViewportWidth } from "../useMediaQuery";
 
@@ -22,6 +22,7 @@ describe("useViewportWidth", () => {
 
   beforeEach(() => {
     document.documentElement.dataset.shellWidth = "";
+    delete document.documentElement.dataset.shellMode;
     rafQueue = [];
     vi.spyOn(window, "requestAnimationFrame").mockImplementation((cb) => {
       rafQueue.push(cb);
@@ -34,14 +35,27 @@ describe("useViewportWidth", () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
     delete document.documentElement.dataset.shellWidth;
+    delete document.documentElement.dataset.shellMode;
   });
+
+  function flushRaf() {
+    act(() => {
+      rafQueue.splice(0).forEach((cb) => cb(16));
+    });
+  }
 
   it("coalesces resize updates to one animation frame", () => {
     const renders = vi.fn();
     render(<WidthProbe onRender={renders} />);
+    // Subscribe schedules an immediate rAF remeasure (iPad cold-start).
+    expect(window.requestAnimationFrame).toHaveBeenCalled();
+    flushRaf();
     expect(screen.getByLabelText("width")).toHaveTextContent("900");
+    const baselineRaf = (window.requestAnimationFrame as ReturnType<typeof vi.fn>).mock.calls.length;
+    const baselineRenders = renders.mock.calls.length;
 
     act(() => {
       setInnerWidth(901);
@@ -52,14 +66,24 @@ describe("useViewportWidth", () => {
       window.dispatchEvent(new Event("resize"));
     });
 
-    expect(window.requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(window.requestAnimationFrame).toHaveBeenCalledTimes(baselineRaf + 1);
     expect(screen.getByLabelText("width")).toHaveTextContent("900");
 
-    act(() => {
-      rafQueue.splice(0).forEach((cb) => cb(16));
-    });
+    flushRaf();
 
     expect(screen.getByLabelText("width")).toHaveTextContent("903");
-    expect(renders).toHaveBeenCalledTimes(2);
+    expect(renders).toHaveBeenCalledTimes(baselineRenders + 1);
+  });
+
+  it("follows live innerWidth even when bootstrap stamped a phone width", () => {
+    document.documentElement.dataset.shellWidth = "390";
+    document.documentElement.dataset.shellMode = "phone";
+    setInnerWidth(1024);
+    render(<WidthProbe onRender={() => undefined} />);
+    expect(screen.getByLabelText("width")).toHaveTextContent("1024");
+
+    flushRaf();
+    expect(document.documentElement.dataset.shellWidth).toBe("1024");
+    expect(document.documentElement.dataset.shellMode).toBe("tablet");
   });
 });

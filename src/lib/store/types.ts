@@ -198,6 +198,8 @@ export interface LoomState {
   panelOpen: boolean;
   dataRegionOpen: boolean;
   dataSourcesExpanded: boolean;
+  /** Chart view: suggestion thumbnails left of the canvas (hide for max chart width). */
+  suggestionsRailOpen: boolean;
 
   // Query
   querySql: string;
@@ -229,6 +231,18 @@ export interface LoomState {
   tablePrefs: { visibleColumns: string[] | null; columnOrder: string[] | null };
   tableFilterRowIndices: number[] | null;
   tableColumnFilters: Record<string, string>;
+  /** Explorer sort — shared with Chart so order can match the table. */
+  tableSortColumn: string | null;
+  tableSortDir: "asc" | "desc" | null;
+  /** Shared time slice (Explorer + Chart). */
+  viewTimeField: string | null;
+  viewTimeWindow: import("../chartTime").ChartTimeRange;
+  /** Keep this color field when switching chart kinds. */
+  lockedColorField: string | null;
+  /** Lasso/brush selection also filters the Explorer/Chart cohort. */
+  brushLinksFilter: boolean;
+  /** Stats tab scrolls to this column when set. */
+  statsFocusColumn: string | null;
   tableUndoStack: { tablePrefs: { visibleColumns: string[] | null; columnOrder: string[] | null }; tableColumnFilters: Record<string, string> }[];
   tableRedoStack: { tablePrefs: { visibleColumns: string[] | null; columnOrder: string[] | null }; tableColumnFilters: Record<string, string> }[];
   selectedRowIndices: number[];
@@ -341,6 +355,8 @@ export interface LoomState {
   togglePanel: () => void;
   setDataRegionOpen: (open: boolean) => void;
   setDataSourcesExpanded: (v: boolean) => void;
+  setSuggestionsRailOpen: (open: boolean) => void;
+  toggleSuggestionsRail: () => void;
   setQuerySql: (sql: string) => void;
   setQueryResult: (result: QueryResult | null) => void;
   setQueryError: (error: string | null) => void;
@@ -372,6 +388,14 @@ export interface LoomState {
   setTableFilterRowIndices: (indices: number[] | null) => void;
   setTableColumnFilter: (column: string, value: string) => void;
   setTableColumnFilters: (filters: Record<string, string>) => void;
+  setTableSort: (column: string | null, dir: "asc" | "desc" | null) => void;
+  setViewTimeWindow: (field: string | null, range: import("../chartTime").ChartTimeRange) => void;
+  setLockedColorField: (field: string | null) => void;
+  setBrushLinksFilter: (v: boolean) => void;
+  setStatsFocusColumn: (column: string | null) => void;
+  applyBrushSelection: (indices: number[]) => void;
+  resetViewCohort: () => void;
+  unlockColorAndResetLocks: () => void;
   pushTableUndo: () => void;
   undoTable: () => void;
   redoTable: () => void;

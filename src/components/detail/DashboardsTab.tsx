@@ -678,7 +678,7 @@ function AddViewDropdown({
           <div
             id={menuId}
             role="menu"
-            className="absolute right-0 top-full mt-1 z-20 min-w-[160px] py-1 rounded border border-loom-border bg-loom-surface shadow-lg"
+            className="loom-menu absolute right-0 top-full mt-1 z-20 min-w-[160px] py-1 rounded"
             onClick={(e) => e.stopPropagation()}
           >
             {tableViews.length > 0 && (

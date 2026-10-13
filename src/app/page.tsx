@@ -45,6 +45,7 @@ import {
   captureChartViewPreview,
   captureStoryDashboardPreviews,
 } from "@/lib/captureStoryPreviews";
+import { endShareReadyAspect } from "@/lib/shareReadySession";
 
 const viewSkeleton = (
   <div className="loom-panel flex-1 min-h-[12rem] animate-pulse bg-loom-surface/40" aria-hidden />
@@ -647,6 +648,7 @@ function HomeContent({
         setShortcutsOpen(false);
         if (ariaModalOpen()) return;
         if (useLoomStore.getState().socialExportReady) {
+          endShareReadyAspect();
           useLoomStore.getState().setSocialExportReady(false);
           useLoomStore.getState().setSocialExportTarget(null);
         }
@@ -805,7 +807,7 @@ function HomeContent({
                 <li><kbd className="loom-kbd">+</kbd>/<kbd className="loom-kbd">−</kbd> Zoom · <kbd className="loom-kbd">0</kbd> Reset · arrows pan (Shift = faster)</li>
                 <li><kbd className="loom-kbd">V</kbd> Pan · <kbd className="loom-kbd">C</kbd> Crosshair · <kbd className="loom-kbd">G</kbd> Lasso</li>
                 <li><kbd className="loom-kbd">Shift</kbd>+drag brush select · <kbd className="loom-kbd">L</kbd> Link tooltip · <kbd className="loom-kbd">Esc</kbd> Clear</li>
-                <li className="pt-1"><kbd className="loom-kbd">⌘</kbd><kbd className="loom-kbd ml-1">Enter</kbd> Run query · <kbd className="loom-kbd">?</kbd> This help</li>
+                <li className="pt-1"><kbd className="loom-kbd">⌘K</kbd> Search & commands · <kbd className="loom-kbd">⌘</kbd><kbd className="loom-kbd ml-1">Enter</kbd> Run query · <kbd className="loom-kbd">?</kbd> This help</li>
                 <li className="pt-2">
                   <button
                     type="button"
@@ -943,6 +945,7 @@ function HomeContent({
                   type="button"
                   className="text-2xs px-2 py-1 rounded border border-loom-border bg-loom-surface text-loom-text hover:border-loom-accent"
                   onClick={() => {
+                    endShareReadyAspect();
                     useLoomStore.getState().setSocialExportReady(false);
                     useLoomStore.getState().setSocialExportTarget(null);
                   }}

@@ -31,6 +31,26 @@ export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+/** True inside Capacitor native WKWebView (App Store iOS build). */
+export function isCapacitor(): boolean {
+  if (typeof window === "undefined") return false;
+  const cap = (
+    window as Window & {
+      Capacitor?: { isNativePlatform?: () => boolean };
+    }
+  ).Capacitor;
+  try {
+    return !!cap?.isNativePlatform?.();
+  } catch {
+    return false;
+  }
+}
+
+/** Tauri or Capacitor — no same-origin Worker `/api` on the device origin. */
+export function isNativeShell(): boolean {
+  return isTauri() || isCapacitor();
+}
+
 /** iPhone / iPad / Android — including iPadOS that reports as MacIntel. */
 export function isMobileOs(): boolean {
   if (typeof navigator === "undefined") return false;

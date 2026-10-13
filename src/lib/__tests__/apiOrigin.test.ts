@@ -15,12 +15,21 @@ describe("apiUrl", () => {
     expect(apiUrl("/api/source/usgs")).toBe("/api/source/usgs");
   });
 
-  it("prefixes the Worker origin inside Tauri", () => {
+  it("prefixes the product origin inside Tauri", () => {
     vi.stubGlobal("window", {
       location: { hostname: "tauri.localhost" },
       __TAURI_INTERNALS__: {},
     });
     expect(apiUrl("/api/source/usgs")).toBe(`${DEFAULT_CATALOG_ORIGIN}/api/source/usgs`);
     expect(apiUrl("api/feedback")).toBe(`${DEFAULT_CATALOG_ORIGIN}/api/feedback`);
+    expect(DEFAULT_CATALOG_ORIGIN).toBe("https://loom.ibm.io");
+  });
+
+  it("prefixes the product origin inside Capacitor", () => {
+    vi.stubGlobal("window", {
+      location: { hostname: "localhost" },
+      Capacitor: { isNativePlatform: () => true },
+    });
+    expect(apiUrl("/api/source/usgs")).toBe(`${DEFAULT_CATALOG_ORIGIN}/api/source/usgs`);
   });
 });

@@ -41,12 +41,23 @@ import { globeCameraForData, isGeoMapKind, isWebGpuGlobeKind, pickAtlasKind, ren
 import { type CubeAxisSlot, type CubeHoverCell, DataCubePivotBar, DataCubePivotTable } from "@/components/DataCubePivot";
 import { buildDataCube, buildPivotTable, cubeCellCenter, cubeCellKey, cubeCellTooltip, cubeView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
 import { densityAwarePointMarks, resolveChartPad, subsampleRowsForDensity } from "@/lib/chartLayout";
-import { drawAxisFieldLabels, drawAxisFrame, drawChartBackground, drawChartSourceFootnote, drawChartTitleBlock } from "@/lib/chartLooks";
+import {
+  chartFootnoteReservePx,
+  drawAxisFieldLabels,
+  drawAxisFrame,
+  drawChartBackground,
+  drawChartSourceFootnote,
+  drawChartTitleBlock,
+} from "@/lib/chartLooks";
 import { formatSourceFootnote, resolveDataProvenance } from "@/lib/dataProvenance";
 import { formatAxisValue } from "@/lib/chartAxes";
 import { VISUAL_PRESETS } from "@/lib/lookSystem";
 import { StartHere } from "@/components/StartHere";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
+import {
+  readSuggestionsRailFromSession,
+  writeSuggestionsRailToSession,
+} from "@/lib/shellLayout";
 import { allowedRowIndices, buildBarFacetGrid, type Canvas2DHitContext, type HitTarget, mergeChartTooltip, pickCanvasTooltipRowIndex, pickHitTarget, projectRowForTooltip, resolveTooltipFieldNames, rowForHitTarget, rowMatchesTooltipLink } from "@/lib/chartTooltip";
 import { clampTopN, countFacetGroupsDropped, DEFAULT_TOP_N, layoutFacetCells, partitionRowsByFacet } from "@/lib/chartFacets";
 import { computeFacetSharedScatterBounds, computeFacetSharedValueDomain } from "@/lib/chartFacetScales";
@@ -58,6 +69,8 @@ import { renderFullSunburst } from "@/lib/canvasCharts/sunburst";
 import { CHART_KIND_CATALOG } from "@/lib/chartKindSearch";
 import { invScaleY, scaleDomain, scaleY, type YScaleKind } from "@/lib/dsTransforms";
 import { applyChartTimeWindow, composeChartFootnote, formatChartTimeFootnote } from "@/lib/chartTime";
+import { applyExplorerViewToRows, explorerFiltersActive } from "@/lib/explorerViewRows";
+import { ViewCohortBar } from "@/components/ViewCohortBar";
 import { DEFAULT_PAD, isNumericType, offsetHitTargets, pointInPolygon, scatterYDomain } from "@/lib/canvasCharts/shared";
 import { drawAxisTicks, drawGridLines, drawSmartOverlays } from "@/lib/canvasCharts/primitives";
 import { renderFullScatter } from "@/lib/canvasCharts/scatter";
@@ -113,6 +126,9 @@ export function ChartView() {
     startDeepScan,
     chartChromeFocus, setChartChromeFocus, setChartPanelSection, setPanelOpen,
     inspectingFilePath,
+      suggestionsRailOpen, setSuggestionsRailOpen,
+      tableColumnFilters, tableFilterRowIndices, tableSortColumn, tableSortDir,
+      viewTimeField, viewTimeWindow, applyBrushSelection,
   } = useLoomStore(
     useShallow((s: LoomState) => ({
       selectedFile: s.selectedFile,
@@ -165,8 +181,27 @@ export function ChartView() {
       setChartPanelSection: s.setChartPanelSection,
       setPanelOpen: s.setPanelOpen,
       inspectingFilePath: s.inspectingFilePath,
+      suggestionsRailOpen: s.suggestionsRailOpen,
+      setSuggestionsRailOpen: s.setSuggestionsRailOpen,
+      tableColumnFilters: s.tableColumnFilters,
+      tableFilterRowIndices: s.tableFilterRowIndices,
+      tableSortColumn: s.tableSortColumn,
+      tableSortDir: s.tableSortDir,
+      viewTimeField: s.viewTimeField,
+      viewTimeWindow: s.viewTimeWindow,
+      applyBrushSelection: s.applyBrushSelection,
     })),
   );
+
+  // Restore suggestions rail preference once (session).
+  useEffect(() => {
+    const pref = readSuggestionsRailFromSession();
+    if (pref != null) setSuggestionsRailOpen(pref);
+  }, [setSuggestionsRailOpen]);
+
+  useEffect(() => {
+    writeSuggestionsRailToSession(suggestionsRailOpen);
+  }, [suggestionsRailOpen]);
 
   const reducedMotion = useReducedMotion();
   const isMobile = useIsMobile();
@@ -294,11 +329,44 @@ export function ChartView() {
   ]);
 
   const chartSampleRows = useMemo(() => {
-    if (!sampleRows || !activeChart) return sampleRows;
-    const sliced = applyChartTimeWindow(sampleRows.rows, sampleRows.columns, activeChart);
-    if (!sliced.filtered) return sampleRows;
-    return { ...sampleRows, rows: sliced.rows, rowSourceIndices: sliced.sourceIndices };
-  }, [sampleRows, activeChart]);
+    if (!sampleRows) return sampleRows;
+    // Explorer filters/sort first so Chart paints the same cohort as the table.
+    const view = applyExplorerViewToRows(sampleRows.rows, sampleRows.columns, {
+      columnFilters: tableColumnFilters,
+      filterRowIndices: tableFilterRowIndices,
+      columnStats,
+      sortColumn: tableSortColumn,
+      sortDir: tableSortDir,
+    });
+    let rows = view.rows;
+    let sourceIndices = view.sourceIndices;
+    let changed = view.changed;
+    // Shared time window wins; fall back to chart-local window.
+    const timeRec =
+      viewTimeWindow && viewTimeWindow !== "all" && viewTimeField
+        ? { timeWindowField: viewTimeField, timeWindow: viewTimeWindow }
+        : activeChart;
+    if (timeRec) {
+      const sliced = applyChartTimeWindow(rows, sampleRows.columns, timeRec);
+      if (sliced.filtered) {
+        rows = sliced.rows;
+        sourceIndices = sliced.sourceIndices.map((i) => view.sourceIndices[i]!);
+        changed = true;
+      }
+    }
+    if (!changed) return sampleRows;
+    return { ...sampleRows, rows, rowSourceIndices: sourceIndices };
+  }, [
+    sampleRows,
+    activeChart,
+    tableColumnFilters,
+    tableFilterRowIndices,
+    tableSortColumn,
+    tableSortDir,
+    columnStats,
+    viewTimeField,
+    viewTimeWindow,
+  ]);
 
   /** Source credit + “when?” under the plot (palette is a ramp on the right, not text). */
   const chartFootnoteText = useMemo(() => {
@@ -478,10 +546,12 @@ export function ChartView() {
     const shown = chartSampleRows?.rows.length ?? sampleRows.rows.length;
     const n = sampleRows.rows.length;
     const t = sampleRows.total_rows ?? n;
+    const filtered = explorerFiltersActive(tableColumnFilters, tableFilterRowIndices);
+    if (filtered && shown < n) return `${shown.toLocaleString()} / ${n.toLocaleString()} filtered`;
     if (shown < n) return `${shown.toLocaleString()} / ${n.toLocaleString()} in window`;
     if (t > n) return `${n.toLocaleString()} / ${t.toLocaleString()} rows`;
     return `${n.toLocaleString()} rows`;
-  }, [sampleRows, chartSampleRows]);
+  }, [sampleRows, chartSampleRows, tableColumnFilters, tableFilterRowIndices]);
 
   const densityHint = useMemo(() => {
     if (!sampleRows || !activeChart) return null;
@@ -776,6 +846,15 @@ export function ChartView() {
   const sampleRowsRef = useRef(chartSampleRows);
   sampleRowsRef.current = chartSampleRows;
   const [suggestionsExpanded, setSuggestionsExpanded] = useState(false);
+
+  const hideSuggestionsRail = useCallback(() => {
+    setSuggestionsExpanded(false);
+    setSuggestionsRailOpen(false);
+  }, [setSuggestionsRailOpen]);
+
+  const showSuggestionsRail = useCallback(() => {
+    setSuggestionsRailOpen(true);
+  }, [setSuggestionsRailOpen]);
 
   const getEffectiveScatterBounds = useCallback(
     (sd: { xMin: number; xMax: number; yMin: number; yMax: number }, view: { scale: number; panX: number; panY: number }) => {
@@ -1161,7 +1240,7 @@ export function ChartView() {
         return;
       }
       if (e.key === "Escape") {
-        setSelectedRowIndices([]);
+        applyBrushSelection([]);
         setLassoPoints([]);
         setBrushRect(null);
         setRulerPins([]);
@@ -1178,7 +1257,7 @@ export function ChartView() {
     getEffectiveScatterBounds,
     setChartInteractionMode,
     setToast,
-    setSelectedRowIndices,
+    applyBrushSelection,
     setLassoPoints,
     setRulerPins,
     setCrosshairPos,
@@ -1402,10 +1481,12 @@ export function ChartView() {
           const exp = exportStateRef.current;
           const cssW = canvas2D.width / stageDpr();
           const cssH = canvas2D.height / stageDpr();
-          const needsSceneCanvas =
-            isGpuSceneKind(ac.kind) ||
-            isWebGpuGlobeKind(ac.kind) ||
-            isGeoMapKind(ac.kind);
+          // Geo maps / globes already paint title, categorical legend, size key, and
+          // footnote on canvas2D (and GPU globe sits on the WebGPU layer). Re-rendering
+          // them here dropped the city color key from Share / Save PNGs — composite the
+          // live stage instead so the export matches what you see.
+          // Particle GPU scenes still re-draw on Canvas for a reliable readback.
+          const needsSceneCanvas = isGpuSceneKind(ac.kind) && !isWebGpuGlobeKind(ac.kind);
           if (needsSceneCanvas && exp.sampleRows?.rows.length) {
             ctx.save();
             ctx.scale(w / cssW, h / cssH);
@@ -1438,36 +1519,17 @@ export function ChartView() {
             };
             const cols = exp.sampleRows.columns;
             const rows = exp.sampleRows.rows;
-            if (isGeoMapKind(ac.kind)) {
-              renderGeoMapCanvas(
-                ac.kind,
-                ctx,
-                rows,
-                cols,
-                {
-                  xField: ac.xField,
-                  yField: ac.yField,
-                  colorField: ac.colorField,
-                  sizeField: ac.sizeField,
-                },
-                cssW,
-                cssH,
-                pad,
-                sceneOpts,
-              );
-            } else {
-              const packed = extractGpuScenePoints(rows, cols, {
-                xField: ac.xField,
-                yField: ac.yField,
-                zField: ac.zField,
-                colorField: ac.colorField,
-                sizeField: ac.sizeField,
-                timeField: ac.timeField,
-                trailId: ac.trailId,
-              });
-              if (packed) {
-                renderGpuSceneCanvas(ac.kind as GpuSceneKind, ctx, packed, cssW, cssH, pad, sceneOpts);
-              }
+            const packed = extractGpuScenePoints(rows, cols, {
+              xField: ac.xField,
+              yField: ac.yField,
+              zField: ac.zField,
+              colorField: ac.colorField,
+              sizeField: ac.sizeField,
+              timeField: ac.timeField,
+              trailId: ac.trailId,
+            });
+            if (packed) {
+              renderGpuSceneCanvas(ac.kind as GpuSceneKind, ctx, packed, cssW, cssH, pad, sceneOpts);
             }
             ctx.restore();
           } else {
@@ -2021,8 +2083,12 @@ export function ChartView() {
           const py = pad + (1 - scaleY(p.y, yd.min, yd.max, yKind)) * chartH;
           if (pointInPolygon(px, py, polyPx)) sel.push(rowIndices[i]);
         });
-        setSelectedRowIndices(sel);
-        setToast(sel.length > 0 ? `${sel.length} point(s) lassoed` : "No points in lasso");
+        applyBrushSelection(sel);
+        setToast(
+          sel.length > 0
+            ? `${sel.length} point(s) lassoed`
+            : "No points in lasso",
+        );
       }
       brushStartRef.current = null;
       setLassoPoints([]);
@@ -2054,14 +2120,18 @@ export function ChartView() {
             sel.push(rowIndices[i]);
           }
         });
-        setSelectedRowIndices(sel);
-        setToast(sel.length > 0 ? `${sel.length} point(s) selected` : "No points in brush");
+        applyBrushSelection(sel);
+        setToast(
+          sel.length > 0
+            ? `${sel.length} point(s) selected`
+            : "No points in brush",
+        );
       }
       brushStartRef.current = null;
       setBrushRect(null);
     }
     panStartRef.current = null;
-  }, [setSelectedRowIndices, setToast, chartInteractionMode, lassoPoints, setLassoPoints]);
+  }, [applyBrushSelection, setToast, chartInteractionMode, lassoPoints, setLassoPoints]);
 
   const extractScatterData = useCallback((): { points: GPUScatterPoint[]; rowIndices: number[]; xMin: number; xMax: number; yMin: number; yMax: number } | null => {
     if (!chartSampleRows || !activeChart) return null;
@@ -2226,6 +2296,10 @@ export function ChartView() {
         // The HTML pivot bar carries the legend live; Canvas draws it only for capture / export.
         showLegend: chartVisualOverrides.legendPosition !== "none" && (forceCanvasCapture || !!socialExportReady),
         hovered: cubeHover,
+        footerReserve: chartFootnoteReservePx(chartFootnoteText, {
+          hasColorRamp: !!chartColorInfo?.stops?.length,
+          pad: 24,
+        }),
       };
       cubeFrameRef.current = { cube: dataCube, opts: cubeOpts, w, h, baseCamera: sceneOrbit };
       if (useWebGpuCube && cubeRendererRef.current && octx) {
@@ -3213,19 +3287,17 @@ export function ChartView() {
     );
   }
 
-  // Always show suggestions panel when a file is selected. Expand toggles full-browse grid.
+  // Ideas sit left of the chart (“before”); hide frees canvas width.
+  const ideasCountLabel =
+    chartRecs.length === 1 ? "1 idea" : `${chartRecs.length} ideas`;
+
   const suggestionHeader = (
     <div className={`flex flex-col border-b border-loom-border flex-shrink-0 ${isMobile && !suggestionsExpanded ? "gap-0 px-3 py-2" : "gap-2 px-2.5 py-2"}`}>
-      <div className="flex items-center gap-2">
-        <div className="min-w-0 flex-1 flex items-baseline gap-2">
-          <p className="text-xs font-semibold text-loom-text leading-tight">
-            Suggestions
-          </p>
-          <p className="text-2xs text-loom-muted tabular-nums">
-            {chartRecs.length}
-            {(!isMobile || suggestionsExpanded) && (
-              <> {chartRecs.length === 1 ? "chart" : "charts"}</>
-            )}
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold text-loom-text leading-tight">Ideas</p>
+          <p className="text-2xs text-loom-muted/80 tabular-nums leading-snug mt-0.5">
+            {ideasCountLabel}
           </p>
         </div>
         <div className="flex items-center gap-1 shrink-0">
@@ -3258,8 +3330,8 @@ export function ChartView() {
                 ? "border-loom-accent bg-loom-accent/10 text-loom-accent"
                 : "border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-accent hover:bg-loom-accent/10"}
             `}
-            title={suggestionsExpanded ? "Back to chart" : "Browse all suggestions"}
-            aria-label={suggestionsExpanded ? "Back to chart" : "Browse all suggestions"}
+            title={suggestionsExpanded ? "Back to chart" : "Browse all ideas"}
+            aria-label={suggestionsExpanded ? "Back to chart" : "Browse all ideas"}
             aria-pressed={suggestionsExpanded}
           >
             {suggestionsExpanded ? (
@@ -3274,6 +3346,17 @@ export function ChartView() {
                 <rect x="14" y="14" width="7" height="7" />
               </svg>
             )}
+          </button>
+          <button
+            type="button"
+            onClick={hideSuggestionsRail}
+            className="loom-btn-ghost p-1.5 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-accent hover:bg-loom-accent/10 transition-colors min-h-10 min-w-10 md:min-h-9 md:min-w-9 flex items-center justify-center"
+            title="Hide ideas — more room for the chart"
+            aria-label="Hide ideas"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
           </button>
         </div>
       </div>
@@ -3319,7 +3402,7 @@ export function ChartView() {
               disabled:opacity-45 disabled:cursor-not-allowed
               ${suggestionsExpanded ? "shrink-0" : "w-full"}
             `}
-            title="Deep scan · swipe Keep / Skip to train suggestions"
+            title="Deep scan · swipe Keep / Skip to train ideas"
           >
             Deep scan
           </button>
@@ -3343,9 +3426,9 @@ export function ChartView() {
               onClick={() => void handleSuggestWithAI()}
               disabled={aiSuggesting || columnStats.length === 0}
               className="text-2xs py-1.5 px-1.5 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text hover:bg-loom-accent/10 transition-colors font-medium text-center disabled:opacity-45 disabled:cursor-not-allowed"
-              title="Local Ollama chart suggestion (requires ollama serve)"
+              title="Local Ollama chart idea (requires ollama serve)"
             >
-              {aiSuggesting ? "Asking…" : "Suggest with AI"}
+              {aiSuggesting ? "Asking…" : "Ask AI"}
             </button>
           </div>
         </div>
@@ -3353,18 +3436,54 @@ export function ChartView() {
     </div>
   );
 
+  const suggestionsRestoreTab = !suggestionsRailOpen && !socialExportReady && !liveEdit && (
+    <button
+      type="button"
+      onClick={showSuggestionsRail}
+      className={`
+        shrink-0 flex items-center justify-center gap-1 border-loom-border bg-loom-surface
+        text-loom-muted hover:text-loom-accent hover:bg-loom-accent/10 transition-colors
+        ${isMobile
+          ? "order-2 w-full border-t min-h-10 px-3 text-xs font-medium"
+          : "w-9 border-r flex-col py-3 gap-2"}
+      `}
+      title="Show ideas"
+      aria-label="Show ideas"
+    >
+      {isMobile ? (
+        <>Ideas · {chartRecs.length}</>
+      ) : (
+        <>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+            <path d="M9 18l6-6-6-6" />
+          </svg>
+          <span
+            className="text-2xs font-medium tracking-wide"
+            style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+          >
+            Ideas
+          </span>
+        </>
+      )}
+    </button>
+  );
+
   if (chartRecs.length === 0) {
     return (
       <div className="flex h-full animate-fade-in flex-col md:flex-row">
-        <div className="hidden md:flex w-[220px] flex-shrink-0 border-r border-loom-border bg-loom-surface flex-col overflow-hidden">
-          {suggestionHeader}
-          <div className="flex-1 flex items-center justify-center p-4">
-            <div className="text-center">
-              <p className="text-sm text-loom-muted">No chart suggestions</p>
-              <p className="text-xs text-loom-muted mt-1">Needs at least 1 numeric or temporal column</p>
+        {suggestionsRailOpen ? (
+          <div className="hidden md:flex w-[220px] flex-shrink-0 border-r border-loom-border bg-loom-surface flex-col overflow-hidden">
+            {suggestionHeader}
+            <div className="flex-1 flex items-center justify-center p-4">
+              <div className="text-center">
+                <p className="text-sm text-loom-muted">No ideas yet</p>
+                <p className="text-xs text-loom-muted mt-1">Needs at least 1 numeric or temporal column</p>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          <div className="hidden md:flex">{suggestionsRestoreTab}</div>
+        )}
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
           <p className="text-sm text-loom-muted text-center">Build a chart with Encoding in the Chart panel</p>
           <button type="button" onClick={openChartEditor} className="loom-btn-primary text-xs py-2 px-4 min-h-10">
@@ -3376,11 +3495,12 @@ export function ChartView() {
   }
 
   const mobileRail = isMobile && !suggestionsExpanded;
+  const showSuggestionsPanel = suggestionsRailOpen && !socialExportReady && !liveEdit;
 
   return (
     <div className={`flex h-full animate-fade-in ${suggestionsExpanded || isMobile ? "flex-col" : ""}`}>
-      {/* Recommendation panel — desktop sidebar, mobile bottom rail, or full browse grid */}
-      {!socialExportReady && !liveEdit && (
+      {/* Recommendation panel — desktop left rail, mobile bottom rail, or full browse grid */}
+      {showSuggestionsPanel ? (
       <div
         className={`
           bg-loom-surface overflow-hidden transition-[width,height] duration-200 ease-out
@@ -3415,6 +3535,8 @@ export function ChartView() {
           ))}
         </div>
       </div>
+      ) : (
+        suggestionsRestoreTab
       )}
 
       {/* Full-size chart — always in DOM so refs/ResizeObserver stay valid; zero size when browsing all */}
@@ -3428,6 +3550,7 @@ export function ChartView() {
               : "flex-1"}
         `}
       >
+        {!socialExportReady && <ViewCohortBar surface="chart" />}
         {!socialExportReady && (
         <div className="flex items-center gap-1.5 sm:gap-3 px-2 sm:px-4 py-1.5 sm:py-2 border-b border-loom-border bg-loom-surface/50 flex-wrap">
           <div className="flex flex-col gap-0.5 min-w-0 flex-1">
@@ -4156,51 +4279,18 @@ export function ChartView() {
 
         {activeChart && !isMobile && (
           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 min-h-[var(--statusbar-height)] py-0.5 border-t border-loom-border text-2xs text-loom-muted font-mono">
-            <span>
+            <span className="truncate max-w-[min(28rem,55vw)]" title={activeChart.subtitle ?? undefined}>
               {CHART_KIND_CATALOG.find((e) => e.value === activeChart.kind)?.label ?? activeChart.kind}
               {" · "}
               {activeChart.xField}
               {activeChart.yField ? ` × ${activeChart.yField}` : ""}
             </span>
-            {chartColorInfo?.stops?.length ? (
-              <>
-                <span className="text-loom-border">|</span>
-                <span
-                  className="inline-flex items-center gap-1.5 text-loom-text"
-                  title={chartColorInfo.line ?? "How color is encoded on this chart"}
-                >
-                  {chartColorInfo.fieldLabel ? (
-                    <span className="text-loom-muted">{chartColorInfo.fieldLabel}</span>
-                  ) : null}
-                  <span
-                    className="inline-block h-2 w-[72px] shrink-0 rounded-sm border border-loom-border/40"
-                    style={
-                      chartColorInfo.continuous
-                        ? {
-                            backgroundImage: `linear-gradient(to right, ${chartColorInfo.stops.join(", ")})`,
-                          }
-                        : {
-                            backgroundImage: `linear-gradient(to right, ${chartColorInfo.stops
-                              .map((c, i, a) => {
-                                const a0 = (i / a.length) * 100;
-                                const a1 = ((i + 1) / a.length) * 100;
-                                return `${c} ${a0}%, ${c} ${a1}%`;
-                              })
-                              .join(", ")})`,
-                          }
-                    }
-                    aria-label={chartColorInfo.paletteName}
-                  />
-                </span>
-              </>
-            ) : null}
-            <span className="text-loom-border">|</span>
-            <span title="Press L while hovering a point to lock/unlock tooltip filter across charts">
-              Tooltip L = link
-            </span>
+            {/* Color ramp lives on the chart (footnote / legend) — don’t repeat it here. */}
+            <span className="text-loom-border">·</span>
+            <span title="Press L while hovering to lock tooltip across charts">L = link</span>
             {tooltipLink && (
               <>
-                <span className="text-loom-accent truncate max-w-[200px]">
+                <span className="text-loom-accent truncate max-w-[160px]">
                   {tooltipLink.field}={tooltipLink.value}
                 </span>
                 <button
@@ -4208,7 +4298,7 @@ export function ChartView() {
                   onClick={() => setTooltipLink(null)}
                   className="text-loom-muted hover:text-loom-text underline"
                 >
-                  Clear link
+                  Clear
                 </button>
               </>
             )}
@@ -4217,12 +4307,10 @@ export function ChartView() {
                 chartDevice !== "desktop" ||
                 (appSettings.chartDevice ?? "auto") !== "auto") && (
               <span
-                className="ml-auto text-2xs font-mono text-loom-muted tabular-nums"
+                className="ml-auto text-2xs font-mono text-loom-muted/80 tabular-nums"
                 title="Chart frame aspect · device · pixel size"
               >
                 {aspectLabel(chartAspect)}
-                {" · "}
-                {chartDevice}
                 {" · "}
                 {chartFrameSize.width}×{chartFrameSize.height}
               </span>

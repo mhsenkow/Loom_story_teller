@@ -27,6 +27,11 @@ export type DialogProps = {
   panelClassName?: string;
   /** Bottom sheet on small screens (default true). */
   sheetOnMobile?: boolean;
+  /**
+   * Near-fullscreen stage: tiny gutter, rounded card that owns the viewport.
+   * Use for browse grids (What’s interesting) where content needs room.
+   */
+  stage?: boolean;
 };
 
 export function Dialog({
@@ -41,6 +46,7 @@ export function Dialog({
   className = "",
   panelClassName = "",
   sheetOnMobile = true,
+  stage = false,
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
@@ -104,14 +110,20 @@ export function Dialog({
   // Overlay owns viewport padding / alignment. Panel owns shape only —
   // never put `p-0` on the panel (it fights caller `panelClassName` padding
   // in the Tailwind cascade and clips content under the rounded corners).
-  const overlayPad =
-    sheetOnMobile !== false
+  const useSheet = sheetOnMobile !== false && !stage;
+  const overlayPad = stage
+    ? "items-center p-1.5 sm:p-2.5"
+    : useSheet
       ? "items-end sm:items-center p-0 sm:p-4"
       : "items-center p-4";
-  const panelShape =
-    sheetOnMobile !== false
+  const panelShape = stage
+    ? "rounded-2xl"
+    : useSheet
       ? "rounded-t-2xl sm:rounded-xl mb-[var(--safe-bottom)] sm:mb-0 animate-slide-up"
       : "rounded-xl";
+  const frameMax = stage
+    ? "max-w-[calc(100vw-0.75rem)] sm:max-w-[calc(100vw-1.25rem)] h-[min(96dvh,calc(100dvh-0.75rem))] sm:h-[min(94dvh,calc(100dvh-1.25rem))]"
+    : "max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)]";
 
   return (
     <div
@@ -128,10 +140,10 @@ export function Dialog({
           Dialog
         </span>
       )}
-      <div className="w-full min-w-0 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)] flex justify-center pointer-events-none">
+      <div className={`w-full min-w-0 ${frameMax} flex justify-center pointer-events-none`}>
         <div
           ref={panelRef}
-          className={`loom-card w-full min-w-0 pointer-events-auto shadow-loom-lg border border-loom-border bg-loom-surface overflow-hidden ${panelShape} ${panelClassName}`}
+          className={`loom-card w-full min-w-0 min-h-0 pointer-events-auto shadow-loom-lg border border-loom-border bg-loom-surface overflow-hidden ${stage ? "h-full" : ""} ${panelShape} ${panelClassName}`}
           style={{
             marginBottom: keyboardInset > 0 ? `max(var(--safe-bottom), ${keyboardInset}px)` : undefined,
           }}

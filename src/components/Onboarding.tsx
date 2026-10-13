@@ -23,6 +23,7 @@ import {
   setDiscoverStoryCache,
   retainDiscoverFeed,
   stopDiscoverProbes,
+  consumeDiscoverForceRequest,
   type DiscoverStory,
 } from "@/lib/discoverStories";
 import { activateDataset, shortlistFor, type DatasetShortlist } from "@/lib/datasetPipeline";
@@ -190,6 +191,11 @@ export function Onboarding() {
     };
 
     const id = window.setTimeout(() => {
+      // Explicit tap often mounts us after the event already fired — honor that.
+      if (consumeDiscoverForceRequest()) {
+        runScan();
+        return;
+      }
       let hasDiscoverSeen = false;
       try {
         hasDiscoverSeen = !!window.localStorage.getItem(DISCOVER_SEEN_KEY);
@@ -216,6 +222,8 @@ export function Onboarding() {
       } catch {
         /* ignore */
       }
+      // Listener path already received the event; drop the pending flag.
+      consumeDiscoverForceRequest();
       runScan();
     };
     window.addEventListener("loom-discover", onForce);
@@ -584,9 +592,10 @@ export function Onboarding() {
       describedBy="onboarding-desc"
       initialFocusRef={closeRef}
       zIndex={200}
-      panelClassName="max-w-5xl p-3 sm:p-5 space-y-0 max-h-[min(85dvh,720px)] flex flex-col"
+      stage
+      panelClassName="p-3 sm:p-4 space-y-0 flex flex-col h-full"
     >
-      <div className="flex flex-col min-w-0 min-h-0 max-h-full space-y-0">
+      <div className="flex flex-col min-w-0 min-h-0 h-full max-h-full space-y-0">
         {/* order: phone = title → stories → filters → footer; desktop = title → filters → stories → footer */}
         <header className="order-1 shrink-0 pb-1.5 sm:pb-3 mb-1 sm:mb-3 border-b border-loom-border/50">
           <div className="flex items-start gap-2 sm:gap-3">
@@ -666,7 +675,7 @@ export function Onboarding() {
           )}
 
           {showFilters && visible.length > 0 && (
-            <ul id="onboarding-stories" className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 content-start gap-2 list-none m-0 p-0 pb-2 min-w-0 w-full">
+            <ul id="onboarding-stories" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 content-start gap-2 sm:gap-2.5 list-none m-0 p-0 pb-2 min-w-0 w-full">
               {visible.map((s) => (
                 <li key={s.id} className="min-w-0 max-w-full animate-fade-in">
                   <div className="relative">

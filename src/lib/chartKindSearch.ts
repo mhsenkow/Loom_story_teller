@@ -10,6 +10,7 @@ import { CHART_KIND_OPTIONS, type ChartKind } from "./recommendations";
 import { ODD_CHART_KIND_OPTIONS } from "./oddCharts";
 import { GPU_SCENE_KIND_OPTIONS } from "./gpuScenes";
 import { GEO_MAP_KIND_OPTIONS } from "./geoMaps";
+import { CHART_KIND_VERNACULAR } from "./analysisVernacular";
 
 export type ChartKindGroup = "Classic" | "Creative" | "3D & GPU" | "Maps";
 
@@ -21,34 +22,8 @@ export interface ChartKindEntry {
   group: ChartKindGroup;
 }
 
-/** Extra words people search for that aren't in the label. */
-const SYNONYMS: Partial<Record<string, string>> = {
-  scatter: "dot point xy correlation",
-  bar: "column histogram compare",
-  line: "trend time series",
-  area: "filled trend",
-  pie: "donut share part whole",
-  heatmap: "matrix grid density",
-  treemap: "nested hierarchy part whole",
-  sunburst: "radial hierarchy",
-  sankey: "flow alluvial",
-  network: "graph force directed links nodes edges",
-  arcDiagram: "arc links linear network",
-  pareto: "80 20 cumulative ranked abc analysis",
-  corrMatrix: "correlation pearson heatmap matrix r",
-  radar: "spider web",
-  parallel: "multivariate axes",
-  box: "boxplot quartile distribution",
-  violin: "distribution density",
-  histogram: "distribution bins frequency",
-  choropleth: "map region country state",
-  scatter3d: "3d orbit point cloud xyz",
-  dataCube: "3d cube voxel olap pivot rows columns depth",
-  firefly: "particles glow",
-  quakeTerrain: "3d heightfield surface",
-  trailRibbon: "path trajectory",
-  loomWeave: "textile threads",
-};
+/** Extra words people search for that aren't in the label (DS + layman + bot talk). */
+const SYNONYMS: Partial<Record<string, string>> = { ...CHART_KIND_VERNACULAR };
 
 function groupFor(kind: string): ChartKindGroup {
   if (GEO_MAP_KIND_OPTIONS.some((o) => o.value === kind) || kind === "choropleth") return "Maps";

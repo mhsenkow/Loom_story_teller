@@ -3,7 +3,7 @@
 // =================================================================
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { isDesktop, isMobileOs, isTauri } from "../tauri";
+import { isCapacitor, isDesktop, isMobileOs, isNativeShell, isTauri } from "../tauri";
 
 describe("isMobileOs / isDesktop", () => {
   afterEach(() => {
@@ -42,4 +42,14 @@ describe("isMobileOs / isDesktop", () => {
     vi.stubGlobal("window", {});
     expect(isDesktop()).toBe(false);
   });
+
+  it("detects Capacitor native shell", () => {
+    vi.stubGlobal("window", {
+      Capacitor: { isNativePlatform: () => true },
+    });
+    expect(isCapacitor()).toBe(true);
+    expect(isNativeShell()).toBe(true);
+    expect(isDesktop()).toBe(false);
+  });
 });
+

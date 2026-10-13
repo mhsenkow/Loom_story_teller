@@ -817,6 +817,30 @@ export function drawChartTitleBlock(
 }
 
 /**
+ * Vertical band (px from canvas bottom) reserved for source/time footnote +
+ * optional color ramp. Scene chrome (cube hints, etc.) must stay above this
+ * so lines don’t collide — LOOM footnote / chrome shared reserve.
+ */
+export function chartFootnoteReservePx(
+  text: string | null | undefined,
+  opts?: { hasColorRamp?: boolean; pad?: number },
+): number {
+  const lines = (text ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean).length;
+  const hasRamp = !!opts?.hasColorRamp;
+  if (!lines && !hasRamp) return 0;
+  const pad = opts?.pad ?? 24;
+  const type = chartTypeRamp(11);
+  const lineH = type.footnote + 3;
+  const n = Math.max(lines, hasRamp ? 1 : 0);
+  // rule (~13) + lines + bottom inset (matches drawChartSourceFootnote)
+  const bottomInset = Math.max(6, pad * 0.22);
+  return Math.ceil(13 + n * lineH + bottomInset + 4);
+}
+
+/**
  * Bottom source / time footnote — rides into PNG / share.
  * Supports 1–2 text lines (`\\n`). Optional `colorRamp` draws a glanceable
  * palette strip on the right (replacing a written palette name).

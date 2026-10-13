@@ -147,7 +147,7 @@ export function DiveChipInput({
         <ul
           id={listId}
           role="listbox"
-          className="absolute z-20 left-0 right-0 top-full mt-0.5 max-h-48 overflow-y-auto rounded-md border border-loom-border bg-loom-surface shadow-loom-lg py-0.5"
+          className="loom-menu absolute z-20 left-0 right-0 top-full mt-0.5 max-h-48 overflow-y-auto rounded-md py-0.5"
         >
           {options.map((o, i) => (
             <li

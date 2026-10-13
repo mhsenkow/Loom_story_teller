@@ -819,6 +819,20 @@ html {
       background-color var(--transition-fast),
       transform var(--transition-fast);
   }
+
+  /* Floating menus / pickers — solid fills so glass/frost translucency never washes text */
+  .loom-menu {
+    background-color: var(--loom-elevated);
+    color: var(--loom-text);
+    border: var(--panel-border-w) solid var(--loom-border);
+    box-shadow: var(--shadow-2);
+  }
+  html[data-theme="glass"] .loom-menu {
+    background-color: #ffffff;
+  }
+  html[data-theme="frost"] .loom-menu {
+    background-color: #111827;
+  }
   .loom-card:hover {
     border-color: color-mix(in srgb, var(--loom-accent) 55%, var(--loom-border));
   }

@@ -737,6 +737,9 @@ export default function ChartPanelTab() {
     chartChromeFocus,
     setChartChromeFocus,
     pushChartEditUndo,
+    lockedColorField,
+    setLockedColorField,
+    unlockColorAndResetLocks,
   } = useLoomStore(
     useShallow((s) => ({
       activeChart: s.activeChart,
@@ -768,6 +771,9 @@ export default function ChartPanelTab() {
       chartChromeFocus: s.chartChromeFocus,
       setChartChromeFocus: s.setChartChromeFocus,
       pushChartEditUndo: s.pushChartEditUndo,
+      lockedColorField: s.lockedColorField,
+      setLockedColorField: s.setLockedColorField,
+      unlockColorAndResetLocks: s.unlockColorAndResetLocks,
     })),
   );
   const [specExpanded, setSpecExpanded] = useState(true);
@@ -1047,6 +1053,11 @@ export default function ChartPanelTab() {
         },
       );
       if (rec) setActiveChart(rec);
+      // Shared cohort — Explorer + Chart ViewCohortBar stay in sync
+      useLoomStore.getState().setViewTimeWindow(
+        field,
+        (range && range !== "all" ? range : "all") as ChartTimeRange,
+      );
     },
     [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
   );
@@ -1061,6 +1072,7 @@ export default function ChartPanelTab() {
         topN: caps.topN ? base.topN : null,
         y2Field: caps.compareY ? base.y2Field : null,
         comparePrevious: caps.compareY ? base.comparePrevious : null,
+        // Pass null explicitly so bubble/dumbbell don't auto-fill on kind switch
         sizeField: caps.sizeChannel ? base.sizeField : null,
         zField: caps.zChannel ? base.zField : null,
         glowField: caps.glowOutline ? base.glowField : null,
@@ -1110,7 +1122,8 @@ export default function ChartPanelTab() {
   const applyChartType = useCallback(
     (kind: ChartKind) => {
       if (!activeChart || columnStats.length === 0) return;
-      const fit = fitEncodingToKind(kind, columnStats, activeChart);
+      const lockedColorField = useLoomStore.getState().lockedColorField;
+      const fit = fitEncodingToKind(kind, columnStats, activeChart, { lockedColorField });
       const sanitized = extrasForKind(kind, extraFromChart());
       let rec = createChartRec(kind, columnStats, fit.xField, fit.yField, fit.colorField, tableName, sanitized);
       if (!rec) {
@@ -1577,45 +1590,77 @@ export default function ChartPanelTab() {
                   onDragOver={handleDragOver("color")}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop("color")}
-                  onChange={(v) => applyEncoding("color", v === "" ? "__none__" : v)}
+                  onChange={(v) => {
+                    applyEncoding("color", v === "" ? "__none__" : v);
+                    if (v && lockedColorField) setLockedColorField(v);
+                  }}
                   chromeTarget="color"
                   chromeActive={chartChromeFocus?.target === "color"}
                   onChromeEnter={focusChromeFromPanel}
                   onChromeLeave={clearChromeFromPanel}
                   trailing={
-                    activeChart.kind === "bar" && activeChart.colorField ? (
+                    activeChart.colorField ? (
                       <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
-                        <span className="text-2xs text-loom-muted shrink-0">Layout</span>
-                        <div className="flex gap-1 flex-wrap">
-                          {(["grouped", "stacked", "percent"] as const).map((m) => (
-                            <button
-                              key={m}
-                              type="button"
-                              aria-pressed={barStackMode === m}
-                              onClick={() => {
-                                setBarStackMode(m);
-                                if (columnStats.length === 0) return;
-                                const rec = createChartRec(
-                                  activeChart.kind,
-                                  columnStats,
-                                  activeChart.xField,
-                                  activeChart.yField,
-                                  activeChart.colorField,
-                                  tableName,
-                                  { ...extraFromChart(), barStackMode: m },
-                                );
-                                if (rec) setActiveChart(rec);
-                              }}
-                              className={`min-h-8 px-2.5 text-2xs rounded-md capitalize ${
-                                barStackMode === m
-                                  ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                                  : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                              }`}
-                            >
-                              {m}
-                            </button>
-                          ))}
-                        </div>
+                        <button
+                          type="button"
+                          title={
+                            lockedColorField === activeChart.colorField
+                              ? "Color locked across chart types"
+                              : "Lock color so it sticks when you change mark type"
+                          }
+                          aria-pressed={lockedColorField === activeChart.colorField}
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${
+                            lockedColorField === activeChart.colorField
+                              ? "border-loom-accent/50 bg-loom-accent/15 text-loom-accent"
+                              : "border-loom-border text-loom-muted hover:text-loom-text"
+                          }`}
+                          onClick={() => {
+                            if (lockedColorField === activeChart.colorField) {
+                              unlockColorAndResetLocks();
+                              setToast("Color unlocked");
+                            } else if (activeChart.colorField) {
+                              setLockedColorField(activeChart.colorField);
+                              setToast(`Color locked · ${activeChart.colorField}`);
+                            }
+                          }}
+                        >
+                          {lockedColorField === activeChart.colorField ? "locked" : "lock"}
+                        </button>
+                        {activeChart.kind === "bar" && (
+                          <>
+                            <span className="text-2xs text-loom-muted shrink-0">Layout</span>
+                            <div className="flex gap-1 flex-wrap">
+                              {(["grouped", "stacked", "percent"] as const).map((m) => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  aria-pressed={barStackMode === m}
+                                  onClick={() => {
+                                    setBarStackMode(m);
+                                    if (columnStats.length === 0) return;
+                                    const rec = createChartRec(
+                                      activeChart.kind,
+                                      columnStats,
+                                      activeChart.xField,
+                                      activeChart.yField,
+                                      activeChart.colorField,
+                                      tableName,
+                                      { ...extraFromChart(), barStackMode: m },
+                                    );
+                                    if (rec) setActiveChart(rec);
+                                  }}
+                                  className={`min-h-8 px-2.5 text-2xs rounded-md capitalize ${
+                                    barStackMode === m
+                                      ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                                      : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
+                                  }`}
+                                >
+                                  {m}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
                       </div>
                     ) : undefined
                   }

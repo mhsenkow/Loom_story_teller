@@ -7,7 +7,7 @@
 // =================================================================
 
 import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
-import { classifyKeys } from "./chartAxes";
+import { classifyKeys, histogramBins } from "./chartAxes";
 import { buildSpatialHitIndex, spatialCandidates } from "./spatialHitIndex";
 
 /** Precomputed facet for bar charts (category × subcategory); used for canvas draw + hit-test. */
@@ -656,18 +656,20 @@ export function pickCanvasTooltipRowIndex(
     case "area":
       return pickLineLikeNearestFixed(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
     case "histogram": {
+      // Fallback when hit targets weren't recorded — match renderFullHistogram bins
       if (xIdx < 0) return null;
-      const [min, max] = numRange(rows, xIdx);
-      const bins = 30;
-      const binW = chartWidth / bins;
-      const bi = Math.max(0, Math.min(bins - 1, Math.floor((chartX - pad) / binW)));
-      const lo = min + (bi / bins) * (max - min);
-      const hi = min + ((bi + 1) / bins) * (max - min);
+      const values = rows.map((r) => Number(r[xIdx]));
+      const bins = histogramBins(values);
+      if (!bins) return null;
+      const n = bins.counts.length;
+      const bi = Math.max(0, Math.min(n - 1, Math.floor(((chartX - pad) / chartWidth) * n)));
+      const lo = bins.lo + bi * bins.step;
+      const hi = lo + bins.step;
       for (let i = 0; i < rows.length; i++) {
         if (!inAllowed(i, allowed)) continue;
         const v = Number(rows[i]![xIdx]);
-        if (isNaN(v)) continue;
-        if (v >= lo && (bi === bins - 1 ? v <= hi : v < hi)) return i;
+        if (!Number.isFinite(v)) continue;
+        if (v >= lo && (bi === n - 1 ? v <= hi : v < hi)) return i;
       }
       return null;
     }

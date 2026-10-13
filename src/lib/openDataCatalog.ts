@@ -2,7 +2,8 @@
 // Loom — Open data catalog fetchers (browser / Worker)
 // =================================================================
 
-import { shouldRetryCsvOnCatalogFallback } from "./openDataCatalogPolicy";
+import { looksLikeHtmlDocument, shouldRetryCsvOnCatalogFallback } from "./openDataCatalogPolicy";
+import { PUBLIC_LOOM_ORIGIN } from "./publicOrigin";
 // Mirrors Rust `fetch_data_gov_recent_csv` / `fetch_uk_data_recent_csv`
 // for the static web UI. US Catalog API has no CORS; prefer same-origin
 // `/api/catalog/*` (Cloudflare Worker). UK CKAN allows CORS `*`.
@@ -42,21 +43,32 @@ export interface DataGovDataset {
 const US_CATALOG = "https://catalog.data.gov/search";
 const UK_CKAN = "https://ckan.publishing.service.gov.uk/api/action/package_search";
 
-/** Deployed Worker origin used when local Next.js has no `/api` routes. */
+/** Deployed Worker / product origin when the shell has no same-origin `/api`. */
 export const DEFAULT_CATALOG_ORIGIN =
   (typeof process !== "undefined" && process.env.NEXT_PUBLIC_CATALOG_ORIGIN) ||
-  "https://loom-storyteller.mhsenkow.workers.dev";
+  PUBLIC_LOOM_ORIGIN;
+
+function isNativeShellWindow(w: Record<string, unknown> | undefined): boolean {
+  if (!w) return false;
+  if ("__TAURI_INTERNALS__" in w) return true;
+  const cap = w.Capacitor as { isNativePlatform?: () => boolean } | undefined;
+  try {
+    return !!cap?.isNativePlatform?.();
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Resolve a Worker API path for fetch.
  * Browser on loom.ibm.io / Next dev → same-origin `/api/…`.
- * Tauri shells (iOS/Android/desktop web-parity helpers) → absolute Worker URL.
+ * Tauri + Capacitor shells → absolute Worker URL (device origin has no `/api`).
  */
 export function apiUrl(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
   const g = typeof globalThis !== "undefined" ? globalThis : undefined;
   const w = g && "window" in g ? (g as unknown as { window?: Record<string, unknown> }).window : undefined;
-  if (w && "__TAURI_INTERNALS__" in w) {
+  if (isNativeShellWindow(w)) {
     return `${DEFAULT_CATALOG_ORIGIN}${p}`;
   }
   return p;
@@ -417,15 +429,25 @@ export async function fetchUkCatalogWeb(opts?: FetchDataGovOptions): Promise<Dat
 
 /** Fetch CSV text via Worker proxy (avoids CORS on agency hosts). */
 export async function fetchCsvTextWeb(csvUrl: string): Promise<{ text: string; truncated: boolean }> {
-  const origins = ["", DEFAULT_CATALOG_ORIGIN];
+  const qs = `url=${encodeURIComponent(csvUrl)}`;
+  // Native shells (Capacitor iPad / Tauri) have no `/api` routes — `apiUrl` points at
+  // the Worker. Hitting relative `/api/fetch-csv` returns SPA `index.html` (~17 KB)
+  // with HTTP 200, which used to show up as “0 rows, 16.7 KB” after Explore.
+  const primary = apiUrl(`/api/fetch-csv?${qs}`);
+  const candidates =
+    primary.startsWith("http://") || primary.startsWith("https://")
+      ? [primary]
+      : [primary, `${DEFAULT_CATALOG_ORIGIN}/api/fetch-csv?${qs}`];
+
   let lastErr: Error | null = null;
-  for (const origin of origins) {
+  for (let i = 0; i < candidates.length; i++) {
+    const endpoint = candidates[i]!;
+    const canFallback = i + 1 < candidates.length;
     try {
-      const res = await fetch(
-        `${origin}/api/fetch-csv?url=${encodeURIComponent(csvUrl)}`,
-        { headers: { Accept: "text/csv,text/plain,*/*" } },
-      );
-      if (res.status === 404 && origin === "") continue;
+      const res = await fetch(endpoint, {
+        headers: { Accept: "text/csv,text/plain,*/*" },
+      });
+      if (res.status === 404 && canFallback) continue;
       if (!res.ok) {
         const raw = await res.text().catch(() => res.statusText);
         let msg = raw || `Fetch CSV failed (${res.status})`;
@@ -437,8 +459,16 @@ export async function fetchCsvTextWeb(csvUrl: string): Promise<{ text: string; t
         }
         throw new Error(msg);
       }
-      // Client-side guard when proxy hasn't been redeployed yet
       const text = await res.text();
+      if (looksLikeHtmlDocument(text)) {
+        const err = new Error("Got an HTML page instead of CSV (API route missing)");
+        if (canFallback && shouldRetryCsvOnCatalogFallback(err)) {
+          lastErr = err;
+          continue;
+        }
+        throw err;
+      }
+      // Client-side guard when proxy hasn't been redeployed yet
       if (text.length >= 2 && text.charCodeAt(0) === 0x50 && text.charCodeAt(1) === 0x4b) {
         throw new Error(
           "This download is an Excel workbook (xlsx), not CSV. Pick a CSV resource from the portal.",
@@ -448,7 +478,7 @@ export async function fetchCsvTextWeb(csvUrl: string): Promise<{ text: string; t
       return { text, truncated };
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      if (origin === "" && shouldRetryCsvOnCatalogFallback(err)) {
+      if (canFallback && shouldRetryCsvOnCatalogFallback(err)) {
         lastErr = err;
         continue;
       }

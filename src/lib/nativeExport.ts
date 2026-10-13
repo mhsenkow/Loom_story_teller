@@ -3,6 +3,8 @@
 // =================================================================
 // Desktop Tauri uses dialogs; Safari/iOS webviews prefer Web Share when
 // programmatic download anchors are ignored.
+// LinkedIn / X often drop bare image files — share a public story URL
+// (OG image) alongside the PNG so the post keeps a preview + reopen link.
 // =================================================================
 
 export type NativeExportOutcome = "saved" | "shared" | "downloaded" | "cancelled" | "unsupported";
@@ -19,20 +21,74 @@ export function downloadBlob(blob: Blob, filename: string): NativeExportOutcome 
   return "downloaded";
 }
 
+/** Caption + absolute story URL for share targets that only keep text. */
+export function shareCaptionWithLink(caption: string, url?: string | null): string {
+  const body = caption.trim();
+  const link = url?.trim();
+  if (!link) return body;
+  if (!body) return link;
+  if (body.includes(link)) return body;
+  return `${body}\n\n${link}`;
+}
+
+/**
+ * Ordered Web Share payloads: file+url first (best for Photos/Messages), then
+ * URL-only (LinkedIn link card with og:image), then file-only fallback.
+ */
+export function buildImageShareAttempts(input: {
+  file: File;
+  title: string;
+  caption: string;
+  url?: string | null;
+}): ShareData[] {
+  const title = input.title.trim() || input.file.name;
+  const url = input.url?.trim() || undefined;
+  const text = shareCaptionWithLink(input.caption, url);
+  const attempts: ShareData[] = [];
+  if (url) {
+    attempts.push({ files: [input.file], title, text, url });
+    attempts.push({ files: [input.file], title, text });
+    attempts.push({ title, text, url });
+  }
+  attempts.push({ files: [input.file], title, text: input.caption.trim() || title });
+  return attempts;
+}
+
+/** Try share payloads until one is accepted (or user cancels). */
+export async function shareWithFallback(attempts: ShareData[]): Promise<NativeExportOutcome> {
+  const nav = typeof navigator !== "undefined" ? navigator : undefined;
+  if (!nav?.share || attempts.length === 0) return "unsupported";
+  for (const data of attempts) {
+    try {
+      if (typeof nav.canShare === "function" && !nav.canShare(data)) continue;
+      await nav.share(data);
+      return "shared";
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return "cancelled";
+      /* try next payload shape */
+    }
+  }
+  return "unsupported";
+}
+
 /** Web Share API when available (iOS Safari / Capacitor https scheme). */
-export async function shareBlob(blob: Blob, filename: string, title?: string): Promise<NativeExportOutcome> {
+export async function shareBlob(
+  blob: Blob,
+  filename: string,
+  title?: string,
+  opts?: { caption?: string; url?: string | null },
+): Promise<NativeExportOutcome> {
   const nav = typeof navigator !== "undefined" ? navigator : undefined;
   if (!nav?.share) return "unsupported";
-  try {
-    const file = new File([blob], filename, { type: blob.type || "application/octet-stream" });
-    const payload: ShareData = { title: title ?? filename, files: [file] };
-    if (nav.canShare && !nav.canShare(payload)) return "unsupported";
-    await nav.share(payload);
-    return "shared";
-  } catch (e) {
-    if (e instanceof DOMException && e.name === "AbortError") return "cancelled";
-    return "unsupported";
-  }
+  const file = new File([blob], filename, { type: blob.type || "application/octet-stream" });
+  return shareWithFallback(
+    buildImageShareAttempts({
+      file,
+      title: title ?? filename,
+      caption: opts?.caption ?? "",
+      url: opts?.url,
+    }),
+  );
 }
 
 /** Prefer share on mobile-like UA, else anchor download. */

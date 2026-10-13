@@ -402,7 +402,7 @@ export function QueryView() {
       <div className="flex-1 overflow-auto relative">
         {contextMenu && (
           <div
-            className="fixed z-50 min-w-[120px] py-1 bg-loom-surface border border-loom-border rounded shadow-lg text-xs"
+            className="loom-menu fixed z-50 min-w-[120px] py-1 rounded text-xs"
             style={{
               // Keep the menu on-screen near the right / bottom edges
               left: Math.max(4, Math.min(contextMenu.x, window.innerWidth - 136)),

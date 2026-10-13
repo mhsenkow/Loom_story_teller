@@ -23,17 +23,20 @@ import {
 } from "@/lib/chartLink";
 import { sanitizeChartVisualOverrides } from "@/lib/chartVisualSanitize";
 import { storyIdFromSharedPath } from "@/lib/shareLineage";
+import { publicLoomWebOrigin } from "@/lib/publicOrigin";
 
 const SYNC_DEBOUNCE_MS = 400;
 
 /** Absolute share URL for the current chart, or null when there's nothing to share. */
 export function currentChartShareUrl(): string | null {
   if (typeof window === "undefined") return null;
+  // Cap / workers.dev must not mint https://localhost or *.mhsenkow.workers.dev links.
+  const origin = publicLoomWebOrigin();
   const storyId = storyIdFromSharedPath(useLoomStore.getState().selectedFile?.path);
-  if (storyId) return `${window.location.origin}${window.location.pathname}#story=${storyId}`;
+  if (storyId) return `${origin}/#story=${storyId}`;
   const link = chartLinkFromState(useLoomStore.getState());
   if (!link) return null;
-  return `${window.location.origin}${window.location.pathname}#${encodeChartLink(link)}`;
+  return `${origin}/#${encodeChartLink(link)}`;
 }
 
 function replaceHash(hash: string) {

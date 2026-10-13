@@ -74,7 +74,7 @@ export function DataRegionView({
     url: string,
     filename: string,
     opts?: { rowLimit?: number; sourceCredit?: string; sourceHome?: string },
-  ) => Promise<void>;
+  ) => Promise<boolean>;
   onLoadFiles?: (e: ChangeEvent<HTMLInputElement>) => void;
   onUseDemoData?: () => void;
   fileInputRef?: RefObject<HTMLInputElement | null>;
@@ -116,6 +116,7 @@ export function DataRegionView({
 
   const [savingId, setSavingId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [exploreError, setExploreError] = useState<string | null>(null);
   const [previewDataset, setPreviewDataset] = useState<DataGovDataset | null>(null);
   const isTauriEnv = isDesktop();
 
@@ -193,8 +194,12 @@ export function DataRegionView({
     opts?: { rowLimit?: number; sourceCredit?: string; sourceHome?: string },
   ) {
     setLoadingId(resourceId);
+    setExploreError(null);
     try {
-      await onLoadRemoteCsv(url, filename, opts);
+      const ok = await onLoadRemoteCsv(url, filename, opts);
+      if (!ok) {
+        setExploreError("Couldn’t load that CSV — check your network and try again, or pick another dataset.");
+      }
     } finally {
       setLoadingId(null);
     }
@@ -241,6 +246,16 @@ export function DataRegionView({
       </div>
 
       <div className={`flex-1 overflow-y-auto py-4 px-3 ${expanded ? "min-h-0" : ""} flex flex-col gap-7`}>
+        {exploreError ? (
+          <div
+            role="alert"
+            className="rounded-md border border-loom-danger/40 bg-loom-danger/10 px-3 py-2 text-2xs text-loom-text"
+            style={{ order: -2 }}
+          >
+            <p className="font-medium">Explore failed</p>
+            <p className="text-loom-muted mt-0.5 break-words">{exploreError}</p>
+          </div>
+        ) : null}
         {/* Web leads with one-tap fun data (discover, live feeds, curated packs);
             desktop leads with the local folder. Order is set per section below. */}
         <section style={{ order: isWeb ? 0 : -1 }}>
