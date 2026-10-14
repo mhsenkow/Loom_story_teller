@@ -1171,7 +1171,7 @@ function hook_asteroids(
   let name = "";
   
   // Also track if there are any truly close flybys
-  let closeApproaches: Array<{ name: string; distance: number; size: number }> = [];
+  const closeApproaches: Array<{ name: string; distance: number; size: number }> = [];
   
   for (let r = 0; r < sample.rows.length; r++) {
     const d = numAt(sample, r, "distance_ld");
