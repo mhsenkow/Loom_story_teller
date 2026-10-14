@@ -282,6 +282,23 @@ export function getAtlas(kind: AtlasKind): AtlasBundle {
   return kind === "us" ? getUsAtlas() : getWorldAtlas();
 }
 
+/** Non-throwing peek for thumbs / first paint before loadAtlas resolves. */
+export function peekWorldAtlas(): AtlasBundle | null {
+  return worldCache;
+}
+
+export function peekUsAtlas(): AtlasBundle | null {
+  return usCache;
+}
+
+export function peekAtlas(kind: AtlasKind): AtlasBundle | null {
+  return kind === "us" ? usCache : worldCache;
+}
+
+export function isAtlasLoaded(kind: AtlasKind): boolean {
+  return peekAtlas(kind) != null;
+}
+
 /** Normalize a raw cell into candidate join keys (most specific first). */
 export function joinKeyCandidates(raw: unknown): string[] {
   if (raw == null) return [];

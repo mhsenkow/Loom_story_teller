@@ -24,9 +24,8 @@ import {
   isGeoRegionField,
   isLatField,
   isLonField,
-  getWorldAtlas,
-  getUsAtlas,
-  loadAtlas,
+  peekWorldAtlas,
+  peekUsAtlas,
   type AtlasBundle,
   type AtlasKind,
 } from "./geoAtlas";
@@ -209,7 +208,8 @@ function drawRegionalDetail(
 ) {
   const [[x0, y0], [x1, y1]] = bounds;
   if (x1 < -170 || x0 > -60 || y1 < 15 || y0 > 72) return;
-  const us = getUsAtlas();
+  const us = peekUsAtlas();
+  if (!us) return;
   ctx.save();
   ctx.strokeStyle = ink.landEdge;
   ctx.globalAlpha = 0.7;
@@ -512,7 +512,12 @@ function renderProjectedPoints(
   ctx.save();
   paintBackground(ctx, w, h, ink);
   const { lonI, latI } = resolveLonLat(columns, xField, yField);
-  const atlas = getWorldAtlas();
+  const atlas = opts.atlas ?? peekWorldAtlas();
+  if (!atlas) {
+    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini);
+    ctx.restore();
+    return;
+  }
   if (lonI < 0 || latI < 0) {
     drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini);
     ctx.restore();
@@ -721,7 +726,12 @@ function renderGlobeLike(
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const sizeI = sizeField ? columns.indexOf(sizeField) : -1;
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
-  const atlas = getWorldAtlas();
+  const atlas = opts.atlas ?? peekWorldAtlas();
+  if (!atlas) {
+    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini);
+    ctx.restore();
+    return;
+  }
   const pts = collectPoints(rows, lonI, latI, colorI, sizeI);
   // Without an orbit camera (thumbnails), face the data instead of a fixed meridian.
   const centroid = opts.yaw == null && pts.length ? sphericalCentroid(pts) : null;
@@ -839,7 +849,12 @@ function renderArcMap(
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const pts = collectPoints(rows, lonI, latI, colorI, -1);
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
-  const atlas = getWorldAtlas();
+  const atlas = opts.atlas ?? peekWorldAtlas();
+  if (!atlas) {
+    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini);
+    ctx.restore();
+    return;
+  }
   const { projection, regional } = fitPointsProjection(pts, atlas, w, h, pad);
   const path = geoPath(projection, undefined);
   drawBasemap(ctx, path, atlas, ink, !mini && !regional);
@@ -925,4 +940,12 @@ export function renderGeoMapCanvas(
   renderProjectedPoints(ctx, rows, columns, xField, yField, colorField ?? null, sizeField ?? null, w, h, pad, opts, "points");
 }
 
-export { getWorldAtlas, getUsAtlas, loadAtlas, pickAtlasKind, type AtlasKind } from "./geoAtlas";
+export {
+  getWorldAtlas,
+  getUsAtlas,
+  peekWorldAtlas,
+  peekUsAtlas,
+  loadAtlas,
+  pickAtlasKind,
+  type AtlasKind,
+} from "./geoAtlas";

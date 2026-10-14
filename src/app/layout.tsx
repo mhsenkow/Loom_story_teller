@@ -61,7 +61,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" data-theme="dark" data-ui="noyes" data-font="inter" data-faces="local" className="dark">
+    <html
+      lang="en"
+      data-theme="dark"
+      data-ui="noyes"
+      data-font="inter"
+      data-faces="local"
+      className="dark"
+      // Theme + shell bootstrap scripts mutate <html> before hydrate (data-theme,
+      // data-shell-*). Suppress so React doesn't warn on intentional first-paint attrs.
+      suppressHydrationWarning
+    >
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
         <script dangerouslySetInnerHTML={{ __html: SHELL_BOOTSTRAP_SCRIPT }} />

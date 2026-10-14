@@ -21,6 +21,7 @@ import {
   discoverStoryLimit,
   getDiscoverStoryCache,
   setDiscoverStoryCache,
+  clearDiscoverStoryCache,
   retainDiscoverFeed,
   stopDiscoverProbes,
   consumeDiscoverForceRequest,
@@ -135,6 +136,8 @@ export function Onboarding() {
       setSortMode("score");
 
       // Reopen: show the last scan from memory instead of clearing and waiting again.
+      // Explicit “What’s interesting” taps pass force so a partial cache can’t stick.
+      if (opts?.force) clearDiscoverStoryCache();
       const cached = !opts?.force ? getDiscoverStoryCache() : null;
       if (cached?.length) {
         applyStories(cached, false);
@@ -161,12 +164,18 @@ export function Onboarding() {
             setDiscoverStoryCache(found);
             applyStories(found, false);
             const summary = getDiscoverScanSummary();
+            const sources = new Set(found.map((s) => s.kind)).size;
+            const totalFeeds = ALL_SOURCE_KINDS.length + 1;
             const unavailable =
               summary.failedKinds.length +
               summary.timedOutKinds.length +
+              summary.emptyKinds.length +
               (summary.wikiFailed || summary.wikiTimedOut ? 1 : 0);
-            if (unavailable > 0) {
-              setScannedHint(`${found.length} stories · ${unavailable} feeds unavailable`);
+            if (unavailable > 0 || sources < Math.min(8, totalFeeds)) {
+              setScannedHint(
+                `${found.length} stories · ${sources}/${totalFeeds} feeds` +
+                  (unavailable > 0 ? ` · ${unavailable} unavailable` : ""),
+              );
             }
             return;
           }
@@ -193,7 +202,7 @@ export function Onboarding() {
     const id = window.setTimeout(() => {
       // Explicit tap often mounts us after the event already fired — honor that.
       if (consumeDiscoverForceRequest()) {
-        runScan();
+        runScan({ force: true });
         return;
       }
       let hasDiscoverSeen = false;
@@ -224,7 +233,7 @@ export function Onboarding() {
       }
       // Listener path already received the event; drop the pending flag.
       consumeDiscoverForceRequest();
-      runScan();
+      runScan({ force: true });
     };
     window.addEventListener("loom-discover", onForce);
 
@@ -410,6 +419,10 @@ export function Onboarding() {
     }
     if (chartFilter !== "all") parts.push(chartKindLabel(chartFilter));
     if (phase === "scan" && stories.length > 0) return scannedHint;
+    // Keep sparse-scan diagnostics visible (e.g. one warm feed → “38” space cards).
+    if (parts.length === 0 && scannedHint.includes("feeds")) {
+      return scannedHint;
+    }
     if (parts.length === 0) {
       return `${visible.length} live ${visible.length === 1 ? "story" : "stories"} across open data`;
     }

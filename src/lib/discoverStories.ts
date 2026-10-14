@@ -240,6 +240,23 @@ const FILE_NAMES: Record<DiscoverKind, string> = {
 
 type ProbeStatus = "ok" | "empty" | "error" | "timeout";
 
+/** Wait until a feed has rows (or give up). Cold starts often need >220ms. */
+async function waitForSourceRows(
+  kind: SourceKind,
+  maxWaitMs = 6_000,
+): Promise<Awaited<ReturnType<typeof sourceSnapshot>> | null> {
+  const started = Date.now();
+  let delay = kind === "iss" || kind === "opensky" || kind === "countries" ? 400 : 250;
+  while (Date.now() - started < maxWaitMs) {
+    const snap = await sourceSnapshot(kind, 400);
+    if (snap.sample.rows.length) return snap;
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(900, Math.round(delay * 1.35));
+  }
+  const last = await sourceSnapshot(kind, 400);
+  return last.sample.rows.length ? last : null;
+}
+
 async function probeKindWithStatus(
   kind: SourceKind,
 ): Promise<{ stories: DiscoverStory[]; status: ProbeStatus }> {
@@ -249,11 +266,8 @@ async function probeKindWithStatus(
       await sourceStart(kind);
       discoverStartedSources.add(kind);
     }
-    await new Promise((r) =>
-      setTimeout(r, kind === "iss" || kind === "opensky" || kind === "countries" ? 550 : 220),
-    );
-    const snap = await sourceSnapshot(kind, 400);
-    if (!snap.sample.rows.length) return { stories: [], status: "empty" };
+    const snap = await waitForSourceRows(kind);
+    if (!snap) return { stories: [], status: "empty" };
     const story = recommendSourceStory(kind, snap.stats, snap.sample, {
       discoverProbe: true,
       chartLimit: variantsPerSource(),
@@ -313,6 +327,19 @@ async function probeKindWithStatus(
   }
 }
 
+async function waitForWikiRows(maxWaitMs = 6_000): Promise<Awaited<ReturnType<typeof streamSnapshot>> | null> {
+  const started = Date.now();
+  let delay = 400;
+  while (Date.now() - started < maxWaitMs) {
+    const snap = await streamSnapshot(300);
+    if (snap.sample.rows.length) return snap;
+    await new Promise((r) => setTimeout(r, delay));
+    delay = Math.min(900, Math.round(delay * 1.35));
+  }
+  const last = await streamSnapshot(300);
+  return last.sample.rows.length ? last : null;
+}
+
 async function probeWikiWithStatus(): Promise<{ stories: DiscoverStory[]; status: ProbeStatus }> {
   try {
     const status = await streamStatus();
@@ -320,9 +347,8 @@ async function probeWikiWithStatus(): Promise<{ stories: DiscoverStory[]; status
       await streamStart();
       discoverStartedWiki = true;
     }
-    await new Promise((r) => setTimeout(r, 800));
-    const snap = await streamSnapshot(300);
-    if (!snap.sample.rows.length) return { stories: [], status: "empty" };
+    const snap = await waitForWikiRows();
+    if (!snap) return { stories: [], status: "empty" };
     const story = recommendStreamStory(snap.stats, snap.sample);
     if (!story.charts.length) return { stories: [], status: "empty" };
     const charts = story.charts.filter((c) => chartHasRowsInWindow(c, snap.sample));
@@ -504,7 +530,87 @@ export async function scanDiscoverStories(
   await stopDiscoverProbes();
   lastDiscoverScanSummary = summary;
 
-  const top = collected.sort((a, b) => b.score - a.score).slice(0, limit);
+  // Apply diversity filters before picking top stories
+  const top = applyDiversityFilters(collected, limit);
   setDiscoverStoryCache(top);
   return top;
+}
+
+/**
+ * Rank stories for Discover with soft diversity caps.
+ * Quotas are relative to the *output* limit (not the huge candidate pool),
+ * so one feed with dozens of chart variants can't flood the grid.
+ */
+export function applyDiversityFilters(stories: DiscoverStory[], limit: number): DiscoverStory[] {
+  if (!stories.length || limit <= 0) return [];
+  const sorted = [...stories].sort((a, b) => b.score - a.score);
+  if (sorted.length <= limit) return sorted;
+
+  const maxPerSource = Math.max(2, Math.ceil(limit * 0.2));
+  const maxPerCategory = Math.max(3, Math.ceil(limit * 0.35));
+  const maxPerChart = Math.max(3, Math.ceil(limit * 0.3));
+
+  const selected: DiscoverStory[] = [];
+  const used = new Set<string>();
+  const sourceCounts = new Map<string, number>();
+  const categoryCounts = new Map<string, number>();
+  const chartCounts = new Map<string, number>();
+
+  const tryAdd = (story: DiscoverStory, enforceCaps: boolean): boolean => {
+    if (used.has(story.id) || selected.length >= limit) return false;
+    if (enforceCaps) {
+      if ((sourceCounts.get(story.kind) ?? 0) >= maxPerSource) return false;
+      if ((categoryCounts.get(story.category) ?? 0) >= maxPerCategory) return false;
+      if ((chartCounts.get(story.chartKind) ?? 0) >= maxPerChart) return false;
+    }
+    selected.push(story);
+    used.add(story.id);
+    sourceCounts.set(story.kind, (sourceCounts.get(story.kind) ?? 0) + 1);
+    categoryCounts.set(story.category, (categoryCounts.get(story.category) ?? 0) + 1);
+    chartCounts.set(story.chartKind, (chartCounts.get(story.chartKind) ?? 0) + 1);
+    return true;
+  };
+
+  // Pass 1: one top story from each category (up to 5) so the grid isn't mono-topic.
+  const byCategory = new Map<string, DiscoverStory[]>();
+  for (const s of sorted) {
+    const list = byCategory.get(s.category);
+    if (list) list.push(s);
+    else byCategory.set(s.category, [s]);
+  }
+  const categories = [...byCategory.keys()].sort((a, b) => {
+    const maxA = byCategory.get(a)![0]!.score;
+    const maxB = byCategory.get(b)![0]!.score;
+    return maxB - maxA;
+  });
+  for (const cat of categories.slice(0, 5)) {
+    const top = byCategory.get(cat)![0]!;
+    tryAdd(top, false);
+  }
+
+  // Pass 2: fill by score with all caps.
+  for (const story of sorted) {
+    if (selected.length >= limit) break;
+    tryAdd(story, true);
+  }
+
+  // Pass 3: relax chart/category caps; keep per-source cap so one feed can't flood.
+  if (selected.length < limit) {
+    for (const story of sorted) {
+      if (selected.length >= limit) break;
+      if (used.has(story.id)) continue;
+      if ((sourceCounts.get(story.kind) ?? 0) >= maxPerSource) continue;
+      tryAdd(story, false);
+    }
+  }
+
+  // Pass 4: last resort fill (sparse candidate sets only).
+  if (selected.length < limit) {
+    for (const story of sorted) {
+      if (selected.length >= limit) break;
+      tryAdd(story, false);
+    }
+  }
+
+  return selected.sort((a, b) => b.score - a.score);
 }

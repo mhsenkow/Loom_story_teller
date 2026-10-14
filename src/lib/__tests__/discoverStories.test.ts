@@ -9,6 +9,7 @@ import {
   DISCOVER_STORY_LIMIT_MOBILE,
   VARIANTS_PER_SOURCE,
   VARIANTS_PER_SOURCE_MOBILE,
+  applyDiversityFilters,
   clearDiscoverForceRequest,
   clearDiscoverStoryCache,
   consumeDiscoverForceRequest,
@@ -135,5 +136,53 @@ describe("discoverStories", () => {
       expect(def.orderBy.trim().length).toBeGreaterThan(0);
       expect(SOURCE_BY_KIND[def.kind].orderBy).toBe(def.orderBy);
     }
+  });
+
+  it("applyDiversityFilters caps one source when the candidate pool is huge", () => {
+    const mk = (
+      kind: DiscoverStory["kind"],
+      category: string,
+      chartKind: string,
+      n: number,
+      baseScore: number,
+    ): DiscoverStory[] =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `${kind}-${i}`,
+        kind,
+        streamPath: `stream://${kind}`,
+        fileName: kind,
+        hook: `${kind} ${i}`,
+        blurb: "",
+        category,
+        chartKind,
+        chart: {
+          id: `${kind}-c-${i}`,
+          kind: chartKind,
+          title: "",
+          subtitle: "",
+          score: baseScore,
+          spec: {},
+          xField: "x",
+          yField: null,
+          colorField: null,
+        },
+        score: baseScore - i * 0.01,
+        stats: [],
+        sample: { columns: [], types: [], rows: [], total_rows: 0 },
+      })) as DiscoverStory[];
+
+    // Five well-stocked sources so the grid can fill without relaxing the source cap.
+    const stories = [
+      ...mk("usgs", "Earth", "geoPoints", 40, 95),
+      ...mk("crypto", "Markets", "scatter", 40, 90),
+      ...mk("steam", "Culture", "bar", 40, 85),
+      ...mk("iss", "Space", "globeTrail", 40, 80),
+      ...mk("citibike", "Cities", "geoPoints", 40, 75),
+    ];
+    const top = applyDiversityFilters(stories, 20);
+    expect(top).toHaveLength(20);
+    const usgs = top.filter((s) => s.kind === "usgs").length;
+    expect(usgs).toBeLessThanOrEqual(Math.ceil(20 * 0.2));
+    expect(new Set(top.map((s) => s.kind)).size).toBeGreaterThanOrEqual(4);
   });
 });

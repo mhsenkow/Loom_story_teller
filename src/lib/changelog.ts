@@ -25,6 +25,30 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-13q",
+    date: "2026-10-13",
+    title: "What’s interesting — sharper, fuller",
+    summary:
+      "Live Discover waits for feeds to load, ranks with clearer headlines, and map thumbs no longer crash before the atlas arrives.",
+    items: [
+      {
+        title: "More feeds in Discover",
+        detail:
+          "Scanning waits for each live source to return rows instead of giving up after a short tick — reopen What’s interesting for a fresh scan.",
+      },
+      {
+        title: "Stronger story hooks",
+        detail:
+          "Quakes, crypto, weather, and more lead with severity and context, with a balanced mix of topics at the top.",
+      },
+      {
+        title: "Map previews stay calm",
+        detail:
+          "Globe and map cards load the world atlas in the background instead of erroring on first paint.",
+      },
+    ],
+  },
+  {
     id: "2026-10-13p",
     date: "2026-10-13",
     title: "See board, hide board",

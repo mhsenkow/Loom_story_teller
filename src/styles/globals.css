@@ -1014,9 +1014,11 @@ html {
     color: var(--loom-accent-text);
   }
 
-  html[data-theme="dark"] a.text-loom-accent,
-  html.dark a.text-loom-accent,
-  html[data-theme="dark"] .text-loom-accent.hover\:underline {
+  /* Dark theme: brighter accent for contrast. Keep selectors simple —
+     LightningCSS/Turbopack mangled `a.text-loom-accent` + escaped
+     `.hover\:underline` into invalid `:hovera` pseudo-classes. */
+  html[data-theme="dark"] .text-loom-accent,
+  html.dark .text-loom-accent {
     color: var(--loom-accent-text);
   }
 

@@ -26,7 +26,8 @@ import { densityAwarePointMarks } from "@/lib/chartLayout";
 import { isOddChartKind, renderOddChart, ODD_CHART_KIND_OPTIONS } from "@/lib/oddCharts";
 import { isGpuSceneKind, extractGpuScenePoints, renderGpuSceneCanvas, GPU_SCENE_KIND_OPTIONS } from "@/lib/gpuScenes";
 import { buildDataCube, renderDataCubeCanvas } from "@/lib/dataCube";
-import { isGeoFamilyKind, isGeoMapKind, renderGeoMapCanvas, GEO_MAP_KIND_OPTIONS } from "@/lib/geoMaps";
+import { isGeoFamilyKind, isGeoMapKind, renderGeoMapCanvas, loadAtlas, GEO_MAP_KIND_OPTIONS } from "@/lib/geoMaps";
+import { isAtlasLoaded } from "@/lib/geoAtlas";
 import { partitionRowsByFacet, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 import { cancelScheduledIdleCallback, scheduleIdleCallback } from "@/lib/idleCallback";
 import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
@@ -243,11 +244,23 @@ export function ChartCard({
     if (!container) return;
     let visible = false;
     let idle = 0;
+    let cancelled = false;
     const scheduleDraw = () => {
-      if (!visible) return;
+      if (!visible || cancelled) return;
       cancelScheduledIdleCallback(idle);
       idle = scheduleIdleCallback(() => draw(), { timeout: 120 });
     };
+    // Discover thumbs paint geo kinds before ChartView has loaded TopoJSON.
+    if (isGeoFamilyKind(rec.kind) && !isAtlasLoaded("world")) {
+      void loadAtlas("world").then(() => {
+        if (!cancelled) scheduleDraw();
+      });
+    }
+    if (rec.kind === "choropleth" && !isAtlasLoaded("us")) {
+      void loadAtlas("us").then(() => {
+        if (!cancelled) scheduleDraw();
+      });
+    }
     const io = new IntersectionObserver(
       (entries) => {
         visible = entries.some((e) => e.isIntersecting);
@@ -259,11 +272,12 @@ export function ChartCard({
     const ro = new ResizeObserver(() => scheduleDraw());
     ro.observe(container);
     return () => {
+      cancelled = true;
       io.disconnect();
       ro.disconnect();
       cancelScheduledIdleCallback(idle);
     };
-  }, [draw]);
+  }, [draw, rec.kind]);
 
   return (
     <button
