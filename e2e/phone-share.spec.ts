@@ -15,7 +15,7 @@ test.skip(!process.env.LOOM_E2E, "Set LOOM_E2E=1 with static out/ + npm run prev
 
 test("cold load shows chart affordance", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("button", { name: /interesting/i })).toBeVisible({
+  await expect(page.getByRole("button", { name: /^What’s interesting right now$/i })).toBeVisible({
     timeout: 30_000,
   });
 });

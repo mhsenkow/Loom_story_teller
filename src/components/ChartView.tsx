@@ -229,9 +229,11 @@ export function ChartView() {
   const reducedMotion = useReducedMotion();
   const isMobile = useIsMobile();
   const [arranging, setArranging] = useState(false);
+  const [arrangeReady, setArrangeReady] = useState(false);
   const arrangePanelWasOpen = useRef(false);
   const finishArranging = useCallback(() => {
     setArranging(false);
+    setArrangeReady(false);
     setArrangementPreview(null);
     if (arrangePanelWasOpen.current) useLoomStore.getState().setPanelOpen(true);
     arrangePanelWasOpen.current = false;
@@ -700,6 +702,23 @@ export function ChartView() {
   const axesOverlayRef = useRef<HTMLCanvasElement>(null);
   const stageHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!arranging) return;
+    let frame = 0;
+    let previous = "";
+    let stableFrames = 0;
+    const settle = () => {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const geometry = [rect.x, rect.y, rect.width, rect.height].map((v) => Math.round(v * 100)).join(":");
+      stableFrames = geometry === previous ? stableFrames + 1 : 0;
+      previous = geometry;
+      if (stableFrames >= 2) { setArrangeReady(true); return; }
+      frame = requestAnimationFrame(settle);
+    };
+    frame = requestAnimationFrame(settle);
+    return () => cancelAnimationFrame(frame);
+  }, [arranging]);
   const chartFrameMax = useMemo(() => {
     if (socialExportTarget) {
       return {
@@ -3744,7 +3763,7 @@ export function ChartView() {
 
           {!socialExportReady && !socialExportTarget && activeChart && (
             <div className="relative z-20 flex shrink-0 max-w-full items-center gap-2 rounded-lg border border-loom-border bg-loom-surface/95 px-2 py-1 shadow-sm" role="toolbar" aria-label="Canvas layout">
-              <button type="button" aria-pressed={arranging} onClick={() => { if (arranging) { finishArranging(); return; } arrangePanelWasOpen.current = isMobile && useLoomStore.getState().panelOpen; if (arrangePanelWasOpen.current) setPanelOpen(false); setArranging(true); setArrangementPreview(null); }} className="loom-btn-ghost min-h-9 px-2 text-xs">{arranging ? "Done arranging" : "Arrange"}</button>
+              <button type="button" aria-pressed={arranging} onClick={() => { if (arranging) { finishArranging(); return; } arrangePanelWasOpen.current = isMobile && useLoomStore.getState().panelOpen; if (arrangePanelWasOpen.current) setPanelOpen(false); setArrangeReady(false); setArranging(true); setArrangementPreview(null); }} className="loom-btn-ghost min-h-9 px-2 text-xs">{arranging ? "Done arranging" : "Arrange"}</button>
               {arranging && <><span className="hidden sm:inline text-2xs text-loom-muted">Drag or arrows to move · handles resize · Esc cancels · Alt skips snapping</span><button type="button" className="loom-btn-ghost min-h-9 px-2 text-xs" title="Restore automatic frame, plot, title and legend placement" onClick={() => { const reset = Object.fromEntries(ARRANGEMENT_KEYS.map((k) => [k, undefined])) as ChartVisualOverrides; reset.legendPosition = "auto"; commitArrangement({ visual: reset }); }}>Auto layout</button></>}
             </div>
           )}
@@ -4351,7 +4370,7 @@ export function ChartView() {
               {a.text}
             </div>
           ); })}
-          {arranging && arrangementLayout && activeChart && !socialExportReady && !socialExportTarget && (
+          {arranging && arrangeReady && arrangementLayout && activeChart && !socialExportReady && !socialExportTarget && (
             <CanvasArrangeOverlay
               key={activeChart.id}
               width={containerSize.w}
