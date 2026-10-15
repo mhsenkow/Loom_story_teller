@@ -14,6 +14,11 @@
   "routes": [
     { "pattern": "loom.ibm.io", "custom_domain": true }
   ],
+  // Published story links (/s/{id}, /s/{id}.img), 7-day expirationTtl set per key.
+  // No id: `wrangler dev` simulates it locally; `wrangler deploy` provisions it.
+  "kv_namespaces": [
+    { "binding": "STORIES" }
+  ],
   "workers_dev": true,
   "preview_urls": true,
   "observability": {

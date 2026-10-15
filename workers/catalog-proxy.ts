@@ -2,7 +2,8 @@
 // Loom — Cloudflare Worker (static UI + open-data API)
 // =================================================================
 // Serves Next static export via ASSETS; `/api/catalog/*`, `/api/fetch-csv`,
-// `/api/source/*` (live poll feeds), and `/api/feedback` (GitHub issues).
+// `/api/source/*` (live poll feeds), `/api/feedback` (GitHub issues), and
+// `/api/stories` + `/s/{id}` (published story links in the STORIES KV).
 // =================================================================
 
 import {
@@ -12,10 +13,33 @@ import {
   type DataGovSortKey,
 } from "../src/lib/openDataCatalog";
 
+/** Metadata stored beside each story value in KV. */
+interface StoryMeta {
+  contentType: string;
+  title?: string;
+  /** Epoch ms when KV drops the key (drives Cache-Control on reads). */
+  expiresAt: number;
+}
+
+/** Minimal slice of the Workers KV binding used for story links. */
+interface StoryKv {
+  put(
+    key: string,
+    value: string | ArrayBuffer | Uint8Array,
+    options?: { expirationTtl?: number; metadata?: StoryMeta },
+  ): Promise<void>;
+  getWithMetadata(
+    key: string,
+    type: "stream",
+  ): Promise<{ value: ReadableStream | null; metadata: StoryMeta | null }>;
+}
+
 export interface Env {
   ASSETS: { fetch: (request: Request) => Promise<Response> };
   /** Fine-grained PAT with `issues: write` on mhsenkow/Loom_story_teller */
   GITHUB_TOKEN?: string;
+  /** Published story pages (`s/{id}`) + og images (`s/{id}.img`); 7-day TTL. */
+  STORIES?: StoryKv;
 }
 
 const GITHUB_REPO = "mhsenkow/Loom_story_teller";
@@ -479,7 +503,11 @@ function storyId(): string {
     .slice(0, 12);
 }
 
-async function handlePublishStory(request: Request): Promise<Response> {
+const STORIES_UNCONFIGURED =
+  "Story links not configured. Add the STORIES KV binding to wrangler.jsonc (kv_namespaces).";
+
+async function handlePublishStory(request: Request, kv: StoryKv | undefined): Promise<Response> {
+  if (!kv) return json({ error: STORIES_UNCONFIGURED }, 503);
   let payload: { html?: string; title?: string; ogImage?: string };
   try {
     payload = (await request.json()) as typeof payload;
@@ -495,54 +523,52 @@ async function handlePublishStory(request: Request): Promise<Response> {
   }
 
   const id = storyId();
-  const cache = caches.default;
-  const cacheUrl = new URL(`https://loom-story.internal/s/${id}`);
   const origin = new URL(request.url).origin;
+  const expiresAt = Date.now() + STORY_TTL_SECONDS * 1000;
+  const put = { expirationTtl: STORY_TTL_SECONDS };
 
   // Link unfurlers (iMessage, Slack, X…) ignore data: URLs — host the preview
   // image beside the page and point og:image / twitter:image at it.
   const og = payload.ogImage?.match(/^data:(image\/(?:png|jpeg));base64,([A-Za-z0-9+/=]+)$/);
   if (og && og[2]!.length < MAX_STORY_HTML_BYTES) {
     const bytes = Uint8Array.from(atob(og[2]!), (c) => c.charCodeAt(0));
-    await cache.put(
-      `https://loom-story.internal/s/${id}.img`,
-      new Response(bytes, {
-        headers: { "Content-Type": og[1]!, "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}` },
-      }),
-    );
+    await kv.put(`s/${id}.img`, bytes, { ...put, metadata: { contentType: og[1]!, expiresAt } });
     const hosted = `${origin}/s/${id}.img`;
     html = html.split(`content="${payload.ogImage}"`).join(`content="${hosted}"`);
   }
 
-  const res = new Response(html, {
-    status: 200,
-    headers: {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": `public, max-age=${STORY_TTL_SECONDS}`,
-      "X-Loom-Story-Title": (payload.title || "Loom story").slice(0, 120),
+  await kv.put(`s/${id}`, html, {
+    ...put,
+    metadata: {
+      contentType: "text/html; charset=utf-8",
+      title: (payload.title || "Loom story").slice(0, 120),
+      expiresAt,
     },
   });
-  await cache.put(cacheUrl.toString(), res.clone());
 
   return json({ id, url: `${origin}/s/${id}` });
 }
 
-async function handleGetStory(id: string): Promise<Response> {
+async function handleGetStory(id: string, kv: StoryKv | undefined): Promise<Response> {
   if (!/^[a-z0-9]{8,16}(\.img)?$/i.test(id)) {
     return json({ error: "Invalid story id" }, 400);
   }
-  const cache = caches.default;
-  const cacheUrl = `https://loom-story.internal/s/${id}`;
-  const hit = await cache.match(cacheUrl);
-  if (!hit) {
+  if (!kv) return json({ error: STORIES_UNCONFIGURED }, 503);
+  const { value, metadata } = await kv.getWithMetadata(`s/${id}`, "stream");
+  if (!value || !metadata) {
     return new Response("Story not found or expired.", {
       status: 404,
       headers: { "Content-Type": "text/plain; charset=utf-8", ...CORS },
     });
   }
-  const headers = new Headers(hit.headers);
-  headers.set("Access-Control-Allow-Origin", "*");
-  return new Response(hit.body, { status: 200, headers });
+  const maxAge = Math.max(0, Math.floor((metadata.expiresAt - Date.now()) / 1000));
+  const headers = new Headers({
+    "Content-Type": metadata.contentType,
+    "Cache-Control": `public, max-age=${maxAge}`,
+    "Access-Control-Allow-Origin": "*",
+  });
+  if (metadata.title) headers.set("X-Loom-Story-Title", metadata.title);
+  return new Response(value, { status: 200, headers });
 }
 
 export default {
@@ -573,11 +599,11 @@ export default {
         return await handleFeedback(request, env);
       }
       if (url.pathname === "/api/stories" && request.method === "POST") {
-        return await handlePublishStory(request);
+        return await handlePublishStory(request, env.STORIES);
       }
       if (url.pathname.startsWith("/s/")) {
         const id = url.pathname.slice(3).replace(/\/$/, "");
-        return await handleGetStory(id);
+        return await handleGetStory(id, env.STORIES);
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
