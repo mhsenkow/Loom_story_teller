@@ -685,12 +685,8 @@ pub async fn fetch_data_gov_recent_csv(
     }
 
     match sort.as_deref() {
-        Some("title_az") => {
-            collected.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-        }
-        Some("title_za") => {
-            collected.sort_by(|a, b| b.title.to_lowercase().cmp(&a.title.to_lowercase()))
-        }
+        Some("title_az") => collected.sort_by_key(|a| a.title.to_lowercase()),
+        Some("title_za") => collected.sort_by_key(|a| std::cmp::Reverse(a.title.to_lowercase())),
         _ => {}
     }
 
