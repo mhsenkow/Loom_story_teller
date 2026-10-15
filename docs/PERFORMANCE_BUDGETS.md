@@ -16,3 +16,7 @@ Proposed targets — measure with `npm run build` transfer sizes, Vitest perf he
 **Regression gates:** `make ci` (tsc, Vitest, build); optional `npm run bundle-budget` when changing imports.
 
 **Recording baselines:** Note device, build id, and `npm run build` First Load JS in PR when changing budgets.
+
+**Chart editor refinement (2026-10-14):** History is bounded to 20 snapshots in each direction and contains no dataset rows. Rapid numeric adjustments reuse a checkpoint (600 ms window), avoiding a deep snapshot on each slider tick. Named looks are capped at 20 and write to storage only when the library reference changes. Collapsed visual sections mount on demand. These changes stay outside parsing and canvas draw loops; check the Next First Load JS report against the 600 kB target when building.
+
+Local macOS production build `2026-10-15T00:07:39.168Z` reported **366 kB First Load JS** for `/` (previous pass: 365 kB), within the proposed 600 kB budget. This is a bundle-size comparison, not a frame-rate or mobile timing measurement.

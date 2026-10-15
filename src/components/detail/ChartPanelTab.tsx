@@ -13,6 +13,10 @@ import { useShallow } from "zustand/react/shallow";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
 import { ChartKindPicker } from "@/components/ChartKindPicker";
+import { ColumnFieldPicker } from "@/components/ColumnFieldPicker";
+import { ChartEditToolbar } from "@/components/ChartEditToolbar";
+import { ChartLookLibrary } from "@/components/ChartLookLibrary";
+import { ChartInspectorSection } from "@/components/ChartInspectorSection";
 import { goToDashboardsAfterSave, saveChartView } from "@/lib/saveChartView";
 import {
   AXIS_LABEL_COLOR_SWATCHES,
@@ -48,6 +52,7 @@ import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
 import {
   createChartRec,
   fitEncodingToKind,
+  PART_TO_WHOLE_KINDS,
   Y_AGGREGATE_OPTIONS,
   getRecommendationReason,
   getRandomEncoding,
@@ -66,6 +71,8 @@ import {
   formatChartAggregationSummary,
   chartCapabilities,
   encodingChannelLabels,
+  encodingPanelHints,
+  encodingDropAllowed,
   CHART_LAYOUT_DIRECTIONS,
   CHART_Y_SCALE_OPTIONS,
   type ChartLayoutDirection,
@@ -106,6 +113,7 @@ import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
 import { exportDashboardMicrosite, streamSnapshot, isDesktop, isTauri, openExternalUrl } from "@/lib/tauri";
 import { isNumericColumnType } from "@/lib/dataCubeSchema";
+import { inferColumnType } from "@/lib/columnClassify";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
 import {
   SOCIAL_PRESETS,
@@ -122,6 +130,13 @@ import { downloadBlob } from "@/lib/zipStore";
 const DRAG_TYPE_COLUMN = "application/x-loom-column";
 
 type EncodingOption = { value: string; label: string; type?: string; disabled?: boolean };
+
+/** Abbreviate DuckDB-ish types for the Encoding slot chip. */
+/** Same vocabulary as the field picker's type chips (# / Abc / Time); raw SQL type stays in the tooltip. */
+function shortColType(typeHint: string, colName?: string): string {
+  const kind = inferColumnType(typeHint, colName);
+  return kind === "quantitative" ? "#" : kind === "temporal" ? "Time" : "Abc";
+}
 
 /** Single channel control: label + select (+ optional type), doubles as column drop target. */
 function EncodingSlot({
@@ -142,6 +157,7 @@ function EncodingSlot({
   chromeActive,
   onChromeEnter,
   onChromeLeave,
+  description,
 }: {
   label: string;
   value: string;
@@ -160,8 +176,12 @@ function EncodingSlot({
   chromeActive?: boolean;
   onChromeEnter?: (target: ChartChromeTarget) => void;
   onChromeLeave?: () => void;
+  /** Optional helper under the slot (screen-reader + sighted). */
+  description?: string;
 }) {
   const droppable = Boolean(onDrop);
+  const descId = useId();
+  const typeId = useId();
   return (
     <div
       className="space-y-1"
@@ -219,28 +239,35 @@ function EncodingSlot({
         <span
           className="shrink-0 w-[4.5rem] px-1.5 flex items-center text-2xs font-semibold uppercase tracking-wide text-loom-muted bg-loom-bg/60 border-r border-loom-border/80 leading-tight"
           title={droppable ? `${label} — pick a column or drop from Schema` : label}
+          id={`${descId}-label`}
         >
           {label}
         </span>
-        <select
+        <ColumnFieldPicker
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="loom-input flex-1 min-w-0 border-0 rounded-none bg-transparent text-xs py-2 px-2 font-mono focus:ring-0"
-          aria-label={`${label} field`}
-        >
-          {allowEmpty && <option value="">{emptyLabel}</option>}
-          {options.map((o) => (
-            <option key={o.value} value={o.value} disabled={o.disabled} title={o.type}>
-              {o.type ? `${o.label}` : o.label}
-            </option>
-          ))}
-        </select>
+          options={options}
+          onChange={onChange}
+          allowEmpty={allowEmpty}
+          emptyLabel={emptyLabel}
+          labelledBy={`${descId}-label`}
+          describedBy={[description ? descId : null, typeHint ? typeId : null].filter(Boolean).join(" ") || undefined}
+          ariaLabel={`${label} field`}
+        />
         {typeHint ? (
-          <span className="hidden sm:flex shrink-0 max-w-[5.5rem] items-center px-1.5 text-2xs font-mono text-loom-muted truncate border-l border-loom-border/80" title={typeHint}>
-            {typeHint.replace(/^(VARCHAR|DOUBLE|INTEGER|BIGINT|BOOLEAN|TIMESTAMP|FLOAT|DECIMAL|REAL)/i, (m) => m.slice(0, 3).toUpperCase())}
+          <span
+            id={typeId}
+            className="hidden sm:flex shrink-0 max-w-[5.5rem] items-center px-1.5 text-2xs font-mono text-loom-muted truncate border-l border-loom-border/80"
+            title={typeHint}
+          >
+            {shortColType(typeHint, value)}
           </span>
         ) : null}
       </div>
+      {description ? (
+        <p id={descId} className="text-2xs text-loom-muted leading-snug pl-0.5">
+          {description}
+        </p>
+      ) : null}
       {trailing}
     </div>
   );
@@ -309,20 +336,46 @@ function IconToggleGroup<T extends string | number>({
 }) {
   return (
     <div>
-      <p className="text-2xs text-loom-muted mb-1">{label}</p>
-      <div className="flex flex-wrap gap-1" role="group" aria-label={label}>
+      <p className="text-2xs text-loom-muted mb-1" id={`icon-toggle-${label.replace(/\s+/g, "-").toLowerCase()}`}>
+        {label}
+      </p>
+      <div
+        className="flex flex-wrap gap-1"
+        role="radiogroup"
+        aria-labelledby={`icon-toggle-${label.replace(/\s+/g, "-").toLowerCase()}`}
+        onKeyDown={(e) => {
+          const i = options.findIndex((o) => o.value === value);
+          if (i < 0) return;
+          if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+            e.preventDefault();
+            onChange(options[(i + 1) % options.length]!.value);
+          } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+            e.preventDefault();
+            onChange(options[(i - 1 + options.length) % options.length]!.value);
+          } else if (e.key === "Home") {
+            e.preventDefault();
+            onChange(options[0]!.value);
+          } else if (e.key === "End") {
+            e.preventDefault();
+            onChange(options[options.length - 1]!.value);
+          }
+        }}
+      >
         {options.map((opt) => {
           const active = opt.value === value;
           return (
             <button
               key={String(opt.value)}
               type="button"
+              role="radio"
               title={opt.label}
               aria-label={opt.label}
-              aria-pressed={active}
+              aria-checked={active}
+              tabIndex={active ? 0 : -1}
               onClick={() => onChange(opt.value)}
               className={`
                 min-h-9 min-w-9 px-2 rounded-md border flex items-center justify-center transition-colors
+                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent/50
                 ${active
                   ? "border-loom-accent bg-loom-accent/15 text-loom-text"
                   : "border-loom-border text-loom-muted hover:border-loom-accent/40 hover:text-loom-text hover:bg-loom-elevated"}
@@ -719,6 +772,7 @@ export default function ChartPanelTab() {
     columnStats,
     chartVisualOverrides,
     setChartVisualOverrides,
+    editChartVisualOverrides,
     setActiveChart,
     selectedFile,
     aiSuggestionReason,
@@ -753,6 +807,7 @@ export default function ChartPanelTab() {
       columnStats: s.columnStats,
       chartVisualOverrides: s.chartVisualOverrides,
       setChartVisualOverrides: s.setChartVisualOverrides,
+      editChartVisualOverrides: s.editChartVisualOverrides,
       setActiveChart: s.setActiveChart,
       selectedFile: s.selectedFile,
       aiSuggestionReason: s.aiSuggestionReason,
@@ -783,7 +838,7 @@ export default function ChartPanelTab() {
   );
   const [specExpanded, setSpecExpanded] = useState(true);
   const [specCopyOk, setSpecCopyOk] = useState(false);
-  const [dragOverSlot, setDragOverSlot] = useState<"x" | "y" | "color" | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState<"x" | "y" | "color" | "size" | "z" | null>(null);
   const [activeChartOpen, setActiveChartOpen] = useState(true);
 
   const focusChromeFromPanel = useCallback(
@@ -800,13 +855,14 @@ export default function ChartPanelTab() {
   // Chart hovered an axis / title → switch tab and scroll the matching control into view
   useEffect(() => {
     if (!chartChromeFocus || chartChromeFocus.source !== "chart") return;
-    const el = document.getElementById(chromeDomId(chartChromeFocus.target));
-    if (!el) return;
+    const sections: Partial<Record<ChartChromeTarget, string>> = { color: "color", marks: "look", axes: "look", grid: "axes", title: "look", legend: "layout" };
+    const section = sections[chartChromeFocus.target];
+    if (section) setVisualSections((prev) => ({ ...prev, [section]: true }));
     const t = window.setTimeout(() => {
-      el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      document.getElementById(chromeDomId(chartChromeFocus.target))?.scrollIntoView({ block: "nearest", behavior: appSettings.reducedMotion ? "auto" : "smooth" });
     }, 80);
     return () => window.clearTimeout(t);
-  }, [chartChromeFocus]);
+  }, [chartChromeFocus, appSettings.reducedMotion]);
   const [vegaOpen, setVegaOpen] = useState(false);
   const [chartWhyOpen, setChartWhyOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(true);
@@ -818,6 +874,9 @@ export default function ChartPanelTab() {
         activeChart?.opacityField,
     ),
   );
+  const [visualSections, setVisualSections] = useState<Record<string, boolean>>({ design: true });
+  const [paletteQuery, setPaletteQuery] = useState("");
+  const toggleVisualSection = (key: string) => setVisualSections((prev) => ({ ...prev, [key]: !prev[key] }));
   const [encodingLocks, setEncodingLocks] = useState<EncodingShuffleLocks>({});
   const [visualLocks, setVisualLocks] = useState<VisualShuffleLocks>({});
 
@@ -886,23 +945,17 @@ export default function ChartPanelTab() {
     ],
   );
 
-  const handleDrop = useCallback(
-    (slot: "x" | "y" | "color") => (e: DragEvent) => {
-      e.preventDefault();
-      setDragOverSlot(null);
-      const colName = e.dataTransfer.getData(DRAG_TYPE_COLUMN) || e.dataTransfer.getData("text/plain");
-      if (!colName || !activeChart || columnStats.length === 0) return;
-      const newX = slot === "x" ? colName : activeChart.xField;
-      const newY = slot === "y" ? colName : activeChart.yField;
-      const newColor = slot === "color" ? colName : activeChart.colorField;
-      const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extraFromChart());
-      if (rec) setActiveChart(rec);
+  const commitRec = useCallback(
+    (rec: NonNullable<ReturnType<typeof createChartRec>>, toastMsg?: string) => {
+      pushChartEditUndo();
+      setActiveChart(rec);
+      if (toastMsg) setToast(toastMsg, { undo: true });
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [pushChartEditUndo, setActiveChart, setToast],
   );
 
-  const handleDragEnter = useCallback((slot: "x" | "y" | "color") => () => setDragOverSlot(slot), []);
-  const handleDragOver = useCallback((slot: "x" | "y" | "color") => (e: DragEvent) => {
+  const handleDragEnter = useCallback((slot: "x" | "y" | "color" | "size" | "z") => () => setDragOverSlot(slot), []);
+  const handleDragOver = useCallback((slot: "x" | "y" | "color" | "size" | "z") => (e: DragEvent) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "copy";
     setDragOverSlot(slot);
@@ -911,9 +964,9 @@ export default function ChartPanelTab() {
 
   const updateOverride = useCallback(
     (key: keyof ChartVisualOverrides, value: number | string | boolean | undefined) => {
-      setChartVisualOverrides((prev) => ({ ...prev, [key]: value }));
+      editChartVisualOverrides({ [key]: value }, typeof value === "number" ? key : undefined);
     },
-    [setChartVisualOverrides],
+    [editChartVisualOverrides],
   );
 
   const handleCopySpec = useCallback(() => {
@@ -928,18 +981,31 @@ export default function ChartPanelTab() {
   const applyEncoding = useCallback(
     (slot: "x" | "y" | "color", colName: string) => {
       if (!activeChart || columnStats.length === 0) return;
-      const newX = slot === "x" ? colName : activeChart.xField;
-      const newY = slot === "y" ? (colName === "" ? null : colName) : activeChart.yField;
-      const newColor = slot === "color" ? (colName === "__none__" || colName === "" ? null : colName) : activeChart.colorField;
+      const resolved =
+        colName === "" || colName === "__none__"
+          ? null
+          : colName;
+      if (resolved) {
+        const col = columnStats.find((c) => c.name === resolved);
+        const gate = encodingDropAllowed(activeChart.kind, slot, col);
+        if (!gate.ok) {
+          setToast(gate.reason);
+          return;
+        }
+      }
+      const newX = slot === "x" ? (resolved ?? activeChart.xField) : activeChart.xField;
+      const newY = slot === "y" ? resolved : activeChart.yField;
+      const newColor = slot === "color" ? resolved : activeChart.colorField;
+      if (slot === "x" && !resolved) return;
       const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extraFromChart());
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, setToast, commitRec],
   );
 
   const applyEncodingExtra = useCallback(
-    (slot: "size" | "z" | "row" | "glow" | "outline" | "opacity" | "y2", colName: string) => {
-      if (!activeChart || columnStats.length === 0) return;
+    (slot: "size" | "z" | "row" | "glow" | "outline" | "opacity" | "y2", colName: string): boolean => {
+      if (!activeChart || columnStats.length === 0) return false;
       const sizeField = slot === "size" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.sizeField ?? null);
       const zField = slot === "z" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.zField ?? null);
       const rowField = slot === "row" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.rowField ?? null);
@@ -947,6 +1013,30 @@ export default function ChartPanelTab() {
       const outlineField = slot === "outline" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.outlineField ?? null);
       const opacityField = slot === "opacity" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.opacityField ?? null);
       const y2Field = slot === "y2" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.y2Field ?? null);
+      // Dual-measure kinds need two distinct numeric ends
+      if (
+        slot === "size" &&
+        sizeField &&
+        sizeField === activeChart.yField &&
+        (activeChart.kind === "dumbbell" || activeChart.kind === "pyramid" || activeChart.kind === "slope")
+      ) {
+        setToast("Pick a different column for the second measure");
+        return false;
+      }
+      if (slot === "size" && sizeField) {
+        const gate = encodingDropAllowed(activeChart.kind, "size", columnStats.find((c) => c.name === sizeField));
+        if (!gate.ok) {
+          setToast(gate.reason);
+          return false;
+        }
+      }
+      if (slot === "z" && zField) {
+        const gate = encodingDropAllowed(activeChart.kind, "z", columnStats.find((c) => c.name === zField));
+        if (!gate.ok) {
+          setToast(gate.reason);
+          return false;
+        }
+      }
       const rec = createChartRec(
         activeChart.kind,
         columnStats,
@@ -965,9 +1055,44 @@ export default function ChartPanelTab() {
           y2Field,
         },
       );
-      if (rec) setActiveChart(rec);
+      if (!rec) return false;
+      commitRec(rec);
+      return true;
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, setToast, commitRec],
+  );
+
+  const handleDrop = useCallback(
+    (slot: "x" | "y" | "color" | "size" | "z") => (e: DragEvent) => {
+      e.preventDefault();
+      setDragOverSlot(null);
+      const colName = e.dataTransfer.getData(DRAG_TYPE_COLUMN) || e.dataTransfer.getData("text/plain");
+      if (!colName || !activeChart || columnStats.length === 0) return;
+      const col = columnStats.find((c) => c.name === colName);
+      const gate = encodingDropAllowed(activeChart.kind, slot, col);
+      if (!gate.ok) {
+        setToast(gate.reason);
+        return;
+      }
+      if (slot === "size" || slot === "z") {
+        if (!applyEncodingExtra(slot, colName)) return;
+        const labels = encodingChannelLabels(activeChart.kind);
+        const slotLabel =
+          slot === "size" ? labels.size : activeChart.kind === "dataCube" ? "Depth" : "Z";
+        setToast(`Mapped ${colName} → ${slotLabel}`, { undo: true });
+        return;
+      }
+      const newX = slot === "x" ? colName : activeChart.xField;
+      const newY = slot === "y" ? colName : activeChart.yField;
+      const newColor = slot === "color" ? colName : activeChart.colorField;
+      const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extraFromChart());
+      if (rec) {
+        const labels = encodingChannelLabels(activeChart.kind);
+        const slotLabel = slot === "x" ? labels.x : slot === "y" ? labels.y : labels.color;
+        commitRec(rec, `Mapped ${colName} → ${slotLabel}`);
+      }
+    },
+    [activeChart, columnStats, tableName, extraFromChart, setToast, commitRec, applyEncodingExtra],
   );
 
   const applySplitMode = useCallback(
@@ -996,9 +1121,9 @@ export default function ChartPanelTab() {
         tableName,
         { ...extraFromChart(), rowField },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const applyTopN = useCallback(
@@ -1013,9 +1138,9 @@ export default function ChartPanelTab() {
         tableName,
         { ...extraFromChart(), topN: clampTopN(n) },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const applyComparePrevious = useCallback(
@@ -1030,9 +1155,9 @@ export default function ChartPanelTab() {
         tableName,
         { ...extraFromChart(), comparePrevious: on },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const applyTimeWindow = useCallback(
@@ -1057,14 +1182,14 @@ export default function ChartPanelTab() {
           timeWindow: range && range !== "all" ? range : null,
         },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
       // Shared cohort — Explorer + Chart ViewCohortBar stay in sync
       useLoomStore.getState().setViewTimeWindow(
         field,
         (range && range !== "all" ? range : "all") as ChartTimeRange,
       );
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   /** Drop Encoding extras the target kind cannot render (stale Facet / Top N / Compare). */
@@ -1085,9 +1210,36 @@ export default function ChartPanelTab() {
         opacityField: caps.opacityChannel ? base.opacityField : null,
         layoutDirection: caps.layoutDirection ? base.layoutDirection : null,
         yScale: caps.yScale ? base.yScale : null,
+        rollingWindow: caps.rollingWindow ? base.rollingWindow : null,
+        seriesNormalize: caps.seriesNormalize ? base.seriesNormalize : null,
+        residualOverlay: caps.residualOverlay ? base.residualOverlay : null,
+        anomalyHighlight: caps.anomalyHighlight ? base.anomalyHighlight : null,
+        bumpMode: caps.bumpMode ? base.bumpMode : null,
+        // Slices of averages / maxima don't add up to a whole — part-to-whole kinds sum
+        yAggregate:
+          PART_TO_WHOLE_KINDS.has(kind) && base.yAggregate && base.yAggregate !== "sum" && base.yAggregate !== "count"
+            ? null
+            : base.yAggregate,
       };
     },
     [],
+  );
+
+  const patchChartExtra = useCallback(
+    (patch: Parameters<typeof createChartRec>[6]) => {
+      if (!activeChart || columnStats.length === 0) return;
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        activeChart.colorField,
+        tableName,
+        { ...extraFromChart(), ...patch },
+      );
+      if (rec) commitRec(rec);
+    },
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const applyLayoutDirection = useCallback(
@@ -1102,9 +1254,9 @@ export default function ChartPanelTab() {
         tableName,
         { ...extraFromChart(), layoutDirection: dir === "auto" ? null : dir },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const applyYScale = useCallback(
@@ -1119,9 +1271,9 @@ export default function ChartPanelTab() {
         tableName,
         { ...extraFromChart(), yScale: scale === "linear" ? null : scale },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const applyChartType = useCallback(
@@ -1145,10 +1297,10 @@ export default function ChartPanelTab() {
           if (rec) break;
         }
       }
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
       else setToast(`Can’t build a ${kind} chart from these columns`);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart, extrasForKind, setToast],
+    [activeChart, columnStats, tableName, extraFromChart, extrasForKind, setToast, commitRec],
   );
 
   const kindSupport = useCallback((kind: ChartKind) => chartKindDataSupport(columnStats, kind), [columnStats]);
@@ -1165,9 +1317,9 @@ export default function ChartPanelTab() {
         tableName,
         { ...extraFromChart(), yAggregate: agg },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const applyTooltipFields = useCallback(
@@ -1182,9 +1334,9 @@ export default function ChartPanelTab() {
         tableName,
         { ...extraFromChart(), tooltipFields: fields.length > 0 ? fields : undefined },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const applyTooltipKeyField = useCallback(
@@ -1199,9 +1351,9 @@ export default function ChartPanelTab() {
         tableName,
         { ...extraFromChart(), tooltipKeyField: col === null ? undefined : col },
       );
-      if (rec) setActiveChart(rec);
+      if (rec) commitRec(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
   const handleRandomize = useCallback(() => {
@@ -1217,9 +1369,9 @@ export default function ChartPanelTab() {
       : undefined;
     const rec = tryBuildRandomChartRec(columnStats, tableName, { locks: encodingLocks, keep });
     if (rec) {
-      setActiveChart(rec);
       const locked = Object.entries(encodingLocks).filter(([, v]) => v).map(([k]) => k);
-      setToast(
+      commitRec(
+        rec,
         locked.length
           ? `Random · ${rec.kind} (locked ${locked.join(", ")})`
           : `Random · ${rec.kind}`,
@@ -1227,7 +1379,7 @@ export default function ChartPanelTab() {
     } else {
       setToast("Couldn’t find a random chart for these columns");
     }
-  }, [columnStats, tableName, setActiveChart, setToast, encodingLocks, activeChart]);
+  }, [columnStats, tableName, setToast, encodingLocks, activeChart, commitRec]);
 
   const handleRandomizeEncoding = useCallback(() => {
     if (columnStats.length === 0 || !activeChart) return;
@@ -1370,6 +1522,21 @@ export default function ChartPanelTab() {
     label: c.name,
     type: c.data_type,
   }));
+  /** Disable columns that encodingDropAllowed would reject for this slot. */
+  const gateOptions = (slot: "x" | "y" | "color" | "size" | "z", opts: EncodingOption[]): EncodingOption[] =>
+    opts.map((o) => {
+      const gate = encodingDropAllowed(
+        activeChart.kind,
+        slot,
+        columnStats.find((c) => c.name === o.value),
+      );
+      if (gate.ok) return o;
+      return { ...o, disabled: true, label: `${o.label} · skip` };
+    });
+  const xColOptions = gateOptions("x", allColOptions);
+  const yColOptions = gateOptions("y", allColOptions);
+  const sizeColOptions = gateOptions("size", numericOptions.length ? numericOptions : allColOptions);
+  const zColOptions = gateOptions("z", isDataCube ? allColOptions : numericOptions);
   const tooltipSelectedCount = activeChart.tooltipFields?.length ?? 0;
   const extraChannelCount = [
     showMarkPoints && activeChart.sizeField,
@@ -1377,14 +1544,21 @@ export default function ChartPanelTab() {
     showGlowOutline && activeChart.outlineField,
     showOpacityEnc && activeChart.opacityField,
   ].filter(Boolean).length;
+  const panelHints = encodingPanelHints(activeChart, columnStats);
+  const showSeriesTools =
+    caps.rollingWindow || caps.seriesNormalize || caps.residualOverlay || caps.anomalyHighlight || caps.bumpMode;
+  const xDistinct = columnStats.find((c) => c.name === activeChart.xField)?.distinct_count ?? 0;
+  const topNChoices = TOP_N_OPTIONS.filter((opt) => xDistinct <= 0 || opt.value <= Math.max(xDistinct, 10));
 
   return (
     <div className="flex flex-col min-h-0">
       {/* Sticky Encoding | Visual secondary header */}
+      <div className="sticky top-0 z-10 bg-loom-surface">
+      <ChartEditToolbar />
       <div
         role="tablist"
         aria-label="Chart panel sections"
-        className="sticky top-0 z-10 flex items-center gap-0.5 px-2 py-1.5 border-b border-loom-border bg-loom-surface shrink-0"
+        className="flex items-center gap-0.5 px-2 py-1.5 border-b border-loom-border bg-loom-surface shrink-0"
       >
         <div className="flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5 w-full">
           {(
@@ -1421,6 +1595,7 @@ export default function ChartPanelTab() {
             </button>
           ))}
         </div>
+      </div>
       </div>
 
       <div className="flex flex-col gap-3 p-3">
@@ -1514,7 +1689,7 @@ export default function ChartPanelTab() {
               <EncodingSlot
                 label={channelLabels.x}
                 value={activeChart.xField}
-                options={allColOptions}
+                options={xColOptions}
                 typeHint={colType(activeChart.xField)}
                 isDropActive={dragOverSlot === "x"}
                 onDragEnter={handleDragEnter("x")}
@@ -1539,7 +1714,7 @@ export default function ChartPanelTab() {
                 <EncodingSlot
                   label={channelLabels.y}
                   value={activeChart.yField ?? ""}
-                  options={allColOptions}
+                  options={yColOptions}
                   allowEmpty
                   emptyLabel="—"
                   typeHint={activeChart.yField ? colType(activeChart.yField) : undefined}
@@ -1652,7 +1827,7 @@ export default function ChartPanelTab() {
                                       tableName,
                                       { ...extraFromChart(), barStackMode: m },
                                     );
-                                    if (rec) setActiveChart(rec);
+                                    if (rec) commitRec(rec);
                                   }}
                                   className={`min-h-8 px-2.5 text-2xs rounded-md capitalize ${
                                     barStackMode === m
@@ -1680,61 +1855,70 @@ export default function ChartPanelTab() {
                   emptyLabel="None"
                   typeHint={activeChart.rowField ? colType(activeChart.rowField) : undefined}
                   onChange={(v) => applyEncodingExtra("row", v === "" ? "__none__" : v)}
+                  description="Small multiples — one panel per category (max 8). Different from Color, which overlays series in one plot."
                 />
               )}
               {showRow && splitCompatible && splitField && (
-                <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
-                  <span className="text-2xs text-loom-muted shrink-0">Split</span>
-                  <div className="flex gap-1 flex-wrap">
-                    {(
-                      [
-                        ["color", "Color"],
-                        ["facet", "Facet"],
-                        ["both", "Both"],
-                      ] as const
-                    ).map(([mode, label]) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        aria-pressed={splitMode === mode}
-                        onClick={() => applySplitMode(mode)}
-                        className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                          splitMode === mode
-                            ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                            : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                        }`}
-                        title={
-                          mode === "color"
-                            ? "Overlay series by color"
-                            : mode === "facet"
-                              ? "Small multiples (one panel per value)"
-                              : "Color within each facet panel"
-                        }
-                      >
-                        {label}
-                      </button>
-                    ))}
+                <div className="space-y-1 pl-0.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="text-2xs text-loom-muted shrink-0">Split</span>
+                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Color versus facet split">
+                      {(
+                        [
+                          ["color", "Color"],
+                          ["facet", "Facet"],
+                          ["both", "Both"],
+                        ] as const
+                      ).map(([mode, label]) => (
+                        <button
+                          key={mode}
+                          type="button"
+                          aria-pressed={splitMode === mode}
+                          onClick={() => applySplitMode(mode)}
+                          className={`min-h-8 px-2.5 text-2xs rounded-md ${
+                            splitMode === mode
+                              ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                              : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
+                          }`}
+                          title={
+                            mode === "color"
+                              ? "Overlay series by color in one plot"
+                              : mode === "facet"
+                                ? "Small multiples (one panel per value)"
+                                : "Color within each facet panel"
+                          }
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+                  <p className="text-2xs text-loom-muted leading-snug">
+                    Same field as Color or Facet — Color overlays, Facet splits panels, Both does both.
+                  </p>
                 </div>
               )}
               {showTopN && (
-                <div className="flex items-center gap-2 pl-0.5">
-                  <label className="text-2xs text-loom-muted shrink-0" htmlFor="loom-top-n">
-                    Top N
-                  </label>
-                  <select
-                    id="loom-top-n"
-                    value={clampTopN(activeChart.topN, DEFAULT_TOP_N)}
-                    onChange={(e) => applyTopN(Number(e.target.value))}
-                    className="loom-input flex-1 text-xs py-1.5 min-h-8"
-                    title="How many categories to keep (ranked by value)"
-                  >
-                    {TOP_N_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                <div className="space-y-1 pl-0.5">
+                  <div className="flex items-center gap-2">
+                    <label className="text-2xs text-loom-muted shrink-0" htmlFor="loom-top-n">
+                      Top N
+                    </label>
+                    <select
+                      id="loom-top-n"
+                      value={clampTopN(activeChart.topN, DEFAULT_TOP_N)}
+                      onChange={(e) => applyTopN(Number(e.target.value))}
+                      className="loom-input flex-1 text-xs py-1.5 min-h-8"
+                      title="How many categories to keep (ranked by value)"
+                    >
+                      {(topNChoices.length > 0 ? topNChoices : TOP_N_OPTIONS).map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                          {xDistinct > 0 && opt.value >= xDistinct ? " (all)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               )}
               {caps.layoutDirection && (
@@ -1771,13 +1955,17 @@ export default function ChartPanelTab() {
                       })}
                     </div>
                   </div>
-                  {(activeChart.layoutDirection === "down" || activeChart.layoutDirection === "left") && (
-                    <p className="text-2xs text-loom-muted leading-snug">
-                      {activeChart.layoutDirection === "down"
+                  <p className="text-2xs text-loom-muted leading-snug">
+                    {(activeChart.layoutDirection ?? "auto") === "auto"
+                      ? "Auto picks vertical vs horizontal from the stage size."
+                      : activeChart.layoutDirection === "down"
                         ? "Zero at the top — good for ranks, losses, latency, deficits."
-                        : "Zero on the right — same idea, horizontal."}
-                    </p>
-                  )}
+                        : activeChart.layoutDirection === "left"
+                          ? "Zero on the right — same idea, horizontal."
+                          : activeChart.layoutDirection === "up"
+                            ? "Zero at the bottom — classic bars / lollipops."
+                            : "Zero on the left — horizontal bars growing right."}
+                  </p>
                 </div>
               )}
               {caps.yScale && (
@@ -1881,6 +2069,11 @@ export default function ChartPanelTab() {
                       })}
                     </div>
                   </div>
+                  {!timeFieldActive && (
+                    <p className="text-2xs text-loom-muted pl-0.5">
+                      Pick a Time column above to enable window chips (Last 24h, 7d, …).
+                    </p>
+                  )}
                   {timeWindowActive !== "all" && sampleRows && (
                     <p className="text-2xs text-loom-muted pl-0.5">
                       {(() => {
@@ -1897,7 +2090,7 @@ export default function ChartPanelTab() {
                             : slice.mode === "wall"
                               ? "wall clock"
                               : "from newest sample";
-                        return `${slice.kept.toLocaleString()} of ${slice.total.toLocaleString()} rows (${modeHint})`;
+                        return `Showing ${slice.kept.toLocaleString()} / ${slice.total.toLocaleString()} rows (${modeHint})`;
                       })()}
                     </p>
                   )}
@@ -1907,21 +2100,36 @@ export default function ChartPanelTab() {
                 <EncodingSlot
                   label={isDataCube ? "Depth" : "Z"}
                   value={activeChart.zField ?? ""}
-                  options={isDataCube ? allColOptions : numericOptions}
+                  options={zColOptions}
                   allowEmpty={!isDataCube}
                   emptyLabel="Auto"
                   typeHint={activeChart.zField ? colType(activeChart.zField) : undefined}
+                  isDropActive={dragOverSlot === "z"}
+                  onDragEnter={handleDragEnter("z")}
+                  onDragOver={handleDragOver("z")}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop("z")}
                   onChange={(v) => applyEncodingExtra("z", v === "" ? "__none__" : v)}
+                  description={
+                    isDataCube
+                      ? "Third cube axis — stacks rows × columns into depth slices."
+                      : "Third spatial axis for 3D scatter (numeric)."
+                  }
                 />
               )}
               {showSize && sizeInPrimary && (
                 <EncodingSlot
                   label={channelLabels.size}
                   value={activeChart.sizeField ?? ""}
-                  options={numericOptions}
+                  options={sizeColOptions}
                   allowEmpty
                   emptyLabel={isDataCube ? "Row count" : "None"}
                   typeHint={activeChart.sizeField ? colType(activeChart.sizeField) : undefined}
+                  isDropActive={dragOverSlot === "size"}
+                  onDragEnter={handleDragEnter("size")}
+                  onDragOver={handleDragOver("size")}
+                  onDragLeave={handleDragLeave}
+                  onDrop={handleDrop("size")}
                   onChange={(v) => applyEncodingExtra("size", v === "" ? "__none__" : v)}
                   chromeTarget="size"
                   chromeActive={chartChromeFocus?.target === "size"}
@@ -1965,7 +2173,16 @@ export default function ChartPanelTab() {
                 >
                   <span>
                     More channels
-                    {extraChannelCount > 0 ? ` · ${extraChannelCount} set` : ""}
+                    {extraChannelCount > 0
+                      ? ` · ${[
+                          showSize && !sizeInPrimary && activeChart.sizeField ? channelLabels.size : null,
+                          showGlowOutline && activeChart.glowField ? "Glow" : null,
+                          showGlowOutline && activeChart.outlineField ? "Outline" : null,
+                          showOpacityEnc && activeChart.opacityField ? "Opacity" : null,
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}`
+                      : ""}
                   </span>
                   <span aria-hidden>{moreChannelsOpen ? "▼" : "▶"}</span>
                 </button>
@@ -1975,9 +2192,14 @@ export default function ChartPanelTab() {
                       <EncodingSlot
                         label={channelLabels.size}
                         value={activeChart.sizeField ?? ""}
-                        options={numericOptions}
+                        options={sizeColOptions}
                         allowEmpty
                         typeHint={activeChart.sizeField ? colType(activeChart.sizeField) : undefined}
+                        isDropActive={dragOverSlot === "size"}
+                        onDragEnter={handleDragEnter("size")}
+                        onDragOver={handleDragOver("size")}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop("size")}
                         onChange={(v) => applyEncodingExtra("size", v === "" ? "__none__" : v)}
                       />
                     )}
@@ -1989,6 +2211,7 @@ export default function ChartPanelTab() {
                           options={allColOptions}
                           allowEmpty
                           onChange={(v) => applyEncodingExtra("glow", v === "" ? "__none__" : v)}
+                          description="Column turns glow on/off or scales intensity per point (scatter)."
                         />
                         <EncodingSlot
                           label="Outline"
@@ -1996,6 +2219,7 @@ export default function ChartPanelTab() {
                           options={allColOptions}
                           allowEmpty
                           onChange={(v) => applyEncodingExtra("outline", v === "" ? "__none__" : v)}
+                          description="Column turns stroke on/off or scales outline width per point."
                         />
                       </>
                     )}
@@ -2006,10 +2230,160 @@ export default function ChartPanelTab() {
                         options={allColOptions}
                         allowEmpty
                         onChange={(v) => applyEncodingExtra("opacity", v === "" ? "__none__" : v)}
+                        description="Per-point opacity from a column (separate from Visual → Opacity)."
                       />
                     )}
                   </div>
                 )}
+              </div>
+            )}
+
+            {showSeriesTools && (
+              <div className="space-y-2 border-t border-loom-border/70 pt-2">
+                <EncodingSectionLabel>Series tools</EncodingSectionLabel>
+                {caps.rollingWindow && (
+                  <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
+                    <span className="text-2xs text-loom-muted shrink-0">Rolling</span>
+                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Rolling mean window">
+                      {(
+                        [
+                          [null, "Off"],
+                          [7, "7"],
+                          [30, "30"],
+                        ] as const
+                      ).map(([w, label]) => {
+                        const on = (activeChart.rollingWindow ?? null) === w;
+                        return (
+                          <button
+                            key={label}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => patchChartExtra({ rollingWindow: w })}
+                            className={`min-h-8 px-2.5 text-2xs rounded-md ${
+                              on
+                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
+                            }`}
+                            title={w ? `${w}-point rolling mean along X` : "No rolling mean"}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {caps.seriesNormalize && (
+                  <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
+                    <span className="text-2xs text-loom-muted shrink-0">Normalize</span>
+                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Series normalize">
+                      {(
+                        [
+                          [null, "Off"],
+                          ["index100", "Index 100"],
+                          ["zscore", "Z-score"],
+                        ] as const
+                      ).map(([mode, label]) => {
+                        const on = (activeChart.seriesNormalize ?? null) === mode;
+                        return (
+                          <button
+                            key={label}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => patchChartExtra({ seriesNormalize: mode })}
+                            className={`min-h-8 px-2.5 text-2xs rounded-md ${
+                              on
+                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
+                            }`}
+                            title={
+                              mode === "index100"
+                                ? "Rebase each series so the first point is 100"
+                                : mode === "zscore"
+                                  ? "Z-score each series for a common scale"
+                                  : "Raw values"
+                            }
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {caps.residualOverlay && (
+                  <label className="flex items-center gap-1.5 text-2xs text-loom-muted cursor-pointer pl-0.5 min-h-8">
+                    <input
+                      type="checkbox"
+                      checked={!!activeChart.residualOverlay}
+                      onChange={(e) => patchChartExtra({ residualOverlay: e.target.checked })}
+                      className="rounded border-loom-border accent-loom-accent"
+                    />
+                    Residual stems (distance from linear fit)
+                  </label>
+                )}
+                {caps.anomalyHighlight && (
+                  <label className="flex items-center gap-1.5 text-2xs text-loom-muted cursor-pointer pl-0.5 min-h-8">
+                    <input
+                      type="checkbox"
+                      checked={!!activeChart.anomalyHighlight}
+                      onChange={(e) => patchChartExtra({ anomalyHighlight: e.target.checked })}
+                      className="rounded border-loom-border accent-loom-accent"
+                    />
+                    Highlight anomalies (|z| outliers)
+                  </label>
+                )}
+                {caps.bumpMode && (
+                  <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
+                    <span className="text-2xs text-loom-muted shrink-0">Bump</span>
+                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Bump mode">
+                      {(
+                        [
+                          ["rank", "Rank"],
+                          ["delta", "Δ rank"],
+                        ] as const
+                      ).map(([mode, label]) => {
+                        const cur = activeChart.bumpMode ?? "rank";
+                        const on = cur === mode;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => patchChartExtra({ bumpMode: mode })}
+                            className={`min-h-8 px-2.5 text-2xs rounded-md ${
+                              on
+                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
+                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {panelHints.length > 0 && (
+              <div className="space-y-1.5" role="status" aria-live="polite">
+                {panelHints.map((h) => (
+                  <div
+                    key={h.id}
+                    role={h.level === "error" ? "alert" : undefined}
+                    className={`rounded-md border px-2.5 py-2 text-2xs leading-snug ${
+                      h.level === "error"
+                        ? "border-loom-error/40 bg-loom-error/10 text-loom-error"
+                        : h.level === "warn"
+                          ? "border-loom-warning/40 bg-loom-warning/10 text-loom-warning"
+                          : "border-loom-border bg-loom-elevated/50 text-loom-muted"
+                    }`}
+                  >
+                    {h.message}
+                  </div>
+                ))}
               </div>
             )}
 
@@ -2251,9 +2625,27 @@ export default function ChartPanelTab() {
       {/* Visual */}
       <div className="loom-card overflow-hidden">
         <div className="space-y-4 px-2.5 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-2xs text-loom-muted">Your chart, your style</span>
+              <div className="flex gap-1">
+                <button type="button" onClick={() => setVisualSections(Object.fromEntries(["design", "personal", "color", "look", "type", "marks", "axes", "layout", "atmosphere", "notes"].map((key) => [key, true])))} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Expand all</button>
+                <button type="button" onClick={() => setVisualSections({})} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Collapse all</button>
+              </div>
+            </div>
+            <ChartInspectorSection title="My looks" open={!!visualSections.personal} onToggle={() => toggleVisualSection("personal")}>
+              <ChartLookLibrary />
+            </ChartInspectorSection>
+            {(!caps.cartesian || !caps.markPoints) && (
+              <p className="text-2xs text-loom-muted leading-snug rounded-md border border-loom-border/60 bg-loom-elevated/40 px-2.5 py-2">
+                Controls that don’t affect {activeChart.kind} are hidden
+                {!caps.cartesian ? " (no axes / grid)" : ""}
+                {!caps.markPoints && caps.cartesian ? " · mark shape / jitter apply to scatter" : ""}
+                .
+              </p>
+            )}
             {/* Presets — full replace */}
-            <div className="space-y-1.5">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Design system</p>
+            <ChartInspectorSection title="Design system" open={!!visualSections.design} onToggle={() => toggleVisualSection("design")}>
+
               <p className="text-2xs text-loom-muted leading-snug">
                 Full looks — Tufte / Bauhaus / Newspaper / Military change ink, axes, and atmosphere on every chart kind.
               </p>
@@ -2319,6 +2711,7 @@ export default function ChartPanelTab() {
                       key={s.id}
                       type="button"
                       aria-pressed={on}
+                      aria-label={`${on ? "Unlock" : "Lock"} visual ${s.label.toLowerCase()}`}
                       onClick={() => toggleVisualLock(s.id)}
                       title={on ? `Unlock ${s.label}` : `Lock ${s.label} while shuffling`}
                       className={`px-1.5 py-0.5 text-2xs rounded border ${
@@ -2332,11 +2725,11 @@ export default function ChartPanelTab() {
                   );
                 })}
               </div>
-            </div>
+            </ChartInspectorSection>
 
             {/* Color palettes */}
-            <div className="space-y-2">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Color</p>
+            <ChartInspectorSection title="Color" open={!!visualSections.color} onToggle={() => toggleVisualSection("color")}>
+
               <p className="text-2xs text-loom-muted leading-snug">
                 Data-viz scales — Auto picks categorical, sequential, or semantic from the chart.
               </p>
@@ -2350,14 +2743,8 @@ export default function ChartPanelTab() {
                       type="button"
                       aria-pressed={active}
                       onClick={() => {
-                        updateOverride("colorScaleKind", id);
-                        if (id === "auto") updateOverride("colorPalette", "auto");
-                        else {
-                          const first = COLOR_PALETTES.find(
-                            (p) => p.kind === id && p.source === "system" && p.id !== "auto",
-                          );
-                          if (first) updateOverride("colorPalette", first.id);
-                        }
+                        const first = COLOR_PALETTES.find((p) => p.kind === id && p.source === "system" && p.id !== "auto");
+                        editChartVisualOverrides({ colorScaleKind: id, colorPalette: id === "auto" ? "auto" : first?.id ?? "auto" });
                       }}
                       className={`px-2 py-1 text-2xs rounded border ${
                         active
@@ -2390,10 +2777,10 @@ export default function ChartPanelTab() {
                 });
                 const kindFilter = chartVisualOverrides.colorScaleKind ?? "auto";
                 const grouped = palettesGrouped();
-                const filterList = (list: typeof grouped.system) =>
-                  kindFilter === "auto"
-                    ? list
-                    : list.filter((p) => p.kind === (kindFilter as PaletteKind));
+                const query = paletteQuery.trim().toLowerCase();
+                const filterList = (list: typeof grouped.system) => list.filter((p) =>
+                  (kindFilter === "auto" || p.kind === (kindFilter as PaletteKind)) &&
+                  (!query || `${p.name} ${p.id} ${p.kind} ${p.source}`.toLowerCase().includes(query)));
                 const sections: { title: string; items: typeof grouped.system }[] = [
                   { title: "System", items: filterList(grouped.system) },
                   { title: "Theme", items: filterList(grouped.theme) },
@@ -2402,6 +2789,8 @@ export default function ChartPanelTab() {
                 const selectedId = chartVisualOverrides.colorPalette ?? "auto";
                 return (
                   <div className="space-y-2.5">
+                    <input type="search" aria-label="Search color palettes" placeholder="Search palettes…" value={paletteQuery} onChange={(e) => setPaletteQuery(e.target.value)} className="loom-input w-full text-xs min-h-9 px-2" />
+                    {!sections.length && <p role="status" className="text-2xs text-loom-muted">No palettes match this search and scale. Clear the search or choose Auto to browse all scales.</p>}
                     <div className="rounded border border-loom-border/60 bg-loom-elevated/40 px-2 py-1.5">
                       <p className="text-2xs text-loom-muted mb-1">
                         Applied · {applied.paletteId}
@@ -2416,8 +2805,7 @@ export default function ChartPanelTab() {
                     <button
                       type="button"
                       onClick={() => {
-                        updateOverride("colorPalette", "auto");
-                        updateOverride("colorScaleKind", "auto");
+                        editChartVisualOverrides({ colorPalette: "auto", colorScaleKind: "auto" });
                       }}
                       className={`w-full text-left rounded border px-2 py-1.5 ${
                         selectedId === "auto"
@@ -2440,8 +2828,7 @@ export default function ChartPanelTab() {
                                 type="button"
                                 aria-pressed={active}
                                 onClick={() => {
-                                  updateOverride("colorPalette", p.id);
-                                  updateOverride("colorScaleKind", p.kind);
+                                  editChartVisualOverrides({ colorPalette: p.id, colorScaleKind: p.kind });
                                 }}
                                 className={`w-full text-left rounded border px-2 py-1.5 ${
                                   active
@@ -2467,11 +2854,11 @@ export default function ChartPanelTab() {
                   </div>
                 );
               })()}
-            </div>
+            </ChartInspectorSection>
 
             {/* Look spectrum — only controls that affect this chart kind */}
-            <div className="space-y-2.5">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Look</p>
+            <ChartInspectorSection title="Composition" open={!!visualSections.look} onToggle={() => toggleVisualSection("look")}>
+
               <IconToggleGroup
                 label="Detail"
                 value={chartVisualOverrides.chartDetail ?? "viz"}
@@ -2622,13 +3009,13 @@ export default function ChartPanelTab() {
                   />
                 </div>
               )}
-            </div>
+            </ChartInspectorSection>
             {/* Typography */}
-            <div className="space-y-2.5">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Typography</p>
+            <ChartInspectorSection title="Typography" open={!!visualSections.type} onToggle={() => toggleVisualSection("type")}>
+
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Font family</label>
-                <select
+                <select aria-label="Font family"
                   value={chartVisualOverrides.fontFamily ?? "Inter"}
                   onChange={(e) => updateOverride("fontFamily", e.target.value)}
                   className="loom-input w-full text-xs py-1.5"
@@ -2658,31 +3045,42 @@ export default function ChartPanelTab() {
                 />
                 Title italic
               </label>
-              {caps.cartesian && (
-                <IconToggleGroup
-                  label="Tick label rotation"
-                  value={chartVisualOverrides.tickRotation ?? 0}
-                  onChange={(v) => updateOverride("tickRotation", v)}
-                  options={[
-                    { value: 0, label: "0°", icon: Ico.rot0 },
-                    { value: 30, label: "30°", icon: Ico.rot30 },
-                    { value: 45, label: "45°", icon: Ico.rot45 },
-                    { value: 60, label: "60°", icon: Ico.rot60 },
-                    { value: 90, label: "90°", icon: Ico.rot90 },
-                  ]}
-                />
-              )}
-            </div>
+              {caps.tickLabelRotation ? (
+                <div className="space-y-1">
+                  <IconToggleGroup
+                    label="X tick label angle"
+                    value={chartVisualOverrides.tickRotation ?? 0}
+                    onChange={(v) => updateOverride("tickRotation", v)}
+                    options={[
+                      { value: 0, label: "0°", icon: Ico.rot0 },
+                      { value: 30, label: "30°", icon: Ico.rot30 },
+                      { value: 45, label: "45°", icon: Ico.rot45 },
+                      { value: 60, label: "60°", icon: Ico.rot60 },
+                      { value: 90, label: "90°", icon: Ico.rot90 },
+                    ]}
+                  />
+                  <p className="text-2xs text-loom-muted leading-snug">
+                    Angles numeric labels along the bottom X axis. Category names and bar end-labels are separate.
+                  </p>
+                </div>
+              ) : caps.cartesian ? (
+                <p className="text-2xs text-loom-muted leading-snug rounded-md border border-loom-border/50 bg-loom-elevated/30 px-2 py-1.5">
+                  {activeChart.kind === "bar" || activeChart.kind === "pareto" || activeChart.kind === "lollipop" || activeChart.kind === "waterfall"
+                    ? "This chart uses category names + value labels on marks — no rotatable X tick numbers."
+                    : "X tick label angle doesn’t apply to this chart type."}
+                </p>
+              ) : null}
+                </ChartInspectorSection>
 
             {/* Marks — only for kinds that draw marks this way */}
             {(caps.markPoints || caps.barMarks || caps.lineMarks) && (
-            <div className="space-y-2">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Marks</p>
+            <ChartInspectorSection title="Marks" open={!!visualSections.marks} onToggle={() => toggleVisualSection("marks")}>
+
               {caps.markPoints && (
                 <>
                   <div>
                     <label className="block text-2xs text-loom-muted mb-1">Point size</label>
-                    <input
+                    <input aria-label="Point size"
                       type="range"
                       min={2}
                       max={24}
@@ -2694,7 +3092,7 @@ export default function ChartPanelTab() {
                   </div>
                   <div>
                     <label className="block text-2xs text-loom-muted mb-1">Mark shape</label>
-                    <select
+                    <select aria-label="Mark shape"
                       value={chartVisualOverrides.markShape ?? "circle"}
                       onChange={(e) => updateOverride("markShape", e.target.value)}
                       className="loom-input w-full text-xs py-1.5"
@@ -2717,7 +3115,7 @@ export default function ChartPanelTab() {
                     <div className="grid grid-cols-2 gap-1">
                       <div>
                         <label className="block text-2xs text-loom-muted mb-0.5">Stroke width</label>
-                        <input
+                        <input aria-label="Stroke width"
                           type="number"
                           min={0.5}
                           max={3}
@@ -2731,7 +3129,7 @@ export default function ChartPanelTab() {
                   )}
                   <div>
                     <label className="block text-2xs text-loom-muted mb-1">Jitter (px)</label>
-                    <input
+                    <input aria-label="Jitter (px)"
                       type="range"
                       min={0}
                       max={10}
@@ -2743,7 +3141,7 @@ export default function ChartPanelTab() {
                   </div>
                   <div>
                     <label className="block text-2xs text-loom-muted mb-1">Size scale</label>
-                    <input
+                    <input aria-label="Size scale"
                       type="range"
                       min={0.5}
                       max={2}
@@ -2769,7 +3167,7 @@ export default function ChartPanelTab() {
               {caps.barMarks && (
                 <div>
                   <label className="block text-2xs text-loom-muted mb-1">Bar corner radius (px)</label>
-                  <input
+                  <input aria-label="Bar corner radius (px)"
                     type="range"
                     min={0}
                     max={12}
@@ -2803,13 +3201,13 @@ export default function ChartPanelTab() {
                   </label>
                 </>
               )}
-            </div>
+              </ChartInspectorSection>
             )}
 
             {/* Axes & Grid — cartesian charts only */}
             {caps.cartesian && (
-            <div className="space-y-2.5">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Axes & Grid</p>
+            <ChartInspectorSection title="Axes & grid" open={!!visualSections.axes} onToggle={() => toggleVisualSection("axes")}>
+
               <ColorSwatchGroup
                 label="Axis line color"
                 value={chartVisualOverrides.axisLineColor ?? "theme"}
@@ -2818,7 +3216,7 @@ export default function ChartPanelTab() {
               />
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Axis line width</label>
-                <input
+                <input aria-label="Axis line width"
                   type="range"
                   min={0.5}
                   max={4}
@@ -2842,7 +3240,7 @@ export default function ChartPanelTab() {
               />
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Grid opacity</label>
-                <input
+                <input aria-label="Grid opacity"
                   type="range"
                   min={0}
                   max={1}
@@ -2855,7 +3253,7 @@ export default function ChartPanelTab() {
               </div>
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Tick count</label>
-                <input
+                <input aria-label="Tick count"
                   type="range"
                   min={3}
                   max={10}
@@ -2873,7 +3271,7 @@ export default function ChartPanelTab() {
               />
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Axis font size</label>
-                <input
+                <input aria-label="Axis font size"
                   type="number"
                   min={8}
                   max={16}
@@ -2898,15 +3296,15 @@ export default function ChartPanelTab() {
                 />
                 Show grid
               </label>
-            </div>
+            </ChartInspectorSection>
             )}
 
             {/* Layout */}
-            <div className="space-y-2">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Layout</p>
+            <ChartInspectorSection title="Layout" open={!!visualSections.layout} onToggle={() => toggleVisualSection("layout")}>
+
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Chart padding (px)</label>
-                <input
+                <input aria-label="Chart padding (px)"
                   type="range"
                   min={20}
                   max={80}
@@ -2923,7 +3321,7 @@ export default function ChartPanelTab() {
                 onMouseLeave={clearChromeFromPanel}
               >
                 <label className="block text-2xs text-loom-muted mb-1">Legend position</label>
-                <select
+                <select aria-label="Legend position"
                   value={chartVisualOverrides.legendPosition ?? "auto"}
                   onChange={(e) => updateOverride("legendPosition", e.target.value)}
                   className="loom-input w-full text-xs py-1.5"
@@ -2955,14 +3353,14 @@ export default function ChartPanelTab() {
                   Data labels
                 </label>
               )}
-            </div>
+            </ChartInspectorSection>
 
             {/* Atmosphere */}
-            <div className="space-y-2">
-              <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Atmosphere</p>
+            <ChartInspectorSection title="Atmosphere" open={!!visualSections.atmosphere} onToggle={() => toggleVisualSection("atmosphere")}>
+
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Background</label>
-                <select
+                <select aria-label="Background"
                   value={chartVisualOverrides.backgroundStyle ?? "default"}
                   onChange={(e) => updateOverride("backgroundStyle", e.target.value)}
                   className="loom-input w-full text-xs py-1.5"
@@ -2985,7 +3383,7 @@ export default function ChartPanelTab() {
               </div>
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Blend mode</label>
-                <select
+                <select aria-label="Blend mode"
                   value={chartVisualOverrides.blendMode ?? "source-over"}
                   onChange={(e) => updateOverride("blendMode", e.target.value as GlobalCompositeOperation)}
                   className="loom-input w-full text-xs py-1.5"
@@ -3009,7 +3407,7 @@ export default function ChartPanelTab() {
                   {chartVisualOverrides.glowEnabled && (
                     <div>
                       <label className="block text-2xs text-loom-muted mb-1">Glow intensity</label>
-                      <input
+                      <input aria-label="Glow intensity"
                         type="range"
                         min={1}
                         max={20}
@@ -3031,12 +3429,26 @@ export default function ChartPanelTab() {
                 />
                 Animate entrance
               </label>
-            </div>
+
+              <div>
+                <label className="block text-2xs text-loom-muted mb-1">Opacity</label>
+                <input aria-label="Opacity"
+                  type="range"
+                  min={0.2}
+                  max={1}
+                  step={0.05}
+                  value={chartVisualOverrides.opacity ?? 0.7}
+                  onChange={(e) => updateOverride("opacity", Number(e.target.value))}
+                  className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
+                />
+                <span className="text-2xs font-mono text-loom-muted ml-2">{((chartVisualOverrides.opacity ?? 0.7) * 100).toFixed(0)}%</span>
+              </div>
+            </ChartInspectorSection>
 
             {/* Annotations */}
             {activeChart && (
-              <div className="space-y-2">
-                <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wide">Annotations</p>
+              <ChartInspectorSection title="Annotations" open={!!visualSections.notes} onToggle={() => toggleVisualSection("notes")}>
+
                 <button
                   type="button"
                   onClick={() => {
@@ -3058,25 +3470,10 @@ export default function ChartPanelTab() {
                     <button type="button" onClick={() => removeChartAnnotation(activeChart.id, a.id)} className="shrink-0 text-loom-muted hover:text-loom-text" aria-label="Remove">×</button>
                   </div>
                 ))}
-              </div>
+              </ChartInspectorSection>
             )}
 
-            {/* Shared */}
-            <div className="space-y-2 pt-2 border-t border-loom-border">
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Opacity</label>
-                <input
-                  type="range"
-                  min={0.2}
-                  max={1}
-                  step={0.05}
-                  value={chartVisualOverrides.opacity ?? 0.7}
-                  onChange={(e) => updateOverride("opacity", Number(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
-                />
-                <span className="text-2xs font-mono text-loom-muted ml-2">{((chartVisualOverrides.opacity ?? 0.7) * 100).toFixed(0)}%</span>
-              </div>
-            </div>
+
           </div>
       </div>
         </div>

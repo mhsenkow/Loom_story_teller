@@ -724,6 +724,57 @@ describe("fitEncodingToKind (chart-type switch)", () => {
     const fit = fitEncodingToKind("sankey", gap, { xField: "continent", yField: "pop", colorField: null });
     expect(fit.colorField).toBe("country");
   });
+
+  const barEnc = { xField: "continent", yField: "pop", colorField: null };
+
+  it("moves a category off X for two-axis numeric kinds and keeps it as color", () => {
+    for (const kind of ["contour", "isoScatter", "voronoi"] as const) {
+      const fit = fitEncodingToKind(kind, gap, barEnc);
+      expect(fit.xField).not.toBe("continent");
+      expect(["year", "pop", "lifeExp", "gdpPercap"]).toContain(fit.xField);
+      expect(fit.yField).not.toBe(fit.xField);
+      expect(fit.colorField).toBe("continent");
+    }
+  });
+
+  it("gives histograms a numeric X", () => {
+    expect(fitEncodingToKind("histogram", gap, barEnc).xField).not.toBe("continent");
+  });
+
+  it("swaps a category X onto Y for strip / ridgeline when it is the only grouping", () => {
+    const demo = [col("x", "DOUBLE", 2000), col("y", "DOUBLE", 2000), col("cluster", "VARCHAR", 8), col("magnitude", "DOUBLE", 900)];
+    for (const kind of ["strip", "ridgeline"] as const) {
+      const fit = fitEncodingToKind(kind, demo, { xField: "cluster", yField: "y", colorField: null });
+      expect(fit.yField).toBe("cluster");
+      expect(["x", "y", "magnitude"]).toContain(fit.xField);
+    }
+  });
+
+  it("counts rows for part-to-whole kinds when the measure is signed", () => {
+    const quakes = [
+      { ...col("mag_type", "VARCHAR", 6) },
+      { ...col("longitude", "DOUBLE", 300), min_value: "-179.9", max_value: "179.8" },
+      { ...col("depth", "DOUBLE", 280), min_value: "0", max_value: "600" },
+    ];
+    const enc = { xField: "mag_type", yField: "longitude", colorField: null };
+    expect(fitEncodingToKind("pie", quakes, enc).yField).toBeNull();
+    expect(fitEncodingToKind("treemap", quakes, enc).yField).toBeNull();
+    expect(fitEncodingToKind("pie", quakes, { ...enc, yField: "depth" }).yField).toBe("depth");
+    // Bars handle negatives fine
+    expect(fitEncodingToKind("bar", quakes, enc).yField).toBe("longitude");
+  });
+
+  it("restores a measure when leaving a count chart for a kind that needs Y", () => {
+    for (const kind of ["line", "stream", "horizon", "spiral", "bump", "box"] as const) {
+      const fit = fitEncodingToKind(kind, gap, { xField: "continent", yField: null, colorField: null });
+      expect(fit.yField, kind).not.toBeNull();
+    }
+  });
+
+  it("gives bump a series to rank", () => {
+    const fit = fitEncodingToKind("bump", gap, { xField: "year", yField: "pop", colorField: null });
+    expect(fit.colorField).toBe("continent");
+  });
 });
 
 describe("column semantics (LOOM-030–034)", () => {

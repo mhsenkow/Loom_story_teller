@@ -14,6 +14,7 @@ import { DiscoverDatasetCard } from "./DiscoverDatasetCard";
 import { SourceCard } from "./SourceCard";
 import { WikiStreamSection } from "./WikiStreamSection";
 import { CURATED_OPEN_PACKS, DATA_GOV_ROW_OPTIONS, SectionHeading, filterDatasetsLocal, ipcErrorMessage } from "./shared";
+import { uniqueDatasets } from "@/lib/openDataCatalog";
 
 const CatalogSectionLoading = () => (
   <section className="rounded-lg border border-loom-border/70 bg-loom-surface/40 p-3 text-xs text-loom-muted">
@@ -137,7 +138,7 @@ export function DataRegionView({
     })
       .then((datasets) => {
         if (cancelled) return;
-        setDataGovDatasets(datasets);
+        setDataGovDatasets(uniqueDatasets(datasets));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -160,7 +161,7 @@ export function DataRegionView({
       sort: ukRequest.sort,
     })
       .then((datasets) => {
-        if (!cancelled) setUkDatasets(datasets);
+        if (!cancelled) setUkDatasets(uniqueDatasets(datasets));
       })
       .catch((e) => {
         if (!cancelled) {

@@ -25,6 +25,34 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-14b",
+    date: "2026-10-14",
+    title: "Make a look yours",
+    summary: "Save favorite styles, explore without losing your place, and find visual controls faster.",
+    items: [
+      { title: "More touch controls", detail: "Reorder table columns with arrow buttons on phones, tap values to exclude them in Dive, and swap cube axes with larger controls and a tap hint." },
+      { title: "Your own look library", detail: "Save up to 20 named looks in Visual → My looks. Apply them to any chart, update them as your style evolves, and carry them to another device in a workspace backup." },
+      { title: "Undo and Redo while you edit", detail: "The chart panel keeps history controls in reach. Restore fields, styling, titles, notes and reference lines together; rapid slider changes are grouped. Use ⌘/Ctrl Z and ⌘/Ctrl Shift Z outside text fields." },
+      { title: "A calmer visual editor", detail: "Expand only the sections you need, or expand and collapse them all. Search color palettes by name, source or scale; clicking chart controls opens the corresponding section." },
+    ],
+  },
+  {
+    id: "2026-10-14a",
+    date: "2026-10-14",
+    title: "Smoother column picking",
+    summary: "Search and choose chart fields comfortably on a keyboard or a small screen.",
+    items: [
+      {
+        title: "Column menus stay in reach",
+        detail: "Field menus open above or below the control to fit the visible screen, including when the phone keyboard is open.",
+      },
+      {
+        title: "Reliable keyboard selection",
+        detail: "Arrow keys skip incompatible fields; Home and End jump through results. Type filters remain keyboard accessible, and screen readers distinguish the selected column from the highlighted result.",
+      },
+    ],
+  },
+  {
     id: "2026-10-13q",
     date: "2026-10-13",
     title: "What’s interesting — sharper, fuller",

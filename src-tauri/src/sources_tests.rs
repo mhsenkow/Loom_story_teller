@@ -162,6 +162,26 @@ fn ensure_tables_creates_registry_schema_and_snapshot_sql_runs() {
 }
 
 #[test]
+fn keep_newest_snapshot_returns_latest_rows_ascending() {
+    let db = test_db();
+    {
+        let conn = db.conn.lock().unwrap();
+        for year in 1880..1890 {
+            conn.execute_batch(&format!(
+                "INSERT INTO global_temperature VALUES ('{year}-01-01', {year}, 1, 0.1)"
+            ))
+            .unwrap();
+        }
+    }
+    let sql = snapshot_sql_limited("climate", 3).unwrap();
+    let res = source_query(&db, "climate", &sql, 3).unwrap();
+    let years: Vec<String> = res.rows.iter().map(|r| r[1].to_string()).collect();
+    assert_eq!(years, vec!["1887", "1888", "1889"]);
+    // Other feeds keep the plain registry ORDER BY
+    assert_eq!(snapshot_sql_limited("usgs", 3), snapshot_sql("usgs"));
+}
+
+#[test]
 fn ensure_tables_migrates_drifted_tables() {
     let db = LoomDb {
         conn: Mutex::new(Connection::open_in_memory().unwrap()),

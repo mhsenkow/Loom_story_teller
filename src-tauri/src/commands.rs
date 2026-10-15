@@ -240,7 +240,6 @@ pub async fn pick_save_path(
     extensions: Option<Vec<String>>,
 ) -> Result<Option<String>, String> {
     let gate = Arc::clone(&*gate);
-    let default_path = default_path;
     let filter_name = filter_name.unwrap_or_else(|| "File".into());
     let extensions = extensions.unwrap_or_else(|| vec!["bin".into()]);
 
@@ -340,7 +339,7 @@ pub async fn reveal_in_finder(path: String) -> Result<(), String> {
             .args(["-R", &path])
             .spawn()
             .map_err(|e| format!("Reveal failed: {}", e))?;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -1073,7 +1072,7 @@ pub async fn stream_status(
     db: State<'_, Arc<LoomDb>>,
     stream: State<'_, Arc<StreamState>>,
 ) -> Result<crate::stream::StreamStatus, String> {
-    Ok(stream.status(&*db).await)
+    Ok(stream.status(&db).await)
 }
 
 /// Query the stream buffer table (wiki_stream) with arbitrary SQL.
@@ -1083,7 +1082,7 @@ pub async fn stream_query(
     sql: String,
     limit: Option<u32>,
 ) -> Result<QueryResult, String> {
-    crate::stream::query_stream(&*db, &sql, limit.unwrap_or(5000))
+    crate::stream::query_stream(&db, &sql, limit.unwrap_or(5000))
 }
 
 /// Get a snapshot: column stats + recent rows from wiki_stream.
@@ -1092,9 +1091,9 @@ pub async fn stream_snapshot(
     db: State<'_, Arc<LoomDb>>,
     limit: Option<u32>,
 ) -> Result<InspectResult, String> {
-    let stats = crate::stream::stream_column_stats(&*db)?;
+    let stats = crate::stream::stream_column_stats(&db)?;
     let sample = crate::stream::query_stream(
-        &*db,
+        &db,
         "SELECT * FROM wiki_stream ORDER BY ts DESC",
         limit.unwrap_or(500),
     )?;
@@ -1159,8 +1158,9 @@ pub async fn source_snapshot(
 ) -> Result<InspectResult, String> {
     let stats = crate::sources::source_stats(&db, &kind)?;
     // Table + ORDER BY come from the registry mirror in sources.rs.
-    let sql = crate::sources::snapshot_sql(&kind).ok_or("Unknown source kind")?;
-    let sample = crate::sources::source_query(&db, &kind, &sql, limit.unwrap_or(500))?;
+    let limit = limit.unwrap_or(500);
+    let sql = crate::sources::snapshot_sql_limited(&kind, limit).ok_or("Unknown source kind")?;
+    let sample = crate::sources::source_query(&db, &kind, &sql, limit)?;
     Ok(InspectResult { stats, sample })
 }
 

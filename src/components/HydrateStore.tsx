@@ -33,6 +33,8 @@ import {
   setPersistedDashboards,
   getVizPreferencesRaw,
   setPersistedVizPreferences,
+  getCustomChartLooks,
+  setPersistedCustomChartLooks,
 } from "@/lib/persist";
 import type { ViewMode } from "@/lib/store";
 import { parseLastSessionViewMode } from "@/lib/persistValidation";
@@ -61,6 +63,16 @@ export function HydrateStore() {
     storageToastShown.current = true;
     useLoomStore.getState().setToast("Couldn't save — browser storage is full");
   };
+
+  useEffect(() => {
+    useLoomStore.setState({ customChartLooks: getCustomChartLooks() });
+    return useLoomStore.subscribe((s, prev) => {
+      if (s.customChartLooks !== prev.customChartLooks && !setPersistedCustomChartLooks(s.customChartLooks)) {
+        notifyStorageFailure();
+      }
+    });
+    // Persistence is owned by this one mount, independent of chart panel visibility.
+  }, []);
 
   const skipFirstPersist = useRef({
     appSettings: true,

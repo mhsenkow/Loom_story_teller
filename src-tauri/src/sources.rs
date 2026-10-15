@@ -669,9 +669,29 @@ pub fn snapshot_sql(kind: &str) -> Option<String> {
     spec_for_kind(kind).map(|s| format!("SELECT * FROM {} ORDER BY {}", s.table, s.order_by))
 }
 
+/// History feeds stored oldest → newest (mirrors `keepNewest` in sourceRegistry.ts).
+/// A limited snapshot of these keeps the most recent rows, still in ascending order —
+/// otherwise a 400-row Discover probe of US debt or global temperature stops in 1913.
+pub const KEEP_NEWEST_KINDS: &[&str] = &["climate", "debt"];
+
+/// Snapshot SQL honoring `limit` for keep-newest history feeds.
+pub fn snapshot_sql_limited(kind: &str, limit: u32) -> Option<String> {
+    let s = spec_for_kind(kind)?;
+    if KEEP_NEWEST_KINDS.contains(&s.kind) && s.order_by.ends_with(" ASC") {
+        let desc = format!("{} DESC", s.order_by.trim_end_matches(" ASC"));
+        return Some(format!(
+            "SELECT * FROM (SELECT * FROM {} ORDER BY {} LIMIT {}) ORDER BY {}",
+            s.table, desc, limit, s.order_by
+        ));
+    }
+    snapshot_sql(kind)
+}
+
 // ================================================================
 // Shared instance per source
 // ================================================================
+
+type PollWorker = Option<(u64, tokio::task::JoinHandle<()>)>;
 
 pub struct SourceInstance {
     pub running: Arc<AtomicBool>,
@@ -680,7 +700,7 @@ pub struct SourceInstance {
     cancel_token: Arc<TokioMutex<Option<tokio::sync::oneshot::Sender<()>>>>,
     eps_state: Arc<TokioMutex<(u64, std::time::Instant)>>,
     poll_generation: Arc<std::sync::atomic::AtomicU64>,
-    poll_worker: Arc<TokioMutex<Option<(u64, tokio::task::JoinHandle<()>)>>>,
+    poll_worker: Arc<TokioMutex<PollWorker>>,
     last_ok_at: Arc<TokioMutex<Option<i64>>>,
     last_error: Arc<TokioMutex<Option<String>>>,
     consecutive_failures: Arc<std::sync::atomic::AtomicU32>,
@@ -2477,7 +2497,7 @@ pub(crate) fn firms_rows(text: &str) -> Result<Vec<Row>, String> {
                 i.and_then(|i| parts.get(i))
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
-                    .map(|s| Cell::str(s))
+                    .map(Cell::str)
                     .unwrap_or(Cell::Null)
             };
             Some(vec![

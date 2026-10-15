@@ -66,6 +66,7 @@ export function snapshotTableState(s: LoomState) {
 
 /** Keys cleared whenever the active dataset identity changes. */
 const DATASET_SCOPED_KEYS = [
+  "chartEditUndoStack", "chartEditRedoStack", "chartEditGroup", "barStackMode", "connectScatterTrail", "showMarginals",
   "tableFilterRowIndices", "tableColumnFilters", "tableSortColumn", "tableSortDir",
   "viewTimeField", "viewTimeWindow", "lockedColorField", "statsFocusColumn",
   "tableUndoStack", "tableRedoStack",
@@ -122,7 +123,10 @@ export function createCoreSlice(set: Setter, _get: Getter, initialState: Record<
     setFiles: (files: FileEntry[]) => set({ files }),
     setIsScanning: (v: boolean) => set({ isScanning: v }),
     setInspectingFilePath: (path: string | null) => set({ inspectingFilePath: path }),
-    setSelectedFile: (file: FileEntry | null) => set({ selectedFile: file }),
+    setSelectedFile: (file: FileEntry | null) => set((s) => ({
+      selectedFile: file,
+      ...(s.selectedFile?.path !== file?.path ? { chartEditUndoStack: [], chartEditRedoStack: [], chartEditGroup: null } : {}),
+    })),
     resetDatasetScoped: () => set(datasetScopedResetSlice(initialState) as Partial<LoomState>),
     openDataset: (payload: {
       file: FileEntry;

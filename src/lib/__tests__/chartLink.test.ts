@@ -250,7 +250,7 @@ describe("chart links", () => {
     const decoded = decodeChartLink(encodeChartLink(hostile));
     expect(decoded).not.toBeNull();
     expect(decoded!.visual?.pointSize).toBe(24);
-    expect(decoded!.visual?.chartPadding).toBe(24);
+    expect(decoded!.visual?.chartPadding).toBe(16);
     expect(decoded!.visual).not.toHaveProperty("notARealKey");
   });
 });

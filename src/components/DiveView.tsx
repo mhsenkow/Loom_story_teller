@@ -13,6 +13,7 @@
 // =================================================================
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useIsMobile } from "@/lib/useMediaQuery";
 import { StartHere } from "@/components/StartHere";
 import { useLoomStore } from "@/lib/store";
 import { createChartRec, type YAggregateOption } from "@/lib/recommendations";
@@ -100,6 +101,8 @@ export function DiveView() {
   const { setDiveQuery, setDiveLink, setToast, setActiveChart, setViewMode, setSampleRows, setQuerySql } =
     useLoomStore.getState();
 
+  const [tapExclude, setTapExclude] = useState(false);
+  const isMobile = useIsMobile();
   const path = selectedFile?.path ?? null;
   const [dataset, setDataset] = useState<DiveDataset | null>(null);
   const [datasetPath, setDatasetPath] = useState<string | null>(null);
@@ -306,6 +309,11 @@ export function DiveView() {
     },
     [update],
   );
+  const drillTap = useCallback(
+    (column: string, value: string, exclude: boolean) => drill(column, value, exclude || (isMobile && tapExclude)),
+    [drill, isMobile, tapExclude],
+  );
+
 
   const zoomTo = useCallback(
     (a: number, b: number) => {
@@ -918,11 +926,20 @@ export function DiveView() {
               </div>
             </div>
           )}
+          {result && query && result.matched > 0 && ((query.view === "table" && query.groupBy.length > 0) || query.view === "samples") && (
+            <div className="md:hidden flex items-center gap-2 mb-2 text-2xs text-loom-muted">
+              <span>Tap a value to</span>
+              <div className="loom-seg" role="group" aria-label="What tapping a value does">
+                <button type="button" onClick={() => setTapExclude(false)} aria-pressed={!tapExclude} className="loom-seg-item min-h-10 px-3 text-2xs border border-transparent">Keep only</button>
+                <button type="button" onClick={() => setTapExclude(true)} aria-pressed={tapExclude} className="loom-seg-item min-h-10 px-3 text-2xs border border-transparent">Exclude</button>
+              </div>
+            </div>
+          )}
           {result && query && result.matched > 0 && query.view === "table" && (
             <DiveTable
               query={query}
               result={result}
-              onDrill={drill}
+              onDrill={drillTap}
               onSort={(i) => (i === ob ? update({ orderDir: query.orderDir === "asc" ? "desc" : "asc" }) : update({ orderBy: i, orderDir: "desc" }))}
             />
           )}
@@ -933,7 +950,7 @@ export function DiveView() {
               rows={result.samples}
               visible={query.columns ?? null}
               onVisible={(columns) => update({ columns })}
-              onDrill={drill}
+              onDrill={drillTap}
             />
           )}
         </div>
@@ -1258,7 +1275,7 @@ function DiveSamples({
     <div className="overflow-auto">
       <div className="flex flex-wrap items-center gap-2 mb-1.5">
         <p className="text-2xs text-loom-muted flex-1 min-w-0">
-          {sort ? `${rows.length} newest matching rows, sorted by ${columns[sort.col]}` : `Newest ${rows.length} matching rows`} · click a value to filter (⌥ to exclude)
+          {sort ? `${rows.length} newest matching rows, sorted by ${columns[sort.col]}` : `Newest ${rows.length} matching rows`}<span className="max-md:hidden"> · click a value to filter (⌥ to exclude)</span>
         </p>
         <button type="button" onClick={() => setPicking((p) => !p)} className="loom-btn-ghost text-2xs px-2 py-0.5" aria-expanded={picking}>
           Columns ({shown.length}/{columns.length})

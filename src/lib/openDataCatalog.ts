@@ -230,6 +230,12 @@ function dataGovFromCatalogRow(row: Record<string, unknown>): DataGovDataset | n
   };
 }
 
+/** Drop repeat datasets (catalog pages overlap) — first occurrence wins. */
+export function uniqueDatasets<T extends { id: string }>(list: T[]): T[] {
+  const seen = new Set<string>();
+  return list.filter((d) => (seen.has(d.id) ? false : (seen.add(d.id), true)));
+}
+
 /** Parse US Catalog `/search` JSON body into datasets (shared by Worker + browser). */
 export function parseUsCatalogBody(body: unknown, rows: number, sort?: DataGovSortKey | null): DataGovDataset[] {
   const collected: DataGovDataset[] = [];

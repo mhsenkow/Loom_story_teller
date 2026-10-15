@@ -37,6 +37,8 @@ async function cacheSourceResponse(request, response) {
 }
 
 self.addEventListener("fetch", (event) => {
+  // Dev chunk URLs stay constant across edits; caching them freezes hot reloads.
+  if (BUILD_ID === "dev") return;
   const url = new URL(event.request.url);
   if (event.request.method === "GET" && url.pathname.startsWith("/api/source/")) {
     event.respondWith(

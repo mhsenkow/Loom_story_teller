@@ -83,7 +83,9 @@ export interface Env {
 }
 
 /** Product host for share links — never mint mhsenkow.workers.dev URLs for recipients. */
-export const DEFAULT_PUBLIC_WEB_ORIGIN = "https://loom.ibm.io";
+// Not exported: Workers treat every named export of the entry module as an
+// entrypoint, and a string export makes workerd refuse to boot.
+const DEFAULT_PUBLIC_WEB_ORIGIN = "https://loom.ibm.io";
 
 export function publicWebOrigin(env?: Env): string {
   const raw = env?.PUBLIC_WEB_ORIGIN?.trim();
@@ -807,7 +809,7 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
       "US Treasury",
       "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny" +
         "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt" +
-        "&sort=-record_date&page[size]=10000",
+        "&sort=-record_date&page%5Bsize%5D=10000",
       20_000,
     );
     return JSON.stringify(treasuryDebt(body));

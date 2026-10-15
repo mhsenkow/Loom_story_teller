@@ -6,7 +6,8 @@
 // =================================================================
 
 import type { ChartKind, ChartRecommendation } from "./recommendations";
-import type { ColumnInfo, QueryResult } from "./store";
+import type { ColumnInfo, QueryResult } from "./queryTypes";
+import { inferType } from "./recs/columns";
 import { ODD_NON_CARTESIAN, isOddChartKind } from "./oddCharts";
 import { GPU_SCENE_NON_CARTESIAN, isGpuSceneKind } from "./gpuScenes";
 import { GEO_MAP_NON_CARTESIAN, isGeoMapKind } from "./geoMaps";
@@ -302,6 +303,161 @@ export interface ChartCapabilities {
   layoutDirection: boolean;
   /** Continuous measure axis transform (linear / log / symlog). */
   yScale: boolean;
+  /**
+   * `tickRotation` only rotates continuous X tick labels from `drawChartTicks`.
+   * Category band labels and horizontal-bar tip labels ignore it — hide the control.
+   */
+  tickLabelRotation: boolean;
+  /** Rolling mean window on line / area. */
+  rollingWindow: boolean;
+  /** Index-100 / z-score rebase for multi-series line / area. */
+  seriesNormalize: boolean;
+  /** Scatter residual stems vs linear fit. */
+  residualOverlay: boolean;
+  /** Scatter / line outlier rings. */
+  anomalyHighlight: boolean;
+  /** Bump chart Δrank vs absolute rank. */
+  bumpMode: boolean;
+}
+
+export type EncodingPanelHintLevel = "info" | "warn" | "error";
+
+export interface EncodingPanelHint {
+  id: string;
+  level: EncodingPanelHintLevel;
+  message: string;
+}
+
+/**
+ * Inline Encoding-panel guidance for common foot-guns (dumbbell ends, split
+ * mode, Top N vs cardinality, high-cardinality color, skewed Y).
+ */
+export function encodingPanelHints(
+  chart: ChartRecommendation,
+  stats: ColumnInfo[],
+): EncodingPanelHint[] {
+  const hints: EncodingPanelHint[] = [];
+  const byName = new Map(stats.map((c) => [c.name, c]));
+
+  if (chart.kind === "dumbbell") {
+    if (!chart.sizeField) {
+      hints.push({
+        id: "dumbbell-need-end",
+        level: "error",
+        message: "Dumbbell needs an End column (Size) — a second numeric measure for the other stem tip.",
+      });
+    } else if (chart.sizeField === chart.yField) {
+      hints.push({
+        id: "dumbbell-same-ends",
+        level: "error",
+        message: "Start and End must be different columns — pick another numeric field for End.",
+      });
+    }
+  }
+
+  if (
+    chart.colorField &&
+    chart.rowField &&
+    chart.colorField !== chart.rowField
+  ) {
+    hints.push({
+      id: "split-fields-differ",
+      level: "info",
+      message: `Color (“${chart.colorField}”) and Facet (“${chart.rowField}”) differ — Split chips hide until they share one field (or clear one).`,
+    });
+  }
+
+  if (chart.topN != null && chart.xField) {
+    const xCol = byName.get(chart.xField);
+    const distinct = xCol?.distinct_count ?? 0;
+    if (distinct > 0 && chart.topN > distinct) {
+      hints.push({
+        id: "topn-above-cardinality",
+        level: "warn",
+        message: `Top ${chart.topN} is larger than “${chart.xField}” (${distinct} distinct) — every category already shows.`,
+      });
+    }
+  }
+
+  if (chart.colorField) {
+    const cCol = byName.get(chart.colorField);
+    const distinct = cCol?.distinct_count ?? 0;
+    if (distinct > 24) {
+      hints.push({
+        id: "color-high-cardinality",
+        level: "warn",
+        message: `“${chart.colorField}” has ${distinct} values — legend and color will be hard to read. Prefer Facet, Top N, or a coarser group.`,
+      });
+    }
+  }
+
+  if (chart.yField && (chart.kind === "scatter" || chart.kind === "line" || chart.kind === "area")) {
+    const yCol = byName.get(chart.yField);
+    const min = yCol?.min_value != null ? Number(yCol.min_value) : NaN;
+    const max = yCol?.max_value != null ? Number(yCol.max_value) : NaN;
+    if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max / min >= 10) {
+      const scale = chart.yScale ?? "linear";
+      if (scale === "linear") {
+        hints.push({
+          id: "y-skew-suggest-log",
+          level: "info",
+          message: `Y spans ~${Math.round(max / min)}× (min ${min} → max ${max}). Try Log or Symlog under Y scale.`,
+        });
+      }
+    }
+  }
+
+  if (chart.kind === "pyramid" || chart.kind === "slope") {
+    if (!chart.sizeField) {
+      hints.push({
+        id: "dual-measure-need-end",
+        level: "warn",
+        message: `${chart.kind === "pyramid" ? "Pyramid" : "Slope"} needs a Right/End measure — map a second numeric column to ${chart.kind === "pyramid" ? "Right" : "End"}.`,
+      });
+    } else if (chart.sizeField === chart.yField) {
+      hints.push({
+        id: "dual-measure-same",
+        level: "error",
+        message: "The two measures must be different columns.",
+      });
+    }
+  }
+
+  return hints;
+}
+
+export type EncodingDropSlot = "x" | "y" | "color" | "size" | "z";
+
+/**
+ * Whether dropping `colName` onto a channel is honest for this chart kind.
+ * Soft rules only — createChartRec remains the hard gate.
+ */
+export function encodingDropAllowed(
+  kind: ChartKind,
+  slot: EncodingDropSlot,
+  col: ColumnInfo | undefined,
+): { ok: true } | { ok: false; reason: string } {
+  if (!col) return { ok: false, reason: "Column not found in this table." };
+  const t = inferType(col.data_type, col.name, col.min_value, col.max_value);
+  const needsNumericY = new Set<ChartKind>([
+    "scatter", "bubble", "heatmap", "hexbin", "strip", "box", "violin",
+    "dumbbell", "ridgeline", "beeswarm", "voronoi", "isoScatter", "contour",
+    "pyramid", "slope", "bump", "stream", "horizon", "dataCube", "line", "area",
+  ]);
+  const needsNumericX = new Set<ChartKind>(["scatter", "bubble", "hexbin", "histogram", "isoScatter", "contour", "voronoi"]);
+
+  if (slot === "size" || (slot === "z" && kind === "scatter3d")) {
+    if (t !== "quantitative") {
+      return { ok: false, reason: `${slot === "size" ? "Size" : "Z"} needs a numeric column — “${col.name}” is ${t}.` };
+    }
+  }
+  if (slot === "y" && needsNumericY.has(kind) && t !== "quantitative") {
+    return { ok: false, reason: `Y needs a numeric column for ${kind} — “${col.name}” is ${t}.` };
+  }
+  if (slot === "x" && needsNumericX.has(kind) && t !== "quantitative") {
+    return { ok: false, reason: `X needs a numeric column for ${kind} — “${col.name}” is ${t}.` };
+  }
+  return { ok: true };
 }
 
 /** Measure-axis scale transforms shown in Encoding. */
@@ -419,6 +575,16 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     layoutDirection: ["bar", "pareto", "lollipop", "waterfall"].includes(kind),
     // Canvas applies opts.yScale in scatter / line / area paths today
     yScale: kind === "scatter" || kind === "line" || kind === "area",
+    // Continuous X ticks that honor tickRotation (not bar/line band axes)
+    tickLabelRotation: [
+      "scatter", "bubble", "hexbin", "histogram", "heatmap", "strip",
+      "beeswarm", "voronoi", "isoScatter", "contour", "corrMatrix",
+    ].includes(kind) || gpu,
+    rollingWindow: kind === "line" || kind === "area",
+    seriesNormalize: kind === "line" || kind === "area",
+    residualOverlay: scatterLike,
+    anomalyHighlight: scatterLike || kind === "line" || kind === "area",
+    bumpMode: kind === "bump",
   };
 }
 

@@ -13,6 +13,9 @@ import { runDeepScan } from "../deepScanClient";
 import { newLoomId } from "../loomId";
 import type { LoomState } from "./types";
 import { chartActivationPatch, prunedChartMaps } from "./coreSlice";
+import { chartEditSnapshot, restoreChartEdit, chartHistoryCheckpoint, CHART_EDIT_HISTORY_LIMIT } from "../chartEditHistory";
+import { MAX_CUSTOM_CHART_LOOKS } from "../customChartLooks";
+import { sanitizeChartVisualOverrides } from "../chartVisualSanitize";
 
 export type ChartSlice = Pick<
   LoomState,
@@ -25,6 +28,11 @@ export type ChartSlice = Pick<
   | "setSmartResults"
   | "pushChartEditUndo"
   | "undoChartEdit"
+  | "redoChartEdit"
+  | "editChartVisualOverrides"
+  | "saveCustomChartLook"
+  | "applyCustomChartLook"
+  | "removeCustomChartLook"
   | "addChartAnnotation"
   | "removeChartAnnotation"
   | "addCustomRefLine"
@@ -47,6 +55,9 @@ export function chartInitialState() {
     chartTitleOverrides: {} as Record<string, string>,
     smartResults: null as LoomState["smartResults"],
     chartEditUndoStack: [] as LoomState["chartEditUndoStack"],
+    chartEditRedoStack: [] as LoomState["chartEditRedoStack"],
+    chartEditGroup: null as LoomState["chartEditGroup"],
+    customChartLooks: [] as LoomState["customChartLooks"],
     chartAnnotations: {} as LoomState["chartAnnotations"],
     customRefLines: {} as LoomState["customRefLines"],
     barStackMode: "grouped" as LoomState["barStackMode"],
@@ -79,6 +90,8 @@ export function createChartSliceFactory(
   return (set, get) => ({
     setVegaSpec: (spec) =>
       set((s) => ({
+        chartEditRedoStack: [],
+        chartEditGroup: null,
         vegaSpec: spec,
         activeChart: s.activeChart
           ? { ...s.activeChart, spec: (spec ?? {}) as object }
@@ -91,6 +104,8 @@ export function createChartSliceFactory(
       })),
     setActiveChart: (chart, opts) =>
       set((s) => ({
+        chartEditRedoStack: [],
+        chartEditGroup: null,
         activeChart: chart,
         vegaSpec: chart?.spec ?? null,
         aiSuggestionReason: opts?.fromAI ? (opts.aiReason ?? null) : null,
@@ -101,12 +116,15 @@ export function createChartSliceFactory(
       })),
     setChartVisualOverrides: (overrides) =>
       set((s) => ({
+        chartEditRedoStack: [],
+        chartEditGroup: null,
         chartVisualOverrides:
           typeof overrides === "function" ? overrides(s.chartVisualOverrides) : overrides,
       })),
     setAISuggestionReason: (reason) => set({ aiSuggestionReason: reason }),
     setChartTitleOverride: (chartId, title) =>
       set((s) => ({
+        ...chartHistoryCheckpoint(s),
         chartTitleOverrides:
           title == null
             ? (() => {
@@ -123,30 +141,74 @@ export function createChartSliceFactory(
       })),
     pushChartEditUndo: () =>
       set((s) => ({
-        chartEditUndoStack: [
-          {
-            activeChart: s.activeChart ? (JSON.parse(JSON.stringify(s.activeChart)) as ChartRecommendation) : null,
-            chartVisualOverrides: JSON.parse(JSON.stringify(s.chartVisualOverrides)) as ChartVisualOverrides,
-          },
-          ...s.chartEditUndoStack,
-        ].slice(0, 20),
+        chartEditUndoStack: [chartEditSnapshot(s), ...s.chartEditUndoStack].slice(0, CHART_EDIT_HISTORY_LIMIT),
+        chartEditRedoStack: [],
+        chartEditGroup: null,
       })),
+    editChartVisualOverrides: (patch, groupKey) =>
+      set((s) => {
+        if (Object.entries(patch).every(([key, value]) => s.chartVisualOverrides[key as keyof ChartVisualOverrides] === value)) return s;
+        const at = Date.now();
+        const grouped = !!groupKey && s.chartEditGroup?.key === groupKey && at - s.chartEditGroup.at < 600;
+        return {
+          chartVisualOverrides: { ...s.chartVisualOverrides, ...patch },
+          chartEditUndoStack: grouped ? s.chartEditUndoStack : [chartEditSnapshot(s), ...s.chartEditUndoStack].slice(0, CHART_EDIT_HISTORY_LIMIT),
+          chartEditRedoStack: [],
+          chartEditGroup: groupKey ? { key: groupKey, at } : null,
+        };
+      }),
     undoChartEdit: () =>
       set((s) => {
         if (s.chartEditUndoStack.length === 0) return s;
         const [snap, ...rest] = s.chartEditUndoStack;
         return {
-          activeChart: snap.activeChart,
-          chartVisualOverrides: snap.chartVisualOverrides,
+          ...restoreChartEdit(snap),
           chartEditUndoStack: rest,
+          chartEditRedoStack: [chartEditSnapshot(s), ...s.chartEditRedoStack].slice(0, CHART_EDIT_HISTORY_LIMIT),
           toastMessage: "Chart change undone",
           toastShowUndo: false,
         };
       }),
+    redoChartEdit: () =>
+      set((s) => {
+        const [snap, ...rest] = s.chartEditRedoStack;
+        if (!snap) return s;
+        return {
+          ...restoreChartEdit(snap),
+          chartEditRedoStack: rest,
+          chartEditUndoStack: [chartEditSnapshot(s), ...s.chartEditUndoStack].slice(0, CHART_EDIT_HISTORY_LIMIT),
+          toastMessage: "Chart change redone",
+          toastShowUndo: false,
+        };
+      }),
+    saveCustomChartLook: (name) => {
+      const clean = name.trim().slice(0, 64);
+      if (!clean) return null;
+      const s = get();
+      const existing = s.customChartLooks.find((look) => look.name.toLowerCase() === clean.toLowerCase());
+      if (!existing && s.customChartLooks.length >= MAX_CUSTOM_CHART_LOOKS) {
+        s.setToast("Your look library is full — remove a look to save another");
+        return null;
+      }
+      const id = existing?.id ?? newLoomId("look-");
+      set({ customChartLooks: [{ id, name: clean, overrides: sanitizeChartVisualOverrides(s.chartVisualOverrides) ?? {}, updatedAt: Date.now() }, ...s.customChartLooks.filter((look) => look.id !== id)] });
+      get().setToast(`${existing ? "Updated" : "Saved"} ${clean} look · on this device`);
+      return id;
+    },
+    applyCustomChartLook: (id) => {
+      const s = get();
+      const look = s.customChartLooks.find((item) => item.id === id);
+      if (!look) return;
+      s.pushChartEditUndo();
+      s.setChartVisualOverrides({ ...look.overrides });
+      s.setToast(`Applied ${look.name} look`, { undo: true });
+    },
+    removeCustomChartLook: (id) => set((s) => ({ customChartLooks: s.customChartLooks.filter((look) => look.id !== id) })),
     addChartAnnotation: (chartId, text, x = 0.5, y = 0.5) =>
       set((s) => {
         const list = s.chartAnnotations[chartId] ?? [];
         return {
+          ...chartHistoryCheckpoint(s),
           chartAnnotations: {
             ...s.chartAnnotations,
             [chartId]: [...list, { id: newLoomId("ann-"), text, x, y }],
@@ -159,10 +221,11 @@ export function createChartSliceFactory(
         const chartAnnotations = { ...s.chartAnnotations };
         if (remaining.length) chartAnnotations[chartId] = remaining;
         else delete chartAnnotations[chartId];
-        return { chartAnnotations };
+        return { ...chartHistoryCheckpoint(s), chartAnnotations };
       }),
     addCustomRefLine: (chartId, axis, value, label) =>
       set((s) => ({
+        ...chartHistoryCheckpoint(s),
         customRefLines: {
           ...s.customRefLines,
           [chartId]: [...(s.customRefLines[chartId] ?? []), { id: newLoomId("rl-"), axis, value, label }],
@@ -174,11 +237,11 @@ export function createChartSliceFactory(
         const customRefLines = { ...s.customRefLines };
         if (remaining.length) customRefLines[chartId] = remaining;
         else delete customRefLines[chartId];
-        return { customRefLines };
+        return { ...chartHistoryCheckpoint(s), customRefLines };
       }),
-    setBarStackMode: (mode) => set({ barStackMode: mode }),
-    setConnectScatterTrail: (v) => set({ connectScatterTrail: v }),
-    setShowMarginals: (v) => set({ showMarginals: v }),
+    setBarStackMode: (mode) => set({ barStackMode: mode, chartEditRedoStack: [], chartEditGroup: null }),
+    setConnectScatterTrail: (v) => set((s) => s.connectScatterTrail === v ? s : ({ ...chartHistoryCheckpoint(s), connectScatterTrail: v })),
+    setShowMarginals: (v) => set((s) => s.showMarginals === v ? s : ({ ...chartHistoryCheckpoint(s), showMarginals: v })),
     startDeepScan: () => {
       const s = get();
       const columns = s.columnStats;

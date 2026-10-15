@@ -228,7 +228,8 @@ function hook_nwis(
       }
       const short = site.length > 40 ? `${site.slice(0, 38)}…` : site;
       return {
-        hook: short ? `${short} · ${Math.round(peak).toLocaleString()} cfs` : `${n} river gauge readings`,
+        // The chart compares every gauge — headline the leader, not a single-site story
+        hook: short ? `Highest flow: ${short} · ${Math.round(peak).toLocaleString()} cfs` : `${n} river gauge readings`,
         blurb: chart.subtitle || "Discharge over the past two days.",
         score: 72 + Math.min(20, Math.log10(peak + 1) * 4),
         preferKind: "line",

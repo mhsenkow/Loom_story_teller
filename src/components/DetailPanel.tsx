@@ -18,14 +18,24 @@ const SmartTab = lazy(() => import("@/components/detail/SmartTab"));
 const DashboardsTab = lazy(() => import("@/components/detail/DashboardsTab"));
 const SettingsTab = lazy(() => import("@/components/detail/SettingsTab"));
 
-const TABS: { key: PanelTab; label: string }[] = [
+/** `short` is what the tab strip shows (all six must fit a 280px tablet panel). */
+const TABS: { key: PanelTab; label: string; short?: string; icon?: boolean }[] = [
   { key: "stats", label: "Stats" },
   { key: "chart", label: "Chart" },
   { key: "export", label: "Export" },
   { key: "smart", label: "Smart" },
-  { key: "dashboards", label: "Dashboards" },
-  { key: "settings", label: "Settings" },
+  { key: "dashboards", label: "Dashboards", short: "Boards" },
+  { key: "settings", label: "Settings", icon: true },
 ];
+
+function GearIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+    </svg>
+  );
+}
 
 function EmptyDatasetState() {
   return (
@@ -72,6 +82,7 @@ export function DetailPanel() {
     if (!panelOpen || !isMobile) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        if (e.target instanceof Element && e.target.closest("[data-loom-field-picker]")) return;
         e.preventDefault();
         e.stopPropagation();
         togglePanel();
@@ -152,9 +163,10 @@ export function DetailPanel() {
                   queueMicrotask(() => document.getElementById(`panel-tab-${last.key}`)?.focus());
                 }
               }}
-              className="loom-tab"
+              title={tab.short || tab.icon ? tab.label : undefined}
+              className={`loom-tab px-2.5 ${tab.icon ? "ml-auto flex items-center" : ""}`}
             >
-              {tab.label}
+              {tab.icon ? <GearIcon /> : (tab.short ?? tab.label)}
             </button>
           ))}
         </div>

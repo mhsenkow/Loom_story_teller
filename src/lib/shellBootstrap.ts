@@ -13,8 +13,8 @@ import {
   type ShellMode,
 } from "./shellLayout";
 
-/** Minified IIFE — keep in sync with shellModeFromWidth cutoffs. */
-export const SHELL_BOOTSTRAP_SCRIPT = `(function(){try{var w=window.innerWidth,m=w<768?"phone":w<1100?"tablet":"desktop";document.documentElement.dataset.shellMode=m;document.documentElement.dataset.shellWidth=String(w);document.documentElement.dataset.shellReady="1";}catch(e){}})();`;
+/** Minified IIFE — keep in sync with shellModeFromWidth cutoffs + isTouchPrimary. */
+export const SHELL_BOOTSTRAP_SCRIPT = `(function(){try{var w=window.innerWidth,n=navigator,t=(window.matchMedia&&matchMedia("(pointer: coarse)").matches)||(n.maxTouchPoints>1&&/Macintosh|iPad/.test(n.userAgent)),m=w<768?"phone":(w<1100||(t&&w<1400))?"tablet":"desktop";document.documentElement.dataset.shellMode=m;document.documentElement.dataset.shellWidth=String(w);document.documentElement.dataset.shellReady="1";}catch(e){}})();`;
 
 export function readBootstrapShellWidth(): number | null {
   if (typeof document === "undefined") return null;

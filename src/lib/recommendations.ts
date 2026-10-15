@@ -20,7 +20,7 @@
 export { columnNameTokens } from "./columnClassify";
 export { CHART_KIND_OPTIONS, type ChartKind, type ChartRecommendation, type YAggregateOption, Y_AGGREGATE_OPTIONS } from "./recs/types";
 export { diversifyRecommendations, isMeasureColumn, stableLiveChartId } from "./recs/columns";
-export { createChartRec, createScatterRec, fitEncodingToKind, parseChartKind } from "./recs/createChartRec";
+export { createChartRec, createScatterRec, fitEncodingToKind, parseChartKind, PART_TO_WHOLE_KINDS } from "./recs/createChartRec";
 export { type StorySequence, getBestSuggestion, getTopSuggestions, recommend, recommendStorySequence } from "./recs/recommend";
 export { type EncodingShuffleLocks, type RandomEncoding, applyEncodingLocks, chartKindDataSupport, getRandomChartAndEncoding, getRandomEncoding, randomEncodingToExtra, tryBuildRandomChartRec } from "./recs/random";
 export { expandRecommendationsWithExtras, getRecommendationReason } from "./recs/expand";

@@ -518,20 +518,22 @@ export function ExplorerView() {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }, []);
+  const moveColumn = useCallback((fromCol: string, toIdx: number) => {
+    const fromIdx = columns.indexOf(fromCol);
+    if (fromIdx < 0 || toIdx < 0 || toIdx >= columns.length || fromIdx === toIdx) return;
+    pushTableUndo();
+    const order = columns.slice();
+    order.splice(fromIdx, 1);
+    order.splice(toIdx, 0, fromCol);
+    setTablePrefs({ ...tablePrefs, columnOrder: order });
+  }, [columns, tablePrefs, setTablePrefs, pushTableUndo]);
   const handleColumnDrop = useCallback((e: React.DragEvent, targetColName: string) => {
     e.preventDefault();
     setDraggedCol(null);
     const fromCol = e.dataTransfer.getData("text/plain");
     if (!fromCol || fromCol === targetColName) return;
-    pushTableUndo();
-    const order = columns.slice();
-    const fromIdx = order.indexOf(fromCol);
-    const toIdx = order.indexOf(targetColName);
-    if (fromIdx < 0 || toIdx < 0) return;
-    order.splice(fromIdx, 1);
-    order.splice(toIdx, 0, fromCol);
-    setTablePrefs({ ...tablePrefs, columnOrder: order });
-  }, [columns, tablePrefs, setTablePrefs, pushTableUndo]);
+    moveColumn(fromCol, columns.indexOf(targetColName));
+  }, [columns, moveColumn]);
   const handleColumnDragEnd = useCallback(() => setDraggedCol(null), []);
 
   const toggleRowSelectionByOriginal = useCallback((originalIdx: number) => {
@@ -852,12 +854,14 @@ export function ExplorerView() {
             </button>
             {columnsOpen && (
               <>
-                <div className="loom-menu absolute left-0 top-full mt-1 z-50 min-w-[180px] max-h-64 overflow-y-auto py-2 rounded">
-                  <div className="px-2 pb-1 border-b border-loom-border/50 text-2xs font-semibold text-loom-muted">Show columns</div>
-                  {allColumns.map((col) => {
+                <div className="loom-menu absolute left-0 top-full mt-1 z-50 min-w-[180px] max-h-64 max-md:fixed max-md:inset-x-3 max-md:top-[calc(var(--safe-top)+9.25rem)] max-md:max-h-[60dvh] overflow-y-auto py-2 rounded">
+                  <div className="px-2 pb-1 border-b border-loom-border/50 text-2xs font-semibold text-loom-muted">Show columns<span className="md:hidden font-normal"> · ← → to reorder</span></div>
+                  {(isMobile ? [...columns, ...allColumns.filter((c) => !columns.includes(c))] : allColumns).map((col) => {
                     const visible = tablePrefs.visibleColumns == null || tablePrefs.visibleColumns.includes(col);
+                    const pos = columns.indexOf(col);
                     return (
-                      <label key={col} className="flex items-center gap-2 px-2 py-1 hover:bg-loom-elevated/60 cursor-pointer text-xs text-loom-text">
+                      <div key={col} className="flex items-center">
+                      <label className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1 max-md:min-h-10 hover:bg-loom-elevated/60 cursor-pointer text-xs text-loom-text">
                         <input
                           type="checkbox"
                           checked={visible}
@@ -874,6 +878,11 @@ export function ExplorerView() {
                         />
                         <span className="truncate" title={col}>{col}</span>
                       </label>
+                      {isMobile && pos >= 0 && <div className="flex shrink-0 pr-1">
+                        <button type="button" onClick={() => moveColumn(col, pos - 1)} disabled={pos === 0} className="min-h-10 min-w-10 grid place-items-center text-loom-muted disabled:opacity-30" aria-label={`Move ${col} left`}>←</button>
+                        <button type="button" onClick={() => moveColumn(col, pos + 1)} disabled={pos === columns.length - 1} className="min-h-10 min-w-10 grid place-items-center text-loom-muted disabled:opacity-30" aria-label={`Move ${col} right`}>→</button>
+                      </div>}
+                      </div>
                     );
                   })}
                   <div className="px-2 mt-2">
@@ -906,7 +915,7 @@ export function ExplorerView() {
             </button>
             {viewsOpen && (
               <>
-                <div className="loom-menu absolute left-0 top-full mt-1 z-50 min-w-[160px] py-2 rounded">
+                <div className="loom-menu absolute left-0 top-full mt-1 z-50 min-w-[160px] max-md:fixed max-md:inset-x-3 max-md:top-[calc(var(--safe-top)+9.25rem)] py-2 rounded">
                   <button
                     type="button"
                     onClick={() => {
@@ -1032,7 +1041,7 @@ export function ExplorerView() {
           <table className="text-xs font-mono border-collapse" style={{ minWidth: "100%" }}>
             <thead>
               <tr>
-                <th className="px-1 py-1 text-left text-2xs font-semibold text-loom-muted whitespace-nowrap sticky top-0 left-0 z-20 bg-loom-bg border-b border-loom-border border-r border-loom-border/50 w-8">
+                <th className="px-1 py-1 text-left text-2xs font-semibold text-loom-muted whitespace-nowrap sticky top-0 left-0 z-20 bg-loom-bg border-b border-loom-border border-r border-loom-border/50 w-8 min-w-8 max-w-8">
                   <label className="flex items-center gap-1 cursor-pointer">
                     <input
                       type="checkbox"
@@ -1049,7 +1058,7 @@ export function ExplorerView() {
                     />
                   </label>
                 </th>
-                <th className="px-2 py-1 text-left text-2xs font-semibold text-loom-muted whitespace-nowrap sticky top-0 left-8 z-20 bg-loom-bg border-b border-loom-border border-r border-loom-border/50 w-10">
+                <th className="px-2 py-1 text-left text-2xs font-semibold text-loom-muted whitespace-nowrap sticky top-0 left-8 z-20 bg-loom-bg border-b border-loom-border border-r border-loom-border/50 w-10 min-w-10">
                   #
                 </th>
                 {columns.map((col, ci) => {
@@ -1165,8 +1174,8 @@ export function ExplorerView() {
               </tr>
               {(!isMobile || showColumnFilters) && (
               <tr className="bg-loom-surface/50 sticky top-7 z-10">
-                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-10 bg-loom-surface w-8" />
-                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-10 bg-loom-surface w-10" />
+                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-10 bg-loom-surface w-8 min-w-8 max-w-8" />
+                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-10 bg-loom-surface w-10 min-w-10" />
                 {columns.map((col) => (
                   <th key={col} className="px-1 py-0.5 border-b border-loom-border">
                     <input
@@ -1227,7 +1236,7 @@ export function ExplorerView() {
                             onMouseLeave={() => setHoveredRowIndex(null)}
                             style={{ height: ROW_HEIGHT }}
                           >
-                            <td className="px-1 py-1 w-8 sticky left-0 z-10 bg-inherit border-r border-loom-border/30">
+                            <td className="px-1 py-1 w-8 min-w-8 max-w-8 sticky left-0 z-10 bg-inherit border-r border-loom-border/30">
                               <input
                                 type="checkbox"
                                 checked={selectedSet.has(originalIdx)}
@@ -1236,7 +1245,7 @@ export function ExplorerView() {
                                 aria-label={`Select row ${ri + 1}`}
                               />
                             </td>
-                            <td className="px-2 py-1 text-loom-muted w-10 sticky left-8 z-10 bg-inherit border-r border-loom-border/30">{originalIdx + 1}</td>
+                            <td className="px-2 py-1 text-loom-muted w-10 min-w-10 sticky left-8 z-10 bg-inherit border-r border-loom-border/30">{originalIdx + 1}</td>
                             {columns.map((col, ci) => renderCell(row, ri, ci, col, originalIdx))}
                           </tr>
                         );
@@ -1258,7 +1267,7 @@ export function ExplorerView() {
                       onMouseEnter={() => setHoveredRowIndex(originalIdx)}
                       onMouseLeave={() => setHoveredRowIndex(null)}
                     >
-                      <td className="px-1 py-1 sticky left-0 z-10 bg-inherit border-r border-loom-border/30">
+                      <td className="px-1 py-1 w-8 min-w-8 max-w-8 sticky left-0 z-10 bg-inherit border-r border-loom-border/30">
                         <input
                           type="checkbox"
                           checked={selectedSet.has(originalIdx)}
@@ -1267,7 +1276,7 @@ export function ExplorerView() {
                           aria-label={`Select row ${ri + 1}`}
                         />
                       </td>
-                      <td className="px-2 py-1 text-loom-muted sticky left-8 z-10 bg-inherit border-r border-loom-border/30">{originalIdx + 1}</td>
+                      <td className="px-2 py-1 text-loom-muted w-10 min-w-10 sticky left-8 z-10 bg-inherit border-r border-loom-border/30">{originalIdx + 1}</td>
                       {columns.map((col, ci) => renderCell(row, ri, ci, col, originalIdx))}
                     </tr>
                   );

@@ -20,6 +20,7 @@ The desktop app (Tauri + DuckDB) adds folder mounting, millions of rows, SQL ove
 - **Share** — the **Share** button renders the chart at Square / Portrait / Story / Wide sizes with feed-sized type, then opens the phone’s share sheet (or saves the image). **Get link** publishes a chart page that unfurls with a preview image in iMessage, Slack, X, etc. (kept 7 days). **Copy chart link** (and the address bar in Chart view, `#chart=…`) reopens the exact chart — dataset, chart type, encodings, headline, look, and framing; live feeds, demo files, and open-data CSVs reopen on load, local files wait for the recipient to open a file with the same name.
 
 ### Explorer
+- **Touch controls** — On phones, reorder columns with ← / → in the Columns menu. Dive offers Keep only / Exclude for value taps, and cube axes can be swapped by tapping two chips.
 - **Mount a folder** — Point at a directory of CSV/Parquet files; Loom scans and exposes them in the sidebar. Search files by name.
 - **Data table** — Virtualized table with sort, column reorder (drag headers), show/hide columns, per-column text and range filters. Sparklines, value bars, heat tint, trend cues, and null % in headers. Date columns auto-formatted.
 - **Row selection** — Checkboxes, keyboard (↑/↓ + Space). Export selected rows to CSV. **Saved views** store column visibility, order, and filters; **Undo/Redo** for table layout.
@@ -27,6 +28,8 @@ The desktop app (Tauri + DuckDB) adds folder mounting, millions of rows, SQL ove
 - **Column profiling** — Right-click (or long-press) a column header for a quick profile: null %, unique count, min/max/median, distribution histogram, top values.
 
 ### Chart
+- **Experiment and keep your style** — The chart panel has Undo/Redo for encoding and visual edits (⌘/Ctrl Z and ⌘/Ctrl Shift Z outside text fields). Rapid slider changes group into one edit. In **Visual → My looks**, save up to 20 named styles, reuse them across datasets, and include them in workspace backups. Visual sections collapse individually or together, and color palettes are searchable.
+- **Find a field quickly** — Encoding fields support search by name or type and filters for numeric, text, and time columns. Use arrow keys, Home/End, and Enter to choose; incompatible fields are skipped. Menus fit the visible screen when editing on a phone.
 - **Chart view** — Pick a file, get instant chart suggestions (bar, line, scatter, area, pie, heatmap, strip, box). Click a suggestion or use **Suggest with AI** (Ollama).
 - **Switch types without losing the plot** — changing chart type keeps fields that suit the new type and swaps in a fitting column where they don't (a scatter's numeric axis won't become 500 bar categories; glyph charts pick a name column; line / area / bump prefer a time column). Long daily series roll up to weeks or months automatically.
 - **Readable by default** — Axes tick at round numbers with gridlines on the same values; dates read as months and years. Category names are never chopped: bars turn sideways when names won’t fit, crowded axes angle or thin their labels. Hover any bar, slice, bin, or cell for its actual value. One color unless Color encodes a field — then a legend appears in the emptiest corner. Heatmap, hexbin, and map ramps work in light and dark themes.

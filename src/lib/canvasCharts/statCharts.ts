@@ -159,7 +159,18 @@ export function renderFullCorrMatrix(
         const v = Number(rows[r]![i]);
         if (Number.isFinite(v)) hits++;
       }
-      return probe > 0 && hits / probe >= 0.5 && name.length > 0;
+      if (!(probe > 0 && hits / probe >= 0.5 && name.length > 0)) return false;
+      // A constant column (all-zero flag, single unit) has no defined r — leave it out
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const row of rows) {
+        const v = Number(row[i]);
+        if (!Number.isFinite(v)) continue;
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+        if (hi > lo) return true;
+      }
+      return false;
     })
     .slice(0, 8);
   if (labels.length < 2) return;

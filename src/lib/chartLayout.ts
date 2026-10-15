@@ -43,6 +43,9 @@ export function isCartesianKind(kind: ChartKind): boolean {
   return !NON_CARTESIAN.has(kind);
 }
 
+/** Bottom band reserved for the source / time footnote (axis titles sit above it). */
+export const FOOTNOTE_BAND_PX = 40;
+
 export type ChartMargins = { top: number; right: number; bottom: number; left: number };
 
 /**
@@ -63,6 +66,8 @@ export function resolveChartMargins(args: {
   axisFontSize?: number;
   /** Reserve a caption strip for source lineage. */
   sourceFootnote?: boolean;
+  /** Extra top room when the title wraps to a second line above a subtitle. */
+  titleWrapPx?: number;
 }): ChartMargins {
   const {
     kind,
@@ -91,7 +96,7 @@ export function resolveChartMargins(args: {
   const fieldBand = fs + 4;
   const rotExtra = rot > 0 ? Math.sin((rot * Math.PI) / 180) * fs * 4.5 + 10 : 0;
 
-  let top = Math.max(base, titleBandBottom(titleLayout) + 4);
+  let top = Math.max(base, titleBandBottom(titleLayout) + 4 + (args.titleWrapPx ?? 0));
   let bottom = cartesian
     ? Math.max(base * 0.85, 14 + tickBand + fieldBand + rotExtra)
     : Math.max(base * 0.55, 20);
@@ -102,7 +107,7 @@ export function resolveChartMargins(args: {
 
   // Credit + optional time / color lines under the plot
   if (sourceFootnote) {
-    bottom += 40;
+    bottom += FOOTNOTE_BAND_PX;
   }
 
   // Legend floats inside the plot; only nudge when it would crowd the edge
@@ -156,6 +161,7 @@ export function resolveChartPad(args: {
   legendPosition?: string | null;
   axisFontSize?: number;
   sourceFootnote?: boolean;
+  titleWrapPx?: number;
 }): number {
   const m = resolveChartMargins(args);
   // Balanced inset: bias toward the larger gutters so labels never clip,

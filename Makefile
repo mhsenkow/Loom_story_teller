@@ -227,6 +227,9 @@ check: check-ts check-worker check-rust test ## ✅ TS + Worker + Rust + Vitest 
 ci: preflight check-ts check-worker check-mcp test build bundle-budget check-rust ## ✅ Full gate (mirrors GitHub CI + Workers + MCP)
 	@echo "$(GREEN)✓ CI gate passed$(RESET)"
 
+.PHONY: build
+build: weave-web ## ✅ Production static export (CI alias)
+
 .PHONY: preflight
 preflight: ## ✅ Node/Rust version preflight (LOOM-663)
 	@scripts/preflight-runtimes.sh

@@ -108,7 +108,7 @@ export type BandLabelLayout = {
  * `room` is the vertical space available below the baseline for labels.
  */
 export function layoutBandLabels(
-  ctx: CanvasRenderingContext2D,
+  ctx: { save(): void; restore(): void; font: string; measureText(text: string): { width: number } },
   labels: string[],
   bandWidth: number,
   room: number,

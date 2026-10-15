@@ -12,8 +12,10 @@ import {
   parsePersistedQueryViews,
 } from "./persistValidation";
 import { migrateAppSettingsV0, unwrapPersist, wrapPersist } from "./persistEnvelope";
+import { parseCustomChartLooks, type CustomChartLook } from "./customChartLooks";
 
 const KEY_APP_SETTINGS = "loom-app-settings";
+const KEY_CUSTOM_CHART_LOOKS = "loom-custom-chart-looks";
 const KEY_RECENT_FILES = "loom-recent-files";
 const KEY_LAST_SESSION = "loom-last-session";
 const KEY_QUERY_HISTORY = "loom-query-history";
@@ -77,6 +79,20 @@ export function getPersistedAppSettings(): PersistedAppSettings | null {
 
 export function setPersistedAppSettings(s: PersistedAppSettings): boolean {
   return safeSetItem(KEY_APP_SETTINGS, JSON.stringify(wrapPersist(s)));
+}
+
+export function getCustomChartLooks(): CustomChartLook[] {
+  const raw = safeGetItem(KEY_CUSTOM_CHART_LOOKS);
+  if (!raw) return [];
+  try {
+    return parseCustomChartLooks(unwrapPersist(JSON.parse(raw)));
+  } catch {
+    return [];
+  }
+}
+
+export function setPersistedCustomChartLooks(looks: CustomChartLook[]): boolean {
+  return safeSetItem(KEY_CUSTOM_CHART_LOOKS, JSON.stringify(wrapPersist(looks)));
 }
 
 export interface RecentFileEntry {
@@ -361,6 +377,7 @@ export const LOOM_PREFERENCE_STORAGE_KEYS = [
   KEY_TABLE_PREFS,
   KEY_TABLE_VIEWS,
   KEY_CHART_VIEWS,
+  KEY_CUSTOM_CHART_LOOKS,
   KEY_QUERY_VIEWS,
   KEY_DASHBOARDS,
   KEY_VIZ_PREFERENCES,

@@ -5,6 +5,8 @@ import {
   safeSetItem,
   setPersistedAppSettings,
   setPersistedRecentFiles,
+  getCustomChartLooks,
+  setPersistedCustomChartLooks,
 } from "../persist";
 
 describe("safeSetItem", () => {
@@ -64,6 +66,8 @@ describe("safeSetItem", () => {
       { path: "web://a.csv", name: "a.csv", extension: "csv", row_count: 1, size_bytes: 10 },
     ]);
     expect(getRecentFiles()[0]?.name).toBe("a.csv");
+    setPersistedCustomChartLooks([{ id: "look", name: "Calm", overrides: { opacity: 0.5 }, updatedAt: 100 }]);
+    expect(getCustomChartLooks()).toEqual([{ id: "look", name: "Calm", overrides: { opacity: 0.5 }, updatedAt: 100 }]);
   });
 
   it("returns null settings on corrupt JSON", () => {

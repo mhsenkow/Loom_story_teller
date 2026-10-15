@@ -410,11 +410,14 @@ function pickAutoPaletteId(
     kind === "dataCube" ||
     kind === "treemap" ||
     kind === "sunburst" ||
-    kind === "forceBubble"
+    kind === "forceBubble" ||
+    kind === "hexbin"
   ) {
     return "seq-blue";
   }
   if (kind === "waterfall") return "semantic";
+  // r runs −1…+1 around a meaningful zero
+  if (kind === "corrMatrix") return "div-cool-warm";
   if (colorFieldType === "quantitative" || colorFieldType === "ordinal") return "seq-blue";
   return "categorical";
 }
@@ -456,6 +459,12 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
       palette = match;
       id = match.id;
     }
+  }
+
+  // Correlation cells interpolate a ramp — a categorical set reads as random hues
+  if (opts.chartKind === "corrMatrix" && !isContinuousKind(palette.kind)) {
+    palette = getPaletteById("div-cool-warm") ?? palette;
+    id = palette.id;
   }
 
   let colors = stopsForPalette(palette, opts.theme);
@@ -500,6 +509,9 @@ const VALUE_RAMP_KINDS = new Set([
   "geoBubbles",
   "geoHex",
 ]);
+
+/** Value-ramp kinds whose color is a row count per cell, not the Y measure. */
+const COUNT_RAMP_KINDS = new Set(["heatmap", "hexbin", "geoHex"]);
 
 export type ChartColorStatusHints = {
   kind: string;
@@ -548,7 +560,11 @@ export function describeChartColorStatus(
 
   const colorField = chart.colorField?.trim() || null;
   const measureField =
-    VALUE_RAMP_KINDS.has(chart.kind) ? chart.yField || chart.sizeField || null : null;
+    COUNT_RAMP_KINDS.has(chart.kind)
+      ? "rows"
+      : VALUE_RAMP_KINDS.has(chart.kind)
+        ? chart.yField || chart.sizeField || null
+        : null;
   const field = colorField || measureField;
 
   const resolved = resolveChartColors({

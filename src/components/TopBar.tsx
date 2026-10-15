@@ -147,7 +147,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         </svg>
       </button>
 
-      <nav className="loom-seg min-w-0" aria-label="View mode">
+      <nav className="loom-seg shrink-0" aria-label="View mode">
         {VIEW_MODES.map((mode) => (
           <button
             key={mode.key}
@@ -166,8 +166,24 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       {/* Aspect / device framing — desktop & tablet authoring only (phones always fill) */}
       {viewMode === "chart" && (
         <>
+          {/* Tablet widths: one native picker instead of a clipped strip of 7 buttons */}
+          <label className="hidden md:flex xl:hidden items-center shrink-0">
+            <span className="sr-only">Chart aspect ratio</span>
+            <select
+              value={aspect}
+              onChange={(e) => setAspect(e.target.value as ChartAspectId)}
+              className="loom-input w-auto text-xs py-1 min-h-9 pr-7"
+              title={CHART_ASPECTS.find((a) => a.id === aspect)?.blurb ?? "Chart aspect ratio"}
+            >
+              {CHART_ASPECTS.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.label}
+                </option>
+              ))}
+            </select>
+          </label>
           <div
-            className="hidden md:flex loom-seg max-w-[min(52vw,36rem)] overflow-x-auto scrollbar-none"
+            className="hidden xl:flex loom-seg min-w-0 max-w-[min(52vw,36rem)] overflow-x-auto scrollbar-none"
             role="group"
             aria-label="Chart aspect ratio"
           >
@@ -190,7 +206,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           </div>
 
           <div
-            className="hidden md:flex loom-seg"
+            className="hidden md:flex loom-seg shrink-0"
             role="group"
             aria-label="Chart width preview"
           >

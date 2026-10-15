@@ -1,8 +1,6 @@
 "use client";
 
-import { useLoomStore } from "@/lib/store";
 import type { DataGovDataset, DataGovSortKey } from "@/lib/tauri";
-import { shellModeFromWidth } from "@/lib/shellLayout";
 
 /** Tauri invoke rejects with string errors from Rust — normalize for UI. */
 export function ipcErrorMessage(e: unknown): string {
@@ -20,20 +18,7 @@ export function dataGovResourceSaveable(res: { format: string; url: string }): b
 }
 
 /** Leave Data & sources full-screen and show the chart canvas (esp. mobile). */
-export function leaveSourcesShowChart() {
-  const s = useLoomStore.getState();
-  s.setDataSourcesExpanded(false);
-  s.setDataRegionOpen(false);
-  s.setViewMode("chart");
-  s.setPanelTab("chart");
-  if (typeof window !== "undefined") {
-    const mode = shellModeFromWidth(window.innerWidth);
-    if (mode === "phone" || mode === "tablet") {
-      if (s.sidebarOpen) s.toggleSidebar();
-    }
-    if (mode === "phone" && s.panelOpen) s.togglePanel();
-  }
-}
+export { leaveSourcesShowChart } from "@/lib/shellHandoff";
 
 /** One-click public CSV packs (web Explore / desktop save). */
 export const CURATED_OPEN_PACKS: {

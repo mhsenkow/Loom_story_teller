@@ -49,4 +49,13 @@ describe("workerCatalogPolicy", () => {
     expect(sourcePayloadCacheable("opensky", JSON.stringify({ states: [["x"]] }))).toBe(true);
     expect(sourcePayloadCacheable("firms", "[]")).toBe(false);
   });
+
+  it("counts rows in columnar transforms (FIRMS / GDACS / ADSB)", () => {
+    const columnar = (rows: unknown[][]) => JSON.stringify({ columns: ["a", "b"], rows });
+    for (const kind of ["firms", "gdacs", "opensky"]) {
+      expect(sourcePayloadCacheable(kind, columnar([[1, 2]])), kind).toBe(true);
+      expect(sourcePayloadCacheable(kind, columnar([])), kind).toBe(false);
+    }
+    expect(sourcePayloadCacheable("buoys", columnar([]))).toBe(false);
+  });
 });

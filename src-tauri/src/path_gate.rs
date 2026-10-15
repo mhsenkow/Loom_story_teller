@@ -46,10 +46,7 @@ impl WritePathGate {
             return false;
         };
         sweep(&mut map);
-        match map.remove(&key) {
-            Some(until) if Instant::now() <= until => true,
-            _ => false,
-        }
+        matches!(map.remove(&key), Some(until) if Instant::now() <= until)
     }
 }
 

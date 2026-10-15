@@ -128,3 +128,19 @@ describe("dashboardGridClass / style", () => {
     expect(dashboardGridClass("auto", "desktop")).toContain("xl:grid-cols-4");
   });
 });
+
+describe("touch-aware shell mode", () => {
+  it("keeps iPad landscape widths in tablet chrome when touch-primary", () => {
+    for (const w of [1133, 1180, 1194, 1366]) {
+      expect(shellModeFromWidth(w, true)).toBe("tablet");
+      expect(shellModeFromWidth(w, false)).toBe("desktop");
+    }
+  });
+  it("still uses desktop chrome for wide touch screens", () => {
+    expect(shellModeFromWidth(1440, true)).toBe("desktop");
+  });
+  it("phone cutoff is width-only", () => {
+    expect(shellModeFromWidth(400, true)).toBe("phone");
+    expect(shellModeFromWidth(400, false)).toBe("phone");
+  });
+});

@@ -175,11 +175,13 @@ function statsFromRows(columns: string[], types: string[], rows: Cell[][]): Colu
   });
 }
 
-function snapshotFromBuffer(buf: BufferState, limit = 500, orderBy?: string): InspectResult {
+function snapshotFromBuffer(buf: BufferState, limit = 500, orderBy?: string, keepNewest = false): InspectResult {
   // Match desktop DuckDB ORDER BY so Discover / Explore see the same “top” rows.
+  // History feeds (oldest → newest) keep their most recent rows when limited.
+  const sorted = orderBy ? sortRowsByOrderBy(buf.rows, buf.columns, orderBy) : null;
   const rows = (
-    orderBy
-      ? sortRowsByOrderBy(buf.rows, buf.columns, orderBy).slice(0, limit)
+    sorted
+      ? keepNewest ? sorted.slice(-limit) : sorted.slice(0, limit)
       : buf.rows.slice(-limit).reverse()
   ) as Cell[][];
   return {
@@ -221,10 +223,22 @@ const DIRECT_SOURCES: Partial<Record<SourceKind, { url: string; transform: (body
   debt: {
     url:
       "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny" +
-      "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt&sort=-record_date&page[size]=10000",
+      "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt&sort=-record_date&page%5Bsize%5D=10000",
     transform: treasuryDebt,
   },
+  // CoinGecko 429s Cloudflare's shared egress (the Worker falls back to CoinPaprika,
+  // which blocks it too); a visitor's own connection is fine. Same shape the Worker returns.
+  crypto: {
+    url: "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false",
+    transform: (body) => body,
+  },
 };
+
+/** Hosts the client contacts directly (native shells must allow them in CSP connect-src). */
+export const DIRECT_FETCH_HOSTS: string[] = [
+  new URL(WIKI_SSE).host,
+  ...Object.values(DIRECT_SOURCES).map((d) => new URL(d!.url).host),
+];
 
 /** User-facing message for upstream / network failures (LOOM-167). */
 export function formatStreamFetchError(kind: SourceKind, err: unknown): string {
@@ -250,8 +264,9 @@ async function fetchSourceJson(kind: SourceKind): Promise<unknown> {
     try {
       const res = await fetch(direct.url, { signal: AbortSignal.timeout(20_000) });
       if (res.ok) {
-        const out = direct.transform(await res.json()) as { rows?: unknown[] };
-        if (out.rows?.length) return out;
+        const out = direct.transform(await res.json()) as unknown[] | { rows?: unknown[] };
+        const n = Array.isArray(out) ? out.length : (out.rows?.length ?? 0);
+        if (n > 0) return out;
       }
     } catch {
       /* fall back to the Worker */
@@ -1333,7 +1348,8 @@ export async function webSourceSnapshot(
   kind: SourceKind,
   limit?: number,
 ): Promise<InspectResult> {
-  return snapshotFromBuffer(sourceBufs[kind], limit ?? 500, SOURCE_BY_KIND[kind]?.orderBy);
+  const def = SOURCE_BY_KIND[kind];
+  return snapshotFromBuffer(sourceBufs[kind], limit ?? 500, def?.orderBy, def?.keepNewest);
 }
 
 export async function webSourceClear(kind: SourceKind): Promise<void> {

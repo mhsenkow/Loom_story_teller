@@ -177,7 +177,7 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
         appSettings: { ...(initialState.appSettings as AppSettings) },
         queryHistory: [], querySnippets: [],
         tablePrefs: { ...(initialState.tablePrefs as { visibleColumns: null; columnOrder: null }) },
-        tableViews: [], chartViews: [], queryViews: [], dashboards: [],
+        tableViews: [], chartViews: [], queryViews: [], dashboards: [], customChartLooks: [],
         activeDashboardId: null, vizPreferences: emptyVizPreferenceModel(),
       }),
     clearRetainedLocalData: async () => {

@@ -49,6 +49,20 @@ function sample(): Partial<WorkspaceBundleContent> {
 }
 
 describe("workspace backup", () => {
+  it("round-trips personal looks alone and preserves existing looks on name collisions", () => {
+    const look = { id: "look1", name: "Calm", overrides: { opacity: 0.4 }, updatedAt: 1 };
+    const bundle = buildWorkspaceBundle({ customChartLooks: [look] });
+    const res = parseWorkspaceBundle(serializeWorkspaceBundle(bundle));
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.bundle.content.customChartLooks).toEqual([look]);
+    expect(res.bundle.manifest.counts.customChartLooks).toBe(1);
+    const current = buildWorkspaceBundle({ customChartLooks: [{ ...look, id: "local", name: "calm", overrides: { opacity: 0.9 } }] }).content;
+    const merged = mergeWorkspaceBundle(current, res.bundle.content);
+    expect(merged.merged.customChartLooks).toEqual(current.customChartLooks);
+    expect(merged.skipped.customChartLooks).toBe(1);
+    expect(buildWorkspaceBundle({ customChartLooks: [look] }, { ...DEFAULT_EXPORT_SCOPE, customChartLooks: false }).content.customChartLooks).toEqual([]);
+  });
   it("round-trips selected work into a fresh profile", () => {
     const text = serializeWorkspaceBundle(buildWorkspaceBundle(sample()));
     const res = parseWorkspaceBundle(text);

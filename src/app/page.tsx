@@ -617,11 +617,15 @@ function HomeContent({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.shiftKey) return;
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.altKey) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       const s = useLoomStore.getState();
-      if (s.chartEditUndoStack.length > 0) {
+      if (s.viewMode !== "chart") return;
+      if (e.shiftKey && s.chartEditRedoStack.length > 0) {
+        e.preventDefault();
+        s.redoChartEdit();
+      } else if (!e.shiftKey && s.chartEditUndoStack.length > 0) {
         e.preventDefault();
         s.undoChartEdit();
       }

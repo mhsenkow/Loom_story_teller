@@ -109,6 +109,18 @@ export const IDENTITY_X_KINDS = new Set<string>(["chernoff", "glyphStar", "flowe
 export const CATEGORY_Y_KINDS = new Set<string>(["strip", "ridgeline"]);
 /** Kinds whose X is an ordering — time reads best. */
 export const ORDERED_X_KINDS = new Set<string>(["line", "area", "bump", "stream", "horizon", "spiral"]);
+/** Kinds that place marks on two continuous axes (density, territories, points). */
+export const NUMERIC_XY_KINDS = new Set<string>(["scatter", "bubble", "hexbin", "contour", "isoScatter", "voronoi"]);
+/** Kinds that bin a numeric X (Y is a count). */
+export const NUMERIC_X_KINDS = new Set<string>(["histogram"]);
+/** Kinds that plot a numeric Y against their X (no count fallback). */
+export const NUMERIC_Y_KINDS = new Set<string>([
+  "line", "area", "bump", "stream", "horizon", "spiral", "box", "violin", "beeswarm", "dumbbell", "slope", "pyramid",
+]);
+/** Kinds that split a whole into parts — slice sizes need non-negative totals. */
+export const PART_TO_WHOLE_KINDS = new Set<string>([
+  "pie", "treemap", "sunburst", "waffle", "isotype", "forceBubble", "radialBar", "funnel", "mosaic", "pareto",
+]);
 /** Kinds where Color is a required second category (target / segment). */
 export const CATEGORY_COLOR_KINDS = new Set<string>(["mosaic", "chord", "sankey", "network", "arcDiagram"]);
 
@@ -157,6 +169,9 @@ export function fitEncodingToKind(
   };
 
   let { xField, yField, colorField } = enc;
+  const measures = measureColumns(columns);
+  const pickMeasure = (avoid: string | null) =>
+    (measures.find((c) => c.name !== avoid) ?? columns.find((c) => typeOf(c) === "quantitative" && c.name !== avoid))?.name ?? null;
 
   if (kind === "choropleth") {
     const region = columns.find((c) => isGeoRegionField(c.name) && c.distinct_count >= 3);
@@ -174,15 +189,33 @@ export function fitEncodingToKind(
     }
     // The measure must be numeric (or none → count)
     if (yField && !isNumeric(yField)) yField = null;
+  } else if (NUMERIC_XY_KINDS.has(kind) || NUMERIC_X_KINDS.has(kind)) {
+    const prevX = xField;
+    if (!isNumeric(xField)) xField = pickMeasure(yField) ?? xField;
+    if (NUMERIC_XY_KINDS.has(kind) && !isNumeric(yField)) yField = pickMeasure(xField) ?? yField;
+    // The category that was on X still tells the story — keep it as color
+    // (hexbin / histogram color by count, so they don't take it)
+    if (prevX !== xField && !colorField && kind !== "hexbin" && !NUMERIC_X_KINDS.has(kind) && isCategory(prevX, 12) && !isNumeric(prevX)) {
+      colorField = prevX;
+    }
   } else if (CATEGORY_Y_KINDS.has(kind)) {
     if (!isCategory(yField)) {
-      const alt = bestCategory(new Set([xField, colorField])) ?? (isCategory(colorField) ? colorField : null);
+      // A category on X is about to move off it (X must be numeric) — it's fair game for Y
+      const exclude = new Set(isNumeric(xField) ? [xField, colorField] : [colorField]);
+      const alt = bestCategory(exclude) ?? (isCategory(colorField) ? colorField : null);
       if (alt) {
         if (alt === colorField) colorField = null;
         yField = alt;
       }
     }
     if (!isNumeric(xField)) xField = columns.find((c) => typeOf(c) === "quantitative" && c.name !== yField)?.name ?? xField;
+  }
+
+  // A signed measure (longitude, Δ%) can't size slices — negative groups vanish and
+  // one survivor shows as "100%". Count the rows instead.
+  if (PART_TO_WHOLE_KINDS.has(kind) && yField) {
+    const min = Number(byName.get(yField)?.min_value);
+    if (Number.isFinite(min) && min < 0) yField = null;
   }
 
   if (ORDERED_X_KINDS.has(kind)) {
@@ -192,6 +225,14 @@ export function fitEncodingToKind(
       const time = columns.find((c) => isTimeLike(c) && c.name !== yField && c.distinct_count >= 3);
       if (time) xField = time.name;
     }
+  }
+
+  // Coming from a count chart (pie of rows) leaves Y empty — these kinds need a measure
+  if (NUMERIC_Y_KINDS.has(kind) && !isNumeric(yField)) yField = pickMeasure(xField) ?? yField;
+
+  // Bump ranks series against each other — without a series there is nothing to rank
+  if (kind === "bump" && (!colorField || colorField === xField)) {
+    colorField = bestCategory(new Set([xField, yField])) ?? colorField;
   }
 
   // One mark per category: a color field that isn't the category would color each mark by

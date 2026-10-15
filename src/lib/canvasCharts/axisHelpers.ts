@@ -250,7 +250,7 @@ export function densityStops(stops: string[], themeBg?: string): string[] {
  */
 export function timeBuckets(rows: unknown[][], xi: number): {
   keyOf: (r: unknown[]) => string;
-  unit: "" | "day" | "week" | "month" | "year";
+  unit: "" | "hour" | "day" | "week" | "month" | "year";
   firstRow: Map<string, number>;
 } {
   const raw = [...new Set(rows.map((r) => String(r[xi])))];
@@ -261,7 +261,11 @@ export function timeBuckets(rows: unknown[][], xi: number): {
   const t0 = cls.values[0]!;
   const t1 = cls.values[cls.values.length - 1]!;
   const days = (t1 - t0) / 86_400_000;
-  const unit = days > 365 * 12 ? "year" : days > 540 ? "month" : days > 120 ? "week" : "day";
+  // Live feeds often span hours or a couple of days — day buckets would fold
+  // them to one or two points. Short spans bucket by hour; very short spans
+  // keep raw timestamps (the time axis spaces them continuously).
+  if (days * 24 <= 8) return plain;
+  const unit = days > 365 * 12 ? "year" : days > 540 ? "month" : days > 120 ? "week" : days > 4 ? "day" : "hour";
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   const bucket = (ms: number) => {
     const d = new Date(ms);
@@ -271,6 +275,7 @@ export function timeBuckets(rows: unknown[][], xi: number): {
       const dow = (d.getUTCDay() + 6) % 7; // Monday-start weeks
       return iso(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - dow)));
     }
+    if (unit === "hour") return `${iso(d)}T${String(d.getUTCHours()).padStart(2, "0")}:00:00Z`;
     return iso(d);
   };
   const cache = new Map<string, string>();

@@ -84,6 +84,11 @@ export interface SourceDef {
   mobilePollMs?: number;
   /** ORDER BY clause for snapshots (no "ORDER BY" keyword). */
   orderBy: string;
+  /**
+   * History feed stored oldest → newest: a limited snapshot keeps the newest
+   * rows (still ascending). Mirrors KEEP_NEWEST_KINDS in sources.rs.
+   */
+  keepNewest?: boolean;
   group: SourceGroup;
   /** Token class for the card's status dot. */
   color: "loom-accent" | "loom-success" | "loom-warning" | "loom-error";
@@ -218,6 +223,7 @@ export const SOURCE_DEFS: SourceDef[] = [
     types: ["DATE", "INTEGER", "INTEGER", "DOUBLE"],
     pollMs: 0,
     orderBy: "ts ASC",
+    keepNewest: true,
     group: "earth",
     color: "loom-error",
   }),
@@ -553,6 +559,7 @@ export const SOURCE_DEFS: SourceDef[] = [
     types: ["DATE", "DOUBLE", "DOUBLE", "DOUBLE"],
     pollMs: 0,
     orderBy: "record_date ASC",
+    keepNewest: true,
     group: "world",
     color: "loom-error",
   }),
@@ -627,9 +634,13 @@ export const SOURCE_BY_KIND: Record<SourceKind, SourceDef> = Object.fromEntries(
 export const SOURCE_KINDS_FROM_DEFS: readonly SourceKind[] = SOURCE_DEFS.map((d) => d.kind);
 
 function isPhoneProfile(): boolean {
-  if (typeof window === "undefined") return false;
-  const coarse = window.matchMedia("(max-width: 640px)").matches;
-  const conn = (navigator as Navigator & { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  const client = globalThis as typeof globalThis & {
+    window?: { matchMedia: (query: string) => { matches: boolean } };
+    navigator?: { connection?: { saveData?: boolean; effectiveType?: string } };
+  };
+  if (!client.window) return false;
+  const coarse = client.window.matchMedia("(max-width: 640px)").matches;
+  const conn = client.navigator?.connection;
   const slow = conn?.saveData || /(?:^|[^a-z])2g|3g(?:$|[^a-z])/i.test(conn?.effectiveType ?? "");
   return coarse || slow;
 }

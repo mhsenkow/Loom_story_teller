@@ -3,7 +3,7 @@
 // (split from recommendations.ts — LOOM-195; public API re-exported there)
 // =================================================================
 
-import { type SourceKind } from "../tauri";
+import { type SourceKind } from "../sourceRegistry";
 
 /** SQL queries for each source kind. */
 export const SOURCE_SQL_SNIPPETS = {

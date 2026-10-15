@@ -20,6 +20,7 @@ import type {
   QueryViewItem,
   TableViewItem,
 } from "./store";
+import { parseCustomChartLooks, MAX_CUSTOM_CHART_LOOKS, type CustomChartLook } from "./customChartLooks";
 
 export const WORKSPACE_BUNDLE_FORMAT = "loom-workspace";
 export const WORKSPACE_BUNDLE_VERSION = 1;
@@ -37,6 +38,7 @@ export interface WorkspaceSnippet {
 }
 
 export interface WorkspaceBundleContent {
+  customChartLooks?: CustomChartLook[];
   tableViews: TableViewItem[];
   chartViews: ChartViewItem[];
   queryViews: QueryViewItem[];
@@ -66,6 +68,7 @@ export type WorkspaceParseResult =
   | { ok: false; code: "empty" | "too-large" | "not-json" | "not-loom" | "future-version" | "invalid"; message: string };
 
 export interface WorkspaceExportScope {
+  customChartLooks?: boolean;
   tableViews: boolean;
   chartViews: boolean;
   queryViews: boolean;
@@ -77,6 +80,7 @@ export interface WorkspaceExportScope {
 }
 
 export const DEFAULT_EXPORT_SCOPE: WorkspaceExportScope = {
+  customChartLooks: true,
   tableViews: true,
   chartViews: true,
   queryViews: true,
@@ -154,6 +158,7 @@ export function buildWorkspaceBundle(
   now: Date = new Date(),
 ): WorkspaceBundle {
   const content: WorkspaceBundleContent = {
+    customChartLooks: scope.customChartLooks === false ? [] : parseCustomChartLooks(input.customChartLooks),
     tableViews: scope.tableViews
       ? (input.tableViews ?? []).map((v) => ({
           id: v.id,
@@ -181,6 +186,7 @@ export function buildWorkspaceBundle(
     version: WORKSPACE_BUNDLE_VERSION,
     createdAt: now.toISOString(),
     counts: {
+      customChartLooks: content.customChartLooks?.length ?? 0,
       tableViews: content.tableViews.length,
       chartViews: content.chartViews.length,
       queryViews: content.queryViews.length,
@@ -236,6 +242,7 @@ export function parseWorkspaceBundle(text: string): WorkspaceParseResult {
   }
   const c = raw.content;
   const content: WorkspaceBundleContent = {
+    customChartLooks: parseCustomChartLooks(c.customChartLooks),
     tableViews: parseTableViews(c.tableViews),
     chartViews: parsePersistedChartViews(c.chartViews),
     queryViews: parsePersistedQueryViews(c.queryViews),
@@ -244,6 +251,7 @@ export function parseWorkspaceBundle(text: string): WorkspaceParseResult {
     tablePrefsByPath: parsePrefsByPath(c.tablePrefsByPath),
   };
   const total =
+    (content.customChartLooks?.length ?? 0) +
     content.tableViews.length +
     content.chartViews.length +
     content.queryViews.length +
@@ -289,6 +297,10 @@ export function mergeWorkspaceBundle(
   const c = mergeById(current.chartViews, incoming.chartViews, 30);
   const q = mergeById(current.queryViews, incoming.queryViews, 30);
   const d = mergeById(current.dashboards, incoming.dashboards, 20);
+  const currentLooks = parseCustomChartLooks(current.customChartLooks);
+  const incomingLooks = parseCustomChartLooks(incoming.customChartLooks);
+  const lookNames = new Set(currentLooks.map((look) => look.name.toLowerCase()));
+  const looks = mergeById(currentLooks, incomingLooks.filter((look) => !lookNames.has(look.name.toLowerCase())), MAX_CUSTOM_CHART_LOOKS);
   const names = new Set(current.snippets.map((s) => s.name));
   const freshSnips = incoming.snippets.filter((s) => !names.has(s.name));
   const snippets = [...current.snippets, ...freshSnips].slice(0, 30);
@@ -296,6 +308,7 @@ export function mergeWorkspaceBundle(
   const prefsAdded = Object.keys(prefs).length - Object.keys(current.tablePrefsByPath).length;
   return {
     merged: {
+      customChartLooks: looks.list,
       tableViews: t.list,
       chartViews: c.list,
       queryViews: q.list,
@@ -304,6 +317,7 @@ export function mergeWorkspaceBundle(
       tablePrefsByPath: prefs,
     },
     added: {
+      customChartLooks: looks.added,
       tableViews: t.added,
       chartViews: c.added,
       queryViews: q.added,
@@ -312,6 +326,7 @@ export function mergeWorkspaceBundle(
       tablePrefsByPath: prefsAdded,
     },
     skipped: {
+      customChartLooks: incomingLooks.length - looks.added,
       tableViews: t.skipped,
       chartViews: c.skipped,
       queryViews: q.skipped,

@@ -28,8 +28,8 @@ import {
   type DiscoverStory,
 } from "@/lib/discoverStories";
 import { activateDataset, shortlistFor, type DatasetShortlist } from "@/lib/datasetPipeline";
-import { ALL_SOURCE_KINDS, sourceStart, sourceStatus, streamStart, streamStatus } from "@/lib/tauri";
-import { SOURCE_BY_KIND } from "@/lib/sourceRegistry";
+import { ALL_SOURCE_KINDS, sourceSnapshot, sourceStart, sourceStatus, streamStart, streamStatus } from "@/lib/tauri";
+import { SOURCE_BY_KIND, SOURCE_EXPLORE_ROWS } from "@/lib/sourceRegistry";
 import { ODD_CHART_KIND_OPTIONS } from "@/lib/oddCharts";
 import { GEO_MAP_KIND_OPTIONS, isGeoFamilyKind } from "@/lib/geoMaps";
 import { resolveStartupIntent, shouldOpenOnboarding } from "@/lib/startupIntent";
@@ -337,11 +337,22 @@ export function Onboarding() {
       } catch {
         /* status optional */
       }
+      // Discover probes with a small snapshot for thumbnails; open the story on
+      // the same full buffer the sidebar uses so lines cover the whole window.
+      let { stats, sample } = story;
+      if (story.kind !== "wiki") {
+        try {
+          const full = await sourceSnapshot(story.kind, SOURCE_EXPLORE_ROWS);
+          if (full.sample.rows.length >= story.sample.rows.length) ({ stats, sample } = full);
+        } catch {
+          /* keep the probe sample */
+        }
+      }
       const file = {
         path: story.streamPath,
         name: story.fileName,
         extension: "stream",
-        row_count: story.sample.total_rows,
+        row_count: sample.total_rows,
         size_bytes: 0,
         ...(story.kind === "wiki"
           ? {
@@ -355,7 +366,7 @@ export function Onboarding() {
       };
       const shortlist: DatasetShortlist =
         story.kind === "wiki" ? { type: "stream" } : { type: "source", kind: story.kind };
-      const seqCharts = shortlistFor(shortlist, file, story.stats, story.sample);
+      const seqCharts = shortlistFor(shortlist, file, stats, sample);
       const charts = seqCharts.length ? seqCharts : [story.chart];
       const preferred =
         charts.find((c) => c.kind === story.chart.kind && c.title === story.chart.title) ??
@@ -365,8 +376,8 @@ export function Onboarding() {
       const openChart = { ...preferred, ...story.chart, id: story.chart.id || preferred.id };
       activateDataset({
         file,
-        stats: story.stats,
-        sample: story.sample,
+        stats,
+        sample,
         charts: [openChart, ...charts.filter((c) => c.id !== openChart.id)],
         active: openChart,
       });

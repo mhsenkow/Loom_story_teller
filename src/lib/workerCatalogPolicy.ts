@@ -69,6 +69,8 @@ function rowCountFromPayload(data: unknown): number | null {
   if (Array.isArray(data)) return data.length;
   if (!data || typeof data !== "object") return null;
   const o = data as JsonRecord;
+  // Columnar transforms ({ columns, rows }) — FIRMS, GDACS, ADSB fallbacks, …
+  if (Array.isArray(o.rows)) return o.rows.length;
   if (Array.isArray(o.states)) return o.states.length;
   if (Array.isArray(o.features)) return o.features.length;
   if (Array.isArray(o.ac)) return o.ac.length;

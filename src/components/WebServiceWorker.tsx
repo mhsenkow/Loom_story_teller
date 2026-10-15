@@ -11,6 +11,13 @@ export function WebServiceWorker() {
     if (!("serviceWorker" in navigator)) return;
     void (async () => {
       try {
+        if (process.env.NODE_ENV === "development") {
+          const reg = await navigator.serviceWorker.getRegistration();
+          if (reg?.active?.scriptURL === new URL("/sw.js", window.location.origin).href) {
+            await reg.unregister();
+          }
+          return;
+        }
         const reg = await navigator.serviceWorker.register("/sw.js");
         await reg.update();
       } catch {

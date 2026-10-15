@@ -272,7 +272,10 @@ export interface LoomState {
   toastMessage: string | null;
   toastShowUndo: boolean;
   dashboardUndoSnapshot: { dashboards: DashboardItem[]; activeDashboardId: string | null } | null;
-  chartEditUndoStack: { activeChart: ChartRecommendation | null; chartVisualOverrides: ChartVisualOverrides }[];
+  chartEditUndoStack: import("../chartEditHistory").ChartEditSnapshot[];
+  chartEditRedoStack: import("../chartEditHistory").ChartEditSnapshot[];
+  chartEditGroup: { key: string; at: number } | null;
+  customChartLooks: import("../customChartLooks").CustomChartLook[];
   chartViews: ChartViewItem[];
   queryViews: QueryViewItem[];
   dashboards: DashboardItem[];
@@ -433,6 +436,11 @@ export interface LoomState {
   clearDashboardUndo: () => void;
   pushChartEditUndo: () => void;
   undoChartEdit: () => void;
+  redoChartEdit: () => void;
+  editChartVisualOverrides: (patch: ChartVisualOverrides, groupKey?: string) => void;
+  saveCustomChartLook: (name: string) => string | null;
+  applyCustomChartLook: (id: string) => void;
+  removeCustomChartLook: (id: string) => void;
   setChartViews: (views: ChartViewItem[]) => void;
   addChartView: (
     name: string,

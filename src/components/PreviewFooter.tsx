@@ -131,10 +131,34 @@ export function PreviewFooter() {
     const newX = slot === "x" ? colName : activeChart.xField;
     const newY = slot === "y" ? colName : activeChart.yField;
     const newColor = slot === "color" ? colName : activeChart.colorField;
-    const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName);
+    // Keep facet / size / tooltip / window extras when assigning from Schema
+    const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, {
+      sizeField: activeChart.sizeField ?? null,
+      zField: activeChart.zField ?? null,
+      rowField: activeChart.rowField ?? null,
+      glowField: activeChart.glowField ?? null,
+      outlineField: activeChart.outlineField ?? null,
+      opacityField: activeChart.opacityField ?? null,
+      yAggregate: activeChart.yAggregate ?? null,
+      topN: activeChart.topN ?? null,
+      y2Field: activeChart.y2Field ?? null,
+      comparePrevious: activeChart.comparePrevious ?? null,
+      rollingWindow: activeChart.rollingWindow ?? null,
+      yScale: activeChart.yScale ?? null,
+      seriesNormalize: activeChart.seriesNormalize ?? null,
+      residualOverlay: activeChart.residualOverlay ?? null,
+      anomalyHighlight: activeChart.anomalyHighlight ?? null,
+      bumpMode: activeChart.bumpMode ?? null,
+      timeWindowField: activeChart.timeWindowField ?? null,
+      timeWindow: activeChart.timeWindow ?? null,
+      tooltipFields: activeChart.tooltipFields,
+      tooltipKeyField: activeChart.tooltipKeyField ?? null,
+      layoutDirection: activeChart.layoutDirection ?? null,
+    });
     if (rec) {
       setActiveChart(rec);
       setPanelTab("chart");
+      useLoomStore.getState().setChartPanelSection("encoding");
       if (!panelOpen) setPanelOpen(true);
     }
     setAssignCol(null);

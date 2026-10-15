@@ -7,6 +7,7 @@
 // =================================================================
 
 import {
+  FOOTNOTE_BAND_PX,
   blendToward,
   fitTextEllipsis,
   isLightHex,
@@ -53,6 +54,8 @@ export interface ChartLookOpts {
   tickCount?: number;
   tickRotation?: number;
   fontFamily?: string;
+  /** A source footnote owns the bottom band — X field title sits above it. */
+  sourceFootnote?: boolean;
   /**
    * Value → pixel maps from the active renderer. When present, grid + ticks
    * follow them so Direction ↓ / ← (reversed measure) keeps labels aligned
@@ -703,8 +706,9 @@ export function drawAxisFieldLabels(
   ctx.font = chartFont(fontSize, fontFamily, 500);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  // Sit just above the canvas floor, clear of tick labels
-  const xY = h - Math.max(10, Math.min(18, pad * 0.22));
+  // Sit just above the canvas floor (or the footnote band), clear of tick labels
+  const footBand = opts?.sourceFootnote ? FOOTNOTE_BAND_PX : 0;
+  const xY = h - footBand - Math.max(10, Math.min(18, pad * 0.22));
   ctx.fillText(fitTextEllipsis(ctx, xLabel, maxX), w / 2, xY);
 
   if (yLabel) {
@@ -719,6 +723,33 @@ export function drawAxisFieldLabels(
     ctx.restore();
   }
   ctx.restore();
+}
+
+/**
+ * Extra top margin (px) a title needs to wrap onto a second line above its
+ * subtitle at this pad — 0 when it fits on one line (or the layout never wraps).
+ */
+export function chartTitleWrapPx(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  pad: number,
+  title: string,
+  subtitle: string | undefined,
+  opts: { titleLayout?: string; fontFamily?: string; titleFontWeight?: number; titleItalic?: boolean; axisFontSize?: number },
+): number {
+  const layout = opts.titleLayout ?? "pair";
+  if (!subtitle || layout === "ticket" || layout === "slab") return 0;
+  const ramp = chartTypeRamp(opts.axisFontSize);
+  const size =
+    layout === "stack" || layout === "spine" ? Math.max(12, ramp.title - 1)
+      : layout === "caption" ? Math.max(12, ramp.title - 2)
+        : ramp.title;
+  const maxW = Math.max(48, w - pad * 2 - (titlePreferCenter(layout) ? 0 : 8));
+  ctx.save();
+  ctx.font = chartFont(size, opts.fontFamily ?? "Inter", opts.titleFontWeight ?? 600, opts.titleItalic ? "italic" : "normal");
+  const wraps = ctx.measureText(title.replace(/\s+/g, " ").trim()).width > maxW;
+  ctx.restore();
+  return wraps ? Math.round(ramp.title * 1.15) : 0;
 }
 
 /** Title / subtitle block — wraps up to 2 lines before ellipsis; sizes from type ramp. */
@@ -774,6 +805,37 @@ export function drawChartTitleBlock(
     }
   };
 
+  /**
+   * Title + subtitle pair: a title that wraps pushes the subtitle down a line
+   * (lifting the title into the top inset first). When the band can't fit
+   * both, the title stays on one line with an ellipsis instead of overlapping.
+   */
+  const paintTitlePair = (
+    x: number,
+    size: number,
+    align: CanvasTextAlign,
+    paintSubtitle: (y: number) => void,
+  ) => {
+    let titleY = pos.titleY;
+    let subY = pos.subtitleY;
+    let maxLines = 2;
+    if (subtitle) {
+      ctx.font = chartFont(size, fontFamily, titleWeight, titleStyle);
+      if (fitTextWrap(ctx, title, maxW, 2).length > 1) {
+        const gap = lineGap * (size / ramp.title);
+        const lift = Math.max(0, Math.min(gap / 2, titleY - (size + 4)));
+        if (subY + gap - lift <= pad - 6) {
+          titleY -= lift;
+          subY += gap - lift;
+        } else {
+          maxLines = 1;
+        }
+      }
+    }
+    paintWrapped(title, x, titleY, size, titleWeight, titleStyle, text, align, maxLines);
+    if (subtitle) paintSubtitle(subY);
+  };
+
   ctx.save();
   ctx.textBaseline = "alphabetic";
   const tx = center ? w / 2 : pad;
@@ -790,28 +852,27 @@ export function drawChartTitleBlock(
       paintWrapped(subtitle, pad + 8, pos.subtitleY, Math.max(10, ramp.subtitle - 1), 400, "normal", muted, "left", 1);
     }
   } else if (layout === "stack" || layout === "spine") {
-    paintWrapped(title, pad, pos.titleY, Math.max(12, ramp.title - 1), titleWeight, titleStyle, text, "left", 2);
-    if (subtitle) {
-      paintWrapped(subtitle, pad, pos.subtitleY, ramp.subtitle, 400, "normal", muted, "left", 1);
-    }
+    let ruleY = pos.subtitleY;
+    paintTitlePair(pad, Math.max(12, ramp.title - 1), "left", (y) => {
+      ruleY = y;
+      paintWrapped(subtitle!, pad, y, ramp.subtitle, 400, "normal", muted, "left", 1);
+    });
     if (layout === "spine") {
       ctx.strokeStyle = text;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(pad, Math.min(pad - 4, pos.subtitleY + 8));
-      ctx.lineTo(pad + 48, Math.min(pad - 4, pos.subtitleY + 8));
+      ctx.moveTo(pad, Math.min(pad - 4, ruleY + 8));
+      ctx.lineTo(pad + 48, Math.min(pad - 4, ruleY + 8));
       ctx.stroke();
     }
   } else if (layout === "caption") {
-    paintWrapped(title, tx, pos.titleY, Math.max(12, ramp.title - 2), titleWeight, titleStyle, text, align, 2);
-    if (subtitle) {
-      paintWrapped(subtitle, tx, pos.subtitleY, ramp.subtitle, 400, "italic", muted, align, 1);
-    }
+    paintTitlePair(tx, Math.max(12, ramp.title - 2), align, (y) =>
+      paintWrapped(subtitle!, tx, y, ramp.subtitle, 400, "italic", muted, align, 1),
+    );
   } else {
-    paintWrapped(title, tx, pos.titleY, ramp.title, titleWeight, titleStyle, text, align, 2);
-    if (subtitle) {
-      paintWrapped(subtitle, tx, pos.subtitleY, ramp.subtitle, 500, "normal", muted, align, 1);
-    }
+    paintTitlePair(tx, ramp.title, align, (y) =>
+      paintWrapped(subtitle!, tx, y, ramp.subtitle, 500, "normal", muted, align, 1),
+    );
   }
   ctx.restore();
 }

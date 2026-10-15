@@ -40,13 +40,14 @@ import { extractGpuScenePoints, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawa
 import { globeCameraForData, isGeoMapKind, isWebGpuGlobeKind, pickAtlasKind, renderGeoMapCanvas } from "@/lib/geoMaps";
 import { type CubeAxisSlot, type CubeHoverCell, DataCubePivotBar, DataCubePivotTable } from "@/components/DataCubePivot";
 import { buildDataCube, buildPivotTable, cubeCellCenter, cubeCellKey, cubeCellTooltip, cubeView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
-import { densityAwarePointMarks, resolveChartPad, subsampleRowsForDensity } from "@/lib/chartLayout";
+import { FOOTNOTE_BAND_PX, densityAwarePointMarks, resolveChartPad, subsampleRowsForDensity } from "@/lib/chartLayout";
 import {
   chartFootnoteReservePx,
   drawAxisFieldLabels,
   drawAxisFrame,
   drawChartBackground,
   drawChartSourceFootnote,
+  chartTitleWrapPx,
   drawChartTitleBlock,
 } from "@/lib/chartLooks";
 import { formatSourceFootnote, resolveDataProvenance } from "@/lib/dataProvenance";
@@ -93,6 +94,13 @@ import { renderFullLollipop, renderFullRadar, renderFullViolin, renderFullWaterf
 import { renderFullArcDiagram, renderFullForceBubble, renderFullNetwork, renderFullSankey, renderFullTreemap } from "@/lib/canvasCharts/flowCharts";
 import { renderFullCorrMatrix, renderFullDumbbell, renderFullFunnel, renderFullHexbin, renderFullParallel, renderFullPareto, renderFullRidgeline } from "@/lib/canvasCharts/statCharts";
 export type { ChartRenderOpts } from "@/lib/chartRenderTypes";
+
+// The WebGPU globe pass (globe.wgsl) only draws glowing points — no sphere,
+// coastlines, legend or hit targets — and its 2D layer covered it, so WebGPU
+// devices (iPadOS Safari included) showed an empty globe. The Canvas 2D globe
+// draws all of that and handles live-feed point counts fine; keep it on 2D
+// until the GPU pass composites a basemap.
+const GPU_GLOBE_ENABLED = false;
 
 /** x/y charts that share the L-frame + axis titles drawn by the dispatch. */
 const FRAMED_KINDS = new Set<string>([
@@ -250,8 +258,13 @@ export function ChartView() {
     if (!useLoomStore.getState().panelOpen) useLoomStore.getState().togglePanel();
   }, [setPanelTab]);
 
+  // Kinds that never read Color (hexbin, histogram, heatmap…) may carry a stale
+  // colorField from an earlier type — don't let it pick palettes or legends.
+  const effectiveColorField =
+    activeChart && chartCapabilities(activeChart.kind).colorChannel ? (activeChart.colorField ?? null) : null;
+
   const colors = useMemo(() => {
-    const colorField = activeChart?.colorField;
+    const colorField = effectiveColorField;
     const col = colorField
       ? columnStats.find((c) => c.name === colorField)
       : undefined;
@@ -275,12 +288,12 @@ export function ChartView() {
     appSettings.theme,
     appSettings.colorblindCharts,
     activeChart?.kind,
-    activeChart?.colorField,
+    effectiveColorField,
     columnStats,
   ]);
 
   const continuousStops = useMemo(() => {
-    const colorField = activeChart?.colorField;
+    const colorField = effectiveColorField;
     const col = colorField
       ? columnStats.find((c) => c.name === colorField)
       : undefined;
@@ -303,7 +316,7 @@ export function ChartView() {
     appSettings.theme,
     appSettings.colorblindCharts,
     activeChart?.kind,
-    activeChart?.colorField,
+    effectiveColorField,
     columnStats,
   ]);
   const opacity = chartVisualOverrides.opacity ?? 0.7;
@@ -311,14 +324,14 @@ export function ChartView() {
 
   const chartColorInfo = useMemo(() => {
     if (!activeChart) return null;
-    const colorField = activeChart.colorField;
+    const colorField = effectiveColorField;
     const col = colorField ? columnStats.find((c) => c.name === colorField) : undefined;
     const colorFieldType = col
       ? isNumericType(col.data_type)
         ? ("quantitative" as const)
         : ("nominal" as const)
       : null;
-    return describeChartColorStatus(activeChart, {
+    return describeChartColorStatus({ ...activeChart, colorField }, {
       paletteId: chartVisualOverrides.colorPalette ?? "auto",
       scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
       reverse: !!chartVisualOverrides.colorPaletteReverse,
@@ -329,6 +342,7 @@ export function ChartView() {
     });
   }, [
     activeChart,
+    effectiveColorField,
     columnStats,
     chartVisualOverrides.colorPalette,
     chartVisualOverrides.colorScaleKind,
@@ -706,6 +720,7 @@ export function ChartView() {
     !forceCanvasCapture &&
     !!sceneRendererRef.current;
   const useWebGpuGlobe =
+    GPU_GLOBE_ENABLED &&
     !!activeChart &&
     isWebGpuGlobeKind(activeChart.kind) &&
     gpuReady &&
@@ -1322,7 +1337,7 @@ export function ChartView() {
     if (!canvas) return;
     let cancelled = false;
     const kind = activeChart?.kind ?? "";
-    const wantScene = isWebGpuDrawableScene(kind) || isWebGpuGlobeKind(kind);
+    const wantScene = isWebGpuDrawableScene(kind);
     const wantCube = kind === "dataCube";
     const wantScatter = kind === "scatter";
 
@@ -2399,32 +2414,12 @@ export function ChartView() {
           ctx.clearRect(0, 0, w, h);
           ctx.fillStyle = themeUi.bg;
           ctx.fillRect(0, 0, w, h);
-          // Footnote on the 2D layer under the GPU canvas (zIndex keeps GPU on top for
-          // points; raise 2D briefly for the caption strip via a second pass on overlay).
-          if (chartFootnoteText || chartColorInfo?.stops?.length) {
-            drawChartSourceFootnote(ctx, w, h, 24, chartFootnoteText ?? "", {
-              ...footnoteOpts(themeUi.label, themeUi.border),
-            });
-          }
           ctx.setTransform(1, 0, 0, 1, 0, 0);
         }
       }
-      // Also paint on the axes overlay so the caption sits above the GPU canvas.
-      const overlay = axesOverlayRef.current;
-      const octx = overlay?.getContext("2d");
-      if (overlay && octx) {
-        const dpr = stageDpr();
-        const w = overlay.width / dpr;
-        const h = overlay.height / dpr;
-        octx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        octx.clearRect(0, 0, w, h);
-        if (chartFootnoteText || chartColorInfo?.stops?.length) {
-          drawChartSourceFootnote(octx, w, h, 24, chartFootnoteText ?? "", {
-            ...footnoteOpts(themeUi.label, themeUi.border),
-          });
-        }
-        octx.setTransform(1, 0, 0, 1, 0, 0);
-      }
+      // Title + credit live on the axes overlay (raised above the GPU canvas) and are
+      // painted by the overlay effect — don't clear it here, or orbiting the scene
+      // (which re-runs this effect, not that one) would wipe the title.
       const packed = extractGpuScenePoints(
         chartSampleRows?.rows ?? sampleRows.rows,
         sampleRows.columns,
@@ -2482,7 +2477,12 @@ export function ChartView() {
     const ch = (canvas2D as HTMLCanvasElement).height;
     if (typeof cw !== "number" || typeof ch !== "number" || cw <= 0 || ch <= 0) return;
     const w = cw / dpr;
-    const h = ch / dpr;
+    const hFull = ch / dpr;
+    // A source footnote owns the bottom band. Every renderer lays out in the
+    // canvas above it (h), so captions, legends and axis titles can't collide
+    // with the credit line; only background + footnote use the full height.
+    const footBand = chartFootnoteText || chartColorInfo?.stops?.length ? FOOTNOTE_BAND_PX : 0;
+    const h = hFull - footBand;
 
     const rowsAll = chartSampleRows?.rows;
     const cols = chartSampleRows?.columns;
@@ -2504,10 +2504,11 @@ export function ChartView() {
     const rows = sub.rows;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
+    ctx.clearRect(0, 0, w, hFull);
 
-    const opts = chartRenderOpts;
-    const pad = resolveChartPad({
+    // The footnote band is already carved off h — renderers shouldn't reserve it again
+    const opts: ChartRenderOpts = { ...chartRenderOpts, sourceFootnote: false };
+    const padArgs = {
       kind: activeChart.kind,
       width: w,
       height: h,
@@ -2518,8 +2519,18 @@ export function ChartView() {
       isCompact,
       legendPosition: opts.legendPosition,
       axisFontSize: opts.axisFontSize,
-      sourceFootnote: opts.sourceFootnote,
-    });
+    };
+    const basePadPx = resolveChartPad(padArgs);
+    // A long headline (Discover hooks often are) wraps above its subtitle — give it the room
+    const titleWrapPx = chartTitleWrapPx(
+      ctx,
+      w,
+      basePadPx,
+      chartTitleOverrides[activeChart.id] ?? activeChart.title,
+      activeChart.subtitle,
+      opts,
+    );
+    const pad = titleWrapPx ? resolveChartPad({ ...padArgs, titleWrapPx }) : basePadPx;
     const xIdx = cols.indexOf(activeChart.xField);
     const yIdx = activeChart.yField ? cols.indexOf(activeChart.yField) : -1;
     const cIdx = activeChart.colorField ? cols.indexOf(activeChart.colorField) : -1;
@@ -2534,12 +2545,12 @@ export function ChartView() {
     const drawOneFrame = (clipProgress: number) => {
       try {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.clearRect(0, 0, w, h);
-        drawChartBackground(ctx, w, h, opts.backgroundStyle, opts.themeBg);
+        ctx.clearRect(0, 0, w, hFull);
+        drawChartBackground(ctx, w, hFull, opts.backgroundStyle, opts.themeBg);
         if (clipProgress < 1) {
           ctx.save();
           ctx.beginPath();
-          ctx.rect(0, 0, w * clipProgress, h);
+          ctx.rect(0, 0, w * clipProgress, hFull);
           ctx.clip();
         }
         ctx.globalCompositeOperation = (opts.blendMode as GlobalCompositeOperation) ?? "source-over";
@@ -2925,7 +2936,11 @@ export function ChartView() {
         if (legendPos !== "none" && legendEntries && legendEntries.length > 1) {
           const legendTitle =
             kind === "waterfall" || kind === "dumbbell" ? undefined : activeChart.colorField ?? undefined;
-          legendRect = drawLegend(ctx, legendEntries, legendPos, w, h, pad, fontFamily, opts.themeBg, opts.themeBorder, opts.themeText, legendTitle);
+          // Renderers with a label gutter report their real plot rect — keep the key inside it
+          const plotRect = !useFacets && ropts.scales?.rect ? ropts.scales.rect : pad;
+          // Point / bubble maps draw their size key bottom-left
+          const avoid = categoricalMap && activeChart.sizeField ? ["bottom-left"] : [];
+          legendRect = drawLegend(ctx, legendEntries, legendPos, w, h, plotRect, fontFamily, opts.themeBg, opts.themeBorder, opts.themeText, legendTitle, avoid);
         }
         const titleBand = Math.min(pad * 0.85, 48);
         const chromeLayout: ChartChromeLayout = {
@@ -2979,8 +2994,8 @@ export function ChartView() {
           );
         }
 
-        if (chartFootnoteText || chartColorInfo?.stops?.length) {
-          drawChartSourceFootnote(ctx, w, h, pad, chartFootnoteText ?? "", {
+        if (footBand) {
+          drawChartSourceFootnote(ctx, w, hFull, pad, chartFootnoteText ?? "", {
             ...footnoteOpts(opts.themeMuted, opts.themeBorder),
             fontFamily,
           });
@@ -3929,7 +3944,7 @@ export function ChartView() {
           <canvas
             ref={axesOverlayRef}
             className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ zIndex: useWebGPUScatter || useWebGpuCube ? 2 : 0 }}
+            style={{ zIndex: useWebGPUScatter || useWebGpuCube || useWebGpuScene || useWebGpuGlobe ? 2 : 0 }}
           />
           {socialExportReady &&
             (chartAspect === "9:16" || socialExportTarget?.presetId === "stories") && (

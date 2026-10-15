@@ -502,3 +502,15 @@ describe("storyMutationAuthorized", () => {
     expect(storyMutationAuthorized(req, makeEnv())).toBe(false);
   });
 });
+
+describe("worker entry exports", () => {
+  // workerd treats every named export of the entry module as an entrypoint and
+  // refuses to boot when one is a primitive (e.g. `export const X = "..."`).
+  it("exports only functions or objects", async () => {
+    const mod = (await importHandlers()) as Record<string, unknown>;
+    for (const [name, value] of Object.entries(mod)) {
+      const t = typeof value;
+      expect(t === "function" || (t === "object" && value !== null), `export ${name} is ${t}`).toBe(true);
+    }
+  });
+});

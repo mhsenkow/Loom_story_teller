@@ -287,22 +287,50 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
     return;
   }
 
-  // Category × category: rank by frequency (or natural order for numbers / dates)
-  const orderedKeys = (idx: number) => {
+  // Category × category: rank by frequency (or natural order for numbers / dates).
+  // A wide numeric axis (category × measure) bins into ranges instead of
+  // listing the first 20 raw values with a count of 1 each.
+  const axisKeys = (idx: number, numericHighFirst: boolean) => {
     const freq = new Map<string, number>();
     for (const r of rows) freq.set(String(r[idx]), (freq.get(String(r[idx])) ?? 0) + 1);
     const cls = classifyKeys([...freq.keys()]);
+    if (cls.kind === "number" && cls.values.length > 20) {
+      const lo = cls.values[0]!;
+      const hi = cls.values[cls.values.length - 1]!;
+      const ticks = niceTicks(lo, hi, 10, false).ticks;
+      const edges = ticks.length >= 2 ? ticks : [lo, hi];
+      if (edges[0]! > lo) edges.unshift(lo);
+      if (edges[edges.length - 1]! < hi) edges.push(hi);
+      const labels = edges.slice(0, -1).map((e, i) => `${formatDataValue(e)} – ${formatDataValue(edges[i + 1]!)}`);
+      const keyOf = (r: unknown[]) => {
+        const v = Number(r[idx]);
+        if (!Number.isFinite(v)) return "";
+        let b = edges.findIndex((e, i) => i > 0 && v < e) - 1;
+        if (b < 0) b = labels.length - 1;
+        return labels[b]!;
+      };
+      return { labels: numericHighFirst ? [...labels].reverse() : labels, keyOf, binned: true };
+    }
     const keys = cls.kind !== "band" ? cls.sorted : [...freq.keys()].sort((a, b) => freq.get(b)! - freq.get(a)!);
-    return keys.slice(0, 20);
+    const top = keys.slice(0, 20);
+    return {
+      labels: numericHighFirst && cls.kind === "number" ? [...top].reverse() : top,
+      keyOf: (r: unknown[]) => String(r[idx]),
+      binned: false,
+    };
   };
-  const xLabels = orderedKeys(xi);
-  const yLabels = orderedKeys(yi);
+  const xAxis = axisKeys(xi, false);
+  const yAxis = axisKeys(yi, true);
+  const xLabels = xAxis.labels;
+  const yLabels = yAxis.labels;
   if (xLabels.length === 0 || yLabels.length === 0) return;
   const counts = new Map<string, number>();
-  for (const r of rows) {
-    const k = `${r[xi]}\u0000${r[yi]}`;
+  const firstRow = new Map<string, number>();
+  rows.forEach((r, ri) => {
+    const k = `${xAxis.keyOf(r)}\u0000${yAxis.keyOf(r)}`;
     counts.set(k, (counts.get(k) ?? 0) + 1);
-  }
+    if (!firstRow.has(k)) firstRow.set(k, ri);
+  });
   let maxC = 1;
   for (const xL of xLabels) for (const yL of yLabels) maxC = Math.max(maxC, counts.get(`${xL}\u0000${yL}`) ?? 0);
 
@@ -329,9 +357,12 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
         ctx.textBaseline = "middle";
         ctx.fillText(formatDataValue(c), px + cellW / 2, py + cellH / 2);
       }
+      const binned = xAxis.binned || yAxis.binned;
       pushHit(opts, {
         shape: "rect", x: px, y: py, w: cellW, h: cellH,
-        match: c > 0 ? [[xi, xL], [yi, yL]] : [],
+        // Range buckets aren't raw values — identify the cell by its first row
+        match: c > 0 && !binned ? [[xi, xL], [yi, yL]] : [],
+        rowIndex: c > 0 && binned ? firstRow.get(`${xL}\u0000${yL}`) : undefined,
         summary: { columns: [xName, yName, "Rows"], row: [xL, yL, formatTooltipNumber(c)] },
       });
     });

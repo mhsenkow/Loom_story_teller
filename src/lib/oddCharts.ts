@@ -10,6 +10,7 @@ import type { ColumnInfo } from "./store";
 import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
+import { formatDateCell } from "./dateFormat";
 import {
   aggregateAxisTitle,
   classifyKeys,
@@ -497,7 +498,22 @@ function dot(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, fil
 }
 
 /** Ordered x keys (numbers / dates sorted by value, plain categories in data order). */
-function orderedKeys(rows: unknown[][], xi: number, max: number): { keys: string[]; pos: number[]; kind: "number" | "time" | "band"; domain: [number, number] | null } {
+type OrderedModel = {
+  keys: string[];
+  pos: number[];
+  kind: "number" | "time" | "band";
+  domain: [number, number] | null;
+  /** Which key a row lands in (raw value, or its bucket when `bucket` is on). */
+  keyOf: (r: unknown[]) => string;
+};
+
+/**
+ * Ordered X positions. Past `max` distinct values a band axis keeps an even
+ * sample; a numeric / time axis either samples too or — with `bucket` — folds
+ * every row into `max` equal-width ranges so nothing is dropped (event feeds
+ * have a unique timestamp per row, and a sample kept ~1 row in 6).
+ */
+function orderedKeys(rows: unknown[][], xi: number, max: number, bucket = false): OrderedModel {
   const seen: string[] = [];
   const set = new Set<string>();
   for (const r of rows) {
@@ -507,9 +523,33 @@ function orderedKeys(rows: unknown[][], xi: number, max: number): { keys: string
       seen.push(k);
     }
   }
+  const raw = (r: unknown[]) => String(r[xi]);
   const cls = classifyKeys(seen);
   let keys = cls.kind === "band" ? seen.filter((k) => k !== "null" && k !== "undefined" && k !== "") : cls.sorted;
   let values = cls.kind === "band" ? keys.map((_, i) => i) : cls.values;
+  if (bucket && cls.kind !== "band" && keys.length > max) {
+    const lo = values[0]!;
+    const hi = values[values.length - 1]!;
+    const width = (hi - lo) / max || 1;
+    const starts = Array.from({ length: max }, (_, i) => lo + i * width);
+    const bucketKeys = starts.map((t) => (cls.kind === "time" ? new Date(t).toISOString() : String(t)));
+    const valueOf = new Map(cls.sorted.map((k, i) => [k, cls.values[i]!]));
+    const keyOf = (r: unknown[]) => {
+      const v = valueOf.get(raw(r));
+      if (v == null) return "";
+      return bucketKeys[Math.min(max - 1, Math.max(0, Math.floor((v - lo) / width)))]!;
+    };
+    // Only buckets that hold rows, positioned at their centers
+    const used = new Set(rows.map(keyOf));
+    const kept = bucketKeys.map((k, i) => ({ k, center: starts[i]! + width / 2 })).filter((b) => used.has(b.k));
+    return {
+      keys: kept.map((b) => b.k),
+      pos: kept.map((b) => (b.center - lo) / (hi - lo || 1)),
+      kind: cls.kind,
+      domain: [lo, hi],
+      keyOf,
+    };
+  }
   if (keys.length > max) {
     // Even sample that keeps the first and last key.
     const idx = Array.from({ length: max }, (_, i) => Math.round((i * (keys.length - 1)) / (max - 1)));
@@ -518,18 +558,17 @@ function orderedKeys(rows: unknown[][], xi: number, max: number): { keys: string
   }
   if (cls.kind === "band" || keys.length < 2) {
     const n = Math.max(1, keys.length);
-    return { keys, pos: keys.map((_, i) => (n === 1 ? 0.5 : i / (n - 1))), kind: "band", domain: null };
+    return { keys, pos: keys.map((_, i) => (n === 1 ? 0.5 : i / (n - 1))), kind: "band", domain: null, keyOf: raw };
   }
   const lo = values[0]!;
   const hi = values[values.length - 1]!;
-  return { keys, pos: values.map((v) => (v - lo) / (hi - lo || 1)), kind: cls.kind, domain: [lo, hi] };
+  return { keys, pos: values.map((v) => (v - lo) / (hi - lo || 1)), kind: cls.kind, domain: [lo, hi], keyOf: raw };
 }
 
-/** X labels for an ordered axis: round ticks for numbers / dates, thinned keys for categories. */
 function drawOrderedXAxis(
   ctx: CanvasRenderingContext2D,
   env: OddEnv,
-  model: ReturnType<typeof orderedKeys>,
+  model: OrderedModel,
   plot: PlotRect,
 ) {
   const pw = plot.right - plot.left;
@@ -1272,7 +1311,7 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
 function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
   if (xi < 0 || yi < 0) return "Bump chart needs an order column and a numeric column";
   if (ci < 0) return "Bump charts rank series — choose a color (series) field";
-  const model = orderedKeys(rows, xi, 20);
+  const model = orderedKeys(rows, xi, 20, true);
   if (model.keys.length < 2) return "Need at least two positions to rank across";
   const { mini, ink } = env;
   const catIdx = categoryIndex(rows, ci);
@@ -1282,7 +1321,7 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
     const v = toNum(r[yi]);
     if (!Number.isFinite(v)) continue;
     const s = String(r[ci]);
-    const key = `${String(r[xi])}||${s}`;
+    const key = `${model.keyOf(r)}||${s}`;
     const l = cell.get(key) ?? [];
     l.push(v);
     cell.set(key, l);
@@ -1410,7 +1449,7 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
 
 function drawStream(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
   if (xi < 0 || yi < 0) return "Streamgraph needs an order column and a numeric column";
-  const model = orderedKeys(rows, xi, 60);
+  const model = orderedKeys(rows, xi, 60, true);
   if (model.keys.length < 2) return "Need at least two positions for a stream";
   const { mini, ink } = env;
   const catIdx = categoryIndex(rows, ci);
@@ -1420,7 +1459,7 @@ function drawStream(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     const v = toNum(r[yi]);
     if (!Number.isFinite(v) || v < 0) continue;
     const s = ci >= 0 ? String(r[ci]) : "";
-    const k = `${String(r[xi])}||${s}`;
+    const k = `${model.keyOf(r)}||${s}`;
     cell.set(k, (cell.get(k) ?? 0) + v);
     totalsBy.set(s, (totalsBy.get(s) ?? 0) + v);
   }
@@ -1526,12 +1565,12 @@ function drawStream(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
 
 function drawHorizon(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number) {
   if (xi < 0 || yi < 0) return "Horizon needs an order column and a numeric column";
-  const model = orderedKeys(rows, xi, 400);
+  const model = orderedKeys(rows, xi, 120, true);
   const sums = new Map<string, { s: number; n: number }>();
   for (const r of rows) {
     const v = toNum(r[yi]);
     if (!Number.isFinite(v)) continue;
-    const k = String(r[xi]);
+    const k = model.keyOf(r);
     const cur = sums.get(k) ?? { s: 0, n: 0 };
     cur.s += v;
     cur.n += 1;
@@ -1654,10 +1693,12 @@ function drawSpiral(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.textBaseline = "middle";
     const s = posOf(0);
     const e = posOf(pts.length - 1);
+    // ISO timestamps read as "2026-10-13 22:47", not "2026-10-13T22:47:39.280Z"; years stay as-is
+    const when = (v: string) => (/^\d{4}-\d{2}-\d{2}/.test(v) ? formatDateCell(v) : v);
     ctx.textAlign = "center";
-    ctx.fillText(fitTextEllipsis(ctx, `start ${pts[0]!.x}`, maxR), s.x, s.y - 12);
+    ctx.fillText(fitTextEllipsis(ctx, `start ${when(pts[0]!.x)}`, maxR), s.x, s.y - 12);
     ctx.textAlign = e.x >= cx ? "left" : "right";
-    ctx.fillText(fitTextEllipsis(ctx, `end ${pts[pts.length - 1]!.x}`, Math.max(40, env.w / 2 - 10)), e.x + (e.x >= cx ? 8 : -8), e.y);
+    ctx.fillText(fitTextEllipsis(ctx, `end ${when(pts[pts.length - 1]!.x)}`, Math.max(40, env.w / 2 - 10)), e.x + (e.x >= cx ? 8 : -8), e.y);
   }
   footer.draw(footerTop);
 }

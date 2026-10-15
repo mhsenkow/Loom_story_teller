@@ -18,11 +18,35 @@ export const SHELL_DESKTOP_PREFS_KEY = "loom-shell-desktop-prefs";
 /** Chart suggestions rail open/closed (session). */
 export const SUGGESTIONS_RAIL_PREFS_KEY = "loom-suggestions-rail";
 
-/** Map chart device band → shell chrome mode (same cutoffs). */
-export function shellModeFromWidth(width: number): ShellMode {
+/**
+ * Touch-primary screens narrower than this get tablet chrome even when the
+ * width alone says desktop — iPads in landscape are 1133–1366px wide, and the
+ * three-panel desktop layout leaves the chart a sliver there.
+ */
+export const TOUCH_TABLET_MAX_WIDTH = 1400;
+
+/** iPad / touch-first device (coarse primary pointer, or iPadOS desktop-class UA). */
+export function isTouchPrimary(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    if (window.matchMedia?.("(pointer: coarse)").matches) return true;
+    // iPadOS reports a Mac UA; touch points give it away (Macs report 0).
+    const nav = window.navigator;
+    return (nav?.maxTouchPoints ?? 0) > 1 && /Macintosh|iPad/.test(nav.userAgent ?? "");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Map viewport width → shell chrome mode. Same cutoffs as chartViewport,
+ * except wide touch screens stay in tablet chrome (see TOUCH_TABLET_MAX_WIDTH).
+ */
+export function shellModeFromWidth(width: number, touchPrimary: boolean = isTouchPrimary()): ShellMode {
   const d: DetectedDevice = detectDevice(width);
   if (d === "mobile") return "phone";
   if (d === "tablet") return "tablet";
+  if (touchPrimary && width < TOUCH_TABLET_MAX_WIDTH) return "tablet";
   return "desktop";
 }
 

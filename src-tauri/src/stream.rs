@@ -53,6 +53,8 @@ pub struct StreamStatus {
     pub last_error: Option<String>,
 }
 
+type StreamWorker = Option<(u64, JoinHandle<()>)>;
+
 pub struct StreamState {
     pub running: Arc<AtomicBool>,
     pub total_events: Arc<AtomicU64>,
@@ -61,7 +63,7 @@ pub struct StreamState {
     cancel_flag: Arc<AtomicBool>,
     events_last_check: Arc<TokioMutex<(u64, std::time::Instant)>>,
     generation: Arc<AtomicU64>,
-    worker: Arc<TokioMutex<Option<(u64, JoinHandle<()>)>>>,
+    worker: Arc<TokioMutex<StreamWorker>>,
     last_error: Arc<TokioMutex<Option<String>>>,
 }
 
@@ -446,8 +448,8 @@ async fn run_stream_worker(
                                     last_event_id = Some(id.trim().to_string());
                                     continue;
                                 }
-                                if line.starts_with("data: ") {
-                                    let payload = line[6..].trim();
+                                if let Some(payload) = line.strip_prefix("data: ") {
+                                    let payload = payload.trim();
                                     if let Some(ev) = parse_sse_event(payload) {
                                         buffer.push(ev);
                                         state.total_events.fetch_add(1, Ordering::Relaxed);
@@ -455,7 +457,8 @@ async fn run_stream_worker(
                                             let _ = batch_insert(&db, &buffer);
                                             buffer.clear();
                                             trim_counter += 1;
-                                            if trim_counter % 20 == 0 {
+                                            if trim_counter == 20 {
+                                                trim_counter = 0;
                                                 let _ = trim_buffer(&db);
                                             }
                                         }

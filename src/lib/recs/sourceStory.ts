@@ -10,7 +10,7 @@ import { expandRecommendationsWithExtras } from "./expand";
 import { type ColumnInfo, type QueryResult } from "../queryTypes";
 import { chartKindDataSupport, getRandomEncoding } from "./random";
 import { type StorySequence, recommend } from "./recommend";
-import { type SourceKind } from "../tauri";
+import { type SourceKind } from "../sourceRegistry";
 import { CHART_KIND_OPTIONS, type ChartKind, type ChartRecommendation, type YAggregateOption } from "./types";
 
 // =================================================================
