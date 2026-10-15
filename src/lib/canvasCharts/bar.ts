@@ -71,7 +71,7 @@ export function renderFullBar(
   const cornerR = opts?.barCornerRadius ?? 3;
   const showDataLabels = opts?.showDataLabels ?? false;
   const axisLabelColor = opts?.axisLabelColor ?? "#6b6b78";
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const chartW = rect.right - rect.left;
   const xName = fieldLabel(opts, xi, "category");
   const vTitle = valueTitle(opts, yi);
@@ -306,7 +306,7 @@ export function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown
   const values = rows.map((r) => Number(r[xi]));
   const bins = histogramBins(values);
   if (!bins) return;
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const maxC = Math.max(1, ...bins.counts);
   const ys = niceZeroScale(0, maxC, opts?.tickCount ?? 5);
   const X = linear(bins.lo, bins.hi, rect.left, rect.right);

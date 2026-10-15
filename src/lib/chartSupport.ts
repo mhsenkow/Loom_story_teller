@@ -528,6 +528,8 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       "corrMatrix", "pareto",
       // Canvas ignores color for these
       "dumbbell", "funnel",
+      // Dual-measure kinds: Size carries the second measure; Color slot is hidden in UI
+      "pyramid", "slope",
     ].includes(kind),
     // Size: bubble/scatter + endpoint kinds + geo bubbles/globe + GPU scenes
     sizeChannel:
@@ -687,6 +689,66 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
       return base("Rows", "Columns", "Color", "Value");
     default:
       return base("X", "Y", "Color");
+  }
+}
+
+/** Short Encoding tip for kinds with non-obvious channel roles. */
+export function encodingKindBlurb(kind: ChartKind): string | null {
+  switch (kind) {
+    case "radar":
+      return "Every numeric column becomes an axis. Set Series (Color) to compare groups.";
+    case "parallel":
+      return "Every numeric column becomes a parallel axis. Color groups the polylines.";
+    case "corrMatrix":
+      return "Pairwise correlations across numeric columns — no X/Y pickers.";
+    case "histogram":
+      return "Y is always a count of rows per bin of X.";
+    case "pie":
+      return "Slice is the category; Value is the measure (aggregated). Color usually matches Slice.";
+    case "treemap":
+    case "sunburst":
+      return "Leaf is the category path; Value sizes the blocks. Nest (Color) builds hierarchy when set.";
+    case "sankey":
+    case "network":
+    case "arcDiagram":
+    case "chord":
+    case "mosaic":
+      return "Source → Target flow; Weight sizes the links. Pick two categorical columns plus a measure.";
+    case "dumbbell":
+      return "Start and End are two numeric measures on the same category — Size is the end measure.";
+    case "pyramid":
+      return "Left and Right are opposing measures (e.g. male/female). Size carries the right-hand measure.";
+    case "slope":
+      return "Start and End are two timepoints or states for each category. Size is the end measure.";
+    case "heatmap":
+      return "Column × Row cells; Heat colors by a third measure (or count when unset).";
+    case "hexbin":
+      return "Bins dense X/Y into hexes; Color shows density (or an aggregate when set).";
+    case "dataCube":
+      return "Rows × Columns pivot; Value fills each cell (count when empty). Drag the cube to orbit.";
+    case "forceBubble":
+      return "Category packs into bubbles; Value sets radius after aggregation.";
+    case "funnel":
+      return "Stages ordered by Value — Top N keeps the largest stages.";
+    case "pareto":
+      return "Categories ranked by Value with a cumulative % line. Top N caps the bars.";
+    case "bump":
+      return "Order on X, ranked Value on Y, Series as Color. Bump mode toggles rank vs Δ rank.";
+    case "stream":
+      return "Order on X, stacked Value bands, Series as Color.";
+    case "choropleth":
+      return "Region names/codes join the basemap; Value fills each area.";
+    case "geoPoints":
+    case "geoBubbles":
+    case "globe":
+    case "globeTrail":
+      return "Lon/Lat place marks; Color and Size encode extra measures.";
+    case "chernoff":
+    case "glyphStar":
+    case "flower":
+      return "Identity labels each glyph; Feature A/B/C map to face/star/petal channels.";
+    default:
+      return null;
   }
 }
 

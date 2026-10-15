@@ -75,8 +75,9 @@ export function renderFullScatter(
   const getOpacityNorm = opacityIdx >= 0 ? encodingNorm(rows, opacityIdx) : null;
   const glowIntensity = opts?.glowIntensity ?? 8;
 
-  const plotW = Math.max(1, w - 2 * pad);
-  const plotH = Math.max(1, h - 2 * pad);
+  const rect = plotOf(w, h, pad, opts);
+  const plotW = Math.max(1, rect.right - rect.left);
+  const plotH = Math.max(1, rect.bottom - rect.top);
   let nValid = 0;
   for (let i = 0; i < rows.length; i++) {
     const x = Number(rows[i]![xi]);
@@ -97,15 +98,15 @@ export function renderFullScatter(
   const baseRadius = marks.minR;
   const maxSizeRadius = marks.maxR;
 
-  const toSX = (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
+  const toSX = (v: number) => rect.left + ((v - xMin) / (xMax - xMin || 1)) * plotW;
   const toSY = (v: number) => {
     if (yScaleKind !== "linear" && !fit) {
       const t = scaleY(v, yMin, yMax, yScaleKind);
-      return h - pad - t * (h - 2 * pad);
+      return rect.bottom - t * plotH;
     }
-    return h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
+    return rect.bottom - ((v - yMin) / (yMax - yMin || 1)) * plotH;
   };
-  if (opts) opts.scales = { x: toSX, y: toSY, valueAxis: "y", rect: plotOf(w, h, pad) };
+  if (opts) opts.scales = { x: toSX, y: toSY, valueAxis: "y", rect: plotOf(w, h, pad, opts) };
   drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
   if (opts?.showMarginals && !fit) drawScatterMarginals(ctx, rows, xi, yi, xMin, xMax, yMin, yMax, w, h, pad, opts);
   if (opts?.connectTrail && !fit) drawScatterTrail(ctx, rows, xi, yi, ci, toSX, toSY, opts);
@@ -117,8 +118,8 @@ export function renderFullScatter(
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
-    ctx.moveTo(pad, zy);
-    ctx.lineTo(w - pad, zy);
+    ctx.moveTo(rect.left, zy);
+    ctx.lineTo(rect.right, zy);
     ctx.stroke();
     ctx.setLineDash([]);
   }

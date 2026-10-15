@@ -43,6 +43,8 @@ export function ColumnFieldPicker({
   labelledBy,
   describedBy,
   ariaLabel,
+  typeBadge,
+  typeBadgeTitle,
 }: {
   value: string;
   options: ColumnFieldOption[];
@@ -52,6 +54,9 @@ export function ColumnFieldPicker({
   labelledBy?: string;
   describedBy?: string;
   ariaLabel?: string;
+  /** Short type chip (# / Abc / Time) shown inside the trigger. */
+  typeBadge?: string;
+  typeBadgeTitle?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -263,6 +268,14 @@ export function ColumnFieldPicker({
         <span className="flex-1 min-w-0 truncate text-loom-text">
           {displayLabel || "—"}
         </span>
+        {typeBadge ? (
+          <span
+            className="shrink-0 text-2xs font-mono text-loom-muted"
+            title={typeBadgeTitle || typeBadge}
+          >
+            {typeBadge}
+          </span>
+        ) : null}
         <span className="shrink-0 text-loom-muted" aria-hidden>
           ▾
         </span>

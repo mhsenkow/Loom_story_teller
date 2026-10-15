@@ -39,7 +39,7 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   const total = entries.reduce((s, e) => s + e.value, 0);
   if (total === 0) return;
   const fontFamily = opts?.fontFamily ?? "Inter";
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const plotW = rect.right - rect.left;
   const plotH = rect.bottom - rect.top;
   const pct = (v: number) => {
@@ -191,7 +191,7 @@ export function renderFullBubble(
       x: (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad),
       y: (v: number) => h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad),
       valueAxis: "y",
-      rect: plotOf(w, h, pad),
+      rect: plotOf(w, h, pad, opts),
     };
   }
 

@@ -43,4 +43,40 @@ describe("sanitizeChartVisualOverrides", () => {
     expect(out?.glowIntensity).toBe(12);
     expect(out?.chartPadding).toBe(20);
   });
+
+  it("keeps custom legend offsets and chrome info band", () => {
+    const out = sanitizeChartVisualOverrides({
+      legendPosition: "custom",
+      legendOffsetX: 0.82,
+      legendOffsetY: 0.12,
+      legendWidth: 0.2,
+      legendHeight: 0.35,
+      chromeInfoBand: "header",
+      sourceFootnote: "credit",
+    });
+    expect(out).toMatchObject({
+      legendPosition: "custom",
+      legendOffsetX: 0.82,
+      legendOffsetY: 0.12,
+      legendWidth: 0.2,
+      legendHeight: 0.35,
+      chromeInfoBand: "header",
+      sourceFootnote: "credit",
+    });
+  });
+
+  it("drops custom legend geometry when position is not custom", () => {
+    const out = sanitizeChartVisualOverrides({
+      legendPosition: "top-right",
+      legendOffsetX: 0.5,
+      legendOffsetY: 0.5,
+      legendWidth: 0.2,
+      legendHeight: 0.3,
+    });
+    expect(out?.legendPosition).toBe("top-right");
+    expect(out).not.toHaveProperty("legendOffsetX");
+    expect(out).not.toHaveProperty("legendOffsetY");
+    expect(out).not.toHaveProperty("legendWidth");
+    expect(out).not.toHaveProperty("legendHeight");
+  });
 });

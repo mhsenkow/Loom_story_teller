@@ -115,6 +115,22 @@ describe("chartSlice", () => {
     expect(getState().chartVisualOverrides.opacity).toBe(0.5);
   });
 
+  it("editChartVisualOverrides deletes keys when patched with undefined", () => {
+    getState().setChartVisualOverrides({
+      legendPosition: "custom",
+      legendOffsetX: 0.7,
+      legendOffsetY: 0.1,
+      legendWidth: 0.2,
+    });
+    getState().editChartVisualOverrides({
+      legendPosition: "auto",
+      legendOffsetX: undefined,
+      legendOffsetY: undefined,
+      legendWidth: undefined,
+    });
+    expect(getState().chartVisualOverrides).toEqual({ legendPosition: "auto" });
+  });
+
   it("setBarStackMode sets barStackMode on bar rec", () => {
     const rec = makeRec({ kind: "bar", barStackMode: "percent" });
     getState().setActiveChart(rec);

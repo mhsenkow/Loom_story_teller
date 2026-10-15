@@ -252,7 +252,7 @@ export interface LoomState {
   tableViews: TableViewItem[];
   queryResultPage: number;
   queryResultPageSize: number;
-  chartAnnotations: Record<string, { id: string; text: string; x: number; y: number }[]>;
+  chartAnnotations: Record<string, { id: string; text: string; x: number; y: number; width?: number; fontSize?: number }[]>;
   hoveredRowIndex: number | null;
   tooltipLink: { field: string; value: string } | null;
   pinnedTooltips: { id: string; chartId: string; x: number; y: number; rowIndex: number; row: (string | number | boolean | null)[]; columns: string[] }[];
@@ -413,6 +413,7 @@ export interface LoomState {
   setQueryResultPage: (page: number) => void;
   setQueryResultPageSize: (size: number) => void;
   addChartAnnotation: (chartId: string, text: string, x?: number, y?: number) => void;
+  updateChartAnnotation: (chartId: string, id: string, patch: { x?: number; y?: number; width?: number; fontSize?: number }) => void;
   removeChartAnnotation: (chartId: string, id: string) => void;
   setHoveredRowIndex: (idx: number | null) => void;
   setTooltipLink: (link: { field: string; value: string } | null) => void;

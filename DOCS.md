@@ -115,7 +115,7 @@ Development does not register the offline service worker; an existing Loom regis
   - **Reference lines, trails, marginals** — renderers publish `opts.scales` ({x, y, valueAxis, rect}); the dispatch draws `customRefLines` on the value axis (X for horizontal bars / lollipop / strip / dumbbell / ridgeline). Scatter draws `connectScatterTrail` paths and `showMarginals` edge histograms; any of these forces the Canvas scatter over WebGPU.
   - **Bars** — `computeBarModel` keeps numeric/date keys in order (≤40) and ranks categories by value (top 20). `barsShouldBeHorizontal` flips to labeled horizontal bands when the stage is portrait or the names can't sit flat under their bars. One color unless Color encodes something.
   - **Hover targets** — renderers push `HitTarget`s (rect / circle / arc + `match` column values or `rowIndex`, plus an aggregated `summary`) into `ChartRenderOpts.hits` while painting; `Canvas2DHitContext.targets` makes the tooltip pick exactly what was drawn and show the mark's value (bar total, slice share, bin range). Kinds without targets fall back to `pickCanvasTooltipRowIndex` geometry.
-  - **Legend** — renderers report the series they colored via `setLegend` (`ChartRenderOpts.legend`); the dispatch draws it. `legendPosition` defaults to `"auto"`: shown only when a color field is encoded, in the plot corner with the least ink (sampled from the canvas). Density ramps go through `densityStops` so the high end contrasts with the theme background.
+  - **Legend** — renderers report the series they colored via `setLegend` (`ChartRenderOpts.legend`); the dispatch draws it. `legendPosition` defaults to `"auto"`: shown only when a color field is encoded, in the plot corner with the least ink (sampled from the canvas). **Arrange** mode (Chart toolbar) drags/resizes the key into `legendPosition: "custom"` plus normalized `legendOffsetX/Y` / `legendWidth/Height` (share-stable in `#chart=` `vo`). Density ramps go through `densityStops` so the high end contrasts with the theme background.
   - **Titles over maps** — geo and GPU-scene renderers fill the whole canvas, so ChartView draws the title block after them. Flat-map projections fit with the full pad on top only (`fitProjection` in `geoMaps.ts`).
 - **Smart analytics** — `src/lib/smartAnalytics.ts`: `runAnomaly`, `runForecast`, `runTrend`, `runReferenceLines`, `runClustering`. **Correlation matrix** (Pearson) computed in DetailPanel. Smart tab runs cards and sets `smartResults`; ChartView draws overlays.
 
@@ -129,7 +129,7 @@ Chart look and feel is controlled by `chartVisualOverrides` in the store and app
 - **Typography** — `fontFamily`, `titleFontWeight`, `titleItalic`, `tickRotation`; applied to title and axis labels.
 - **Marks** — `markShape` (circle, square, diamond, triangle, cross, star, …), `markStroke` / `markStrokeWidth`, `markJitter`, `sizeScale` (for size encoding), `barCornerRadius`, `lineStrokeStyle`, `lineCurveSmooth`.
 - **Axes & grid** — `axisLineColor`, `axisLineWidth`, `gridStyle`, `gridOpacity`, `tickCount`, `axisLabelColor`.
-- **Layout** — `chartPadding`, `legendPosition`, `showDataLabels`.
+- **Layout** — `chartPadding`, `legendPosition` (+ custom offsets), `showDataLabels`, `sourceFootnote` / `sourceFootnoteAlign`, `chromeInfoBand` (`footer` under the plot or `header` under the title — credit, date range, and color ramp move together).
 - **Atmosphere** — `backgroundStyle`, `blendMode`, `glowEnabled`, `animateEntrance`.
 - **Look spectrum** (wordcount-inspired) — `chartDetail` (plain/viz/deep), `markMotif`, `axisStyle`, `emphasisStyle`, `ghostEnabled` / weight / place, `titleLayout`, `chartFrame`. Presets in `src/lib/lookSystem.ts` **replace** the override bundle (Tufte, Bauhaus, Newspaper, Military, Clarity, … + Shuffle).
 
@@ -266,3 +266,11 @@ Run `make test` for Vitest only; run `make ci` before tagging releases.
 - **Static export** — No `getServerSideProps` or runtime API routes; Data.gov and other backend work live in Tauri commands.
 - **Paths** — Normalize `file://` and `file:///` to a plain path before sending to Rust (see `normalizePath` in `tauri.ts` and `normalize_folder_path` in `commands.rs`).
 - **Errors** — Rust commands return `Result<T, String>`; frontend shows errors via toast or inline message where appropriate.
+
+### Canvas arrangement
+
+`CanvasArrangeOverlay` adds an explicit Arrange mode to Chart view. The Ideas rail temporarily yields its space; phone inspector drawers close for the gesture and reopen when done. Canvas handles resize the centered frame (aspect presets keep their shape). Title width controls wrapping; title height changes type scale. Legend width controls label room and height controls how many rows fit. Plot handles change the rendering rectangle for ordinary scatter/bubble, bar, histogram, line and area charts; specialized scenes and facets retain their own internal geometry. Notes support position, width and type size.
+
+Geometry lives as normalized visual overrides, sanitized by `chartVisualSanitize`, and follows existing persistence, chart links, looks and Undo/Redo. Annotation geometry lives beside its text in `chartAnnotations`. Pointer changes use a local animation-frame preview and commit one history entry on release; pointer cancellation/Escape drops the preview. Keyboard arrows move, Shift uses 10px increments, and Ctrl/⌘ arrows resize. All handles are focusable. Edge/center snapping is disabled by Alt. PNG captures preserve arrangement and notes; SVG remains explicitly labeled as a Vega approximation.
+
+`canvasArrangement.ts` supplies bounds and geometry. Cartesian renderers, ticks, reference lines and hit targets share `ChartRenderOpts.plotBounds`; scatter pointer projection uses those same bounds. Custom scatter plot geometry uses the Canvas renderer so live pixels and PNG agree. Export captures omit arrangement handles.

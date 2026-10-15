@@ -18,6 +18,22 @@ const options = [
 ];
 
 describe("ColumnFieldPicker", () => {
+  it("shows an inline type badge inside the trigger", () => {
+    render(
+      <ColumnFieldPicker
+        value="sales"
+        options={options}
+        onChange={vi.fn()}
+        ariaLabel="X field"
+        typeBadge="#"
+        typeBadgeTitle="DOUBLE"
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "X field" });
+    expect(trigger).toHaveTextContent("#");
+    expect(trigger.querySelector('[title="DOUBLE"]')).toBeTruthy();
+  });
+
   it("keeps a mobile popup inside its dialog for screen readers and the focus trap", () => {
     const outerEscape = vi.fn();
     render(

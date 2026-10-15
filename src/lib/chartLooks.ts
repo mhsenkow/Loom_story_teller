@@ -14,6 +14,7 @@ import {
   titlePositions,
   titlePreferCenter,
 } from "./chartLayout";
+import { titleArrangementRect } from "./canvasArrangement";
 import { formatAxisValue, layoutBandLabels, niceTicks } from "./chartAxes";
 import {
   CHART_LABEL_FALLBACK,
@@ -38,6 +39,7 @@ export type ChartBackgroundStyle =
 export type ChartAxisStyle = "rule" | "ladder" | "mercury" | "spine" | "index" | "tape";
 
 export interface ChartLookOpts {
+  plotBounds?: PlotRect;
   backgroundStyle?: string;
   axisStyle?: string;
   axisLineColor?: string;
@@ -238,7 +240,7 @@ export function drawAxisFrame(
   const style = (opts?.axisStyle ?? "rule") as ChartAxisStyle;
   const color = opts?.axisLineColor ?? opts?.themeBorder ?? "#2a2a30";
   const lw = opts?.axisLineWidth ?? 1;
-  const { left, right, top, bottom } = plotRect(w, h, pad);
+  const { left, right, top, bottom } = plotRect(w, h, opts?.plotBounds ?? pad);
 
   ctx.save();
   ctx.strokeStyle = color;
@@ -348,7 +350,7 @@ export function drawChartGrid(
   const axis = opts?.axisStyle ?? "rule";
   const n = Math.max(2, opts?.tickCount ?? 5);
   const alpha = opts?.gridOpacity ?? 0.5;
-  const { left, right, top, bottom } = plotRect(w, h, pad);
+  const { left, right, top, bottom } = plotRect(w, h, opts?.plotBounds ?? pad);
 
   ctx.save();
   ctx.globalAlpha = alpha;
@@ -437,7 +439,7 @@ export function drawChartTicks(
   const rotDeg = opts?.tickRotation ?? 0;
   const rotRad = (rotDeg * Math.PI) / 180;
   const axis = (opts?.axisStyle ?? "rule") as ChartAxisStyle;
-  const { left, right, top, bottom } = plotRect(w, h, pad);
+  const { left, right, top, bottom } = plotRect(w, h, opts?.plotBounds ?? pad);
   const stub = axis === "index" || axis === "mercury" ? 5 : axis === "ladder" ? 7 : 4;
 
   ctx.save();
@@ -528,7 +530,7 @@ export function drawBandAxisX(
   const fontFamily = opts?.fontFamily ?? "Inter";
   const color = opts?.axisLabelColor ?? opts?.themeMuted ?? CHART_LABEL_FALLBACK;
   const baseFont = chartTypeRamp(opts?.axisFontSize).tick;
-  const { bottom } = plotRect(w, h, pad);
+  const { bottom } = plotRect(w, h, opts?.plotBounds ?? pad);
   // Labels live between the baseline and the axis field name near the canvas floor
   const room = Math.max(14, h - bottom - 22);
 
@@ -618,7 +620,7 @@ export function drawPositionedLabelsX(
   pad: number | PlotRect,
   opts?: ChartLookOpts,
 ): void {
-  const { left, right, bottom } = plotRect(w, h, pad);
+  const { left, right, bottom } = plotRect(w, h, opts?.plotBounds ?? pad);
   const fontFamily = opts?.fontFamily ?? "Inter";
   const fontSize = chartTypeRamp(opts?.axisFontSize).tick;
   ctx.save();
@@ -698,8 +700,9 @@ export function drawAxisFieldLabels(
   const fontFamily = opts?.fontFamily ?? "Inter";
   const fontSize = chartTypeRamp(opts?.axisFontSize).axisField;
   const color = opts?.axisLabelColor ?? opts?.themeMuted ?? CHART_LABEL_FALLBACK;
-  const maxX = Math.max(40, w - pad * 2);
-  const maxY = Math.max(40, h - pad * 2);
+  const rect = opts?.plotBounds ?? plotRect(w, h, pad);
+  const maxX = Math.max(40, rect.right - rect.left);
+  const maxY = Math.max(40, rect.bottom - rect.top);
 
   ctx.save();
   ctx.fillStyle = color;
@@ -708,15 +711,15 @@ export function drawAxisFieldLabels(
   ctx.textBaseline = "middle";
   // Sit just above the canvas floor (or the footnote band), clear of tick labels
   const footBand = opts?.sourceFootnote ? FOOTNOTE_BAND_PX : 0;
-  const xY = h - footBand - Math.max(10, Math.min(18, pad * 0.22));
-  ctx.fillText(fitTextEllipsis(ctx, xLabel, maxX), w / 2, xY);
+  const xY = opts?.plotBounds ? Math.min(h - footBand - 12, rect.bottom + 40) : h - footBand - Math.max(10, Math.min(18, pad * 0.22));
+  ctx.fillText(fitTextEllipsis(ctx, xLabel, maxX), (rect.left + rect.right) / 2, xY);
 
   if (yLabel) {
     ctx.save();
     // Vertically center on the plot; horizontally mid-left gutter, but always
     // left of ~7-char tick labels (narrow phone / capture layouts have slim pads).
-    const gx = Math.max(fontSize * 0.75 + 2, Math.min(pad * 0.38, pad - 10, pad - 46));
-    const gy = pad + (h - 2 * pad) / 2;
+    const gx = Math.max(fontSize * 0.75 + 2, Math.min(rect.left * 0.38, rect.left - 10, rect.left - 46));
+    const gy = (rect.top + rect.bottom) / 2;
     ctx.translate(gx, gy);
     ctx.rotate(-Math.PI / 2);
     ctx.fillText(fitTextEllipsis(ctx, yLabel, maxY), 0, 0);
@@ -761,6 +764,10 @@ export function drawChartTitleBlock(
   title: string,
   subtitle: string | undefined,
   opts: {
+    titleX?: number;
+    titleY?: number;
+    titleWidth?: number;
+    titleScale?: number;
     titleLayout?: string;
     fontFamily?: string;
     titleFontWeight?: number;
@@ -772,7 +779,16 @@ export function drawChartTitleBlock(
     axisFontSize?: number;
   },
 ): void {
-  void h;
+  if (opts.titleX != null || opts.titleY != null || opts.titleWidth != null || opts.titleScale != null) {
+    const r = titleArrangementRect(w, h, pad, opts);
+    const scale = opts.titleScale ?? 1;
+    ctx.save();
+    ctx.translate(r.x - pad * scale, r.y - 4 * scale);
+    ctx.scale(scale, scale);
+    drawChartTitleBlock(ctx, r.w / scale + 2 * pad, h / scale, pad, title, subtitle, { ...opts, titleX: undefined, titleY: undefined, titleWidth: undefined, titleScale: undefined });
+    ctx.restore();
+    return;
+  }
   const layout = opts.titleLayout ?? "pair";
   const pos = titlePositions(pad, layout);
   const fontFamily = opts.fontFamily ?? "Inter";
@@ -923,6 +939,10 @@ export function drawChartSourceFootnote(
     colorRampLabel?: string | null;
     /** When true, blend stops into a gradient; otherwise discrete chips. */
     colorRampContinuous?: boolean;
+    /** Footer (default) under the plot, or header under the title band. */
+    band?: "footer" | "header";
+    /** When band is header, Y of the rule (CSS px from top). */
+    headerTop?: number;
   } = {},
 ): void {
   const lines = text
@@ -942,24 +962,36 @@ export function drawChartSourceFootnote(
   const rampW = Math.min(132, Math.max(72, w * 0.22));
   const rampGap = ramp.length ? rampW + 10 : 0;
   const maxW = Math.max(48, w - pad * 2 - rampGap);
-  const baseY = h - Math.max(6, pad * 0.22);
   const textLines = Math.max(lines.length, ramp.length ? 1 : 0);
-  const topLineY = baseY - (textLines - 1) * lineH;
+  const band = opts.band ?? "footer";
+  const baseY =
+    band === "header"
+      ? (opts.headerTop ?? Math.max(pad * 0.55, 28)) + (textLines - 1) * lineH + rampH + 4
+      : h - Math.max(6, pad * 0.22);
+  const topLineY =
+    band === "header"
+      ? (opts.headerTop ?? Math.max(pad * 0.55, 28))
+      : baseY - (textLines - 1) * lineH;
 
   ctx.save();
   ctx.strokeStyle = opts.themeBorder ?? muted;
   ctx.globalAlpha = 0.45;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(pad, topLineY - 13);
-  ctx.lineTo(w - pad, topLineY - 13);
+  if (band === "header") {
+    ctx.moveTo(pad, topLineY + textLines * lineH + 4);
+    ctx.lineTo(w - pad, topLineY + textLines * lineH + 4);
+  } else {
+    ctx.moveTo(pad, topLineY - 13);
+    ctx.lineTo(w - pad, topLineY - 13);
+  }
   ctx.stroke();
   ctx.globalAlpha = 1;
 
   if (lines.length) {
     ctx.font = chartFont(type.footnote, fontFamily, 500);
     ctx.fillStyle = muted;
-    ctx.textBaseline = "bottom";
+    ctx.textBaseline = band === "header" ? "top" : "bottom";
     ctx.textAlign = align === "center" ? "center" : align === "right" ? "right" : "left";
     const x =
       align === "center"
@@ -974,7 +1006,10 @@ export function drawChartSourceFootnote(
 
   if (ramp.length) {
     const rx = w - pad - rampW;
-    const ry = baseY - rampH;
+    const ry =
+      band === "header"
+        ? topLineY + Math.max(0, lines.length - 1) * lineH + (lines.length ? lineH - rampH : 0)
+        : baseY - rampH;
     if (opts.colorRampLabel) {
       ctx.font = chartFont(type.footnoteMeta, fontFamily, 500);
       ctx.fillStyle = muted;

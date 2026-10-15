@@ -72,6 +72,29 @@ describe("chart links", () => {
     expect(decodeChartLink(enc)).toEqual(min);
   });
 
+  it("round-trips custom legend placement and header source info in vo", () => {
+    const link: ChartLink = {
+      src: "mock://buoys.csv",
+      chart: { kind: "scatter", xField: "wind_speed_ms", yField: "wave_height_m", colorField: "gust_ms" },
+      visual: {
+        legendPosition: "custom",
+        legendOffsetX: 0.78,
+        legendOffsetY: 0.08,
+        legendWidth: 0.18,
+        legendHeight: 0.4,
+        chromeInfoBand: "header",
+        sourceFootnote: "credit",
+      },
+    };
+    expect(decodeChartLink(encodeChartLink(link))).toEqual(link);
+    const p = payload(encodeChartLink(link));
+    expect(p.vo).toMatchObject({
+      legendPosition: "custom",
+      legendOffsetX: 0.78,
+      chromeInfoBand: "header",
+    });
+  });
+
   it("omits undefined, null-ish and default values from the payload", () => {
     const link = chartLinkFromState({
       selectedFile: { path: "mock://sales.csv", name: "sales.csv" },

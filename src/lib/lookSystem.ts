@@ -638,7 +638,7 @@ const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]>
   axes: [
     "showGrid", "gridStyle", "gridOpacity", "axisLineColor", "axisLineWidth",
     "axisLabelColor", "tickCount", "tickRotation", "axisFontSize", "chartPadding",
-    "legendPosition",
+    "legendPosition", "legendOffsetX", "legendOffsetY",
   ],
   atmosphere: [
     "blendMode", "glowEnabled", "glowIntensity", "animateEntrance",
@@ -649,7 +649,7 @@ const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]>
 
 export const CHART_VISUAL_OVERRIDE_KEYS: (keyof ChartVisualOverrides)[] = (
   Object.values(SECTION_KEYS) as (keyof ChartVisualOverrides)[][]
-).flat().concat(["sourceFootnote", "sourceFootnoteAlign", "tooltipMode"]);
+).flat().concat(["sourceFootnote", "sourceFootnoteAlign", "chromeInfoBand", "tooltipMode", "canvasWidth", "canvasHeight", "plotX", "plotY", "plotWidth", "plotHeight", "titleX", "titleY", "titleWidth", "titleScale", "legendWidth", "legendHeight"]);
 
 function pickOne<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]!;

@@ -94,7 +94,7 @@ function OccasionalOverlays() {
   return (
     <>
       {(mountDiscover || whatsNewOpen) && <Onboarding />}
-      {whatsNewOpen && <WhatsNew />}
+      <WhatsNew />
       {shareSheetOpen && <ShareSheet />}
       {vizSwipeOpen && <VizSwipeDeck />}
       {promptDialog && <PromptDialog />}

@@ -129,3 +129,18 @@ describe("extracted canvas renderers", () => {
     expect(o.hits!.length).toBeGreaterThan(0);
   });
 });
+
+describe("authored plot geometry", () => {
+  it.each(renderers.filter(([name]) => ["bar", "histogram", "scatter", "line", "area", "bubble"].includes(name)))("%s keeps its scales inside the authored bounds", (_, render) => {
+    const { ctx } = fakeCtx();
+    const o = opts();
+    o.plotBounds = { left: 100, top: 90, right: 500, bottom: 280 };
+    render(ctx, rows, o);
+    expect(o.scales?.rect).toBeDefined();
+    expect(o.scales!.rect.left).toBeGreaterThanOrEqual(100);
+    expect(o.scales!.rect.top).toBeGreaterThanOrEqual(90);
+    expect(o.scales!.rect.right).toBeLessThanOrEqual(500);
+    expect(o.scales!.rect.bottom).toBeLessThanOrEqual(280);
+    if (o.scales?.x) expect(Number.isFinite(o.scales.x(12))).toBe(true);
+  });
+});

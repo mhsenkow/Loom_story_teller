@@ -2,6 +2,7 @@
 // WebGPU scatter eligibility — one predicate for draw + PNG export
 // =================================================================
 
+import { hasCanvasArrangement } from "./canvasArrangement";
 import type { ChartRecommendation } from "./recommendations";
 import type { ChartVisualOverrides } from "./store";
 
@@ -20,6 +21,15 @@ export interface WebGpuScatterEligibilityInput {
   > | null;
   overrides: Pick<
     ChartVisualOverrides,
+    | "plotX"
+    | "titleX"
+    | "titleY"
+    | "titleWidth"
+    | "titleScale"
+    | "legendOffsetX"
+    | "legendOffsetY"
+    | "legendWidth"
+    | "legendHeight"
     | "markShape"
     | "markStroke"
     | "markJitter"
@@ -28,6 +38,7 @@ export interface WebGpuScatterEligibilityInput {
 }
 
 export function canUseWebGpuScatter(input: WebGpuScatterEligibilityInput): boolean {
+  if (hasCanvasArrangement(input.overrides)) return false;
   const chart = input.chart;
   return (
     input.kind === "scatter" &&

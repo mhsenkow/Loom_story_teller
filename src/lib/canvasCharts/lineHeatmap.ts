@@ -32,7 +32,7 @@ export function renderFullLine(
   const alpha = Math.max(0.85, opts?.opacity ?? 0.9);
   const lineW = Math.max(1.5, opts?.lineWidth ?? 2);
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "mean");
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const span = rect.right - rect.left;
   const comparePrev = !!opts?.comparePrevious;
 
@@ -232,7 +232,7 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
     if (!isNaN(x) && !isNaN(y)) numericHits++;
   }
   if (probe > 0 && numericHits / probe >= 0.7) {
-    const rect = plotOf(w, h, pad);
+    const rect = plotOf(w, h, pad, opts);
     const plotW = rect.right - rect.left;
     const plotH = rect.bottom - rect.top;
     const [xMin, xMax] = numRange(rows, xi);

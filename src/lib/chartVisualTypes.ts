@@ -3,6 +3,19 @@
 // =================================================================
 
 export interface ChartVisualOverrides {
+  /** Canvas arrangement, normalized to the chart frame. */
+  canvasWidth?: number;
+  canvasHeight?: number;
+  plotX?: number;
+  plotY?: number;
+  plotWidth?: number;
+  plotHeight?: number;
+  titleX?: number;
+  titleY?: number;
+  titleWidth?: number;
+  titleScale?: number;
+  legendWidth?: number;
+  legendHeight?: number;
   pointSize?: number;
   opacity?: number;
   colorPalette?: string;
@@ -32,6 +45,9 @@ export interface ChartVisualOverrides {
   axisLabelColor?: string;
   chartPadding?: number;
   legendPosition?: string;
+  /** Normalized 0–1 offsets within the plot when legendPosition is `custom` (share-stable). */
+  legendOffsetX?: number;
+  legendOffsetY?: number;
   showDataLabels?: boolean;
   facetField?: string | null;
   backgroundStyle?: string;
@@ -50,5 +66,7 @@ export interface ChartVisualOverrides {
   chartFrame?: "hero" | "compact" | "focus";
   sourceFootnote?: "off" | "name" | "credit" | "full";
   sourceFootnoteAlign?: "left" | "center" | "right";
+  /** Where source / time / color-ramp chrome sits on the canvas. */
+  chromeInfoBand?: "footer" | "header";
   tooltipMode?: "auto" | "hover" | "glass" | "dock" | "compact" | "off";
 }

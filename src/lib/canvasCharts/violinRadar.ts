@@ -28,7 +28,7 @@ export function renderFullViolin(ctx: CanvasRenderingContext2D, rows: unknown[][
   const groupColor = new Map<string, string>();
   if (ci >= 0 && ci !== xi) for (const r of rows) if (!groupColor.has(String(r[xi]))) groupColor.set(String(r[xi]), String(r[ci]));
   const colorKeys = [...new Set(groupColor.values())];
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const gMin = Math.min(...groups.map((g) => g.min));
   const gMax = Math.max(...groups.map((g) => g.max));
   const ys = niceTicks(gMin, gMax, opts?.tickCount ?? 5, true);
@@ -294,7 +294,7 @@ export function renderFullWaterfall(ctx: CanvasRenderingContext2D, rows: unknown
   bars.push({ label: "Total", start: 0, end: running, value: running, total: true });
   const allY = bars.flatMap(b => [b.start, b.end]);
   const ys = niceZeroScale(Math.min(0, ...allY), Math.max(0, ...allY), opts?.tickCount ?? 5);
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const layout = resolveLayoutDirection(opts?.layoutDirection, false);
   // Waterfall stays category-on-X; Direction flips the measure (↓ / ← / → → reverse).
   const flip = layout.reverse || layout.horizontal;
@@ -453,7 +453,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
   }
 
   // Vertical lollipops — categories on X, values grow up (or down when reverse)
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const ys = niceZeroScale(Math.min(0, ...entries.map((e) => e.value)), Math.max(0, ...entries.map((e) => e.value)), opts?.tickCount ?? 5);
   const Y = reverse
     ? linear(ys.min, ys.max, rect.top, rect.bottom)

@@ -909,6 +909,16 @@ html {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--loom-accent) 22%, transparent);
   }
 
+  /* Nested inside EncodingSlot chrome — outer row owns the border. */
+  .loom-encoding-slot .loom-input,
+  .loom-encoding-slot .loom-input:focus,
+  .loom-encoding-slot .loom-input:focus-visible {
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0;
+    background: transparent;
+  }
+
   .loom-badge {
     @apply inline-flex items-center px-1.5 py-0.5
            text-2xs font-mono

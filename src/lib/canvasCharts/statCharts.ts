@@ -52,7 +52,7 @@ export function renderFullPareto(
 
   const layout = resolveLayoutDirection(opts?.layoutDirection, false);
   const reverse = layout.reverse;
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const maxV = Math.max(...bins.map((b) => b.value));
   const ys = niceTicks(0, maxV, opts?.tickCount ?? 5, true);
   // Pareto keeps categories on X; Direction only flips the measure (↑ / ↓).
@@ -181,7 +181,7 @@ export function renderFullCorrMatrix(
   );
   if (!matrix) return;
 
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const n = matrix.labels.length;
   const cellW = (rect.right - rect.left) / n;
   const cellH = (rect.bottom - rect.top) / n;
@@ -460,7 +460,7 @@ export function renderFullHexbin(
       x: (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad),
       y: (v: number) => h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad),
       valueAxis: "y",
-      rect: plotOf(w, h, pad),
+      rect: plotOf(w, h, pad, opts),
     };
   }
 

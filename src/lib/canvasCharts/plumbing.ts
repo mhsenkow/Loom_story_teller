@@ -43,6 +43,6 @@ export function setLegend(opts: ChartRenderOpts | undefined, entries: { label: s
   if (opts) opts.legend = entries;
 }
 
-export function plotOf(w: number, h: number, pad: number): PlotRect {
-  return { left: pad, top: pad, right: w - pad, bottom: h - pad };
+export function plotOf(w: number, h: number, pad: number, opts?: ChartRenderOpts): PlotRect {
+  return opts?.plotBounds ? { ...opts.plotBounds } : { left: pad, top: pad, right: w - pad, bottom: h - pad };
 }

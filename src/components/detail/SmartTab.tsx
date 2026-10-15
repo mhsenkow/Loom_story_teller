@@ -42,8 +42,6 @@ import {
   type AppFont,
   type FacesSource,
 } from "@/lib/lookSystem";
-import { requestDiscoverScan } from "@/lib/discoverStories";
-import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
 import {
   createChartRec,
   fitEncodingToKind,

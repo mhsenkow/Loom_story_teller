@@ -66,6 +66,8 @@ export function resolveChartMargins(args: {
   axisFontSize?: number;
   /** Reserve a caption strip for source lineage. */
   sourceFootnote?: boolean;
+  /** Footer (default) or under the title band. */
+  chromeInfoBand?: "footer" | "header";
   /** Extra top room when the title wraps to a second line above a subtitle. */
   titleWrapPx?: number;
 }): ChartMargins {
@@ -81,6 +83,7 @@ export function resolveChartMargins(args: {
     legendPosition,
     axisFontSize = 11,
     sourceFootnote = false,
+    chromeInfoBand = "footer",
   } = args;
 
   let base = basePad;
@@ -105,9 +108,10 @@ export function resolveChartMargins(args: {
     : Math.max(base * 0.55, 20);
   let right = Math.max(base * 0.55, cartesian ? 20 : 18);
 
-  // Credit + optional time / color lines under the plot
+  // Credit + optional time / color lines — footer under the plot, or header under the title
   if (sourceFootnote) {
-    bottom += FOOTNOTE_BAND_PX;
+    if (chromeInfoBand === "header") top += FOOTNOTE_BAND_PX;
+    else bottom += FOOTNOTE_BAND_PX;
   }
 
   // Legend floats inside the plot; only nudge when it would crowd the edge
@@ -161,6 +165,7 @@ export function resolveChartPad(args: {
   legendPosition?: string | null;
   axisFontSize?: number;
   sourceFootnote?: boolean;
+  chromeInfoBand?: "footer" | "header";
   titleWrapPx?: number;
 }): number {
   const m = resolveChartMargins(args);

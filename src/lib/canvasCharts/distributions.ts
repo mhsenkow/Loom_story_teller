@@ -140,7 +140,7 @@ export function renderFullBox(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   const ink = opts?.themeText ?? "#e8e8ec";
   const boxes = groupedDistributions(rows, xi, yi, 20);
   if (boxes.length === 0) return;
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   // Tukey whiskers: 1.5 × IQR, points beyond are outliers
   const tukey = boxes.map((b) => {
     const iqr = b.q3 - b.q1;
@@ -232,7 +232,7 @@ export function renderFullArea(
 ) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
-  const rect = plotOf(w, h, pad);
+  const rect = plotOf(w, h, pad, opts);
   const span = rect.right - rect.left;
   const tb = timeBuckets(rows, xi);
   const model = buildXModel([...new Set(rows.map(tb.keyOf))]);

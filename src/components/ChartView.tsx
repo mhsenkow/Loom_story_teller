@@ -31,6 +31,10 @@ import { type ChartRecommendation, createChartRec, getBestSuggestion, getRecomme
 import { chartCapabilities, encodingChannelLabels, formatChartAggregationSummary, getChartRenderIssue, resolveLayoutDirection, svgExportMode } from "@/lib/chartSupport";
 import { canUseWebGpuScatter } from "@/lib/webGpuScatterEligibility";
 import { notifyChartPainted } from "@/lib/chartPaintSignal";
+import { drawCanvasAnnotations } from "@/lib/canvasAnnotationDraw";
+import { CanvasArrangeOverlay, type ArrangeChange } from "./CanvasArrangeOverlay";
+import { ARRANGEMENT_KEYS, ARRANGE_PLOT_KINDS, arrangementPlot, arrangedFrameSize, hasCanvasArrangement, titleArrangementRect } from "@/lib/canvasArrangement";
+import type { ChartVisualOverrides } from "@/lib/chartVisualTypes";
 import { type ChartChromeLayout, chromeHighlightRect, chromeSectionFor, pickChartChromeRegion } from "@/lib/chartChromeLink";
 import { type AtlasBundle, loadAtlas } from "@/lib/geoAtlas";
 import { resolveTooltipPresentation } from "@/lib/chartTooltipMode";
@@ -40,7 +44,7 @@ import { extractGpuScenePoints, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawa
 import { globeCameraForData, isGeoMapKind, isWebGpuGlobeKind, pickAtlasKind, renderGeoMapCanvas } from "@/lib/geoMaps";
 import { type CubeAxisSlot, type CubeHoverCell, DataCubePivotBar, DataCubePivotTable } from "@/components/DataCubePivot";
 import { buildDataCube, buildPivotTable, cubeCellCenter, cubeCellKey, cubeCellTooltip, cubeView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
-import { FOOTNOTE_BAND_PX, densityAwarePointMarks, resolveChartPad, subsampleRowsForDensity } from "@/lib/chartLayout";
+import { FOOTNOTE_BAND_PX, densityAwarePointMarks, resolveChartPad, subsampleRowsForDensity, titleBandBottom } from "@/lib/chartLayout";
 import {
   chartFootnoteReservePx,
   drawAxisFieldLabels,
@@ -127,7 +131,7 @@ type GpuCubeRenderer = import("@/lib/webgpuCube").LoomCubeRenderer;
 export function ChartView() {
   const {
     selectedFile, sampleRows, chartRecs, activeChart, setActiveChart, setPanelTab, columnStats,
-    chartVisualOverrides, aiSuggestionReason, chartTitleOverrides, setChartTitleOverride,
+    chartVisualOverrides: savedChartVisualOverrides, aiSuggestionReason, chartTitleOverrides, setChartTitleOverride,
     setPngExportHandler, setSvgExportHandler, setSvgExportLabel, vegaSpec, smartResults, appSettings,
     setSelectedRowIndices, setToast, chartAnnotations,
     setHoveredRowIndex,
@@ -143,6 +147,7 @@ export function ChartView() {
     createStoryDashboard, setDashboardsExpanded,
     startDeepScan,
     chartChromeFocus, setChartChromeFocus, setChartPanelSection, setPanelOpen,
+    setChartVisualOverrides,
     inspectingFilePath,
       suggestionsRailOpen, setSuggestionsRailOpen,
       tableColumnFilters, tableFilterRowIndices, tableSortColumn, tableSortDir,
@@ -197,6 +202,7 @@ export function ChartView() {
       setChartChromeFocus: s.setChartChromeFocus,
       setChartPanelSection: s.setChartPanelSection,
       setPanelOpen: s.setPanelOpen,
+      setChartVisualOverrides: s.setChartVisualOverrides,
       inspectingFilePath: s.inspectingFilePath,
       suggestionsRailOpen: s.suggestionsRailOpen,
       setSuggestionsRailOpen: s.setSuggestionsRailOpen,
@@ -222,6 +228,29 @@ export function ChartView() {
 
   const reducedMotion = useReducedMotion();
   const isMobile = useIsMobile();
+  const [arranging, setArranging] = useState(false);
+  const arrangePanelWasOpen = useRef(false);
+  const finishArranging = useCallback(() => {
+    setArranging(false);
+    setArrangementPreview(null);
+    if (arrangePanelWasOpen.current) useLoomStore.getState().setPanelOpen(true);
+    arrangePanelWasOpen.current = false;
+  }, []);
+  const [arrangementPreview, setArrangementPreview] = useState<ArrangeChange | null>(null);
+  const [arrangementLayout, setArrangementLayout] = useState<ChartChromeLayout | null>(null);
+  const chartVisualOverrides = useMemo(() => arrangementPreview && "visual" in arrangementPreview ? { ...savedChartVisualOverrides, ...arrangementPreview.visual } : savedChartVisualOverrides, [savedChartVisualOverrides, arrangementPreview]);
+  const reportArrangementLayout = useCallback((layout: ChartChromeLayout) => {
+    setArrangementLayout((old) => JSON.stringify(old) === JSON.stringify(layout) ? old : layout);
+  }, []);
+  const commitArrangement = useCallback((change: ArrangeChange, group?: string) => {
+    const store = useLoomStore.getState();
+    if ("visual" in change) store.editChartVisualOverrides(change.visual, group);
+    else if (store.activeChart) {
+      const { id, ...patch } = change.annotation;
+      store.updateChartAnnotation(store.activeChart.id, id, patch);
+    }
+  }, []);
+  useEffect(() => { setArranging(false); setArrangementPreview(null); setArrangementLayout(null); }, [activeChart?.id]);
   const shellMode = useShellMode();
   const liveEdit = useMobileLiveEdit();
   const viewportW = useViewportWidth();
@@ -472,10 +501,17 @@ export function ChartView() {
       colorRamp: chartColorInfo?.stops ?? null,
       colorRampLabel: chartColorInfo?.fieldLabel ?? null,
       colorRampContinuous: chartColorInfo?.continuous ?? true,
+      band: (chartVisualOverrides.chromeInfoBand ?? "footer") as "footer" | "header",
+      headerTop:
+        (chartVisualOverrides.chromeInfoBand ?? "footer") === "header"
+          ? titleBandBottom(chartVisualOverrides.titleLayout) + 6
+          : undefined,
     }),
     [
       chartVisualOverrides.sourceFootnoteAlign,
       chartVisualOverrides.fontFamily,
+      chartVisualOverrides.chromeInfoBand,
+      chartVisualOverrides.titleLayout,
       chartColorInfo,
     ],
   );
@@ -534,6 +570,10 @@ export function ChartView() {
         : rawBlend;
 
     return {
+      titleX: chartVisualOverrides.titleX,
+      titleY: chartVisualOverrides.titleY,
+      titleWidth: chartVisualOverrides.titleWidth,
+      titleScale: chartVisualOverrides.titleScale,
       colors,
       continuousStops,
       opacity,
@@ -563,6 +603,11 @@ export function ChartView() {
       showGrid,
       chartPadding: isCompact ? 36 : isMedium ? 46 : framePad,
       // "auto" shows a key only when a color field is encoded, in the emptiest corner
+      legendOffsetX: chartVisualOverrides.legendOffsetX,
+      legendOffsetY: chartVisualOverrides.legendOffsetY,
+      legendWidth: chartVisualOverrides.legendWidth,
+      legendHeight: chartVisualOverrides.legendHeight,
+      plotX: chartVisualOverrides.plotX, plotY: chartVisualOverrides.plotY, plotWidth: chartVisualOverrides.plotWidth, plotHeight: chartVisualOverrides.plotHeight,
       legendPosition: !caps?.legend ? "none" : (chartVisualOverrides.legendPosition ?? "auto"),
       showDataLabels: detail === "plain" ? false : showDataLabels,
       backgroundStyle: chartVisualOverrides.backgroundStyle ?? "default",
@@ -580,6 +625,7 @@ export function ChartView() {
       chartFrame: frame,
       sourceFootnote: Boolean(chartFootnoteText || chartColorInfo?.stops?.length),
       sourceFootnoteAlign: chartVisualOverrides.sourceFootnoteAlign ?? "left",
+      chromeInfoBand: chartVisualOverrides.chromeInfoBand ?? "footer",
       themeBg: themeUi.bg,
       themeText: themeUi.text,
       themeMuted: themeUi.label,
@@ -654,7 +700,7 @@ export function ChartView() {
   const axesOverlayRef = useRef<HTMLCanvasElement>(null);
   const stageHostRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const chartFrameSize = useMemo(() => {
+  const chartFrameMax = useMemo(() => {
     if (socialExportTarget) {
       return {
         width: socialExportTarget.width,
@@ -672,6 +718,10 @@ export function ChartView() {
       gutter: 10,
     });
   }, [hostSize.w, hostSize.h, chartAspect, chartDevice, socialExportTarget, isMobile]);
+  const chartFrameSize = useMemo(() => {
+    if (socialExportTarget) return chartFrameMax;
+    return arrangedFrameSize(chartFrameMax, chartVisualOverrides);
+  }, [chartFrameMax, chartVisualOverrides.canvasWidth, chartVisualOverrides.canvasHeight, socialExportTarget]);
   const rendererRef = useRef<GpuScatterRenderer | null>(null);
   const sceneRendererRef = useRef<GpuSceneRenderer | null>(null);
   const cubeRendererRef = useRef<GpuCubeRenderer | null>(null);
@@ -701,7 +751,7 @@ export function ChartView() {
   // Story/dashboard PNG capture must use Canvas 2D — WebGPU readback often
   // yields axes-only frames (grid, no points) when tiles are snapped quickly.
   const previewCaptureActive = useLoomStore((s) => !!s.previewCapture);
-  const forceCanvasCapture = previewCaptureActive || !!socialExportTarget || socialExportReady;
+  const forceCanvasCapture = previewCaptureActive || !!socialExportTarget || socialExportReady || arranging || hasCanvasArrangement(chartVisualOverrides);
   const useWebGPUScatter = canUseWebGpuScatter({
     kind: activeChart?.kind,
     gpuReady,
@@ -985,6 +1035,7 @@ export function ChartView() {
     h: number;
     columns: string[];
     yScale?: YScaleKind;
+    plot?: { left: number; top: number; right: number; bottom: number };
   } | null>(null);
   const canvas2DHitRef = useRef<Canvas2DHitContext | null>(null);
   const [titleEditing, setTitleEditing] = useState(false);
@@ -1554,7 +1605,7 @@ export function ChartView() {
           // them here dropped the city color key from Share / Save PNGs — composite the
           // live stage instead so the export matches what you see.
           // Particle GPU scenes still re-draw on Canvas for a reliable readback.
-          const needsSceneCanvas = isGpuSceneKind(ac.kind) && !isWebGpuGlobeKind(ac.kind);
+          const needsSceneCanvas = isGpuSceneKind(ac.kind) && !isWebGpuGlobeKind(ac.kind) && !hasCanvasArrangement(overrides);
           if (needsSceneCanvas && exp.sampleRows?.rows.length) {
             ctx.save();
             ctx.scale(w / cssW, h / cssH);
@@ -1622,6 +1673,7 @@ export function ChartView() {
             }
           }
         }
+        drawCanvasAnnotations(ctx, w, h, st.chartAnnotations[ac.id] ?? [], themeUi, { width: canvas2D.width / stageDpr(), height: canvas2D.height / stageDpr() });
         // Attribution burn-in for platform / social PNG exports.
         // When the canvas already has a source/time footnote, skip the burn-in bar.
         if (st.socialExportTarget) {
@@ -1654,8 +1706,8 @@ export function ChartView() {
     });
     const svgMode = svgExportMode(vegaSpec);
     setSvgExportLabel(
-      svgMode === "approx"
-        ? "Vega approximation — Canvas chart may differ"
+      (svgMode === "approx" || ARRANGEMENT_KEYS.some((key) => savedChartVisualOverrides[key] != null))
+        ? "Vega approximation — use PNG to preserve canvas arrangement"
         : null,
     );
     setSvgExportHandler(
@@ -1705,7 +1757,7 @@ export function ChartView() {
       setSvgExportHandler(null);
       setSvgExportLabel(null);
     };
-  }, [setPngExportHandler, setSvgExportHandler, setSvgExportLabel, vegaSpec]);
+  }, [setPngExportHandler, setSvgExportHandler, setSvgExportLabel, vegaSpec, savedChartVisualOverrides]);
 
   const tooltipPresentation = resolveTooltipPresentation(
     chartVisualOverrides.tooltipMode,
@@ -1735,11 +1787,11 @@ export function ChartView() {
       const rect = e.currentTarget.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
-      const { xMin, xMax, yMin, yMax, pad, w, h, points, rowIndices, yScale: ySk } = data;
+      const { xMin, xMax, yMin, yMax, pad, w, h, points, rowIndices, yScale: ySk, plot } = data;
       const yKind = (ySk ?? "linear") as YScaleKind;
       const yd = scatterYDomain(yMin, yMax, yKind);
-      const chartW = w - 2 * pad;
-      const chartH = h - 2 * pad;
+      const chartW = plot ? plot.right - plot.left : w - 2 * pad;
+      const chartH = plot ? plot.bottom - plot.top : h - 2 * pad;
       if (chartW <= 0 || chartH <= 0) return;
       const scaleX = w / rect.width;
       const scaleYPx = h / rect.height;
@@ -1751,8 +1803,8 @@ export function ChartView() {
         const rowIndex = rowIndices[i]!;
         if (link && !rowMatchesTooltipLink(allCols, fullRows[rowIndex]!, link)) continue;
         const p = points[i];
-        const ppx = pad + ((p.x - xMin) / (xMax - xMin || 1)) * chartW;
-        const ppy = pad + (1 - scaleY(p.y, yd.min, yd.max, yKind)) * chartH;
+        const ppx = (plot?.left ?? pad) + ((p.x - xMin) / (xMax - xMin || 1)) * chartW;
+        const ppy = (plot?.top ?? pad) + (1 - scaleY(p.y, yd.min, yd.max, yKind)) * chartH;
         const d = Math.hypot(px - ppx, py - ppy);
         if (d < bestDist) {
           bestDist = d;
@@ -1836,7 +1888,7 @@ export function ChartView() {
       const relX = e.clientX - rect.left;
       const relY = e.clientY - rect.top;
       const scaleX = hit.w / rect.width;
-      const scaleY = hit.h / rect.height;
+      const scaleY = (hit.frameH ?? hit.h) / rect.height;
       const chartX = relX * scaleX;
       const chartY = relY * scaleY;
       const { pad, w, h } = hit;
@@ -1847,7 +1899,7 @@ export function ChartView() {
         return;
       }
 
-      if (chartX < pad || chartX > w - pad || chartY < pad || chartY > h - pad) {
+      if (chartX < 0 || chartX > w || chartY < 0 || chartY > h) {
         if (!stickyTooltip) {
           setChartTooltip(null);
           setHoveredRowIndex(null);
@@ -1948,15 +2000,15 @@ export function ChartView() {
       if (rect.width <= 0 || rect.height <= 0) return;
       const px = ((clientX - rect.left) / rect.width) * d.w;
       const py = ((clientY - rect.top) / rect.height) * d.h;
-      const chartW = d.w - 2 * d.pad;
-      const chartH = d.h - 2 * d.pad;
+      const chartW = d.plot ? d.plot.right - d.plot.left : d.w - 2 * d.pad;
+      const chartH = d.plot ? d.plot.bottom - d.plot.top : d.h - 2 * d.pad;
       if (chartW <= 0 || chartH <= 0) return;
       setScatterView((v) => {
         const bounds = getEffectiveScatterBounds(d, { ...v, scale: baseScale });
         const yKind = (d.yScale ?? "linear") as YScaleKind;
         const yd = scatterYDomain(bounds.yMin, bounds.yMax, yKind);
-        const t = (px - d.pad) / chartW;
-        const u = (py - d.pad) / chartH;
+        const t = (px - (d.plot?.left ?? d.pad)) / chartW;
+        const u = (py - (d.plot?.top ?? d.pad)) / chartH;
         const dataX = bounds.xMin + t * (bounds.xMax - bounds.xMin);
         const dataY = invScaleY(1 - u, yd.min, yd.max, yKind);
         const scale = Math.max(0.5, Math.min(20, newScale));
@@ -2001,8 +2053,8 @@ export function ChartView() {
       if (rect.width <= 0 || rect.height <= 0) return;
       const px = ((e.clientX - rect.left) / rect.width) * d.w;
       const py = ((e.clientY - rect.top) / rect.height) * d.h;
-      const chartW = d.w - 2 * d.pad;
-      const chartH = d.h - 2 * d.pad;
+      const chartW = d.plot ? d.plot.right - d.plot.left : d.w - 2 * d.pad;
+      const chartH = d.plot ? d.plot.bottom - d.plot.top : d.h - 2 * d.pad;
       if (chartW <= 0 || chartH <= 0) return;
 
       // Pinch (ctrl+wheel) or discrete mouse wheel → zoom toward cursor.
@@ -2018,8 +2070,8 @@ export function ChartView() {
           const bounds = getEffectiveScatterBounds(d, v);
           const yKind = (d.yScale ?? "linear") as YScaleKind;
           const yd = scatterYDomain(bounds.yMin, bounds.yMax, yKind);
-          const t = (px - d.pad) / chartW;
-          const u = (py - d.pad) / chartH;
+          const t = (px - (d.plot?.left ?? d.pad)) / chartW;
+          const u = (py - (d.plot?.top ?? d.pad)) / chartH;
           const dataX = bounds.xMin + t * (bounds.xMax - bounds.xMin);
           const dataY = invScaleY(1 - u, yd.min, yd.max, yKind);
           const factor = zoomOut ? 0.9 : 1.11;
@@ -2089,18 +2141,18 @@ export function ChartView() {
           const rect = containerRef.current.getBoundingClientRect();
           const sx = e.clientX - rect.left;
           const sy = e.clientY - rect.top;
-          const { xMin, xMax, yMin, yMax, pad, w, h, yScale: ySk } = data;
+          const { xMin, xMax, yMin, yMax, pad, w, h, yScale: ySk, plot } = data;
           const yKind = (ySk ?? "linear") as YScaleKind;
           const yd = scatterYDomain(yMin, yMax, yKind);
-          const chartW = w - 2 * pad;
-          const chartH = h - 2 * pad;
+          const chartW = plot ? plot.right - plot.left : w - 2 * pad;
+          const chartH = plot ? plot.bottom - plot.top : h - 2 * pad;
           const scaleX = w / rect.width;
           const scaleYPx = h / rect.height;
           const px = sx * scaleX;
           const py = sy * scaleYPx;
-          if (chartW > 0 && chartH > 0 && px >= pad && px <= w - pad && py >= pad && py <= h - pad) {
-            const dataX = xMin + ((px - pad) / chartW) * (xMax - xMin);
-            const dataY = invScaleY(1 - (py - pad) / chartH, yd.min, yd.max, yKind);
+          if (chartW > 0 && chartH > 0 && px >= (plot?.left ?? pad) && px <= (plot?.right ?? w - pad) && py >= (plot?.top ?? pad) && py <= (plot?.bottom ?? h - pad)) {
+            const dataX = xMin + ((px - (plot?.left ?? pad)) / chartW) * (xMax - xMin);
+            const dataY = invScaleY(1 - (py - (plot?.top ?? pad)) / chartH, yd.min, yd.max, yKind);
             setCrosshairPos({ dataX, dataY, screenX: e.clientX, screenY: e.clientY });
           } else {
             setCrosshairPos(null);
@@ -2114,8 +2166,8 @@ export function ChartView() {
         panStartRef.current = { x: e.clientX, y: e.clientY };
         const d = scatterDataRef.current;
         if (d) {
-          const cw = d.w - 2 * d.pad;
-          const ch = d.h - 2 * d.pad;
+          const cw = d.plot ? d.plot.right - d.plot.left : d.w - 2 * d.pad;
+          const ch = d.plot ? d.plot.bottom - d.plot.top : d.h - 2 * d.pad;
           const dataPerPxX = cw > 0 ? (d.xMax - d.xMin) / cw : 0;
           const dataPerPxY = ch > 0 ? (d.yMax - d.yMin) / ch : 0;
           setScatterView((v) => ({
@@ -2134,11 +2186,11 @@ export function ChartView() {
       const data = scatterDataRef.current;
       if (data) {
         const rect = containerRef.current.getBoundingClientRect();
-        const { points, rowIndices, xMin, xMax, yMin, yMax, pad, w, h, yScale: ySk } = data;
+        const { points, rowIndices, xMin, xMax, yMin, yMax, pad, w, h, yScale: ySk, plot } = data;
         const yKind = (ySk ?? "linear") as YScaleKind;
         const yd = scatterYDomain(yMin, yMax, yKind);
-        const chartW = w - 2 * pad;
-        const chartH = h - 2 * pad;
+        const chartW = plot ? plot.right - plot.left : w - 2 * pad;
+        const chartH = plot ? plot.bottom - plot.top : h - 2 * pad;
         const scaleX = w / rect.width;
         const scaleYPx = h / rect.height;
         const polyPx = lassoPoints.map((p) => ({
@@ -2147,8 +2199,8 @@ export function ChartView() {
         }));
         const sel: number[] = [];
         points.forEach((p, i) => {
-          const px = pad + ((p.x - xMin) / (xMax - xMin || 1)) * chartW;
-          const py = pad + (1 - scaleY(p.y, yd.min, yd.max, yKind)) * chartH;
+          const px = (plot?.left ?? pad) + ((p.x - xMin) / (xMax - xMin || 1)) * chartW;
+          const py = (plot?.top ?? pad) + (1 - scaleY(p.y, yd.min, yd.max, yKind)) * chartH;
           if (pointInPolygon(px, py, polyPx)) sel.push(rowIndices[i]);
         });
         applyBrushSelection(sel);
@@ -2167,21 +2219,21 @@ export function ChartView() {
       const data = scatterDataRef.current;
       if (data) {
         const rect = containerRef.current.getBoundingClientRect();
-        const { points, rowIndices, xMin, xMax, yMin, yMax, pad, w, h, yScale: ySk } = data;
+        const { points, rowIndices, xMin, xMax, yMin, yMax, pad, w, h, yScale: ySk, plot } = data;
         const yKind = (ySk ?? "linear") as YScaleKind;
         const yd = scatterYDomain(yMin, yMax, yKind);
-        const chartW = w - 2 * pad;
-        const chartH = h - 2 * pad;
+        const chartW = plot ? plot.right - plot.left : w - 2 * pad;
+        const chartH = plot ? plot.bottom - plot.top : h - 2 * pad;
         const scaleX = w / rect.width;
         const scaleYPx = h / rect.height;
         const px1 = (Math.min(br.x1, br.x2) - rect.left) * scaleX;
         const px2 = (Math.max(br.x1, br.x2) - rect.left) * scaleX;
         const py1 = (Math.min(br.y1, br.y2) - rect.top) * scaleYPx;
         const py2 = (Math.max(br.y1, br.y2) - rect.top) * scaleYPx;
-        const dataX1 = xMin + ((px1 - pad) / chartW) * (xMax - xMin);
-        const dataX2 = xMin + ((px2 - pad) / chartW) * (xMax - xMin);
-        const dataY2 = invScaleY(1 - (py1 - pad) / chartH, yd.min, yd.max, yKind);
-        const dataY1 = invScaleY(1 - (py2 - pad) / chartH, yd.min, yd.max, yKind);
+        const dataX1 = xMin + ((px1 - (plot?.left ?? pad)) / chartW) * (xMax - xMin);
+        const dataX2 = xMin + ((px2 - (plot?.left ?? pad)) / chartW) * (xMax - xMin);
+        const dataY2 = invScaleY(1 - (py1 - (plot?.top ?? pad)) / chartH, yd.min, yd.max, yKind);
+        const dataY1 = invScaleY(1 - (py2 - (plot?.top ?? pad)) / chartH, yd.min, yd.max, yKind);
         const sel: number[] = [];
         points.forEach((p, i) => {
           if (p.x >= Math.min(dataX1, dataX2) && p.x <= Math.max(dataX1, dataX2) && p.y >= Math.min(dataY1, dataY2) && p.y <= Math.max(dataY1, dataY2)) {
@@ -2370,6 +2422,7 @@ export function ChartView() {
         }),
       };
       cubeFrameRef.current = { cube: dataCube, opts: cubeOpts, w, h, baseCamera: sceneOrbit };
+      reportArrangementLayout({ plot: { x: 24, y: 24, w: w - 48, h: h - 48 } });
       if (useWebGpuCube && cubeRendererRef.current && octx) {
         const view = cubeView(camera, w, h);
         ctx.fillStyle = themeUi.bg;
@@ -2478,10 +2531,11 @@ export function ChartView() {
     if (typeof cw !== "number" || typeof ch !== "number" || cw <= 0 || ch <= 0) return;
     const w = cw / dpr;
     const hFull = ch / dpr;
-    // A source footnote owns the bottom band. Every renderer lays out in the
-    // canvas above it (h), so captions, legends and axis titles can't collide
-    // with the credit line; only background + footnote use the full height.
-    const footBand = chartFootnoteText || chartColorInfo?.stops?.length ? FOOTNOTE_BAND_PX : 0;
+    // Footer info owns a carved bottom band; header info grows top pad via margins instead.
+    const infoBandOn =
+      !!chartFootnoteText || !!chartColorInfo?.stops?.length;
+    const chromeBand = chartVisualOverrides.chromeInfoBand ?? "footer";
+    const footBand = infoBandOn && chromeBand === "footer" ? FOOTNOTE_BAND_PX : 0;
     const h = hFull - footBand;
 
     const rowsAll = chartSampleRows?.rows;
@@ -2519,6 +2573,8 @@ export function ChartView() {
       isCompact,
       legendPosition: opts.legendPosition,
       axisFontSize: opts.axisFontSize,
+      sourceFootnote: infoBandOn && chromeBand === "header",
+      chromeInfoBand: chromeBand,
     };
     const basePadPx = resolveChartPad(padArgs);
     // A long headline (Discover hooks often are) wraps above its subtitle — give it the room
@@ -2531,6 +2587,7 @@ export function ChartView() {
       opts,
     );
     const pad = titleWrapPx ? resolveChartPad({ ...padArgs, titleWrapPx }) : basePadPx;
+    if (ARRANGE_PLOT_KINDS.has(activeChart.kind) && !activeChart.rowField) opts.plotBounds = arrangementPlot(w, h, chartVisualOverrides);
     const xIdx = cols.indexOf(activeChart.xField);
     const yIdx = activeChart.yField ? cols.indexOf(activeChart.yField) : -1;
     const cIdx = activeChart.colorField ? cols.indexOf(activeChart.colorField) : -1;
@@ -2623,6 +2680,7 @@ export function ChartView() {
         const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
         const drawTitle = () =>
           drawChartTitleBlock(ctx, w, h, pad, titleText, activeChart.subtitle, {
+            titleX: opts.titleX, titleY: opts.titleY, titleWidth: opts.titleWidth, titleScale: opts.titleScale,
             titleLayout: opts.titleLayout,
             fontFamily,
             titleFontWeight: opts.titleFontWeight,
@@ -2645,9 +2703,10 @@ export function ChartView() {
             scatterDataRef.current = {
               ...sd,
               ...scatterViewBounds,
+              plot: opts.plotBounds ?? { left: pad, top: pad, right: w - pad, bottom: h - pad },
               pad,
               w,
-              h,
+              h: hFull,
               columns: cols,
               yScale: (activeChart.yScale ?? "linear") as YScaleKind,
             };
@@ -2903,6 +2962,7 @@ export function ChartView() {
 
         const baseHit: Canvas2DHitContext = {
           kind: activeChart.kind,
+          frameH: hFull,
           rows,
           columns: cols,
           pad,
@@ -2940,17 +3000,19 @@ export function ChartView() {
           const plotRect = !useFacets && ropts.scales?.rect ? ropts.scales.rect : pad;
           // Point / bubble maps draw their size key bottom-left
           const avoid = categoricalMap && activeChart.sizeField ? ["bottom-left"] : [];
-          legendRect = drawLegend(ctx, legendEntries, legendPos, w, h, plotRect, fontFamily, opts.themeBg, opts.themeBorder, opts.themeText, legendTitle, avoid);
+          legendRect = drawLegend(ctx, legendEntries, legendPos, w, h, plotRect, fontFamily, opts.themeBg, opts.themeBorder, opts.themeText, legendTitle, avoid, { x: chartVisualOverrides.legendOffsetX, y: chartVisualOverrides.legendOffsetY, width: chartVisualOverrides.legendWidth, height: chartVisualOverrides.legendHeight });
         }
-        const titleBand = Math.min(pad * 0.85, 48);
+        const actualPlot = !useFacets && ropts.scales?.rect ? ropts.scales.rect : (opts.plotBounds ?? { left: pad, top: pad, right: w - pad, bottom: h - pad });
         const chromeLayout: ChartChromeLayout = {
-          plot: { x: pad, y: pad, w: Math.max(0, w - 2 * pad), h: Math.max(0, h - 2 * pad) },
-          title: { x: pad * 0.4, y: 2, w: Math.max(40, w - pad), h: titleBand },
+          plot: { x: actualPlot.left, y: actualPlot.top, w: actualPlot.right - actualPlot.left, h: actualPlot.bottom - actualPlot.top },
+          plotEdit: opts.plotBounds ? { x: opts.plotBounds.left, y: opts.plotBounds.top, w: opts.plotBounds.right - opts.plotBounds.left, h: opts.plotBounds.bottom - opts.plotBounds.top } : { x: pad, y: pad, w: w - 2 * pad, h: h - 2 * pad },
+          title: titleArrangementRect(w, h, pad, chartVisualOverrides),
           legend: legendRect,
           xAxis: { x: pad, y: h - pad, w: Math.max(0, w - 2 * pad), h: pad },
           yAxis: { x: 0, y: pad, w: pad, h: Math.max(0, h - 2 * pad) },
         };
         canvas2DHitRef.current = { ...baseHit, chromeLayout };
+        reportArrangementLayout(chromeLayout);
         // Custom reference lines ("+ Add reference line") on the renderer's own value scale
         const refLines = customRefLines[activeChart.id] ?? [];
         if (refLines.length && ropts.scales) {
@@ -2994,7 +3056,7 @@ export function ChartView() {
           );
         }
 
-        if (footBand) {
+        if (infoBandOn) {
           drawChartSourceFootnote(ctx, w, hFull, pad, chartFootnoteText ?? "", {
             ...footnoteOpts(opts.themeMuted, opts.themeBorder),
             fontFamily,
@@ -3223,11 +3285,13 @@ export function ChartView() {
         legendPosition: chartRenderOpts.legendPosition,
         axisFontSize: chartRenderOpts.axisFontSize,
         sourceFootnote: chartRenderOpts.sourceFootnote,
+        chromeInfoBand: chartRenderOpts.chromeInfoBand,
       });
       const ui = getThemeUiColors(appSettings.theme);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
       drawChartTitleBlock(ctx, w, h, scenePad, titleText, activeChart.subtitle, {
+        titleX: chartRenderOpts.titleX, titleY: chartRenderOpts.titleY, titleWidth: chartRenderOpts.titleWidth, titleScale: chartRenderOpts.titleScale,
         titleLayout: chartRenderOpts.titleLayout,
         fontFamily: chartRenderOpts.fontFamily,
         titleFontWeight: chartRenderOpts.titleFontWeight,
@@ -3259,6 +3323,7 @@ export function ChartView() {
       legendPosition: chartRenderOpts.legendPosition,
       axisFontSize: chartRenderOpts.axisFontSize,
       sourceFootnote: chartRenderOpts.sourceFootnote,
+      chromeInfoBand: chartRenderOpts.chromeInfoBand,
     });
     const eff = getEffectiveScatterBounds(sd, scatterView);
     const yScaleKind = (activeChart.yScale ?? "linear") as YScaleKind;
@@ -3293,6 +3358,7 @@ export function ChartView() {
     drawAxisFieldLabels(ctx, w, h, overlayPad, activeChart.xField, activeChart.yField, overlayOpts);
     const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
     drawChartTitleBlock(ctx, w, h, overlayPad, titleText, activeChart.subtitle, {
+      titleX: overlayOpts.titleX, titleY: overlayOpts.titleY, titleWidth: overlayOpts.titleWidth, titleScale: overlayOpts.titleScale,
       titleLayout: overlayOpts.titleLayout,
       fontFamily: overlayOpts.fontFamily,
       titleFontWeight: overlayOpts.titleFontWeight,
@@ -3329,6 +3395,7 @@ export function ChartView() {
         ui.border,
         ui.text,
         activeChart.colorField ?? undefined,
+        [], { x: chartVisualOverrides.legendOffsetX, y: chartVisualOverrides.legendOffsetY, width: chartVisualOverrides.legendWidth, height: chartVisualOverrides.legendHeight },
       );
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -3504,7 +3571,7 @@ export function ChartView() {
     </div>
   );
 
-  const suggestionsRestoreTab = !suggestionsRailOpen && !socialExportReady && !liveEdit && (
+  const suggestionsRestoreTab = !suggestionsRailOpen && !socialExportReady && !liveEdit && !arranging && (
     <button
       type="button"
       onClick={showSuggestionsRail}
@@ -3563,7 +3630,7 @@ export function ChartView() {
   }
 
   const mobileRail = isMobile && !suggestionsExpanded;
-  const showSuggestionsPanel = suggestionsRailOpen && !socialExportReady && !liveEdit;
+  const showSuggestionsPanel = suggestionsRailOpen && !socialExportReady && !liveEdit && !arranging;
 
   return (
     <div className={`flex h-full animate-fade-in ${suggestionsExpanded || isMobile ? "flex-col" : ""}`}>
@@ -3674,6 +3741,13 @@ export function ChartView() {
             )}
           </div>
         )}
+
+          {!socialExportReady && !socialExportTarget && activeChart && (
+            <div className="relative z-20 flex shrink-0 max-w-full items-center gap-2 rounded-lg border border-loom-border bg-loom-surface/95 px-2 py-1 shadow-sm" role="toolbar" aria-label="Canvas layout">
+              <button type="button" aria-pressed={arranging} onClick={() => { if (arranging) { finishArranging(); return; } arrangePanelWasOpen.current = isMobile && useLoomStore.getState().panelOpen; if (arrangePanelWasOpen.current) setPanelOpen(false); setArranging(true); setArrangementPreview(null); }} className="loom-btn-ghost min-h-9 px-2 text-xs">{arranging ? "Done arranging" : "Arrange"}</button>
+              {arranging && <><span className="hidden sm:inline text-2xs text-loom-muted">Drag or arrows to move · handles resize · Esc cancels · Alt skips snapping</span><button type="button" className="loom-btn-ghost min-h-9 px-2 text-xs" title="Restore automatic frame, plot, title and legend placement" onClick={() => { const reset = Object.fromEntries(ARRANGEMENT_KEYS.map((k) => [k, undefined])) as ChartVisualOverrides; reset.legendPosition = "auto"; commitArrangement({ visual: reset }); }}>Auto layout</button></>}
+            </div>
+          )}
 
         <div
           ref={stageHostRef}
@@ -3819,7 +3893,7 @@ export function ChartView() {
           )}
           <div
             ref={containerRef}
-            role="img"
+            role={arranging ? "group" : "img"}
             aria-label={chartA11yLabel}
             tabIndex={activeChart && activeChart.kind !== "scatter" ? 0 : undefined}
             onKeyDown={(e) => {
@@ -3849,7 +3923,7 @@ export function ChartView() {
                 : ""
             } ${orbitEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
             onPointerDown={(e) => {
-              if (!orbitEnabled) return;
+              if (!orbitEnabled || arranging) return;
               (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
               sceneOrbitDragRef.current = {
                 x: e.clientX,
@@ -3882,7 +3956,7 @@ export function ChartView() {
               sceneOrbitDragRef.current = null;
             }}
             onWheel={(e) => {
-              if (!orbitEnabled) return;
+              if (!orbitEnabled || arranging) return;
               e.preventDefault();
               e.stopPropagation();
               setSceneOrbit((o) => ({
@@ -4074,8 +4148,8 @@ export function ChartView() {
                   panStartRef.current = { x: t.clientX, y: t.clientY };
                   const d = scatterDataRef.current;
                   if (d) {
-                    const cw = d.w - 2 * d.pad;
-                    const ch = d.h - 2 * d.pad;
+                    const cw = d.plot ? d.plot.right - d.plot.left : d.w - 2 * d.pad;
+                    const ch = d.plot ? d.plot.bottom - d.plot.top : d.h - 2 * d.pad;
                     const dataPerPxX = cw > 0 ? (d.xMax - d.xMin) / cw : 0;
                     const dataPerPxY = ch > 0 ? (d.yMax - d.yMin) / ch : 0;
                     setScatterView((v) => ({
@@ -4266,15 +4340,40 @@ export function ChartView() {
               Reset view
             </button>
           )}
-          {activeChart && (chartAnnotations[activeChart.id] ?? []).map((a) => (
+          {activeChart && (chartAnnotations[activeChart.id] ?? []).map((saved) => {
+            const a = arrangementPreview && "annotation" in arrangementPreview && arrangementPreview.annotation.id === saved.id ? { ...saved, ...arrangementPreview.annotation } : saved;
+            return (
             <div
               key={a.id}
               className="absolute text-2xs font-mono px-1.5 py-0.5 rounded bg-loom-surface/95 border border-loom-border text-loom-text pointer-events-none z-[4]"
-              style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%`, transform: "translate(-50%, -50%)" }}
+              style={{ left: `${a.x * 100}%`, top: `${a.y * 100}%`, width: `${(a.width ?? .25) * 100}%`, fontSize: a.fontSize ?? 11, lineHeight: 1.4, padding: "4px 6px", whiteSpace: "pre-wrap", overflowWrap: "anywhere", transform: "translate(-50%, -50%)" }}
             >
               {a.text}
             </div>
-          ))}
+          ); })}
+          {arranging && arrangementLayout && activeChart && !socialExportReady && !socialExportTarget && (
+            <CanvasArrangeOverlay
+              key={activeChart.id}
+              width={containerSize.w}
+              height={containerSize.h}
+              frameInset={2}
+              contentHeight={
+                containerSize.h -
+                ((chartFootnoteText || chartColorInfo?.stops?.length) &&
+                (chartVisualOverrides.chromeInfoBand ?? "footer") === "footer"
+                  ? FOOTNOTE_BAND_PX
+                  : 0)
+              }
+              frameMax={chartFrameMax}
+              layout={arrangementLayout}
+              visual={chartVisualOverrides}
+              annotations={chartAnnotations[activeChart.id] ?? []}
+              allowPlot={ARRANGE_PLOT_KINDS.has(activeChart.kind) && !activeChart.rowField && !showMarginals}
+              onPreview={setArrangementPreview}
+              onCommit={commitArrangement}
+              onDone={finishArranging}
+            />
+          )}
           </div>
           {!socialExportReady && activeChart && !isMobile && (
             <div className="flex flex-col gap-1.5 self-start items-start shrink-0">

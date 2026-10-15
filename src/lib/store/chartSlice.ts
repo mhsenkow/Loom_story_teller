@@ -35,6 +35,7 @@ export type ChartSlice = Pick<
   | "removeCustomChartLook"
   | "addChartAnnotation"
   | "removeChartAnnotation"
+  | "updateChartAnnotation"
   | "addCustomRefLine"
   | "removeCustomRefLine"
   | "setBarStackMode"
@@ -150,8 +151,13 @@ export function createChartSliceFactory(
         if (Object.entries(patch).every(([key, value]) => s.chartVisualOverrides[key as keyof ChartVisualOverrides] === value)) return s;
         const at = Date.now();
         const grouped = !!groupKey && s.chartEditGroup?.key === groupKey && at - s.chartEditGroup.at < 600;
+        const next: ChartVisualOverrides = { ...s.chartVisualOverrides };
+        for (const [key, value] of Object.entries(patch) as [keyof ChartVisualOverrides, ChartVisualOverrides[keyof ChartVisualOverrides]][]) {
+          if (value === undefined) delete next[key];
+          else (next as Record<string, unknown>)[key] = value;
+        }
         return {
-          chartVisualOverrides: { ...s.chartVisualOverrides, ...patch },
+          chartVisualOverrides: next,
           chartEditUndoStack: grouped ? s.chartEditUndoStack : [chartEditSnapshot(s), ...s.chartEditUndoStack].slice(0, CHART_EDIT_HISTORY_LIMIT),
           chartEditRedoStack: [],
           chartEditGroup: groupKey ? { key: groupKey, at } : null,
@@ -214,6 +220,19 @@ export function createChartSliceFactory(
             [chartId]: [...list, { id: newLoomId("ann-"), text, x, y }],
           },
         };
+      }),
+    updateChartAnnotation: (chartId, id, patch) =>
+      set((s) => {
+        const list = s.chartAnnotations[chartId];
+        if (!list?.some((a) => a.id === id)) return s;
+        const safe = Object.fromEntries(Object.entries(patch).filter(([, v]) => typeof v === "number" && Number.isFinite(v)));
+        if (safe.x != null) safe.x = Math.max(0, Math.min(1, safe.x));
+        if (safe.y != null) safe.y = Math.max(0, Math.min(1, safe.y));
+        if (safe.width != null) safe.width = Math.max(.1, Math.min(.9, safe.width));
+        if (safe.fontSize != null) safe.fontSize = Math.max(10, Math.min(32, safe.fontSize));
+        const before = list.find((a) => a.id === id)!;
+        if (Object.entries(safe).every(([k, v]) => before[k as keyof typeof before] === v)) return s;
+        return { ...chartHistoryCheckpoint(s), chartAnnotations: { ...s.chartAnnotations, [chartId]: list.map((a) => a.id === id ? { ...a, ...safe } : a) } };
       }),
     removeChartAnnotation: (chartId, id) =>
       set((s) => {

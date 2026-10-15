@@ -25,6 +25,43 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-15a",
+    date: "2026-10-15",
+    title: "Encoding that stays out of the way",
+    summary: "Clearer channel controls, a movable key that shares cleanly, and source info where you want it.",
+    items: [
+      { title: "Arrange your canvas", detail: "Move and resize chart titles, legends, plots and notes directly on the canvas. Resize the frame, nudge with the keyboard, snap to edges or center, and undo each gesture in one step. PNG shares keep your arrangement." },
+      {
+        title: "Help behind ⓘ tips",
+        detail: "Long Encoding essays for Facet, Split, Direction, Glow, and friends move into small info tips so the panel stays scannable.",
+      },
+      {
+        title: "Size where it matters",
+        detail: "Bubble, map, and glyph charts keep Size in the main Channels list instead of burying it under More.",
+      },
+      {
+        title: "Move the key, keep the link",
+        detail: "Arrange mode lets you drag (and resize) the legend on the chart. The placement rides along in the share link.",
+      },
+      {
+        title: "Source info in the header or footer",
+        detail: "Visual → Source / time info can sit under the title or under the plot — credit, date range, and color ramp move together.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15",
+    date: "2026-10-15",
+    title: "What’s new opens again",
+    summary: "See what’s new from Settings, Help, and the sidebar — the changelog modal no longer stays silent.",
+    items: [
+      {
+        title: "See what’s new works",
+        detail: "Tapping See what’s new (or What’s new in the sidebar) opens the changelog every time, including after you’ve already read the latest notes.",
+      },
+    ],
+  },
+  {
     id: "2026-10-14b",
     date: "2026-10-14",
     title: "Make a look yours",

@@ -79,6 +79,7 @@ export function buildBarFacetGrid(
 }
 
 export type Canvas2DHitContext = {
+  frameH?: number;
   kind: ChartKind;
   rows: (string | number | boolean | null)[][];
   columns: string[];

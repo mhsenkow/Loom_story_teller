@@ -48,16 +48,20 @@ export function drawLegend(
   title?: string,
   /** Corners already holding other chrome (e.g. a map's size key) — auto skips them. */
   avoidCorners: readonly string[] = [],
+  /** Normalized 0–1 placement when `position` is `custom` (share / drag). */
+  offsets?: { x?: number; y?: number; width?: number; height?: number } | null,
 ): ChartChromeLayout["legend"] {
   if (position === "none" || entries.length === 0) return null;
-  const maxRows = 10;
+  const plot = typeof pad === "number" ? { left: pad, top: pad, right: w - pad, bottom: h - pad } : pad;
+  const availableH = Math.min(h - 8, Math.max(64, plot.bottom - plot.top));
+  const requestedH = Math.min(availableH, offsets?.height == null ? 232 : Math.max(64, offsets.height * h));
+  const maxRows = Math.max(1, Math.min(offsets?.height == null ? 10 : entries.length, Math.floor((requestedH - 10) / 18) - (title ? 1 : 0) - 1));
   const shown = entries.slice(0, maxRows);
   const extra = entries.length - shown.length;
   const font = `11px '${fontFamily}', system-ui, sans-serif`;
   const titleFont = `600 11px '${fontFamily}', system-ui, sans-serif`;
   const lineH = 18;
   const sw = 10;
-  const plot = typeof pad === "number" ? { left: pad, top: pad, right: w - pad, bottom: h - pad } : pad;
   const maxText = Math.min(170, Math.max(60, (plot.right - plot.left) * 0.32));
   ctx.save();
   ctx.font = font;
@@ -67,9 +71,10 @@ export function drawLegend(
     textW = Math.max(textW, ctx.measureText(title).width);
   }
   textW = Math.min(maxText, textW);
-  const legendW = Math.ceil(10 + sw + 6 + textW + 10);
+  const legendW = offsets?.width == null ? Math.ceil(10 + sw + 6 + textW + 10) : Math.min(w - 8, Math.max(76, offsets.width * w));
+  textW = Math.max(12, legendW - 36);
   const rowsN = shown.length + (extra > 0 ? 1 : 0) + (title ? 1 : 0);
-  const legendH = rowsN * lineH + 10;
+  const legendH = offsets?.height == null ? rowsN * lineH + 10 : requestedH;
 
   const inset = 8;
   const corners: Record<string, [number, number]> = {
@@ -81,7 +86,14 @@ export function drawLegend(
     bottom: [Math.round((plot.left + plot.right - legendW) / 2), plot.bottom - legendH - inset],
   };
   let [lx, ly] = corners[position] ?? corners["top-right"]!;
-  if (position === "auto") {
+  if (position === "custom") {
+    const plotW = Math.max(1, plot.right - plot.left - legendW);
+    const plotH = Math.max(1, plot.bottom - plot.top - legendH);
+    const ox = Math.min(1, Math.max(0, offsets?.x ?? 0.7));
+    const oy = Math.min(1, Math.max(0, offsets?.y ?? 0.05));
+    lx = plot.left + ox * plotW;
+    ly = plot.top + oy * plotH;
+  } else if (position === "auto") {
     const dpr = ctx.getTransform().a || 1;
     let best = Infinity;
     if (avoidCorners.includes("top-right")) [lx, ly] = corners["top-left"]!;

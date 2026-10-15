@@ -39,6 +39,8 @@ export interface ChartChromeRect {
 /** Actual layout from the last chart paint pass (LOOM-394). */
 export interface ChartChromeLayout {
   plot: ChartChromeRect;
+  /** Authoring bounds before renderer-specific label gutters. */
+  plotEdit?: ChartChromeRect;
   title?: ChartChromeRect | null;
   legend?: ChartChromeRect | null;
   xAxis?: ChartChromeRect | null;

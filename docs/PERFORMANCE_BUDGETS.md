@@ -20,3 +20,5 @@ Proposed targets — measure with `npm run build` transfer sizes, Vitest perf he
 **Chart editor refinement (2026-10-14):** History is bounded to 20 snapshots in each direction and contains no dataset rows. Rapid numeric adjustments reuse a checkpoint (600 ms window), avoiding a deep snapshot on each slider tick. Named looks are capped at 20 and write to storage only when the library reference changes. Collapsed visual sections mount on demand. These changes stay outside parsing and canvas draw loops; check the Next First Load JS report against the 600 kB target when building.
 
 Local macOS production build `2026-10-15T00:07:39.168Z` reported **366 kB First Load JS** for `/` (previous pass: 365 kB), within the proposed 600 kB budget. This is a bundle-size comparison, not a frame-rate or mobile timing measurement.
+
+Canvas Arrange mode previews pointer changes at most once per animation frame and commits history only on release. It adds no dataset copies. Customized scatter plot bounds use the existing density-capped Canvas path to keep marks, axes, hit testing and PNG capture aligned. Ordinary charts keep their existing renderer outside Arrange mode.

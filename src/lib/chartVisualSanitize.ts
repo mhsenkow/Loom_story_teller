@@ -14,6 +14,18 @@ const BOOLEAN_KEYS = new Set<keyof ChartVisualOverrides>([
 type ClampRule = { min?: number; max?: number; int?: boolean };
 
 const CLAMPS: Partial<Record<keyof ChartVisualOverrides, ClampRule>> = {
+  canvasWidth: { min: .35, max: 1 },
+  canvasHeight: { min: .35, max: 1 },
+  plotX: { min: 0, max: .9 },
+  plotY: { min: 0, max: .9 },
+  plotWidth: { min: .1, max: 1 },
+  plotHeight: { min: .1, max: 1 },
+  titleX: { min: 0, max: 1 },
+  titleY: { min: 0, max: 1 },
+  titleWidth: { min: .1, max: 1 },
+  titleScale: { min: .7, max: 2.5 },
+  legendWidth: { min: .1, max: 1 },
+  legendHeight: { min: .1, max: 1 },
   pointSize: { min: 2, max: 24, int: true },
   // Ranges match the Visual panel sliders so a shared link renders as authored
   chartPadding: { min: 16, max: 96, int: true },
@@ -30,6 +42,8 @@ const CLAMPS: Partial<Record<keyof ChartVisualOverrides, ClampRule>> = {
   sizeScale: { min: 0.5, max: 3 },
   tickRotation: { min: -90, max: 90 },
   titleFontWeight: { min: 100, max: 900, int: true },
+  legendOffsetX: { min: 0, max: 1 },
+  legendOffsetY: { min: 0, max: 1 },
 };
 
 type EnumKey<K extends keyof ChartVisualOverrides> = NonNullable<ChartVisualOverrides[K]> & string;
@@ -51,9 +65,10 @@ const STRING_ENUMS: Partial<Record<keyof ChartVisualOverrides, readonly string[]
   chartFrame: allOf<"chartFrame">({ hero: true, compact: true, focus: true }),
   sourceFootnote: allOf<"sourceFootnote">({ off: true, name: true, credit: true, full: true }),
   sourceFootnoteAlign: allOf<"sourceFootnoteAlign">({ left: true, center: true, right: true }),
+  chromeInfoBand: allOf<"chromeInfoBand">({ footer: true, header: true }),
   tooltipMode: allOf<"tooltipMode">({ auto: true, hover: true, glass: true, dock: true, compact: true, off: true }),
   // Plain-string overrides: the values the Visual panel and look presets write
-  legendPosition: ["auto", "none", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"],
+  legendPosition: ["auto", "none", "custom", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"],
   markShape: ["circle", "square", "diamond", "triangle", "cross", "star", "hexagon", "ring"],
   gridStyle: ["solid", "dashed", "dotted", "none"],
   lineStrokeStyle: ["solid", "dashed", "dotted"],
@@ -96,6 +111,12 @@ export function sanitizeChartVisualOverrides(
       const rule = CLAMPS[key];
       if (rule) (out as Record<string, number>)[k] = clampNum(val, rule);
     }
+  }
+  if (out.legendPosition !== "custom") {
+    delete out.legendOffsetX;
+    delete out.legendOffsetY;
+    delete out.legendWidth;
+    delete out.legendHeight;
   }
   return Object.keys(out).length ? out : undefined;
 }

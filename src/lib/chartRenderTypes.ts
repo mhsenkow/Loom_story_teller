@@ -9,6 +9,19 @@ import type { HitTarget } from "./chartTooltip";
 import type { YAggregateOption } from "./recommendations";
 
 export interface ChartRenderOpts {
+  plotBounds?: PlotRect;
+  plotX?: number;
+  plotY?: number;
+  plotWidth?: number;
+  plotHeight?: number;
+  legendOffsetX?: number;
+  legendOffsetY?: number;
+  legendWidth?: number;
+  legendHeight?: number;
+  titleX?: number;
+  titleY?: number;
+  titleWidth?: number;
+  titleScale?: number;
   colors: string[];
   continuousStops?: string[];
   opacity: number;
@@ -54,6 +67,7 @@ export interface ChartRenderOpts {
   titleLayout?: string;
   chartFrame?: string;
   sourceFootnote?: boolean;
+  chromeInfoBand?: "footer" | "header";
   sourceFootnoteAlign?: "left" | "center" | "right";
   themeBg?: string;
   themeText?: string;
