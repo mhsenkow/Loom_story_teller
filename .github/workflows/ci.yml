@@ -110,7 +110,7 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps webkit
       - run: npm run build
       - name: Playwright smoke
         run: LOOM_E2E=1 npm run test:e2e
