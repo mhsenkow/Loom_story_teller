@@ -12,17 +12,21 @@ test("cold load shows chart affordance", async ({ page }) => {
   });
 });
 
-test("share sheet opens from chart view when data is loaded", async ({ page }) => {
-  await page.goto("/");
-  const interesting = page.getByRole("button", { name: /interesting/i });
-  await interesting.waitFor({ state: "visible", timeout: 30_000 });
-  await interesting.click();
-  await page.waitForTimeout(1500);
-  const share = page.getByRole("button", { name: /share/i }).first();
-  if (await share.isVisible().catch(() => false)) {
-    await share.click();
-    await expect(page.getByRole("dialog").or(page.locator('[aria-modal="true"]'))).toBeVisible({
-      timeout: 10_000,
-    });
-  }
+test("share sheet opens from a sample chart", async ({ page }) => {
+  // A portable sample link exercises cold-load chart hydration without live feeds
+  // or the first-visit discovery overlay intercepting the start-page button.
+  const chart = {
+    v: 1,
+    src: "mock://sales.csv",
+    c: { k: "bar", x: "city", y: "revenue", a: "sum" },
+  };
+  const encoded = Buffer.from(JSON.stringify(chart)).toString("base64url");
+  await page.goto(`/#chart=${encoded}`);
+  const share = page.getByRole("button", { name: "Share chart", exact: true });
+  await expect(share).toBeVisible({ timeout: 30_000 });
+  await expect(share).not.toHaveAttribute("aria-disabled", "true");
+  // Shared charts open their editor; dismiss its phone drawer to reach the toolbar.
+  await page.getByRole("dialog", { name: "Detail panel", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
+  await share.click();
+  await expect(page.getByRole("dialog", { name: "Share", exact: true })).toBeVisible();
 });
