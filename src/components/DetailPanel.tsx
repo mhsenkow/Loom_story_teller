@@ -41,6 +41,7 @@ import {
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import {
   createChartRec,
+  reencodeChart,
   Y_AGGREGATE_OPTIONS,
   getRecommendationReason,
   getRandomEncoding,
@@ -2574,14 +2575,11 @@ function ChartPanelView() {
       e.preventDefault();
       setDragOverSlot(null);
       const colName = e.dataTransfer.getData(DRAG_TYPE_COLUMN) || e.dataTransfer.getData("text/plain");
-      if (!colName || !activeChart || columnStats.length === 0) return;
-      const newX = slot === "x" ? colName : activeChart.xField;
-      const newY = slot === "y" ? colName : activeChart.yField;
-      const newColor = slot === "color" ? colName : activeChart.colorField;
-      const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extraFromChart());
+      if (!colName || !activeChart) return;
+      const rec = reencodeChart(activeChart, columnStats, tableName, slot, colName, barStackMode);
       if (rec) setActiveChart(rec);
     },
-    [activeChart, columnStats, tableName, setActiveChart, extraFromChart],
+    [activeChart, columnStats, tableName, setActiveChart, barStackMode],
   );
 
   const handleDragEnter = useCallback((slot: "x" | "y" | "color") => () => setDragOverSlot(slot), []);

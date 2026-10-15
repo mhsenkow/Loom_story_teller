@@ -402,20 +402,23 @@ export function ExplorerView() {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
   }, []);
+  /** Move a visible column to `toIdx` in display order (header drag, or phone ← → buttons). */
+  const moveColumn = useCallback((fromCol: string, toIdx: number) => {
+    const fromIdx = columns.indexOf(fromCol);
+    if (fromIdx < 0 || toIdx < 0 || toIdx >= columns.length || fromIdx === toIdx) return;
+    pushTableUndo();
+    const order = columns.slice();
+    order.splice(fromIdx, 1);
+    order.splice(toIdx, 0, fromCol);
+    setTablePrefs({ ...tablePrefs, columnOrder: order });
+  }, [columns, tablePrefs, setTablePrefs, pushTableUndo]);
   const handleColumnDrop = useCallback((e: React.DragEvent, targetColName: string) => {
     e.preventDefault();
     setDraggedCol(null);
     const fromCol = e.dataTransfer.getData("text/plain");
     if (!fromCol || fromCol === targetColName) return;
-    pushTableUndo();
-    const order = columns.slice();
-    const fromIdx = order.indexOf(fromCol);
-    const toIdx = order.indexOf(targetColName);
-    if (fromIdx < 0 || toIdx < 0) return;
-    order.splice(fromIdx, 1);
-    order.splice(toIdx, 0, fromCol);
-    setTablePrefs({ ...tablePrefs, columnOrder: order });
-  }, [columns, tablePrefs, setTablePrefs, pushTableUndo]);
+    moveColumn(fromCol, columns.indexOf(targetColName));
+  }, [columns, moveColumn]);
   const handleColumnDragEnd = useCallback(() => setDraggedCol(null), []);
 
   const toggleRowSelectionByOriginal = useCallback((originalIdx: number) => {
@@ -640,12 +643,18 @@ export function ExplorerView() {
             </button>
             {columnsOpen && (
               <>
-                <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] max-h-64 overflow-y-auto py-2 bg-loom-surface border border-loom-border rounded shadow-lg">
-                  <div className="px-2 pb-1 border-b border-loom-border/50 text-2xs font-semibold text-loom-muted">Show columns</div>
-                  {allColumns.map((col) => {
+                {/* Phones: fixed so the toolbar's overflow-x-auto doesn't clip the menu. */}
+                <div className="absolute left-0 top-full mt-1 z-50 min-w-[180px] max-h-64 max-md:fixed max-md:inset-x-3 max-md:top-[calc(var(--safe-top)+9.25rem)] max-md:max-h-[60dvh] overflow-y-auto py-2 bg-loom-surface border border-loom-border rounded shadow-lg">
+                  <div className="px-2 pb-1 border-b border-loom-border/50 text-2xs font-semibold text-loom-muted">
+                    Show columns<span className="md:hidden font-normal"> · ← → to reorder</span>
+                  </div>
+                  {/* Phones list columns in table order so ← → (no header drag on touch) reads naturally. */}
+                  {(isMobile ? [...columns, ...allColumns.filter((c) => !columns.includes(c))] : allColumns).map((col) => {
                     const visible = tablePrefs.visibleColumns == null || tablePrefs.visibleColumns.includes(col);
+                    const pos = columns.indexOf(col);
                     return (
-                      <label key={col} className="flex items-center gap-2 px-2 py-1 hover:bg-loom-elevated/60 cursor-pointer text-xs text-loom-text">
+                      <div key={col} className="flex items-center">
+                      <label className="flex-1 min-w-0 flex items-center gap-2 px-2 py-1 max-md:min-h-10 hover:bg-loom-elevated/60 cursor-pointer text-xs text-loom-text">
                         <input
                           type="checkbox"
                           checked={visible}
@@ -661,12 +670,35 @@ export function ExplorerView() {
                         />
                         <span className="truncate">{col}</span>
                       </label>
+                      {isMobile && pos >= 0 && (
+                        <div className="flex shrink-0 pr-1">
+                          <button
+                            type="button"
+                            onClick={() => moveColumn(col, pos - 1)}
+                            disabled={pos === 0}
+                            className="min-h-10 min-w-10 grid place-items-center text-loom-muted disabled:opacity-30"
+                            aria-label={`Move ${col} left`}
+                          >
+                            ←
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => moveColumn(col, pos + 1)}
+                            disabled={pos === columns.length - 1}
+                            className="min-h-10 min-w-10 grid place-items-center text-loom-muted disabled:opacity-30"
+                            aria-label={`Move ${col} right`}
+                          >
+                            →
+                          </button>
+                        </div>
+                      )}
+                      </div>
                     );
                   })}
                   <button
                     type="button"
                     onClick={() => setTablePrefs({ visibleColumns: null, columnOrder: null })}
-                    className="w-full mt-2 mx-2 px-2 py-1 text-2xs text-loom-muted hover:text-loom-text border border-loom-border rounded"
+                    className="w-full max-md:w-[calc(100%-1rem)] max-md:min-h-10 mt-2 mx-2 px-2 py-1 text-2xs text-loom-muted hover:text-loom-text border border-loom-border rounded"
                   >
                     Reset to all
                   </button>
@@ -686,7 +718,7 @@ export function ExplorerView() {
             </button>
             {viewsOpen && (
               <>
-                <div className="absolute left-0 top-full mt-1 z-50 min-w-[160px] py-2 bg-loom-surface border border-loom-border rounded shadow-lg">
+                <div className="absolute left-0 top-full mt-1 z-50 min-w-[160px] max-md:fixed max-md:inset-x-3 max-md:top-[calc(var(--safe-top)+9.25rem)] py-2 bg-loom-surface border border-loom-border rounded shadow-lg">
                   <button
                     type="button"
                     onClick={() => {

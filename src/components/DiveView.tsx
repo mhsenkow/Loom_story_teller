@@ -5,7 +5,8 @@
 // =================================================================
 // Left: query builder (time window, filters, group by, metrics,
 // compare). Right: Time series · Table · Samples over the same query.
-// Click a value to drill in (filter + next group), ⌥-click to exclude.
+// Click a value to drill in (filter + next group), ⌥-click to exclude
+// (phones: a "Tap to: Keep only | Exclude" toggle stands in for ⌥).
 // Live streams auto-refresh; the query lives in the URL (#dive=…) so a
 // dive can be shared. Engine: src/lib/dive.ts; rows: diveSource.ts.
 // =================================================================
@@ -14,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
 import { createChartRec, type YAggregateOption } from "@/lib/recommendations";
 import { isTauri } from "@/lib/tauri";
+import { useIsMobile } from "@/lib/useMediaQuery";
 import {
   DIVE_AGGS,
   DIVE_BUCKETS,
@@ -79,6 +81,9 @@ export function DiveView() {
   // Layout follows Dive's own width (side panels can squeeze it on any screen).
   const rootRef = useRef<HTMLDivElement>(null);
   const [wide, setWide] = useState(true);
+  // Touch has no ⌥ — phones pick what a tap on a value does.
+  const [tapExclude, setTapExclude] = useState(false);
+  const isMobile = useIsMobile();
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
@@ -177,6 +182,10 @@ export function DiveView() {
       });
     },
     [update],
+  );
+  const drillTap = useCallback(
+    (column: string, value: string, exclude: boolean) => drill(column, value, exclude || (isMobile && tapExclude)),
+    [drill, isMobile, tapExclude],
   );
 
   const copyLink = useCallback(async () => {
@@ -574,11 +583,34 @@ export function DiveView() {
               />
             </div>
           )}
+          {result && query && result.matched > 0 && ((query.view === "table" && query.groupBy.length > 0) || query.view === "samples") && (
+            <div className="md:hidden flex items-center gap-2 mb-2 text-2xs text-loom-muted">
+              <span>Tap a value to</span>
+              <div className="loom-seg" role="group" aria-label="What tapping a value does">
+                <button
+                  type="button"
+                  onClick={() => setTapExclude(false)}
+                  aria-pressed={!tapExclude}
+                  className="loom-seg-item min-h-10 px-3 text-2xs border border-transparent"
+                >
+                  Keep only
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTapExclude(true)}
+                  aria-pressed={tapExclude}
+                  className="loom-seg-item min-h-10 px-3 text-2xs border border-transparent"
+                >
+                  Exclude
+                </button>
+              </div>
+            </div>
+          )}
           {result && query && result.matched > 0 && query.view === "table" && (
-            <DiveTable query={query} result={result} onDrill={drill} onSort={(i) => update({ orderBy: i })} />
+            <DiveTable query={query} result={result} onDrill={drillTap} onSort={(i) => update({ orderBy: i })} />
           )}
           {result && query && result.matched > 0 && query.view === "samples" && ready && (
-            <DiveSamples columns={ready.data.columns} rows={result.samples} onDrill={drill} />
+            <DiveSamples columns={ready.data.columns} rows={result.samples} onDrill={drillTap} />
           )}
         </div>
       </section>
@@ -720,7 +752,9 @@ function DiveSamples({
 }) {
   return (
     <div className="overflow-auto">
-      <p className="text-2xs text-loom-muted mb-1.5">Newest {rows.length} matching rows · click a value to filter (⌥ to exclude)</p>
+      <p className="text-2xs text-loom-muted mb-1.5">
+        Newest {rows.length} matching rows<span className="max-md:hidden"> · click a value to filter (⌥ to exclude)</span>
+      </p>
       <table className="text-2xs font-mono border-collapse">
         <thead className="sticky top-0 bg-loom-bg">
           <tr className="border-b border-loom-border text-loom-muted">

@@ -378,6 +378,46 @@ export function createScatterRec(
   };
 }
 
+/** Encoding slots a Schema column can be dropped (or, on phones, tapped) into. */
+export type EncodingDropSlot = "x" | "y" | "color" | "size";
+
+/**
+ * Rebuild `chart` with `column` placed in one encoding slot, keeping every other
+ * channel. Shared by the Encoding drop targets and the Schema tap menu.
+ */
+export function reencodeChart(
+  chart: ChartRecommendation,
+  columns: ColumnInfo[],
+  tableName: string,
+  slot: EncodingDropSlot,
+  column: string,
+  barStackMode?: "grouped" | "stacked" | "percent",
+): ChartRecommendation | null {
+  if (columns.length === 0) return null;
+  return createChartRec(
+    chart.kind,
+    columns,
+    slot === "x" ? column : chart.xField,
+    slot === "y" ? column : chart.yField,
+    slot === "color" ? column : chart.colorField,
+    tableName,
+    {
+      sizeField: slot === "size" ? column : (chart.sizeField ?? null),
+      zField: chart.zField ?? null,
+      timeField: chart.timeField ?? null,
+      trailId: chart.trailId ?? null,
+      rowField: chart.rowField ?? null,
+      glowField: chart.glowField ?? null,
+      outlineField: chart.outlineField ?? null,
+      opacityField: chart.opacityField ?? null,
+      yAggregate: chart.yAggregate ?? null,
+      tooltipFields: chart.tooltipFields,
+      tooltipKeyField: chart.tooltipKeyField ?? null,
+      barStackMode,
+    },
+  );
+}
+
 /** Build a chart recommendation for any kind from chosen columns (for drag-drop encoding in panel). */
 export function createChartRec(
   kind: ChartKind,

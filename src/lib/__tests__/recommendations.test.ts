@@ -4,6 +4,7 @@
 import { describe, it, expect } from "vitest";
 import {
   createChartRec,
+  reencodeChart,
   createScatterRec,
   CHART_KIND_OPTIONS,
   getRecommendationReason,
@@ -86,6 +87,23 @@ describe("recommendations", () => {
       );
       expect(rec.glowField).toBe("value");
       expect(rec.opacityField).toBe("value");
+    });
+  });
+
+  describe("reencodeChart (Schema drop / tap → encoding)", () => {
+    it("swaps one slot and keeps the other channels", () => {
+      const base = createChartRec("scatter", richColumns, "x", "y", "category", "t", { sizeField: "value" })!;
+      const recolored = reencodeChart(base, richColumns, "t", "color", "region")!;
+      expect(recolored.colorField).toBe("region");
+      expect([recolored.xField, recolored.yField, recolored.sizeField]).toEqual(["x", "y", "value"]);
+      const resized = reencodeChart(base, richColumns, "t", "size", "z")!;
+      expect(resized.sizeField).toBe("z");
+      expect(resized.colorField).toBe("category");
+    });
+
+    it("returns null with no column stats", () => {
+      const base = createChartRec("scatter", numericColumns, "x", "y", null, "t")!;
+      expect(reencodeChart(base, [], "t", "x", "value")).toBeNull();
     });
   });
 

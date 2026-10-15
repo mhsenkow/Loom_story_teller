@@ -10,26 +10,26 @@
 
 ### Explorer
 - **Mount a folder** — Point at a directory of CSV/Parquet files; Loom scans and exposes them in the sidebar. Search files by name.
-- **Data table** — Virtualized table with sort, column reorder (drag headers), show/hide columns, per-column text and range filters. Sparklines, value bars, heat tint, trend cues, and null % in headers. Date columns auto-formatted.
+- **Data table** — Virtualized table with sort, column reorder (drag headers; on phones, ← → in the Columns menu), show/hide columns, per-column text and range filters. Sparklines, value bars, heat tint, trend cues, and null % in headers. Date columns auto-formatted.
 - **Row selection** — Checkboxes, keyboard (↑/↓ + Space). Export selected rows to CSV. **Saved views** store column visibility, order, and filters; **Undo/Redo** for table layout.
 - **Linked highlighting** — Hover a row in the table to highlight the corresponding point on the chart (and vice versa via scatter hover).
 - **Column profiling** — Right-click a column header for a quick profile: null %, unique count, min/max/median, distribution histogram, top values.
 
 ### Chart
 - **Chart view** — Pick a file, get instant chart suggestions (bar, line, scatter, area, pie, heatmap, strip, box). Click a suggestion or use **Suggest with AI** (Ollama).
-- **Encode your way** — X, Y, Color, Size, Row; plus **Glow by**, **Outline by**, **Opacity by**. Bar stacking: grouped, stacked, or 100% stacked. Scatter: connect points (trail), marginal distributions.
+- **Encode your way** — X, Y, Color, Size, Row; plus **Glow by**, **Outline by**, **Opacity by**. Bar stacking: grouped, stacked, or 100% stacked. Scatter: connect points (trail), marginal distributions. Drag Schema columns from the footer into Encoding — or on phones, tap a column → **Use as X / Y / Color / Size**.
 - **Visual controls** — Typography (font, title weight, tick rotation), marks (shape, outline, jitter, bar radius, line style, smooth curve), axes and grid, layout (padding, legend, data labels), atmosphere (background, blend, glow, entrance animation). **Responsive** — compact padding and smaller type when the panel is narrow.
 - **Interactivity** — **Pan** (drag) and **zoom** (wheel) on scatter. **Brush** (Shift+drag) or **Lasso** (freeform polygon) to select points and sync to table selection. **Crosshair** mode shows live (x, y) and ruler pins for Δx/Δy. **Tooltip pinning** — click a point to pin its tooltip. **Mini-map** when zoomed. **Custom reference lines** from the Chart panel.
 - **Smart tab** — **Anomaly** (Z-score, IQR, MAD), **Forecast**, **Trend line**, **Reference lines**, **Clustering**, and **Correlation matrix** (pairwise Pearson heatmap). Overlays draw on the chart; filter table to anomalies.
 - **Data cube 3D** — Pick **Rows**, **Columns**, and **Depth** (any column type: categories, numbers, dates are binned to ≤12 slots) plus an optional **Value** with Sum / Average / Min / Max (default: row count). Each non-empty cell is a voxel sized and colored by its value. Drag to orbit, scroll to zoom, hover a voxel for its row · column · depth and value. Renders with WebGPU when available (Canvas 2D fallback for exports and thumbnails).
-  - **Pivot it** — drag the **Rows / Columns / Depth** chips onto each other (or click two, or **↻ Pivot** to rotate all three) and the voxels fly to their new positions; drop a Schema column on a chip to replace that axis. **Slice** a depth layer with ◀ ▶, `[` / `]`, or by clicking a voxel (other layers ghost; Esc for all). **▦ Table** docks a linked pivot table (rows × columns for the slice, or rolled up across depth, with row / column / grand totals) — hover a cell to light its voxels.
+  - **Pivot it** — drag the **Rows / Columns / Depth** chips onto each other (or click / tap two — the only way on phones — or **↻ Pivot** to rotate all three) and the voxels fly to their new positions; drop a Schema column on a chip to replace that axis. **Slice** a depth layer with ◀ ▶, `[` / `]`, or by clicking a voxel (other layers ghost; Esc for all). **▦ Table** docks a linked pivot table (rows × columns for the slice, or rolled up across depth, with row / column / grand totals) — hover a cell to light its voxels.
 - **Export** — Copy or download PNG/SVG; copy chart config as JSON. Annotations and custom ref lines are per chart.
 
 ### Dive (Scuba-style slice and dice)
 - **Ask questions by clicking** — pick a **time window** (last 15 min → last year, ending at the newest row), **filters**, **group by** (nested), and **metrics** (count, count distinct, sum, avg, min, max, **p50 / p90 / p99**). Results update instantly.
 - **Three views of one query** — **Time series** (auto or fixed buckets, one line per top group), **Table** (ranked groups with totals), **Samples** (newest matching raw rows).
 - **Compare** with the previous period, 1 day, 1 week, or 4 weeks earlier — dashed ghost lines and green/red % deltas.
-- **Drill in** — click any value to filter to it (and stop grouping by it); ⌥-click to exclude it.
+- **Drill in** — click any value to filter to it (and stop grouping by it); ⌥-click to exclude it. On phones, a **Tap a value to: Keep only | Exclude** toggle replaces ⌥.
 - **Live** — on Wikipedia / USGS / NWS and other feeds the dive auto-refreshes.
 - **Share** — the whole query lives in the URL (`#dive=…`); links to live feeds and demo files reopen the dataset on load. **SQL** shows the equivalent DuckDB query (open it in Query on desktop). **Open as cube** sends the filtered rows to the Data cube.
 - Works on web and desktop: the engine runs in the browser over the loaded rows (desktop pulls a 30k-row DuckDB sample first; web streams use their 8k-row buffer; uploaded CSVs on web use the 500-row sample).
@@ -258,7 +258,7 @@ Loom_story_teller/
 │   │   ├── ChartCard.tsx        # Thumbnail + “Try” for suggestions
 │   │   ├── ExplorerView.tsx    # Full-width data table
 │   │   ├── QueryView.tsx       # SQL editor + results
-│   │   └── PreviewFooter.tsx   # Collapsible preview + Schema (drag tokens)
+│   │   └── PreviewFooter.tsx   # Collapsible preview + Schema (drag tokens; tap → Use as X/Y/Color/Size on phones)
 │   ├── lib/
 │   │   ├── store.ts             # Zustand state
 │   │   ├── tauri.ts             # Typed IPC bridge (invoke wrappers)

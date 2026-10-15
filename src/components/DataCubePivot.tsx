@@ -6,6 +6,7 @@
 // Overlay for the `dataCube` chart:
 //  • Axis chips (Rows / Columns / Depth): drag a chip onto another (or
 //    click two) to pivot; drop a Schema column on a chip to replace it.
+//    Phones (no HTML5 drag on touch): tap two chips, with an inline hint.
 //  • Slice stepper: focus one depth layer or roll up across all depth.
 //  • Pivot table: rows × columns for the slice, with totals; hover is
 //    linked to voxels in the cube.
@@ -119,7 +120,8 @@ export function DataCubePivotBar({
                 ? `Swap ${SLOT_LABEL[picked]} ↔ ${SLOT_LABEL[slot]}`
                 : "Drag onto another axis (or click two) to pivot · drop a column here to replace"
             }
-            className={`flex items-center gap-1 max-w-[11rem] px-2 py-1 rounded-md border text-2xs backdrop-blur-sm cursor-grab active:cursor-grabbing transition-colors ${
+            aria-pressed={picked === slot}
+            className={`flex items-center gap-1 max-w-[11rem] px-2 py-1 max-md:min-h-10 max-md:px-2.5 rounded-md border text-2xs backdrop-blur-sm cursor-grab active:cursor-grabbing transition-colors ${
               dropOn === slot || picked === slot
                 ? "border-loom-accent bg-loom-accent/20 text-loom-text"
                 : "border-loom-border bg-loom-surface/85 text-loom-text hover:border-loom-accent/60"
@@ -134,27 +136,32 @@ export function DataCubePivotBar({
           onClick={onRotate}
           title="Rotate axes: rows → columns → depth → rows"
           aria-label="Rotate axes"
-          className="px-2 py-1 rounded-md border border-loom-border bg-loom-surface/85 text-2xs text-loom-muted hover:text-loom-text hover:border-loom-accent/60 backdrop-blur-sm"
+          className="px-2 py-1 max-md:min-h-10 max-md:px-2.5 rounded-md border border-loom-border bg-loom-surface/85 text-2xs text-loom-muted hover:text-loom-text hover:border-loom-accent/60 backdrop-blur-sm"
         >
           ↻ Pivot
         </button>
       </div>
+      <p className="md:hidden pointer-events-none px-1.5 py-0.5 rounded bg-loom-surface/70 backdrop-blur-sm text-2xs text-loom-muted" aria-live="polite">
+        {picked
+          ? `Now tap the axis to swap with ${SLOT_LABEL[picked]}`
+          : "Tap two axes to swap them"}
+      </p>
 
       <div className="flex flex-wrap items-center gap-1 pointer-events-auto">
         <div className="flex items-center rounded-md border border-loom-border bg-loom-surface/85 backdrop-blur-sm text-2xs">
-          <button type="button" onClick={() => step(-1)} className="px-1.5 py-1 text-loom-muted hover:text-loom-text" aria-label="Previous slice" title="Previous slice ( [ )">
+          <button type="button" onClick={() => step(-1)} className="px-1.5 py-1 max-md:min-w-10 max-md:min-h-10 text-loom-muted hover:text-loom-text" aria-label="Previous slice" title="Previous slice ( [ )">
             ◀
           </button>
           <button
             type="button"
             onClick={() => onSlice(null)}
-            className="px-1.5 py-1 min-w-[6.5rem] max-w-[12rem] truncate text-center text-loom-text"
+            className="px-1.5 py-1 max-md:min-h-10 min-w-[6.5rem] max-w-[12rem] truncate text-center text-loom-text"
             title={slice == null ? `All ${cube.z.field} rolled up — step to slice` : "Show all layers (Esc)"}
           >
             <span className="text-loom-muted">{cube.z.field}: </span>
             {slice == null ? "All" : cube.z.labels[slice]}
           </button>
-          <button type="button" onClick={() => step(1)} className="px-1.5 py-1 text-loom-muted hover:text-loom-text" aria-label="Next slice" title="Next slice ( ] )">
+          <button type="button" onClick={() => step(1)} className="px-1.5 py-1 max-md:min-w-10 max-md:min-h-10 text-loom-muted hover:text-loom-text" aria-label="Next slice" title="Next slice ( ] )">
             ▶
           </button>
         </div>
@@ -162,7 +169,7 @@ export function DataCubePivotBar({
           type="button"
           onClick={onToggleTable}
           aria-pressed={tableOpen}
-          className={`px-2 py-1 rounded-md border text-2xs backdrop-blur-sm ${
+          className={`px-2 py-1 max-md:min-h-10 max-md:px-2.5 rounded-md border text-2xs backdrop-blur-sm ${
             tableOpen
               ? "border-loom-accent bg-loom-accent/20 text-loom-text"
               : "border-loom-border bg-loom-surface/85 text-loom-muted hover:text-loom-text hover:border-loom-accent/60"

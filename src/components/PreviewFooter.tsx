@@ -3,6 +3,7 @@
 // =================================================================
 // Tabs: Preview (data table) | Schema (draggable column tokens).
 // Drag tokens from Schema into the right-panel Chart tab encoding targets.
+// Phones (no HTML5 drag on touch): tap a token → "Use as X / Y / Color / Size".
 // =================================================================
 
 "use client";
@@ -10,15 +11,24 @@
 import { useState } from "react";
 import { useLoomStore } from "@/lib/store";
 import { useIsMobile } from "@/lib/useMediaQuery";
+import { reencodeChart, type EncodingDropSlot } from "@/lib/recommendations";
 
 const DRAG_TYPE_COLUMN = "application/x-loom-column";
 
 type FooterTab = "preview" | "schema";
 
+const TAP_SLOTS: { slot: EncodingDropSlot; label: string }[] = [
+  { slot: "x", label: "X" },
+  { slot: "y", label: "Y" },
+  { slot: "color", label: "Color" },
+  { slot: "size", label: "Size" },
+];
+
 export function PreviewFooter() {
-  const { sampleRows, selectedFile, columnStats, activeChart, chartTitleOverrides, viewMode } = useLoomStore();
+  const { sampleRows, selectedFile, columnStats, activeChart, chartTitleOverrides, viewMode, barStackMode, setActiveChart, setToast } = useLoomStore();
   const [expanded, setExpanded] = useState(false);
   const [footerTab, setFooterTab] = useState<FooterTab>("preview");
+  const [tapCol, setTapCol] = useState<string | null>(null);
   const isMobile = useIsMobile();
 
   if (!selectedFile) return null;
@@ -33,6 +43,20 @@ export function PreviewFooter() {
     e.dataTransfer.setData(DRAG_TYPE_COLUMN, colName);
     e.dataTransfer.setData("text/plain", colName);
     e.dataTransfer.effectAllowed = "copy";
+  }
+
+  function assignColumn(slot: EncodingDropSlot, colName: string) {
+    if (!activeChart) return;
+    const tableName = selectedFile?.name?.replace(/\.\w+$/, "") ?? "";
+    const rec = reencodeChart(activeChart, columnStats, tableName, slot, colName, barStackMode);
+    const label = TAP_SLOTS.find((t) => t.slot === slot)?.label ?? slot;
+    if (rec) {
+      setActiveChart(rec);
+      setToast(`${label} → ${colName}`);
+    } else {
+      setToast(`${colName} doesn't fit ${label} for this chart`);
+    }
+    setTapCol(null);
   }
 
   return (
@@ -72,7 +96,10 @@ export function PreviewFooter() {
             </span>
           )}
           {footerTab === "schema" && hasSchema && (
-            <span className="text-2xs font-mono text-loom-muted hidden sm:inline">Drag into Chart → Encoding</span>
+            <>
+              <span className="text-2xs font-mono text-loom-muted hidden md:inline">Drag into Chart → Encoding</span>
+              <span className="text-2xs font-mono text-loom-muted md:hidden whitespace-nowrap">Tap a column</span>
+            </>
           )}
           <button
             type="button"
@@ -119,23 +146,64 @@ export function PreviewFooter() {
               </table>
             )
           ) : (
-            <div className="p-2 flex flex-wrap gap-1.5">
-              {!hasSchema ? (
-                <p className="text-sm text-loom-muted px-2">Select a file to see columns</p>
-              ) : (
-                columnStats.map((col) => (
-                  <div
-                    key={col.name}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, col.name)}
-                    className="flex items-center gap-1.5 px-2 py-1.5 rounded border border-loom-border bg-loom-elevated hover:border-loom-accent cursor-grab active:cursor-grabbing text-xs font-mono text-loom-text transition-colors shrink-0"
+            <>
+              {isMobile && tapCol && (
+                <div
+                  className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 px-2 py-1.5 border-b border-loom-border/50 bg-loom-surface"
+                  role="menu"
+                  aria-label={`Use ${tapCol} as`}
+                >
+                  <span className="text-2xs text-loom-muted truncate max-w-[40%]">
+                    Use <span className="font-mono text-loom-text">{tapCol}</span> as
+                  </span>
+                  {activeChart ? (
+                    TAP_SLOTS.map(({ slot, label }) => (
+                      <button
+                        key={slot}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => assignColumn(slot, tapCol)}
+                        className="min-h-10 px-3 rounded border border-loom-border bg-loom-elevated text-xs text-loom-text active:border-loom-accent"
+                      >
+                        {label}
+                      </button>
+                    ))
+                  ) : (
+                    <span className="text-2xs text-loom-muted">— pick a chart first</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setTapCol(null)}
+                    className="ml-auto min-h-10 min-w-10 grid place-items-center text-loom-muted"
+                    aria-label="Close column menu"
                   >
-                    <span className="truncate max-w-[140px]" title={col.name}>{col.name}</span>
-                    <span className="text-2xs text-loom-muted shrink-0">({col.data_type})</span>
-                  </div>
-                ))
+                    ×
+                  </button>
+                </div>
               )}
-            </div>
+              <div className="p-2 flex flex-wrap gap-1.5">
+                {!hasSchema ? (
+                  <p className="text-sm text-loom-muted px-2">Select a file to see columns</p>
+                ) : (
+                  columnStats.map((col) => (
+                    <div
+                      key={col.name}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, col.name)}
+                      onClick={isMobile ? () => setTapCol((c) => (c === col.name ? null : col.name)) : undefined}
+                      role={isMobile ? "button" : undefined}
+                      aria-expanded={isMobile ? tapCol === col.name : undefined}
+                      className={`flex items-center gap-1.5 px-2 py-1.5 max-md:min-h-10 rounded border hover:border-loom-accent cursor-grab active:cursor-grabbing text-xs font-mono text-loom-text transition-colors shrink-0 ${
+                        isMobile && tapCol === col.name ? "border-loom-accent bg-loom-accent/20" : "border-loom-border bg-loom-elevated"
+                      }`}
+                    >
+                      <span className="truncate max-w-[140px]" title={col.name}>{col.name}</span>
+                      <span className="text-2xs text-loom-muted shrink-0">({col.data_type})</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
