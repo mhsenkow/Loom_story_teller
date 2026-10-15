@@ -101,7 +101,13 @@ export function gpuSceneDataSupport(
 export function getGpuRandomEncoding(
   columns: ColumnInfo[],
   kind: GpuSceneKind,
-): { xField: string; yField: string | null; colorField: string | null; sizeField?: string | null } | null {
+): {
+  xField: string;
+  yField: string | null;
+  colorField: string | null;
+  sizeField?: string | null;
+  zField?: string | null;
+} | null {
   const num = columns.filter((c) => {
     const t = c.data_type.toUpperCase();
     return ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL", "HUGEINT"].some((n) => t.includes(n));
@@ -116,7 +122,13 @@ export function getGpuRandomEncoding(
     if (dims.length < 3) return null;
     const used = new Set(dims.slice(0, 3).map((c) => c.name));
     const measure = pick(num.filter((c) => !used.has(c.name) && c.distinct_count > 12)) ?? null;
-    return { xField: dims[0]!.name, yField: dims[1]!.name, colorField: null, sizeField: measure?.name ?? null };
+    return {
+      xField: dims[0]!.name,
+      yField: dims[1]!.name,
+      colorField: null,
+      sizeField: measure?.name ?? null,
+      zField: dims[2]?.name ?? null,
+    };
   }
   if (kind === "loomWeave") {
     const x = pick(nom.filter((c) => c.distinct_count >= 2 && c.distinct_count <= 24));
@@ -127,11 +139,22 @@ export function getGpuRandomEncoding(
   if (num.length < 2) return null;
   const shuffled = [...num].sort(() => Math.random() - 0.5);
   const color = pick(nom.filter((c) => c.distinct_count >= 2 && c.distinct_count <= 16)) ?? null;
+  if (kind === "quakeTerrain") {
+    // Height is Z — not Size (Size remains unused for terrain).
+    return {
+      xField: shuffled[0]!.name,
+      yField: shuffled[1]!.name,
+      colorField: color?.name ?? null,
+      zField: shuffled[2]?.name ?? null,
+      sizeField: null,
+    };
+  }
   return {
     xField: shuffled[0]!.name,
     yField: shuffled[1]!.name,
     colorField: color?.name ?? null,
-    sizeField: shuffled[2]?.name ?? null,
+    zField: kind === "scatter3d" ? shuffled[2]?.name ?? null : null,
+    sizeField: kind === "scatter3d" ? shuffled[3]?.name ?? null : shuffled[2]?.name ?? null,
   };
 }
 
@@ -151,6 +174,8 @@ export interface GpuSceneRenderOpts {
   zoom?: number;
   /** Sequential ramp for terrain heights (defaults to a theme-tuned ramp). */
   continuousStops?: string[];
+  /** Encoding → Direction: rotate / flip the isometric floor (terrain). */
+  layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
   /** Thumbnail mode — marks only, no axes / keys. Inferred from size when omitted. */
   mini?: boolean;
   hits?: import("./chartTooltip").HitTarget[];
@@ -370,11 +395,13 @@ export function buildGpuSceneRec(
   if (!columns.some((c) => c.name === xField)) return null;
   if (yField && !columns.some((c) => c.name === yField)) return null;
 
+  // Terrain Height historically lived on sizeField — prefer explicit z, then size, then auto.
   const zField =
     opts?.zField ??
-    num.find((c) => c.name !== xField && c.name !== yField)?.name ??
+    (kind === "quakeTerrain" ? opts?.sizeField ?? null : null) ??
+    num.find((c) => c.name !== xField && c.name !== yField && c.name !== opts?.sizeField)?.name ??
     null;
-  const sizeField = opts?.sizeField ?? null;
+  const sizeField = kind === "quakeTerrain" ? null : opts?.sizeField ?? null;
   const timeField =
     opts?.timeField ??
     columns.find((c) => /^(ts|time|date|timestamp)/i.test(c.name) || c.data_type.toUpperCase().includes("TIMESTAMP"))?.name ??

@@ -79,6 +79,7 @@ import { ViewCohortBar } from "@/components/ViewCohortBar";
 import {
   CellIconBtn,
   ChartCellRail,
+  IconArrange,
   IconDataTable,
   IconEditTitle,
   IconRefresh,
@@ -238,6 +239,17 @@ export function ChartView() {
     if (arrangePanelWasOpen.current) useLoomStore.getState().setPanelOpen(true);
     arrangePanelWasOpen.current = false;
   }, []);
+  const toggleArranging = useCallback(() => {
+    if (arranging) {
+      finishArranging();
+      return;
+    }
+    arrangePanelWasOpen.current = isMobile && useLoomStore.getState().panelOpen;
+    if (arrangePanelWasOpen.current) setPanelOpen(false);
+    setArrangeReady(false);
+    setArranging(true);
+    setArrangementPreview(null);
+  }, [arranging, finishArranging, isMobile, setPanelOpen]);
   const [arrangementPreview, setArrangementPreview] = useState<ArrangeChange | null>(null);
   const [arrangementLayout, setArrangementLayout] = useState<ChartChromeLayout | null>(null);
   const chartVisualOverrides = useMemo(() => arrangementPreview && "visual" in arrangementPreview ? { ...savedChartVisualOverrides, ...arrangementPreview.visual } : savedChartVisualOverrides, [savedChartVisualOverrides, arrangementPreview]);
@@ -252,6 +264,11 @@ export function ChartView() {
       store.updateChartAnnotation(store.activeChart.id, id, patch);
     }
   }, []);
+  const resetArrangement = useCallback(() => {
+    const reset = Object.fromEntries(ARRANGEMENT_KEYS.map((k) => [k, undefined])) as ChartVisualOverrides;
+    reset.legendPosition = "auto";
+    commitArrangement({ visual: reset });
+  }, [commitArrangement]);
   useEffect(() => { setArranging(false); setArrangementPreview(null); setArrangementLayout(null); }, [activeChart?.id]);
   const shellMode = useShellMode();
   const liveEdit = useMobileLiveEdit();
@@ -2918,7 +2935,10 @@ export function ChartView() {
                 {
                   xField: activeChart.xField,
                   yField: activeChart.yField,
-                  zField: activeChart.zField,
+                  // Terrain Height is Z; older shares may still carry it on sizeField.
+                  zField:
+                    activeChart.zField ??
+                    (activeChart.kind === "quakeTerrain" ? activeChart.sizeField : null),
                   colorField: activeChart.colorField,
                   sizeField: activeChart.sizeField,
                   timeField: activeChart.timeField,
@@ -2935,6 +2955,8 @@ export function ChartView() {
                   themeBorder: opts.themeBorder,
                   themeBg: opts.themeBg,
                   pointSize: opts.pointSize,
+                  continuousStops: opts.continuousStops,
+                  layoutDirection: activeChart.layoutDirection,
                   yaw: sceneOrbit.yaw,
                   pitch: sceneOrbit.pitch,
                   zoom: sceneOrbit.zoom,
@@ -2970,6 +2992,7 @@ export function ChartView() {
                   legendPosition: opts.legendPosition,
                   topN: opts.topN,
                   bumpMode: opts.bumpMode ?? activeChart.bumpMode ?? undefined,
+                  layoutDirection: activeChart.layoutDirection,
                   hits,
                 },
                 false,
@@ -3761,13 +3784,6 @@ export function ChartView() {
           </div>
         )}
 
-          {!socialExportReady && !socialExportTarget && activeChart && (
-            <div className="relative z-20 flex shrink-0 max-w-full items-center gap-2 rounded-lg border border-loom-border bg-loom-surface/95 px-2 py-1 shadow-sm" role="toolbar" aria-label="Canvas layout">
-              <button type="button" aria-pressed={arranging} onClick={() => { if (arranging) { finishArranging(); return; } arrangePanelWasOpen.current = isMobile && useLoomStore.getState().panelOpen; if (arrangePanelWasOpen.current) setPanelOpen(false); setArrangeReady(false); setArranging(true); setArrangementPreview(null); }} className="loom-btn-ghost min-h-9 px-2 text-xs">{arranging ? "Done arranging" : "Arrange"}</button>
-              {arranging && <><span className="hidden sm:inline text-2xs text-loom-muted">Drag or arrows to move · handles resize · Esc cancels · Alt skips snapping</span><button type="button" className="loom-btn-ghost min-h-9 px-2 text-xs" title="Restore automatic frame, plot, title and legend placement" onClick={() => { const reset = Object.fromEntries(ARRANGEMENT_KEYS.map((k) => [k, undefined])) as ChartVisualOverrides; reset.legendPosition = "auto"; commitArrangement({ visual: reset }); }}>Auto layout</button></>}
-            </div>
-          )}
-
         <div
           ref={stageHostRef}
           className={`flex-1 relative min-h-0 min-h-[200px] flex items-center justify-center ${socialExportReady ? "px-0 py-0 overflow-auto" : "px-3 py-3 sm:px-4 sm:py-4"}`}
@@ -3782,6 +3798,33 @@ export function ChartView() {
             backgroundSize: "10px 10px",
           }}
         >
+          {arranging && !socialExportReady && !socialExportTarget && activeChart && (
+            <div
+              className="absolute top-2 left-1/2 z-30 -translate-x-1/2 flex max-w-[min(36rem,calc(100%-1rem))] flex-wrap items-center justify-center gap-1.5 rounded-lg border border-loom-accent/40 bg-loom-surface/95 px-2 py-1 shadow-sm backdrop-blur-md"
+              role="status"
+              aria-live="polite"
+            >
+              <span className="text-2xs font-medium text-loom-text px-1">Arranging</span>
+              <span className="hidden sm:inline text-2xs text-loom-muted">
+                Drag · resize handles · Esc done · Alt skips snap
+              </span>
+              <button
+                type="button"
+                className="loom-btn-ghost min-h-8 px-2 text-2xs"
+                title="Restore automatic frame, plot, title and legend placement"
+                onClick={resetArrangement}
+              >
+                Auto layout
+              </button>
+              <button
+                type="button"
+                className="min-h-8 px-2.5 text-2xs rounded-md border border-loom-accent/50 bg-loom-accent/15 text-loom-text"
+                onClick={finishArranging}
+              >
+                Done
+              </button>
+            </div>
+          )}
           <div
             aria-live="polite"
             aria-atomic="true"
@@ -3903,6 +3946,16 @@ export function ChartView() {
                 >
                   <IconWhy />
                 </CellIconBtn>
+                {!socialExportTarget && (
+                  <CellIconBtn
+                    label={arranging ? "Done arranging" : "Arrange chart layout"}
+                    title={arranging ? "Finish arranging" : "Move title, legend, and plot on the canvas"}
+                    pressed={arranging}
+                    onClick={toggleArranging}
+                  >
+                    <IconArrange />
+                  </CellIconBtn>
+                )}
                 <CellIconBtn label="Edit chart title" title="Edit title" onClick={handleTitleStartEdit}>
                   <IconEditTitle />
                 </CellIconBtn>
@@ -4442,6 +4495,16 @@ export function ChartView() {
                 >
                   <IconWhy />
                 </CellIconBtn>
+                {!socialExportTarget && (
+                  <CellIconBtn
+                    label={arranging ? "Done arranging" : "Arrange chart layout"}
+                    title={arranging ? "Finish arranging" : "Move title, legend, and plot on the canvas"}
+                    pressed={arranging}
+                    onClick={toggleArranging}
+                  >
+                    <IconArrange />
+                  </CellIconBtn>
+                )}
                 <CellIconBtn label="Edit chart title" title="Edit title" onClick={handleTitleStartEdit}>
                   <IconEditTitle />
                 </CellIconBtn>

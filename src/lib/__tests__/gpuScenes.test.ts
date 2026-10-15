@@ -75,4 +75,17 @@ describe("gpuScenes shortlist", () => {
     expect(rec!.zField).toBe("depth");
     expect(rec!.sizeField).toBe("magnitude");
   });
+
+  it("quakeTerrain Height uses zField (sizeField is a legacy fallback)", () => {
+    const viaZ = buildGpuSceneRec("quakeTerrain", cols, "longitude", "latitude", null, {
+      zField: "depth",
+    });
+    expect(viaZ?.zField).toBe("depth");
+    expect(viaZ?.sizeField).toBeUndefined();
+    const viaLegacySize = buildGpuSceneRec("quakeTerrain", cols, "longitude", "latitude", null, {
+      sizeField: "magnitude",
+    });
+    expect(viaLegacySize?.zField).toBe("magnitude");
+    expect(viaLegacySize?.sizeField).toBeUndefined();
+  });
 });

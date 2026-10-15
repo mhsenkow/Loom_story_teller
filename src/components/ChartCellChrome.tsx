@@ -1,8 +1,8 @@
 // =================================================================
 // ChartCellChrome — floating cell actions next to the chart stage
 // =================================================================
-// Icon rail (refresh / save / data / why / edit title) sits beside the
-// chart so the plot reads as one cell, not a header+footer sandwich.
+// Icon rail (refresh / save / data / why / arrange / edit title) sits beside
+// the chart so the plot reads as one cell, not a header+footer sandwich.
 // =================================================================
 
 "use client";
@@ -82,6 +82,16 @@ export function IconEditTitle() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
       <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+    </svg>
+  );
+}
+
+/** Move / resize canvas chrome (title, legend, plot). */
+export function IconArrange() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden>
+      <path strokeLinecap="round" strokeLinejoin="round" d="M5 9V5h4M15 5h4v4M19 15v4h-4M9 19H5v-4" />
+      <rect x="8" y="8" width="8" height="8" rx="1" />
     </svg>
   );
 }

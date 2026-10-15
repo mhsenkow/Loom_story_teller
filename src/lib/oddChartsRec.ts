@@ -69,6 +69,7 @@ export const ODD_NON_CARTESIAN = new Set<string>([
   "flower",
   "spiral",
   "isoBars",
+  "isoScatter",
   "mosaic",
 ]);
 
@@ -92,6 +93,8 @@ export interface OddRenderOpts {
   topN?: number | null;
   /** Bump: absolute rank or Δrank over time. */
   bumpMode?: "rank" | "delta" | null;
+  /** Bar grow / iso floor orientation (Encoding → Direction). */
+  layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
   /** Registered hover targets (LOOM-020). */
   hits?: import("./chartTooltip").HitTarget[];
 }

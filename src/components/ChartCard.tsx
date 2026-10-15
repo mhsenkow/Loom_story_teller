@@ -79,6 +79,7 @@ export function ChartCard({
   compact = false,
   hero = false,
   micro = false,
+  nativeTitle = true,
 }: {
   rec: ChartRecommendation;
   data: QueryResult | null;
@@ -90,6 +91,8 @@ export function ChartCard({
   hero?: boolean;
   /** Shape-first thumb — denser canvas, thinner chrome (What’s interesting / dense rails) */
   micro?: boolean;
+  /** Browser tooltip on hover — off when a sibling Data chip owns the TLDR. */
+  nativeTitle?: boolean;
 }) {
   const theme = useLoomStore((s) => s.appSettings.theme);
   const colorblind = useLoomStore((s) => s.appSettings.colorblindCharts);
@@ -153,9 +156,13 @@ export function ChartCard({
     const y2Idx = rec.y2Field ? data.columns.indexOf(rec.y2Field) : -1;
     const topN = rec.topN != null ? clampTopN(rec.topN) : null;
 
-    if (xIdx === -1) return;
+    // corrMatrix / radar / parallel draw from all columns — they don't need a resolved X.
+    const xOptional =
+      rec.kind === "corrMatrix" || rec.kind === "radar" || rec.kind === "parallel";
+    if (xIdx === -1 && !xOptional) return;
 
     const rows = downsampledRowsForThumb(data, rec);
+    if (!rows.length) return;
 
     const paintPanel = (
       panelRows: unknown[][],
@@ -193,13 +200,15 @@ export function ChartCard({
         residualOverlay: !!rec.residualOverlay,
         anomalyHighlight: !!rec.anomalyHighlight,
         bumpMode: rec.bumpMode ?? null,
-        zField: rec.zField,
+        // Terrain Height is Z; older recs may still carry it on sizeField.
+        zField: rec.zField ?? (rec.kind === "quakeTerrain" ? rec.sizeField : null),
         timeField: rec.timeField,
         trailId: rec.trailId,
         sizeField: rec.sizeField,
         xField: rec.xField,
         yField: rec.yField,
         colorField: rec.colorField,
+        layoutDirection: rec.layoutDirection,
         hero,
       });
       ctx.restore();
@@ -286,7 +295,13 @@ export function ChartCard({
       tabIndex={hero ? -1 : undefined}
       aria-hidden={hero || undefined}
       aria-pressed={hero ? undefined : isActive}
-      title={hero ? undefined : rec.subtitle ? `${rec.title} — ${rec.subtitle}` : rec.title}
+      title={
+        hero || !nativeTitle
+          ? undefined
+          : rec.subtitle
+            ? `${rec.title} — ${rec.subtitle}`
+            : rec.title
+      }
       className={`
         group flex flex-col overflow-hidden text-left min-w-0
         border bg-loom-elevated
@@ -481,6 +496,7 @@ type PaintArgs = {
   xField: string;
   yField: string | null;
   colorField: string | null;
+  layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
   hero: boolean;
 };
 
@@ -606,6 +622,8 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         colors: COLORS,
         opacity: 0.85,
         pointSize: 2.6,
+        continuousStops: SEQ,
+        layoutDirection: a.layoutDirection,
         themeBg: "rgba(0,0,0,0)",
         themeText: ui.text,
         themeMuted: ui.muted,
@@ -629,6 +647,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         colors: COLORS,
         opacity: 0.85,
         pointSize: 2.5,
+        continuousStops: SEQ,
         axisLabelColor: ui.muted,
         themeText: ui.text,
         themeMuted: ui.muted,
@@ -637,6 +656,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         topN: a.topN,
         legendPosition: "none",
         bumpMode: a.bumpMode ?? undefined,
+        layoutDirection: a.layoutDirection,
       },
       true,
     );

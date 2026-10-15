@@ -737,6 +737,8 @@ export function createChartRec(
           tooltipKeyField: extra?.tooltipKeyField,
           timeWindowField: timeWindowField || undefined,
           timeWindow: timeWindow || undefined,
+          // Direction rotates the isometric floor (terrain) — must survive GPU early-return.
+          layoutDirection: layoutDirection || undefined,
         };
       }
       if (isGeoMapKind(kind)) {
@@ -759,7 +761,7 @@ export function createChartRec(
           yAggregate,
         });
         if (!odd) return null;
-        // Preserve Encoding extras the odd builder doesn't know about (Top N, tooltips).
+        // Preserve Encoding extras the odd builder doesn't know about (Top N, Direction, tooltips).
         return {
           ...odd,
           topN: topN ?? undefined,
@@ -767,6 +769,7 @@ export function createChartRec(
           tooltipKeyField: extra?.tooltipKeyField,
           timeWindowField: timeWindowField || undefined,
           timeWindow: timeWindow || undefined,
+          layoutDirection: layoutDirection || undefined,
         };
       }
       return null;

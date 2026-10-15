@@ -14,6 +14,7 @@ import { Dialog } from "@/components/ui/Dialog";
 import { useLoomStore } from "@/lib/store";
 import { openDataSources } from "@/components/StartHere";
 import { ChartCard } from "@/components/ChartCard";
+import { DiscoverSourceLink } from "@/components/DiscoverSourceLink";
 import {
   scanDiscoverStories,
   getDiscoverScanSummary,
@@ -317,7 +318,11 @@ export function Onboarding() {
     setShow(false);
   };
 
-  const openStory = async (story: DiscoverStory) => {
+  const openStory = async (
+    story: DiscoverStory,
+    opts?: { dest?: "chart" | "inspect" },
+  ) => {
+    const dest = opts?.dest ?? "chart";
     scanAbortRef.current?.abort();
     retainDiscoverFeed(story.kind);
     setOpeningId(story.id);
@@ -385,16 +390,26 @@ export function Onboarding() {
       if (story.hook && story.hook !== openChart.title) {
         useLoomStore.getState().setChartTitleOverride(openChart.id, story.hook);
       }
-      setViewMode("chart");
-      setPanelTab("chart");
+      if (dest === "inspect") {
+        setViewMode("chart");
+        setPanelTab("stats");
+        // Keep the detail panel open so provenance + columns are visible.
+        const st = useLoomStore.getState();
+        if (!st.panelOpen) st.togglePanel();
+        setToast(`Inspect · ${file.name}`);
+      } else {
+        setViewMode("chart");
+        setPanelTab("chart");
+        setToast(`Opened · ${story.hook}`);
+      }
       setDataRegionOpen(false);
       setDataSourcesExpanded(false);
       if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
         const st = useLoomStore.getState();
         if (st.sidebarOpen) st.toggleSidebar();
-        if (st.panelOpen) st.togglePanel();
+        // Inspect needs the panel; chart-open still collapses chrome on phones.
+        if (dest !== "inspect" && st.panelOpen) st.togglePanel();
       }
-      setToast(`Opened · ${story.hook}`);
       dismiss();
     } catch (e) {
       setToast(`Couldn’t open: ${e instanceof Error ? e.message : e}`);
@@ -703,9 +718,13 @@ export function Onboarding() {
               {visible.map((s) => (
                 <li key={s.id} className="min-w-0 max-w-full animate-fade-in">
                   <div className="relative">
-                    <span className="absolute top-1.5 left-1.5 z-10 text-[9px] uppercase tracking-wider font-medium text-loom-muted bg-loom-bg/85 border border-loom-border/70 rounded px-1 py-px max-w-[70%] truncate pointer-events-none">
+                    <span className="absolute top-1.5 left-1.5 z-10 text-[9px] uppercase tracking-wider font-medium text-loom-muted bg-loom-bg/85 border border-loom-border/70 rounded px-1 py-px max-w-[52%] truncate pointer-events-none">
                       {s.category}
                     </span>
+                    <DiscoverSourceLink
+                      kind={s.kind}
+                      onInspect={() => void openStory(s, { dest: "inspect" })}
+                    />
                     <ChartCard
                       rec={{
                         ...s.chart,
@@ -716,6 +735,7 @@ export function Onboarding() {
                       isActive={openingId === s.id}
                       onClick={() => void openStory(s)}
                       micro
+                      nativeTitle={false}
                     />
                   </div>
                 </li>

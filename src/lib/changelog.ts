@@ -25,6 +25,38 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-15c",
+    date: "2026-10-15",
+    title: "Data chip on What’s interesting",
+    summary: "Hover any card’s Data link for a short source TLDR; click it to inspect the feed.",
+    items: [
+      {
+        title: "Where this data is from",
+        detail: "Each What’s interesting card has a quiet Data control. Hover for a one-line TLDR and credit; click to open the feed with Stats (provenance + columns). The rest of the card still opens the chart.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15b",
+    date: "2026-10-15",
+    title: "Terrain Direction and isometric axes",
+    summary: "Fake-3D charts get a Direction control, Height on the right channel, and axes that sit on the diamond floor.",
+    items: [
+      {
+        title: "Direction for terrain & iso charts",
+        detail: "Terrain, isometric bars, and isometric scatter join the Direction chips — rotate or flip the fake-3D floor (and bar grow) instead of only flat bar charts.",
+      },
+      {
+        title: "Height is Height",
+        detail: "Terrain Height maps to the Z channel (kept through Shuffle / Random). Older shares that stored height on Size still render.",
+      },
+      {
+        title: "Axes on the diamond",
+        detail: "Floor and height ticks follow the isometric projection so labels stay even with the bars and cells — not a separate flat L-frame.",
+      },
+    ],
+  },
+  {
     id: "2026-10-15a",
     date: "2026-10-15",
     title: "Encoding that stays out of the way",
@@ -36,12 +68,16 @@ export const CHANGELOG: ChangelogRelease[] = [
         detail: "Long Encoding essays for Facet, Split, Direction, Glow, and friends move into small info tips so the panel stays scannable.",
       },
       {
+        title: "Keep vs Pin, clearly",
+        detail: "Encoding and Visual both use Keep chips for shuffle (⟳ / ✦ / Shuffle look). Color’s old orphan lock is now Pin across types — a different job.",
+      },
+      {
         title: "Size where it matters",
         detail: "Bubble, map, and glyph charts keep Size in the main Channels list instead of burying it under More.",
       },
       {
         title: "Move the key, keep the link",
-        detail: "Arrange mode lets you drag (and resize) the legend on the chart. The placement rides along in the share link.",
+        detail: "The Arrange icon lives with the other chart tools (Refresh, Save…). Drag title, legend, and plot — placement rides along in the share link.",
       },
       {
         title: "Source info in the header or footer",

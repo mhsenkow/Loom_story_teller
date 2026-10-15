@@ -34,6 +34,7 @@ import {
   type ChartInk,
 } from "./chartInk";
 import { pickDataCubeEncoding, rankCubeDimensions } from "./dataCube";
+import { orientIsoCell, resolveIsoFloorOrient } from "./isoOrient";
 
 export * from "./gpuScenesRec";
 import type {
@@ -487,6 +488,7 @@ function drawQuakeTerrain(
   // Non-negative measures (magnitudes, counts) rise from zero so heights compare honestly.
   const base0 = lo >= 0 ? 0 : lo;
   const span = hi - base0 || 1;
+  const floorOrient = resolveIsoFloorOrient(opts.layoutDirection);
 
   const keyH = mini ? 0 : rampKeyHeight(true) + 8;
   const side = mini ? 4 : Math.max(12, pad * 0.4);
@@ -507,15 +509,28 @@ function drawQuakeTerrain(
   const originX = (w - floorW) / 2 + rows * sxStep;
   const originY = top + elevMax + Math.max(0, (availH - elevMax - (cols + rows) * syStep) / 2);
 
+  const projectFloor = (c: number, r: number, elev = 0) => {
+    const o = orientIsoCell(c, r, cols, rows, floorOrient);
+    return {
+      x: originX + (o.c - o.r) * sxStep,
+      y: originY + (o.c + o.r) * syStep - elev,
+    };
+  };
+
   const stops = sequentialStops(ink, opts.continuousStops);
   const colorAt = (t: number) => rampColor(stops, 0.12 + 0.88 * t);
   const shadeTo = "#000000";
-  cells.sort((a, b) => a.c + a.r - (b.c + b.r) || a.c - b.c);
+  cells.sort((a, b) => {
+    const ao = orientIsoCell(a.c, a.r, cols, rows, floorOrient);
+    const bo = orientIsoCell(b.c, b.r, cols, rows, floorOrient);
+    return ao.c + ao.r - (bo.c + bo.r) || ao.c - bo.c;
+  });
   for (const cell of cells) {
     const t = Math.max(0, Math.min(1, (cell.v - base0) / span));
     const hh = Math.max(1, t * elevMax);
-    const x = originX + (cell.c - cell.r) * sxStep;
-    const yBase = originY + (cell.c + cell.r) * syStep;
+    const o = orientIsoCell(cell.c, cell.r, cols, rows, floorOrient);
+    const x = originX + (o.c - o.r) * sxStep;
+    const yBase = originY + (o.c + o.r) * syStep;
     const yTop = yBase - hh;
     const col = colorAt(t);
     // left face
@@ -560,19 +575,84 @@ function drawQuakeTerrain(
     ink,
     fontFamily: font,
   });
-  // Floor axis names along the two near floor edges
+
+  // Isometric floor edges + tick labels (aligned with the diamond, not screen axes).
+  const corners = {
+    o: projectFloor(0, 0),
+    x: projectFloor(cols - 1, 0),
+    y: projectFloor(0, rows - 1),
+    far: projectFloor(cols - 1, rows - 1),
+  };
   ctx.save();
+  ctx.strokeStyle = inkTint(ink, 0.4);
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  ctx.moveTo(corners.o.x, corners.o.y);
+  ctx.lineTo(corners.x.x, corners.x.y);
+  ctx.moveTo(corners.o.x, corners.o.y);
+  ctx.lineTo(corners.y.x, corners.y.y);
+  ctx.stroke();
+
+  const xTicks = niceTicks(xMin, xMax, 4, true);
+  const yTicks = niceTicks(yMin, yMax, 4, true);
   ctx.font = fontOf(10, font);
   ctx.fillStyle = ink.muted;
-  const frontY = originY + (cols + rows) * syStep + 2 * syStep;
   ctx.textBaseline = "top";
-  ctx.textAlign = "left";
-  const xLabel = f?.x ? `${f.x} →` : "";
-  const yLabel = f?.y ? `← ${f.y}` : "";
-  const half = Math.max(40, floorW / 2 - 8);
-  if (xLabel) ctx.fillText(fitTextEllipsis(ctx, xLabel, half), originX - rows * sxStep + floorW / 2 + 8, Math.min(h - bottom - 12, frontY - (cols * syStep) / 2));
+  for (const v of xTicks.ticks) {
+    const t = (v - xMin) / (xMax - xMin || 1);
+    const c = Math.max(0, Math.min(cols - 1, Math.round(t * (cols - 1))));
+    const p = projectFloor(c, 0);
+    ctx.strokeStyle = inkTint(ink, 0.22);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x - 4, p.y + 7);
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.fillText(formatAxisValue(v, xTicks.step), p.x - 2, p.y + 8);
+  }
+  for (const v of yTicks.ticks) {
+    const t = (v - yMin) / (yMax - yMin || 1);
+    const r = Math.max(0, Math.min(rows - 1, Math.round(t * (rows - 1))));
+    const p = projectFloor(0, r);
+    ctx.strokeStyle = inkTint(ink, 0.22);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    ctx.lineTo(p.x + 4, p.y + 7);
+    ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.fillText(formatAxisValue(v, yTicks.step), p.x + 6, p.y + 6);
+  }
+
+  // Height pole at the origin corner — same perspective as cell extrusion.
+  const zTicks = niceTicks(base0, hi, 3, true);
+  const poleTop = projectFloor(0, 0, elevMax);
+  ctx.strokeStyle = inkTint(ink, 0.45);
+  ctx.beginPath();
+  ctx.moveTo(corners.o.x, corners.o.y);
+  ctx.lineTo(poleTop.x, poleTop.y);
+  ctx.stroke();
   ctx.textAlign = "right";
-  if (yLabel) ctx.fillText(fitTextEllipsis(ctx, yLabel, half), originX - rows * sxStep + floorW / 2 - 8, Math.min(h - bottom - 12, frontY - (rows * syStep) / 2));
+  ctx.textBaseline = "middle";
+  for (const v of zTicks.ticks) {
+    const t = Math.max(0, Math.min(1, (v - base0) / span));
+    const p = projectFloor(0, 0, t * elevMax);
+    ctx.fillText(formatAxisValue(v, zTicks.step), p.x - 6, p.y);
+  }
+
+  ctx.font = fontOf(10, font, 600);
+  ctx.fillStyle = ink.text;
+  ctx.textBaseline = "top";
+  const xm = projectFloor((cols - 1) * 0.55, 0);
+  const ym = projectFloor(0, (rows - 1) * 0.55);
+  ctx.textAlign = "center";
+  if (f?.x) ctx.fillText(fitTextEllipsis(ctx, `${f.x} →`, floorW * 0.42), xm.x, xm.y + 22);
+  ctx.textAlign = "left";
+  if (f?.y) ctx.fillText(fitTextEllipsis(ctx, `← ${f.y}`, floorW * 0.42), ym.x + 10, ym.y + 18);
+  if (f?.z) {
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(fitTextEllipsis(ctx, `↑ ${f.z}`, 120), poleTop.x, poleTop.y - 4);
+  }
   ctx.restore();
 }
 

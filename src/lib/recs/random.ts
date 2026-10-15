@@ -20,6 +20,7 @@ export type EncodingShuffleLocks = {
   y?: boolean;
   color?: boolean;
   size?: boolean;
+  z?: boolean;
 };
 
 export type RandomEncoding = {
@@ -27,6 +28,7 @@ export type RandomEncoding = {
   yField: string | null;
   colorField: string | null;
   sizeField?: string | null;
+  zField?: string | null;
   /** Small-multiples facet (bar / line / area / scatter). */
   rowField?: string | null;
   /** Category cap for ranked bars. */
@@ -44,7 +46,20 @@ export type RandomEncoding = {
   barStackMode?: "grouped" | "stacked" | "percent" | null;
   timeWindowField?: string | null;
   timeWindow?: ChartTimeRange | null;
+  /** Encoding → Direction (bar grow / iso floor). */
+  layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
 };
+
+const DIRECTION_RANDOM_KINDS = new Set<ChartKind>([
+  "bar",
+  "pareto",
+  "lollipop",
+  "waterfall",
+  "isoBars",
+  "isoScatter",
+  "quakeTerrain",
+]);
+const DIRECTION_RANDOM_PICKS = ["up", "down", "right", "left"] as const;
 
 export const FACET_RANDOM_KINDS = new Set<ChartKind>(["bar", "line", "area", "scatter", "bubble"]);
 export const TOP_N_RANDOM_KINDS = new Set<ChartKind>(["bar", "pareto", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "waffle", "isotype", "radialBar", "isoBars"]);
@@ -63,6 +78,7 @@ export function applyEncodingLocks(
     yField: locks.y ? (keep.yField ?? null) : drawn.yField,
     colorField: locks.color ? (keep.colorField ?? null) : drawn.colorField,
     sizeField: locks.size ? (keep.sizeField ?? null) : drawn.sizeField,
+    zField: locks.z ? (keep.zField ?? null) : drawn.zField,
     // Facet / Top N / Compare / DS always reshuffle with the draw (no lock chips yet).
     rowField: drawn.rowField,
     topN: drawn.topN,
@@ -77,6 +93,7 @@ export function applyEncodingLocks(
     barStackMode: drawn.barStackMode,
     timeWindowField: keep.timeWindowField ?? drawn.timeWindowField ?? null,
     timeWindow: keep.timeWindow ?? drawn.timeWindow ?? null,
+    layoutDirection: drawn.layoutDirection,
   };
 }
 
@@ -104,6 +121,7 @@ export function withRandomEncodingExtras(
   let bumpMode: "rank" | "delta" | null = null;
   let timeWindowField: string | null = null;
   let timeWindow: ChartTimeRange | null = null;
+  let layoutDirection: "auto" | "up" | "down" | "right" | "left" | null = null;
 
   if (FACET_RANDOM_KINDS.has(kind)) {
     const facetPool = nomCols.filter(
@@ -156,6 +174,10 @@ export function withRandomEncodingExtras(
 
   if (kind === "bump" && Math.random() < 0.4) bumpMode = "delta";
 
+  if (DIRECTION_RANDOM_KINDS.has(kind) && Math.random() < 0.38) {
+    layoutDirection = pick([...DIRECTION_RANDOM_PICKS]) ?? "up";
+  }
+
   const timeCol = pickDefaultTimeField(columns, base);
   if (timeCol && Math.random() < 0.42) {
     const windows = suggestedChartTimeWindows(timeCol);
@@ -179,6 +201,7 @@ export function withRandomEncodingExtras(
     bumpMode,
     timeWindowField,
     timeWindow,
+    layoutDirection,
   };
 }
 
@@ -569,6 +592,7 @@ export function getRandomChartAndEncoding(
 export function randomEncodingToExtra(enc: RandomEncoding): NonNullable<Parameters<typeof createChartRec>[6]> {
   return {
     sizeField: enc.sizeField ?? null,
+    zField: enc.zField ?? null,
     rowField: enc.rowField ?? null,
     topN: enc.topN ?? null,
     y2Field: enc.y2Field ?? null,
@@ -582,5 +606,9 @@ export function randomEncodingToExtra(enc: RandomEncoding): NonNullable<Paramete
     barStackMode: enc.barStackMode ?? undefined,
     timeWindowField: enc.timeWindowField ?? null,
     timeWindow: enc.timeWindow && enc.timeWindow !== "all" ? enc.timeWindow : null,
+    // Omit when unset so field shuffle keeps the current Direction from extraFromChart.
+    ...(enc.layoutDirection && enc.layoutDirection !== "auto"
+      ? { layoutDirection: enc.layoutDirection }
+      : {}),
   };
 }

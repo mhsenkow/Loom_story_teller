@@ -23,7 +23,7 @@ import {
   streamStatus,
   type SourceKind,
 } from "./tauri";
-import { SOURCE_DEFS } from "./sourceRegistry";
+import { SOURCE_BY_KIND, SOURCE_DEFS } from "./sourceRegistry";
 import { stormLevel } from "./webStreams";
 
 export type DiscoverKind = SourceKind | "wiki";
@@ -44,6 +44,33 @@ export interface DiscoverStory {
   score: number;
   stats: ColumnInfo[];
   sample: QueryResult;
+}
+
+/** TLDR + credit for What’s interesting data chips (hover bubble / inspect). */
+export interface DiscoverSourceBrief {
+  label: string;
+  /** One-line “what is this feed”. */
+  tldr: string;
+  credit: string;
+  homepage: string;
+}
+
+const WIKI_BRIEF: DiscoverSourceBrief = {
+  label: "Wikipedia Live",
+  tldr: "Recent edits across Wikimedia projects as they happen — titles, bots, and language editions.",
+  credit: "Wikimedia recent changes · CC BY-SA",
+  homepage: "https://www.wikimedia.org/",
+};
+
+export function discoverSourceBrief(kind: DiscoverKind): DiscoverSourceBrief {
+  if (kind === "wiki") return WIKI_BRIEF;
+  const def = SOURCE_BY_KIND[kind];
+  return {
+    label: def.label,
+    tldr: def.description,
+    credit: def.attribution,
+    homepage: def.homepage,
+  };
 }
 
 /** localStorage flag — after first dismiss, intro scan stays quiet until cleared. */

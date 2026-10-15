@@ -26,6 +26,8 @@ import {
 import {
   chartCapabilities,
   encodingChannelLabels,
+  encodingDirectionTip,
+  resolveIsoFloorOrient,
   resolveLayoutDirection,
   measureSuggestsGrowDown,
 } from "../chartSupport";
@@ -271,6 +273,12 @@ describe("recommendations", () => {
       expect(chartCapabilities("bar").layoutDirection).toBe(true);
       expect(chartCapabilities("lollipop").layoutDirection).toBe(true);
       expect(chartCapabilities("waterfall").layoutDirection).toBe(true);
+      expect(chartCapabilities("quakeTerrain").layoutDirection).toBe(true);
+      expect(chartCapabilities("isoBars").layoutDirection).toBe(true);
+      expect(chartCapabilities("isoScatter").layoutDirection).toBe(true);
+      expect(chartCapabilities("quakeTerrain").zChannel).toBe(true);
+      expect(chartCapabilities("quakeTerrain").sizeChannel).toBe(false);
+      expect(encodingChannelLabels("quakeTerrain").size).toBe("Height");
       expect(chartCapabilities("line").layoutDirection).toBe(false);
       expect(chartCapabilities("line").yScale).toBe(true);
       expect(chartCapabilities("area").yScale).toBe(true);
@@ -281,6 +289,10 @@ describe("recommendations", () => {
       expect(resolveLayoutDirection("down", false)).toEqual({ horizontal: false, reverse: true });
       expect(resolveLayoutDirection("right", false)).toEqual({ horizontal: true, reverse: false });
       expect(resolveLayoutDirection("left", false)).toEqual({ horizontal: true, reverse: true });
+      expect(resolveIsoFloorOrient("right")).toBe(1);
+      expect(resolveIsoFloorOrient("down")).toBe(2);
+      expect(encodingDirectionTip("quakeTerrain")).toMatch(/isometric/i);
+      expect(encodingDirectionTip("bar")).toMatch(/vertical/i);
     });
 
     it("createChartRec keeps layoutDirection on bar rebuilds", () => {
@@ -292,6 +304,19 @@ describe("recommendations", () => {
         layoutDirection: "auto",
       });
       expect(auto?.layoutDirection).toBeUndefined();
+    });
+
+    it("createChartRec keeps layoutDirection on terrain / iso rebuilds", () => {
+      const terrain = createChartRec("quakeTerrain", richColumns, "x", "y", null, "t", {
+        zField: "z",
+        layoutDirection: "right",
+      });
+      expect(terrain?.layoutDirection).toBe("right");
+      expect(terrain?.zField).toBe("z");
+      const iso = createChartRec("isoBars", richColumns, "category", "value", null, "t", {
+        layoutDirection: "down",
+      });
+      expect(iso?.layoutDirection).toBe("down");
     });
 
     it("suggests Direction ↓ for lower-is-better measure names", () => {

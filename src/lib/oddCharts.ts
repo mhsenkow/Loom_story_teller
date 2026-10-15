@@ -55,6 +55,8 @@ import {
 export * from "./oddChartsRec";
 import type { OddChartKind, OddRenderOpts } from "./oddChartsRec";
 import { toNum, groupSum, agg, numColsOf, nomColsOf, timeColsOf, inferType, jitter } from "./oddChartsRec";
+import { resolveLayoutDirection } from "./chartSupport";
+import { resolveIsoFloorOrient } from "./isoOrient";
 
 
 // ---------------------------------------------------------------------------
@@ -1936,6 +1938,7 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     env.opts.topN != null ? Math.max(3, Math.min(30, Math.round(env.opts.topN))) : 12,
   );
   if (!entries.length) return "Nothing positive to stack into bars";
+  const layout = resolveLayoutDirection(env.opts.layoutDirection, false);
   const { mini, ink } = env;
   const base = basePlot(env);
   const n = entries.length;
@@ -1945,23 +1948,24 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   const bw = Math.max(3, ((plot.right - plot.left) / n) * 0.6);
   const scale = niceTicks(0, Math.max(...entries.map(([, v]) => v)), 5, true);
   const ph = plot.bottom - plot.top;
-  const yOf = (v: number) => plot.bottom - (v / (scale.max || 1)) * ph;
-  if (!mini) {
-    drawChartGrid(ctx, env.w, env.h, plot, gridLook(env), { x: null, y: [0, scale.max] });
-    drawChartTicks(ctx, 0, 1, 0, scale.max, env.w, env.h, plot, env.look, { x: false });
-  }
+  // Direction ↓ / ← grow from the top; → flips extrusion to the left.
+  const yOf = (v: number) =>
+    layout.reverse
+      ? plot.top + (v / (scale.max || 1)) * ph
+      : plot.bottom - (v / (scale.max || 1)) * ph;
   const step = (plot.right - plot.left) / n;
   const centers = entries.map((_, i) => plot.left + (i + 0.5) * step);
   const front = env.single;
   const sideC = mixColor(front, "#000000", 0.3);
   const topC = mixColor(front, "#ffffff", 0.25);
-  const dx = depth;
+  const dx = layout.horizontal && layout.reverse ? -depth : depth;
   const dy = -depth * 0.6;
+  const baseline = layout.reverse ? plot.top : plot.bottom;
   entries.forEach(([, v], i) => {
     const x0 = centers[i]! - bw / 2;
     const x1 = centers[i]! + bw / 2;
-    const yT = yOf(v);
-    const yB = plot.bottom;
+    const yT = Math.min(yOf(v), baseline);
+    const yB = Math.max(yOf(v), baseline);
     ctx.globalAlpha = Math.max(0.85, env.alpha);
     ctx.fillStyle = sideC;
     ctx.beginPath();
@@ -1984,24 +1988,43 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     ctx.globalAlpha = 1;
   });
   if (mini) return;
-  ctx.strokeStyle = inkTint(ink, 0.38);
-  ctx.lineWidth = 1;
+  // Floor edge follows the extrusion (fake-3D), not a flat cartesian L-frame.
+  ctx.strokeStyle = inkTint(ink, 0.4);
+  ctx.lineWidth = 1.25;
   ctx.beginPath();
-  ctx.moveTo(plot.left, plot.bottom + 0.5);
-  ctx.lineTo(plot.right + depth, plot.bottom + 0.5);
+  ctx.moveTo(plot.left, baseline);
+  ctx.lineTo(plot.right, baseline);
+  ctx.lineTo(plot.right + dx, baseline + dy);
+  ctx.lineTo(plot.left + dx, baseline + dy);
+  ctx.closePath();
   ctx.stroke();
+  // Height ticks along the left riser, parallel to bar extrusion.
+  const yTicks = niceTicks(0, scale.max, 4, true);
+  ctx.font = fontOf(10, env.font);
+  ctx.fillStyle = ink.muted;
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  ctx.strokeStyle = inkTint(ink, 0.28);
+  for (const v of yTicks.ticks) {
+    const y = yOf(v);
+    ctx.beginPath();
+    ctx.moveTo(plot.left, y);
+    ctx.lineTo(plot.left + dx * 0.35, y + dy * 0.35);
+    ctx.stroke();
+    ctx.fillText(formatAxisValue(v, yTicks.step), plot.left - 4, y);
+  }
   drawBandAxisX(ctx, entries.map(([l]) => l), centers, step, env.w, env.h, plot, env.look);
   drawAxisFieldLabels(ctx, env.w, env.h, env.pad, fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null), env.look);
-  // Value on top of each bar when it fits.
   ctx.font = fontOf(10, env.font);
   ctx.fillStyle = ink.text;
   ctx.textAlign = "center";
-  ctx.textBaseline = "bottom";
+  ctx.textBaseline = layout.reverse ? "top" : "bottom";
   if (env.opts.showDataLabels !== false) {
     entries.forEach(([, v], i) => {
       const t = formatDataValue(v);
       if (ctx.measureText(t).width > step - 2) return;
-      ctx.fillText(t, centers[i]! + dx / 2, yOf(v) + dy - 3);
+      const tip = yOf(v);
+      ctx.fillText(t, centers[i]! + dx / 2, tip + dy + (layout.reverse ? 4 : -3));
     });
   }
 }
@@ -2022,8 +2045,24 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
   const zH = zs ? 0.9 : 0;
   const cos30 = Math.cos(Math.PI / 6);
   const sin30 = 0.5;
+  const floorOrient = resolveIsoFloorOrient(env.opts.layoutDirection);
+  const mapFloor = (nx: number, ny: number): { nx: number; ny: number } => {
+    switch (floorOrient) {
+      case 1:
+        return { nx: ny, ny: 1 - nx };
+      case 2:
+        return { nx: 1 - nx, ny: 1 - ny };
+      case 3:
+        return { nx: 1 - ny, ny: nx };
+      default:
+        return { nx, ny };
+    }
+  };
   // Unit-space projection, then fit to the plot (with room for edge labels).
-  const iso = (nx: number, ny: number, nz: number) => ({ X: (nx - ny) * cos30, Y: (nx + ny) * sin30 - nz * zH });
+  const iso = (nx0: number, ny0: number, nz: number) => {
+    const { nx, ny } = mapFloor(nx0, ny0);
+    return { X: (nx - ny) * cos30, Y: (nx + ny) * sin30 - nz * zH };
+  };
   const corners = [iso(0, 0, 0), iso(1, 0, 0), iso(0, 1, 0), iso(1, 1, 0), iso(0, 0, 1), iso(0, 1, 1)];
   const minX = Math.min(...corners.map((c) => c.X));
   const maxX = Math.max(...corners.map((c) => c.X));
@@ -2071,11 +2110,16 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     }
     ctx.stroke();
   }
-  // Points back to front, with drop lines when height is encoded.
+  // Points back to front (after Direction remap), with drop lines when height is encoded.
   const catIdx = categoryIndex(rows, ci);
   const drawn = pts
-    .map((p) => ({ p, n: [nX(p.x), nY(p.y), nZ(p.z)] as const }))
-    .sort((a, b) => a.n[0] + a.n[1] - (b.n[0] + b.n[1]) || a.n[2] - b.n[2]);
+    .map((p) => {
+      const nx0 = nX(p.x);
+      const ny0 = nY(p.y);
+      const floor = mapFloor(nx0, ny0);
+      return { p, n: [nx0, ny0, nZ(p.z)] as const, depth: floor.nx + floor.ny };
+    })
+    .sort((a, b) => a.depth - b.depth || a.n[2] - b.n[2]);
   const r = mini ? 2 : radiusFromPointSize(env.opts.pointSize, 3.2);
   for (const d of drawn) {
     const top = proj(d.n[0], d.n[1], d.n[2]);
@@ -2092,32 +2136,52 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     dot(ctx, top.sx, top.sy, r, color, env.alpha, ink.bg);
   }
   if (mini) return;
-  // Edge tick labels on the two front floor edges, height ticks on the left pole.
+  // Tick labels on the two floor edges from the origin — stay on the diamond after Direction.
+  const o = proj(0, 0, 0);
+  ctx.strokeStyle = inkTint(ink, 0.4);
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  ctx.moveTo(o.sx, o.sy);
+  ctx.lineTo(proj(1, 0, 0).sx, proj(1, 0, 0).sy);
+  ctx.moveTo(o.sx, o.sy);
+  ctx.lineTo(proj(0, 1, 0).sx, proj(0, 1, 0).sy);
+  ctx.stroke();
+
   ctx.font = fontOf(10, env.font);
   ctx.fillStyle = ink.muted;
   ctx.textBaseline = "top";
-  ctx.textAlign = "right";
   for (const v of xs.ticks) {
-    const p = proj(nX(v), 1, 0);
-    ctx.fillText(formatAxisValue(v, xs.step), p.sx - 4, p.sy + 3);
+    const p = proj(nX(v), 0, 0);
+    ctx.strokeStyle = inkTint(ink, 0.22);
+    ctx.beginPath();
+    ctx.moveTo(p.sx, p.sy);
+    ctx.lineTo(p.sx - 4, p.sy + 7);
+    ctx.stroke();
+    ctx.textAlign = "center";
+    ctx.fillText(formatAxisValue(v, xs.step), p.sx - 2, p.sy + 8);
   }
-  ctx.textAlign = "left";
   for (const v of ys.ticks) {
-    const p = proj(1, nY(v), 0);
-    ctx.fillText(formatAxisValue(v, ys.step), p.sx + 4, p.sy + 3);
+    const p = proj(0, nY(v), 0);
+    ctx.strokeStyle = inkTint(ink, 0.22);
+    ctx.beginPath();
+    ctx.moveTo(p.sx, p.sy);
+    ctx.lineTo(p.sx + 4, p.sy + 7);
+    ctx.stroke();
+    ctx.textAlign = "left";
+    ctx.fillText(formatAxisValue(v, ys.step), p.sx + 6, p.sy + 6);
   }
   ctx.font = fontOf(10, env.font, 600);
   ctx.fillStyle = ink.text;
-  const xm = proj(0.5, 1, 0);
-  const ym = proj(1, 0.5, 0);
-  ctx.textAlign = "right";
-  ctx.fillText(fitTextEllipsis(ctx, `${fieldName(env, xi)} →`, env.w / 2 - 20), xm.sx - 16, xm.sy + 18);
+  const xm = proj(0.55, 0, 0);
+  const ym = proj(0, 0.55, 0);
+  ctx.textAlign = "center";
+  ctx.fillText(fitTextEllipsis(ctx, `${fieldName(env, xi)} →`, env.w / 2 - 20), xm.sx, xm.sy + 22);
   ctx.textAlign = "left";
-  ctx.fillText(fitTextEllipsis(ctx, `← ${fieldName(env, yi)}`, env.w / 2 - 20), ym.sx + 16, ym.sy + 18);
+  ctx.fillText(fitTextEllipsis(ctx, `← ${fieldName(env, yi)}`, env.w / 2 - 20), ym.sx + 10, ym.sy + 18);
   if (zs) {
-    const p0 = proj(0, 1, 0);
-    const p1 = proj(0, 1, 1);
-    ctx.strokeStyle = inkTint(ink, 0.38);
+    const p0 = proj(0, 0, 0);
+    const p1 = proj(0, 0, 1);
+    ctx.strokeStyle = inkTint(ink, 0.45);
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(p0.sx, p0.sy);
@@ -2128,14 +2192,14 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     for (const v of zs.ticks) {
-      const p = proj(0, 1, nZ(v));
-      ctx.fillText(formatAxisValue(v, zs.step), p.sx - 5, p.sy);
+      const p = proj(0, 0, nZ(v));
+      ctx.fillText(formatAxisValue(v, zs.step), p.sx - 6, p.sy);
     }
     ctx.font = fontOf(10, env.font, 600);
     ctx.fillStyle = ink.text;
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
-    ctx.fillText(fitTextEllipsis(ctx, `↑ ${fieldName(env, si)}`, 140), p1.sx, p1.sy - 6);
+    ctx.fillText(fitTextEllipsis(ctx, `↑ ${fieldName(env, si)}`, 140), p1.sx, p1.sy - 4);
   }
   if (ci >= 0) drawPanelLegend(ctx, env, legendEntriesFor(rows, ci, env.colors), fieldName(env, ci), base, "top-right");
 }

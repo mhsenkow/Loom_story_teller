@@ -14,6 +14,7 @@ import {
   clearDiscoverStoryCache,
   consumeDiscoverForceRequest,
   discoverHookFor,
+  discoverSourceBrief,
   discoverStoryLimit,
   getDiscoverScanSummary,
   getDiscoverStoryCache,
@@ -47,6 +48,17 @@ describe("discoverStories", () => {
 
   it("exports the dismiss key used by Onboarding", () => {
     expect(DISCOVER_SEEN_KEY).toBe("loom-discover-v1");
+  });
+
+  it("discoverSourceBrief returns TLDR + credit for live feeds and wiki", () => {
+    const usgs = discoverSourceBrief("usgs");
+    expect(usgs.label).toMatch(/earthquake/i);
+    expect(usgs.tldr.length).toBeGreaterThan(20);
+    expect(usgs.credit).toBeTruthy();
+    expect(usgs.homepage).toMatch(/^https?:\/\//);
+    const wiki = discoverSourceBrief("wiki");
+    expect(wiki.label).toMatch(/wiki/i);
+    expect(wiki.credit).toMatch(/CC BY-SA/i);
   });
 
   it("keeps room for many chart variants across every live feed", () => {

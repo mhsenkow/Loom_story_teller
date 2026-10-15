@@ -446,9 +446,10 @@ export function encodingDropAllowed(
   ]);
   const needsNumericX = new Set<ChartKind>(["scatter", "bubble", "hexbin", "histogram", "isoScatter", "contour", "voronoi"]);
 
-  if (slot === "size" || (slot === "z" && kind === "scatter3d")) {
+  if (slot === "size" || (slot === "z" && (kind === "scatter3d" || kind === "quakeTerrain"))) {
     if (t !== "quantitative") {
-      return { ok: false, reason: `${slot === "size" ? "Size" : "Z"} needs a numeric column — “${col.name}” is ${t}.` };
+      const label = slot === "size" ? "Size" : kind === "quakeTerrain" ? "Height" : "Z";
+      return { ok: false, reason: `${label} needs a numeric column — “${col.name}” is ${t}.` };
     }
   }
   if (slot === "y" && needsNumericY.has(kind) && t !== "quantitative") {
@@ -488,6 +489,41 @@ export const CHART_LAYOUT_DIRECTIONS: {
   { value: "left", label: "←", title: "Horizontal — zero at right, values grow left" },
 ];
 
+/** Iso / terrain Direction: rotate or flip the fake-3D floor (not bar grow). */
+const ISO_FLOOR_DIRECTION_TITLES: Record<ChartLayoutDirection, string> = {
+  auto: "Default floor facing — X along the right diamond edge, Y along the left",
+  up: "Default floor facing (same as Auto for isometric charts)",
+  down: "Rotate the floor 180° — swap near/far corners",
+  right: "Rotate the floor 90° clockwise",
+  left: "Rotate the floor 90° counter-clockwise",
+};
+
+const ISO_BAR_DIRECTION_TITLES: Record<ChartLayoutDirection, string> = {
+  auto: "Bars grow up from the baseline; extrusion to the right",
+  up: "Bars grow up from the baseline",
+  down: "Bars grow down from the top (ranks, deficits)",
+  right: "Bars grow up; extrude toward the right",
+  left: "Bars grow up; extrude toward the left",
+};
+
+/** Per-kind tip under Encoding → Direction. */
+export function encodingDirectionTip(kind: ChartKind): string {
+  if (kind === "quakeTerrain" || kind === "isoScatter") {
+    return "Rotates which floor edge is X vs Y so the isometric grid matches how you want to read it. Axes stay on the diamond.";
+  }
+  if (kind === "isoBars") {
+    return "Flips grow-up vs grow-down and which way the fake-3D extrusion leans.";
+  }
+  return "Auto picks vertical vs horizontal from the stage size. Down/left put zero at the top/right — good for ranks and deficits.";
+}
+
+/** Button title for a Direction chip (bar family vs iso floor). */
+export function encodingDirectionTitle(kind: ChartKind, dir: ChartLayoutDirection): string {
+  if (kind === "quakeTerrain" || kind === "isoScatter") return ISO_FLOOR_DIRECTION_TITLES[dir];
+  if (kind === "isoBars") return ISO_BAR_DIRECTION_TITLES[dir];
+  return CHART_LAYOUT_DIRECTIONS.find((d) => d.value === dir)?.title ?? dir;
+}
+
 /** Resolve Encoding Direction into horizontal + reverse measure axis. */
 export function resolveLayoutDirection(
   dir: ChartLayoutDirection | null | undefined,
@@ -521,7 +557,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     // Radar/parallel draw every numeric column as an axis; only Color (series) is user-driven
     xChannel: kind !== "radar" && kind !== "parallel" && kind !== "corrMatrix",
     yChannel: kind !== "histogram" && kind !== "radar" && kind !== "parallel" && kind !== "corrMatrix",
-    zChannel: kind === "scatter3d" || kind === "dataCube",
+    zChannel: kind === "scatter3d" || kind === "dataCube" || kind === "quakeTerrain",
     // Show Color only when the canvas reads colorField / cIdx for this kind
     colorChannel: ![
       "histogram", "pie", "heatmap", "hexbin", "box", "waterfall", "choropleth", "ridgeline", "dataCube",
@@ -531,7 +567,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       // Dual-measure kinds: Size carries the second measure; Color slot is hidden in UI
       "pyramid", "slope",
     ].includes(kind),
-    // Size: bubble/scatter + endpoint kinds + geo bubbles/globe + GPU scenes
+    // Size: bubble/scatter + endpoint kinds + geo + GPU (terrain uses Z/Height, not Size)
     sizeChannel:
       scatterLike ||
       bubbleLike ||
@@ -547,7 +583,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       kind === "geoBubbles" ||
       kind === "globe" ||
       kind === "globeTrail" ||
-      gpu,
+      (gpu && kind !== "quakeTerrain"),
     aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind),
     facetRow: kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble",
     // Only kinds whose canvas path actually ranks/caps categories (see ChartView / oddCharts).
@@ -574,7 +610,8 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     emphasis: false,
     // GPU particle scenes and lon/lat maps lack hover; dataCube has its own picker
     tooltipHover: kind === "dataCube" || (!gpu && !isGeoMapKind(kind)),
-    layoutDirection: ["bar", "pareto", "lollipop", "waterfall"].includes(kind),
+    // Bar family: grow direction. Iso / terrain: rotate or flip the fake-3D floor.
+    layoutDirection: ["bar", "pareto", "lollipop", "waterfall", "isoBars", "isoScatter", "quakeTerrain"].includes(kind),
     // Canvas applies opts.yScale in scatter / line / area paths today
     yScale: kind === "scatter" || kind === "line" || kind === "area",
     // Continuous X ticks that honor tickRotation (not bar/line band axes)
@@ -674,6 +711,7 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
       return base("Source", "Weight", "Target");
     case "voronoi":
     case "isoScatter":
+      return base("X", "Y", "Color", "Height");
     case "contour":
       return base("X", "Y", "Color");
     case "scatter3d":
@@ -682,7 +720,8 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
     case "trailRibbon":
       return base("X", "Y", "Series", "Width");
     case "quakeTerrain":
-      return base("Lon", "Lat", "Color", "Height");
+      // Floor axes are any ordered measures (lon/lat, year/month, …); Height is Z.
+      return base("X", "Y", "Color", "Height");
     case "loomWeave":
       return base("Warp", "Value", "Color", "Weft");
     case "dataCube":
@@ -747,10 +786,20 @@ export function encodingKindBlurb(kind: ChartKind): string | null {
     case "glyphStar":
     case "flower":
       return "Identity labels each glyph; Feature A/B/C map to face/star/petal channels.";
+    case "quakeTerrain":
+      return "X × Y lay the floor grid; Height (Z) raises each cell. Direction rotates the isometric view.";
+    case "isoBars":
+      return "Category bars extruded in fake 3D. Direction flips grow-up vs grow-down (and left/right).";
+    case "isoScatter":
+      return "X × Y on the isometric floor; Height lifts points. Direction rotates which floor edge is which.";
+    case "bucketField":
+      return "Bucket splits the canvas into paddocks; Value/Size/Color decorate dots inside each.";
     default:
       return null;
   }
 }
+
+export { resolveIsoFloorOrient, orientIsoCell } from "./isoOrient";
 
 /** Whether SVG export is meaningful for the current Vega spec (Canvas is authoritative). */
 export function svgExportMode(vegaSpec: unknown): "off" | "approx" {

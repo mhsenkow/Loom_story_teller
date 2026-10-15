@@ -193,14 +193,14 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
       {lockedColorField && (
         <button
           type="button"
-          title={`Unlock color · ${lockedColorField}`}
-          className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono border border-loom-accent/35 text-loom-text hover:bg-loom-accent/10"
+          title={`Unpin color · ${lockedColorField} (Encoding → Color → Pin across types)`}
+          className="shrink-0 min-h-7 px-2 py-0.5 rounded-md text-2xs border border-loom-accent/35 text-loom-text hover:bg-loom-accent/10"
           onClick={() => {
             unlockColorAndResetLocks();
-            setToast("Color unlocked");
+            setToast("Color unpinned");
           }}
         >
-          unlock
+          Unpin color
         </button>
       )}
 

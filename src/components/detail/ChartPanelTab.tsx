@@ -72,6 +72,8 @@ import {
   formatChartAggregationSummary,
   chartCapabilities,
   encodingChannelLabels,
+  encodingDirectionTip,
+  encodingDirectionTitle,
   encodingKindBlurb,
   encodingPanelHints,
   encodingDropAllowed,
@@ -304,6 +306,41 @@ function EncodingSlot({
 function EncodingSectionLabel({ children }: { children: ReactNode }) {
   return (
     <p className="text-2xs font-semibold text-loom-muted uppercase tracking-wider pt-1">{children}</p>
+  );
+}
+
+/** Shared “Keep while shuffling” chips — Encoding (✦/⟳) and Visual (Shuffle look). */
+function ShuffleKeepRow({
+  tip,
+  chips,
+}: {
+  tip: string;
+  chips: { id: string; label: string; on: boolean; onToggle: () => void }[];
+}) {
+  if (chips.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1 pt-0.5" role="group" aria-label="Keep while shuffling">
+      <span className="text-2xs text-loom-muted shrink-0 flex items-center gap-1 mr-0.5">
+        Keep
+        <EncodingInfoTip label="About Keep" text={tip} />
+      </span>
+      {chips.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          aria-pressed={c.on}
+          onClick={c.onToggle}
+          title={c.on ? `Will keep ${c.label} when shuffling` : `Keep ${c.label} when shuffling`}
+          className={`px-1.5 py-0.5 text-2xs rounded border ${
+            c.on
+              ? "border-loom-accent/60 text-loom-accent bg-loom-accent/10"
+              : "border-loom-border text-loom-muted hover:border-loom-accent/40"
+          }`}
+        >
+          {c.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -1393,6 +1430,7 @@ export default function ChartPanelTab() {
           yField: activeChart.yField,
           colorField: activeChart.colorField,
           sizeField: activeChart.sizeField ?? null,
+          zField: activeChart.zField ?? null,
         }
       : undefined;
     const rec = tryBuildRandomChartRec(columnStats, tableName, { locks: encodingLocks, keep });
@@ -1401,7 +1439,7 @@ export default function ChartPanelTab() {
       commitRec(
         rec,
         locked.length
-          ? `Random · ${rec.kind} (locked ${locked.join(", ")})`
+          ? `Random · ${rec.kind} (kept ${locked.join(", ")})`
           : `Random · ${rec.kind}`,
       );
     } else {
@@ -1420,6 +1458,7 @@ export default function ChartPanelTab() {
       yField: activeChart.yField,
       colorField: activeChart.colorField,
       sizeField: activeChart.sizeField ?? null,
+      zField: activeChart.zField ?? null,
     };
     for (let i = 0; i < 48; i++) {
       const drawn = getRandomEncoding(columnStats, activeChart.kind);
@@ -1485,6 +1524,7 @@ export default function ChartPanelTab() {
   const showY = caps.yChannel;
   const showColor = caps.colorChannel;
   const showSize = caps.sizeChannel;
+  const showZ = caps.zChannel;
   /** Size is a defining channel for these kinds — keep it in primary Channels. */
   const sizeInPrimary =
     activeChart.kind === "pyramid" ||
@@ -1502,12 +1542,14 @@ export default function ChartPanelTab() {
     activeChart.kind === "beeswarm" ||
     activeChart.kind === "bucketField" ||
     activeChart.kind === "trailRibbon" ||
-    activeChart.kind === "quakeTerrain" ||
+    activeChart.kind === "isoScatter" ||
     activeChart.kind === "firefly" ||
     activeChart.kind === "scatter3d" ||
     activeChart.kind === "loomWeave";
   const kindBlurb = encodingKindBlurb(activeChart.kind);
   const isDataCube = activeChart.kind === "dataCube";
+  const zChannelLabel =
+    activeChart.kind === "quakeTerrain" ? "Height" : isDataCube ? "Depth" : "Z";
   const cubeAggregate: YAggregateOption = activeChart.sizeField ? (activeChart.yAggregate ?? "sum") : "count";
   const showAggregate = caps.aggregate;
   const effectiveAggregate: YAggregateOption = !activeChart.yField
@@ -1685,7 +1727,7 @@ export default function ChartPanelTab() {
                 type="button"
                 onClick={handleRandomizeEncoding}
                 className="shrink-0 min-h-9 min-w-9 px-2 rounded-md border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors"
-                title="Shuffle unlocked fields (keeps chart type; respects locks)"
+                title="Shuffle fields — respects Keep chips below (chart type stays)"
                 aria-label="Shuffle fields"
               >
                 ⟳
@@ -1694,43 +1736,33 @@ export default function ChartPanelTab() {
                 type="button"
                 onClick={handleRandomize}
                 className="shrink-0 min-h-9 min-w-9 px-2 rounded-md border border-loom-border text-loom-muted hover:text-loom-accent hover:bg-loom-elevated transition-colors"
-                title="Random chart — respects locks (type / x / y / color / size)"
+                title="Random chart — respects Keep chips below"
                 aria-label="Randomize chart"
               >
                 ✦
               </button>
             </div>
 
-            <div className="flex flex-wrap items-center gap-1">
-              <span className="text-2xs text-loom-muted mr-0.5">Lock</span>
-              {(
+            <ShuffleKeepRow
+              tip="Only affects Shuffle fields (⟳) and Random chart (✦). Kept channels stay put; the rest reshuffle. Separate from Pin on Color, which sticks across chart-type changes."
+              chips={(
                 [
-                  ["kind", "Type"],
-                  ["x", "X"],
-                  ["y", "Y"],
-                  ["color", "Color"],
-                    ["size", channelLabels.size],
-                  ] as const
-                ).map(([key, label]) => {
-                const on = !!encodingLocks[key];
-                return (
-                  <button
-                    key={key}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => toggleEncodingLock(key)}
-                    title={on ? `Unlock ${label} for random` : `Lock ${label} while randomizing`}
-                    className={`px-1.5 py-0.5 text-2xs rounded border ${
-                      on
-                        ? "border-loom-accent/60 text-loom-accent bg-loom-accent/10"
-                        : "border-loom-border text-loom-muted hover:border-loom-accent/40"
-                    }`}
-                  >
-                    {label}{on ? " · locked" : ""}
-                  </button>
-                );
-              })}
-            </div>
+                  { id: "kind", label: "Type", show: true as boolean },
+                  { id: "x", label: channelLabels.x, show: showX },
+                  { id: "y", label: channelLabels.y, show: showY },
+                  { id: "color", label: channelLabels.color, show: showColor },
+                  { id: "size", label: channelLabels.size, show: showSize },
+                  { id: "z", label: zChannelLabel, show: showZ },
+                ] as const
+              )
+                .filter((c) => c.show)
+                .map((c) => ({
+                  id: c.id,
+                  label: c.label,
+                  on: !!encodingLocks[c.id as keyof EncodingShuffleLocks],
+                  onToggle: () => toggleEncodingLock(c.id as keyof EncodingShuffleLocks),
+                }))}
+            />
 
             <EncodingSectionLabel>Channels</EncodingSectionLabel>
             <div className="space-y-2">
@@ -1819,33 +1851,41 @@ export default function ChartPanelTab() {
                   onChromeEnter={focusChromeFromPanel}
                   onChromeLeave={clearChromeFromPanel}
                   trailing={
-                    activeChart.colorField ? (
-                      <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
-                        <button
-                          type="button"
-                          title={
-                            lockedColorField === activeChart.colorField
-                              ? "Color locked across chart types"
-                              : "Lock color so it sticks when you change mark type"
-                          }
-                          aria-pressed={lockedColorField === activeChart.colorField}
-                          className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${
-                            lockedColorField === activeChart.colorField
-                              ? "border-loom-accent/50 bg-loom-accent/15 text-loom-accent"
-                              : "border-loom-border text-loom-muted hover:text-loom-text"
-                          }`}
-                          onClick={() => {
-                            if (lockedColorField === activeChart.colorField) {
-                              unlockColorAndResetLocks();
-                              setToast("Color unlocked");
-                            } else if (activeChart.colorField) {
-                              setLockedColorField(activeChart.colorField);
-                              setToast(`Color locked · ${activeChart.colorField}`);
-                            }
-                          }}
-                        >
-                          {lockedColorField === activeChart.colorField ? "locked" : "lock"}
-                        </button>
+                    activeChart.colorField || activeChart.kind === "bar" ? (
+                      <div className="flex items-center gap-1.5 flex-wrap pl-0.5 pt-0.5">
+                        {activeChart.colorField ? (
+                          <span className="inline-flex items-center gap-1">
+                            <button
+                              type="button"
+                              title={
+                                lockedColorField === activeChart.colorField
+                                  ? `Pinned · ${activeChart.colorField} stays when you change chart type`
+                                  : "Pin this color field across chart-type changes"
+                              }
+                              aria-pressed={lockedColorField === activeChart.colorField}
+                              className={`min-h-7 px-2 py-0.5 rounded-md text-2xs border ${
+                                lockedColorField === activeChart.colorField
+                                  ? "border-loom-accent/50 bg-loom-accent/15 text-loom-accent"
+                                  : "border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent/40"
+                              }`}
+                              onClick={() => {
+                                if (lockedColorField === activeChart.colorField) {
+                                  unlockColorAndResetLocks();
+                                  setToast("Color unpinned");
+                                } else if (activeChart.colorField) {
+                                  setLockedColorField(activeChart.colorField);
+                                  setToast(`Color pinned · ${activeChart.colorField}`);
+                                }
+                              }}
+                            >
+                              {lockedColorField === activeChart.colorField ? "Pinned across types" : "Pin across types"}
+                            </button>
+                            <EncodingInfoTip
+                              label="About pinning color"
+                              text="Different from Keep above. Pin remembers this color field when you switch chart types (bar → scatter → map). Keep only protects Color during Shuffle/Random."
+                            />
+                          </span>
+                        ) : null}
                         {activeChart.kind === "bar" && (
                           <>
                             <span className="text-2xs text-loom-muted shrink-0">Layout</span>
@@ -1982,12 +2022,7 @@ export default function ChartPanelTab() {
                       Direction
                       <EncodingInfoTip
                         label="About Direction"
-                        text={
-                          (activeChart.layoutDirection ?? "auto") === "auto"
-                            ? "Auto picks vertical vs horizontal from the stage size. Down/left put zero at the top/right — good for ranks and deficits."
-                            : (CHART_LAYOUT_DIRECTIONS.find((d) => d.value === activeChart.layoutDirection)?.title ??
-                              "Choose where zero sits and which way bars grow.")
-                        }
+                        text={encodingDirectionTip(activeChart.kind)}
                       />
                     </span>
                     <div className="flex gap-1 flex-wrap" role="group" aria-label="Chart direction">
@@ -2004,7 +2039,7 @@ export default function ChartPanelTab() {
                                 ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
                                 : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
                             }`}
-                            title={d.title}
+                            title={encodingDirectionTitle(activeChart.kind, d.value)}
                             aria-pressed={on}
                           >
                             {d.label}
@@ -2149,9 +2184,9 @@ export default function ChartPanelTab() {
                   )}
                 </>
               )}
-              {caps.zChannel && (
+              {showZ && (
                 <EncodingSlot
-                  label={isDataCube ? "Depth" : "Z"}
+                  label={zChannelLabel}
                   value={activeChart.zField ?? ""}
                   options={zColOptions}
                   allowEmpty={!isDataCube}
@@ -2166,7 +2201,9 @@ export default function ChartPanelTab() {
                   info={
                     isDataCube
                       ? "Third cube axis — stacks rows × columns into depth slices."
-                      : "Third spatial axis for 3D scatter (numeric)."
+                      : activeChart.kind === "quakeTerrain"
+                        ? "Cell height on the isometric floor — mean value per grid cell."
+                        : "Third spatial axis for 3D scatter (numeric)."
                   }
                 />
               )}
@@ -2719,10 +2756,15 @@ export default function ChartPanelTab() {
             )}
             {/* Presets — full replace */}
             <ChartInspectorSection title="Design system" open={!!visualSections.design} onToggle={() => toggleVisualSection("design")}>
-
-              <p className="text-2xs text-loom-muted leading-snug">
-                Full looks — Tufte / Bauhaus / Newspaper / Military change ink, axes, and atmosphere on every chart kind.
-              </p>
+              <div className="flex items-center gap-1 mb-0.5">
+                <p className="text-2xs text-loom-muted leading-snug flex-1 min-w-0">
+                  Presets replace the whole look. Shuffle randomizes sections you haven’t kept.
+                </p>
+                <EncodingInfoTip
+                  label="About design system"
+                  text="Tufte / Bauhaus / Newspaper / Military (and friends) replace ink, axes, and atmosphere. Keep chips below only affect Shuffle look — same idea as Encoding Keep for ✦/⟳."
+                />
+              </div>
               <div className="flex flex-wrap gap-1.5">
                 {(Object.keys(VISUAL_PRESETS) as VisualPresetId[]).map((id) => (
                   <button
@@ -2762,51 +2804,42 @@ export default function ChartPanelTab() {
                     pushChartEditUndo();
                     const next = shuffleVisualOverrides(chartVisualOverrides, visualLocks);
                     setChartVisualOverrides(next);
-                    const locked = VISUAL_SHUFFLE_SECTIONS.filter((s) => visualLocks[s.id]).map((s) => s.label);
+                    const kept = VISUAL_SHUFFLE_SECTIONS.filter((s) => visualLocks[s.id]).map((s) => s.label);
                     setToast(
-                      locked.length
-                        ? `Shuffled look · kept ${locked.join(", ")}`
+                      kept.length
+                        ? `Shuffled look · kept ${kept.join(", ")}`
                         : "Shuffled look · color + design",
                       { undo: true },
                     );
                   }}
                   className="px-2.5 py-1.5 min-h-9 text-2xs rounded border border-loom-accent/50 text-loom-accent hover:bg-loom-accent/10"
-                  title="Randomize unlocked Visual sections (Color included when unlocked)"
+                  title="Randomize Visual sections that aren’t marked Keep"
                 >
                   Shuffle look
                 </button>
               </div>
-              <div className="flex flex-wrap items-center gap-1 pt-0.5">
-                <span className="text-2xs text-loom-muted mr-0.5">Lock</span>
-                {VISUAL_SHUFFLE_SECTIONS.map((s) => {
-                  const on = !!visualLocks[s.id];
-                  return (
-                    <button
-                      key={s.id}
-                      type="button"
-                      aria-pressed={on}
-                      aria-label={`${on ? "Unlock" : "Lock"} visual ${s.label.toLowerCase()}`}
-                      onClick={() => toggleVisualLock(s.id)}
-                      title={on ? `Unlock ${s.label}` : `Lock ${s.label} while shuffling`}
-                      className={`px-1.5 py-0.5 text-2xs rounded border ${
-                        on
-                          ? "border-loom-accent/60 text-loom-accent bg-loom-accent/10"
-                          : "border-loom-border text-loom-muted hover:border-loom-accent/40"
-                      }`}
-                    >
-                      {s.label}{on ? " · locked" : ""}
-                    </button>
-                  );
-                })}
-              </div>
+              <ShuffleKeepRow
+                tip="Only affects Shuffle look. Kept sections stay; the rest reshuffle. Same pattern as Encoding Keep for field shuffle / random chart."
+                chips={VISUAL_SHUFFLE_SECTIONS.map((s) => ({
+                  id: s.id,
+                  label: s.label,
+                  on: !!visualLocks[s.id],
+                  onToggle: () => toggleVisualLock(s.id),
+                }))}
+              />
             </ChartInspectorSection>
 
             {/* Color palettes */}
             <ChartInspectorSection title="Color" open={!!visualSections.color} onToggle={() => toggleVisualSection("color")}>
-
-              <p className="text-2xs text-loom-muted leading-snug">
-                Data-viz scales — Auto picks categorical, sequential, or semantic from the chart.
-              </p>
+              <div className="flex items-center gap-1 mb-0.5">
+                <p className="text-2xs text-loom-muted leading-snug flex-1 min-w-0">
+                  Palette for the Color channel (and heat / density ramps).
+                </p>
+                <EncodingInfoTip
+                  label="About color scales"
+                  text="Auto picks categorical, sequential, or semantic from the chart. This is visual ink — Encoding → Color chooses which field; Keep/Pin there control shuffle and type switches."
+                />
+              </div>
               <div className="flex flex-wrap gap-1">
                 {COLOR_SCALE_KIND_OPTIONS.map(({ value: id, label }) => {
                   const cur = chartVisualOverrides.colorScaleKind ?? "auto";
@@ -3421,7 +3454,7 @@ export default function ChartPanelTab() {
                   Legend / key
                   <EncodingInfoTip
                     label="About legend"
-                    text="Tap Arrange on the chart, then drag the key (handles resize). Placement is saved in the share link. Or pick a corner here."
+                    text="Use the Arrange icon in the chart tools (beside Refresh), then drag the key (handles resize). Placement is saved in the share link. Or pick a corner here."
                   />
                 </label>
                 <select aria-label="Legend position"
