@@ -89,7 +89,7 @@ How these were captured (and how to refresh them): [docs/screenshots/README.md](
 
 - **macOS 14+** (Sonoma) with Apple Silicon recommended
 - **Rust** 1.75+ (`rustup`)
-- **Node.js** 20+ (e.g. `nvm`)
+- **Node.js** 24.x (e.g. `nvm`)
 - **Tauri CLI**: `cargo install tauri-cli`
 - **Docker** (optional, for containerized web UI)
 

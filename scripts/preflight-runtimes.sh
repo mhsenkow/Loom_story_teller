@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-need_node="${LOOM_NODE_VERSION:-20}"
+need_node="${LOOM_NODE_VERSION:-$(cat "$ROOT/.nvmrc")}"
 node_major="$(node -p "process.versions.node.split('.')[0]")"
 if [[ "$node_major" != "$need_node" ]]; then
   echo "Node $need_node required (CI + .nvmrc); got $(node -v)" >&2
