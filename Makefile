@@ -230,6 +230,10 @@ ci: preflight check-ts check-worker check-mcp test build bundle-budget check-rus
 .PHONY: build
 build: weave-web ## ✅ Production static export (CI alias)
 
+.PHONY: bundle-budget
+bundle-budget: ## ✅ First-load JavaScript budget
+	npm run bundle-budget
+
 .PHONY: preflight
 preflight: ## ✅ Node/Rust version preflight (LOOM-663)
 	@scripts/preflight-runtimes.sh
