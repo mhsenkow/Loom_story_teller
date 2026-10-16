@@ -59,6 +59,11 @@ describe("geoAtlas", () => {
 
   it("pickAtlasKind prefers US for state samples", () => {
     expect(pickAtlasKind("state", ["CA", "TX", "NY", "FL"])).toBe("us");
+    // snake_case / camelCase region names (USAFacts states: CA must not read as Canada)
+    expect(pickAtlasKind("state_abbr", ["CA", "IN", "AL", "GA"])).toBe("us");
+    expect(pickAtlasKind("state_fips", ["06", "48"])).toBe("us");
+    expect(pickAtlasKind("home_state", ["CA"])).toBe("us");
+    expect(pickAtlasKind("statement", ["CA"])).toBe("world");
     expect(pickAtlasKind("country_code", ["USA", "BRA", "DEU"])).toBe("world");
   });
 

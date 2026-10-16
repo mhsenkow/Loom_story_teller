@@ -19,6 +19,7 @@ import {
   type ChartRecommendation,
 } from "./recommendations";
 import { sourceKindFromPath } from "./sourceRegistry";
+import { refForPath } from "./sourceRef";
 import type { SourceKind } from "./tauri";
 
 /** Which recommender builds the chart shortlist for the dataset. */
@@ -87,6 +88,8 @@ export function activateDataset(input: ActivateDatasetInput): ActivatedDataset {
     inspectingFilePath: input.inspectingFilePath,
     extra: input.extra,
   });
+  // Implicit "like" for source preferences (de-duped per ref within minutes).
+  useLoomStore.getState().noteSourceOpened(refForPath(input.file.path, input.file));
   return { charts, active };
 }
 

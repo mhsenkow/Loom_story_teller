@@ -1306,6 +1306,105 @@ function hook_debt(
       };
 }
 
+function hook_usafacts_states(
+  n: number,
+  sample: QueryResult,
+  chart: ChartRecommendation,
+): DiscoverHookResult {
+  // Richest state in the newest vintage, plus how many states saw unemployment rise vs the prior one
+  let latest = -Infinity;
+  for (let r = 0; r < sample.rows.length; r++) {
+    const y = numAt(sample, r, "yr");
+    if (Number.isFinite(y) && y > latest) latest = y;
+  }
+  let prior = -Infinity;
+  for (let r = 0; r < sample.rows.length; r++) {
+    const y = numAt(sample, r, "yr");
+    if (y < latest && y > prior) prior = y;
+  }
+  const unempPrior = new Map<string, number>();
+  let topIncome = -Infinity;
+  let topState = "";
+  for (let r = 0; r < sample.rows.length; r++) {
+    const y = numAt(sample, r, "yr");
+    if (y === prior) unempPrior.set(strAt(sample, r, "state_abbr"), numAt(sample, r, "unemployment_rate"));
+    if (y !== latest) continue;
+    const inc = numAt(sample, r, "median_household_income");
+    if (inc > topIncome) {
+      topIncome = inc;
+      topState = strAt(sample, r, "state_name");
+    }
+  }
+  let rose = 0;
+  let compared = 0;
+  for (let r = 0; r < sample.rows.length; r++) {
+    if (numAt(sample, r, "yr") !== latest) continue;
+    const before = unempPrior.get(strAt(sample, r, "state_abbr"));
+    const now = numAt(sample, r, "unemployment_rate");
+    if (before == null || !Number.isFinite(before) || !Number.isFinite(now)) continue;
+    compared++;
+    if (now > before) rose++;
+  }
+  if (topState && Number.isFinite(topIncome)) {
+    const movers = compared ? ` Unemployment rose in ${rose} of ${compared} states vs ${prior}.` : "";
+    return {
+      hook: `${topState} earns the most · $${Math.round(topIncome).toLocaleString("en-US")} median income (${latest})`,
+      blurb: `${chart.subtitle || chart.title}.${movers}`,
+      score: 84,
+      preferKind: "choropleth",
+      category: "Economy",
+    };
+  }
+  return {
+    hook: "Income, poverty, and jobs in every state",
+    blurb: chart.subtitle || chart.title,
+    score: 74,
+    preferKind: "choropleth",
+    category: "Economy",
+  };
+}
+
+function hook_usafacts_nation(
+  n: number,
+  sample: QueryResult,
+  chart: ChartRecommendation,
+): DiscoverHookResult {
+  let latest = "";
+  let unemp = NaN;
+  let infl = NaN;
+  for (let r = 0; r < sample.rows.length; r++) {
+    const m = strAt(sample, r, "month");
+    const u = numAt(sample, r, "unemployment_rate");
+    if (m > latest && Number.isFinite(u)) {
+      latest = m;
+      unemp = u;
+      infl = numAt(sample, r, "inflation_yoy_pct");
+    }
+  }
+  if (latest && Number.isFinite(unemp)) {
+    const when = new Date(`${latest.slice(0, 7)}-15T00:00:00Z`).toLocaleDateString("en-US", {
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+    const inflText = Number.isFinite(infl) ? ` · inflation ${infl.toFixed(1)}%` : "";
+    return {
+      hook: `US unemployment ${unemp.toFixed(1)}%${inflText} (${when})`,
+      blurb: chart.subtitle || chart.title,
+      score: Number.isFinite(infl) && infl >= 3 ? 85 : 80,
+      preferKind: "line",
+      category: "Economy",
+    };
+  }
+  return {
+    hook: "The US economy since 1990",
+    blurb: chart.subtitle || chart.title,
+    score: 74,
+    preferKind: "line",
+    category: "Economy",
+  };
+}
+
 function hook_wiki(
   n: number,
   sample: QueryResult,
@@ -1386,6 +1485,8 @@ export const DISCOVER_HOOKS: { [K in DiscoverKind]: DiscoverHookFn } = {
   "steam": hook_steam,
   "bitcoin": hook_bitcoin,
   "debt": hook_debt,
+  "usafacts_states": hook_usafacts_states,
+  "usafacts_nation": hook_usafacts_nation,
   "wiki": hook_wiki,
 };
 

@@ -5,6 +5,8 @@ import { useLoomStore } from "@/lib/store";
 import { activateDataset } from "@/lib/datasetPipeline";
 import { isDesktop, openExternalUrl, sourceClear, sourceSnapshot, sourceStart, sourceStatus, sourceStop } from "@/lib/tauri";
 import { SOURCE_EXPLORE_ROWS, sourceStreamPath, type SourceDef } from "@/lib/sourceRegistry";
+import { feedRef } from "@/lib/sourceRef";
+import { LoveButton, SaveButton, SourcePrefMenu } from "@/components/SourcePrefControls";
 import { ipcErrorMessage, leaveSourcesShowChart } from "./shared";
 
 export function SourceCard({ def }: { def: SourceDef }) {
@@ -110,7 +112,7 @@ export function SourceCard({ def }: { def: SourceDef }) {
   };
 
   return (
-    <div className="border border-loom-border rounded-md p-3 space-y-2 bg-loom-surface/40">
+    <div className="relative border border-loom-border rounded-md p-3 space-y-2 bg-loom-surface/40" data-source-ref={feedRef(def.kind)}>
       <div className="flex items-start gap-2">
         <span className={`w-2 h-2 mt-1.5 rounded-full shrink-0 ${running ? "bg-loom-accent animate-pulse" : "bg-loom-muted"}`} aria-hidden />
         <span className="sr-only">{running ? "Live" : "Stopped"}</span>
@@ -167,22 +169,29 @@ export function SourceCard({ def }: { def: SourceDef }) {
           </button>
         </div>
       )}
-      {def.attribution && (
-        <a
-          href={def.homepage}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="block text-2xs text-loom-label hover:text-loom-accent pl-4 w-fit"
-          onClick={(e) => {
-            if (isDesktop()) {
-              e.preventDefault();
-              void openExternalUrl(def.homepage);
-            }
-          }}
-        >
-          {def.attribution}
-        </a>
-      )}
+      <div className="flex items-center justify-between gap-2 pl-4">
+        {def.attribution ? (
+          <a
+            href={def.homepage}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block min-w-0 text-2xs text-loom-label hover:text-loom-accent w-fit"
+            onClick={(e) => {
+              if (isDesktop()) {
+                e.preventDefault();
+                void openExternalUrl(def.homepage);
+              }
+            }}
+          >
+            {def.attribution}
+          </a>
+        ) : <span />}
+        <div className="flex items-center gap-1 shrink-0">
+          <LoveButton sourceRef={feedRef(def.kind)} label={def.label} />
+          <SaveButton sourceRef={feedRef(def.kind)} label={def.label} />
+          <SourcePrefMenu sourceRef={feedRef(def.kind)} label={def.label} actions={["less", "hide"]} />
+        </div>
+      </div>
     </div>
   );
 }

@@ -4,6 +4,7 @@ import {
   searchCommandPalette,
   shouldSearchOpenDataCatalog,
 } from "../commandPalette";
+import { emptySourcePreferences, setSourceReaction } from "../sourcePreferences";
 
 describe("searchCommandPalette", () => {
   it("returns chip-backed defaults when empty", () => {
@@ -54,6 +55,18 @@ describe("searchCommandPalette", () => {
   it("finds live sources", () => {
     const hit = searchCommandPalette("usgs river");
     expect(hit.some((h) => h.id === "source:nwis" || h.id === "source:usgs")).toBe(true);
+  });
+
+  it("lifts loved feeds and drops hidden ones", () => {
+    const sourceIds = (q: string, prefs?: Parameters<typeof searchCommandPalette>[1]) =>
+      searchCommandPalette(q, prefs).filter((h) => h.id.startsWith("source:")).map((h) => h.id);
+    const plain = sourceIds("space");
+    expect(plain.length).toBeGreaterThan(2);
+    const last = plain[plain.length - 1]!;
+    const loved = setSourceReaction(emptySourcePreferences(), `feed:${last.slice(7)}`, "love");
+    expect(sourceIds("space", { sourcePrefs: loved })[0]).toBe(last);
+    const hidden = setSourceReaction(emptySourcePreferences(), `feed:${plain[0]!.slice(7)}`, "hide");
+    expect(sourceIds("space", { sourcePrefs: hidden })).not.toContain(plain[0]);
   });
 
   it("ranks recent files when paths match", () => {

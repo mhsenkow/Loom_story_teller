@@ -6,6 +6,16 @@ import type { ExportBurnInOptions, SocialExportTarget, SocialPresetId } from "..
 import { DEFAULT_BURN_IN } from "../socialExport";
 import type { VizPreferenceModel } from "../vizPreferences";
 import { emptyVizPreferenceModel, extractVizFeatures, recordVizSwipe, setCachedVizPreferences } from "../vizPreferences";
+import {
+  emptySourcePreferences,
+  recordSourceOpen,
+  setCachedSourcePreferences,
+  setSourceReaction,
+  toggleSourceSaved,
+  type SourcePreferences,
+  type SourceReaction,
+} from "../sourcePreferences";
+import type { SourceRef } from "../sourceRef";
 import { resolveDeepScanSource } from "../deepScan";
 import { runDeepScan } from "../deepScanClient";
 import { setPersistedVizPreferences } from "../persist";
@@ -47,6 +57,7 @@ export function uiInitialState() {
     streamWikisSeen: 0,
     streamStartedAt: null as number | null,
     sourceStatuses: {} as LoomState["sourceStatuses"],
+    sourcePrefs: emptySourcePreferences(),
     // Viz swipe
     vizPreferences: emptyVizPreferenceModel(),
     vizSwipeOpen: false,
@@ -110,6 +121,13 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
         return { sourceStatuses: { ...s.sourceStatuses, [kind]: { ...status } } };
       }),
     setVizPreferences: (model: VizPreferenceModel) => { setCachedVizPreferences(model); set({ vizPreferences: model }); },
+    setSourcePrefs: (prefs: SourcePreferences) => { setCachedSourcePreferences(prefs); set({ sourcePrefs: prefs }); },
+    reactToSource: (ref: SourceRef, reaction: SourceReaction | null) => get().setSourcePrefs(setSourceReaction(get().sourcePrefs, ref, reaction)),
+    toggleSavedSource: (ref: SourceRef) => get().setSourcePrefs(toggleSourceSaved(get().sourcePrefs, ref)),
+    noteSourceOpened: (ref: SourceRef) => {
+      const next = recordSourceOpen(get().sourcePrefs, ref);
+      if (next !== get().sourcePrefs) get().setSourcePrefs(next);
+    },
     startDeepScan: () => {
       const s = get();
       if (!s.columnStats.length || (!s.sampleRows && !s.queryResult)) { get().setToast("Load a dataset before scanning"); return; }
@@ -172,14 +190,17 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
         webFileCache: {}, chartRecs: [], activeChart: null, vegaSpec: null,
         inspectingFilePath: null, isScanning: false, lastSession: null, recentFiles: [],
       } as Partial<LoomState>),
-    resetPreferencesInStore: () =>
+    resetPreferencesInStore: () => {
+      setCachedSourcePreferences(emptySourcePreferences());
       set({
         appSettings: { ...(initialState.appSettings as AppSettings) },
         queryHistory: [], querySnippets: [],
         tablePrefs: { ...(initialState.tablePrefs as { visibleColumns: null; columnOrder: null }) },
         tableViews: [], chartViews: [], queryViews: [], dashboards: [], customChartLooks: [],
         activeDashboardId: null, vizPreferences: emptyVizPreferenceModel(),
-      }),
+        sourcePrefs: emptySourcePreferences(),
+      });
+    },
     clearRetainedLocalData: async () => {
       set((s) => ({ webImportOperationId: s.webImportOperationId + 1 }));
       await clearAllWebFileInspects();

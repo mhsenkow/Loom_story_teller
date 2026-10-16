@@ -23,6 +23,8 @@ import type {
   SocialPresetId,
 } from "../socialExport";
 import type { VizPreferenceModel } from "../vizPreferences";
+import type { SourcePreferences, SourceReaction } from "../sourcePreferences";
+import type { SourceRef } from "../sourceRef";
 import type { ChartVisualOverrides } from "../chartVisualTypes";
 import type { ColumnInfo, QueryResult } from "../queryTypes";
 
@@ -320,6 +322,9 @@ export interface LoomState {
     }
   >;
 
+  /** Per-source ♥ / 👎 / Hide / 🔖 + implicit opens (sourcePreferences.ts). */
+  sourcePrefs: SourcePreferences;
+
   // Deep scan / viz swipe
   vizPreferences: VizPreferenceModel;
   vizSwipeOpen: boolean;
@@ -513,6 +518,11 @@ export interface LoomState {
     },
   ) => void;
   setVizPreferences: (model: VizPreferenceModel) => void;
+  setSourcePrefs: (prefs: SourcePreferences) => void;
+  /** Set or clear (null) a source's reaction. */
+  reactToSource: (ref: SourceRef, reaction: SourceReaction | null) => void;
+  toggleSavedSource: (ref: SourceRef) => void;
+  noteSourceOpened: (ref: SourceRef) => void;
   startDeepScan: () => void;
   swipeViz: (direction: "left" | "right") => void;
   closeVizSwipe: () => void;

@@ -43,6 +43,8 @@ export const SOURCE_KINDS = [
   "bitcoin",
   "fx",
   "debt",
+  "usafacts_states",
+  "usafacts_nation",
   "fema",
   "covid",
   "countries",
@@ -51,17 +53,71 @@ export const SOURCE_KINDS = [
 
 export type SourceKind = (typeof SOURCE_KINDS)[number];
 
-export type SourceGroup = "earth" | "cities" | "space" | "web" | "world";
+export type SourceGroup = "earth" | "cities" | "space" | "web" | "us" | "world";
 
 export const SOURCE_GROUP_LABELS: Record<SourceGroup, string> = {
   earth: "Earth & climate",
   cities: "Cities & transport",
   space: "Space",
   web: "Web & markets",
+  us: "United States",
   world: "Countries & history",
 };
 
 export type SourceColumnType = "VARCHAR" | "DOUBLE" | "INTEGER" | "BIGINT" | "BOOLEAN" | "TIMESTAMP" | "DATE";
+
+/** Browse topics — feed search / filter chips and preference spillover. */
+export const SOURCE_TOPICS = [
+  "disasters",
+  "weather",
+  "climate",
+  "environment",
+  "energy",
+  "transport",
+  "cities",
+  "space",
+  "tech",
+  "culture",
+  "markets",
+  "economy",
+  "government",
+  "health",
+  "people",
+] as const;
+
+export type SourceTopic = (typeof SOURCE_TOPICS)[number];
+
+export const SOURCE_TOPIC_LABELS: Record<SourceTopic, string> = {
+  disasters: "Disasters",
+  weather: "Weather",
+  climate: "Climate",
+  environment: "Environment",
+  energy: "Energy",
+  transport: "Transport",
+  cities: "Cities",
+  space: "Space",
+  tech: "Tech",
+  culture: "Culture",
+  markets: "Markets",
+  economy: "Economy",
+  government: "Government",
+  health: "Health",
+  people: "People",
+};
+
+/** Where the rows are about. `region` = one country or area outside the US (e.g. UK grid). */
+export type SourceGeo = "world" | "us" | "city" | "region";
+
+/**
+ * What one row is: a discrete `event`, a periodic `reading` of live sensors,
+ * a calendar-grain series (`day` / `month` / `year`), or a current `snapshot`.
+ */
+export type SourceGrain = "event" | "reading" | "day" | "month" | "year" | "snapshot";
+
+/** Shared keys a feed can be matched on with other datasets (Collections). */
+export type JoinRole = "state" | "country" | "year" | "month" | "date";
+
+export const JOIN_ROLES: readonly JoinRole[] = ["state", "country", "year", "month", "date"];
 
 export interface SourceDef {
   kind: SourceKind;
@@ -90,6 +146,11 @@ export interface SourceDef {
    */
   keepNewest?: boolean;
   group: SourceGroup;
+  topics: SourceTopic[];
+  geo: SourceGeo;
+  grain: SourceGrain;
+  /** Column per join role (state = names / abbrs / FIPS, country = names / ISO codes). */
+  joinKeys?: Partial<Record<JoinRole, string>>;
   /** Token class for the card's status dot. */
   color: "loom-accent" | "loom-success" | "loom-warning" | "loom-error";
   /** Max upstream rows retained in the browser buffer for this feed (when set). */
@@ -119,6 +180,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 60_000,
     orderBy: "ts DESC",
     group: "earth",
+    topics: ["disasters"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "ts" },
     color: "loom-warning",
   }),
   def({
@@ -134,6 +199,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 600_000,
     orderBy: "ts DESC",
     group: "earth",
+    topics: ["disasters", "environment"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "ts" },
     color: "loom-error",
   }),
   def({
@@ -149,6 +218,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 900_000,
     orderBy: "start_ts DESC",
     group: "earth",
+    topics: ["disasters"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { country: "country", date: "start_ts" },
     color: "loom-error",
   }),
   def({
@@ -163,7 +236,11 @@ export const SOURCE_DEFS: SourceDef[] = [
     types: ["VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "TIMESTAMP", "TIMESTAMP", "VARCHAR", "VARCHAR"],
     pollMs: 120_000,
     orderBy: "effective DESC",
-    group: "earth",
+    group: "us",
+    topics: ["weather", "disasters"],
+    geo: "us",
+    grain: "event",
+    joinKeys: { date: "effective" },
     color: "loom-error",
   }),
   def({
@@ -179,6 +256,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 300_000,
     orderBy: "ts DESC",
     group: "earth",
+    topics: ["weather"],
+    geo: "city",
+    grain: "reading",
+    joinKeys: { date: "ts" },
     color: "loom-accent",
   }),
   def({
@@ -194,6 +275,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 300_000,
     orderBy: "pm2_5 DESC",
     group: "earth",
+    topics: ["environment", "health"],
+    geo: "city",
+    grain: "reading",
+    joinKeys: { date: "ts" },
     color: "loom-accent",
   }),
   def({
@@ -209,6 +294,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 1_800_000,
     orderBy: "ts DESC",
     group: "earth",
+    topics: ["energy", "climate"],
+    geo: "region",
+    grain: "reading",
+    joinKeys: { date: "ts" },
     color: "loom-success",
   }),
   def({
@@ -225,6 +314,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     orderBy: "ts ASC",
     keepNewest: true,
     group: "earth",
+    topics: ["climate"],
+    geo: "world",
+    grain: "month",
+    joinKeys: { year: "year", month: "ts" },
     color: "loom-error",
   }),
   def({
@@ -240,6 +333,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 1_800_000,
     orderBy: "wave_height_m DESC",
     group: "earth",
+    topics: ["weather", "environment"],
+    geo: "us",
+    grain: "reading",
+    joinKeys: { date: "ts" },
     color: "loom-accent",
   }),
   def({
@@ -255,6 +352,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 600_000,
     orderBy: "frp DESC",
     group: "earth",
+    topics: ["disasters", "environment"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "acq_ts" },
     color: "loom-error",
   }),
   def({
@@ -270,6 +371,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 300_000,
     orderBy: "ts DESC",
     group: "earth",
+    topics: ["environment"],
+    geo: "us",
+    grain: "reading",
+    joinKeys: { date: "ts" },
     color: "loom-accent",
   }),
   def({
@@ -286,6 +391,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     mobilePollMs: 60_000,
     orderBy: "baro_altitude DESC",
     group: "cities",
+    topics: ["transport"],
+    geo: "world",
+    grain: "reading",
+    joinKeys: { country: "origin_country" },
     color: "loom-accent",
   }),
   def({
@@ -302,6 +411,9 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 60_000,
     orderBy: "bikes_available DESC",
     group: "cities",
+    topics: ["transport", "cities"],
+    geo: "city",
+    grain: "reading",
     color: "loom-success",
   }),
   def({
@@ -318,6 +430,9 @@ export const SOURCE_DEFS: SourceDef[] = [
     mobilePollMs: 60_000,
     orderBy: "route, label",
     group: "cities",
+    topics: ["transport", "cities"],
+    geo: "city",
+    grain: "reading",
     color: "loom-accent",
   }),
   def({
@@ -333,6 +448,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 300_000,
     orderBy: "created_date DESC",
     group: "cities",
+    topics: ["cities", "government"],
+    geo: "city",
+    grain: "event",
+    joinKeys: { date: "created_date" },
     color: "loom-warning",
   }),
   def({
@@ -349,6 +468,9 @@ export const SOURCE_DEFS: SourceDef[] = [
     mobilePollMs: 60_000,
     orderBy: "ts DESC",
     group: "space",
+    topics: ["space"],
+    geo: "world",
+    grain: "reading",
     color: "loom-accent",
   }),
   def({
@@ -364,6 +486,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 1_800_000,
     orderBy: "net ASC",
     group: "space",
+    topics: ["space"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "net" },
     color: "loom-accent",
   }),
   def({
@@ -380,6 +506,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 3_600_000,
     orderBy: "date_utc DESC",
     group: "space",
+    topics: ["space"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "date_utc" },
     color: "loom-accent",
   }),
   def({
@@ -395,6 +525,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 900_000,
     orderBy: "ts DESC",
     group: "space",
+    topics: ["space"],
+    geo: "world",
+    grain: "reading",
+    joinKeys: { date: "ts" },
     color: "loom-success",
   }),
   def({
@@ -410,6 +544,9 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 900_000,
     orderBy: "probability DESC",
     group: "space",
+    topics: ["space"],
+    geo: "world",
+    grain: "snapshot",
     color: "loom-success",
   }),
   def({
@@ -425,6 +562,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 21_600_000,
     orderBy: "approach_ts ASC",
     group: "space",
+    topics: ["space"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "approach_ts" },
     color: "loom-warning",
   }),
   def({
@@ -440,6 +581,9 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 7_200_000,
     orderBy: "mean_motion DESC",
     group: "space",
+    topics: ["space"],
+    geo: "world",
+    grain: "snapshot",
     color: "loom-accent",
   }),
   def({
@@ -455,6 +599,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 120_000,
     orderBy: "points DESC",
     group: "web",
+    topics: ["tech"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "created_at" },
     color: "loom-warning",
   }),
   def({
@@ -470,6 +618,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 120_000,
     orderBy: "score DESC",
     group: "web",
+    topics: ["tech"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "created_at" },
     color: "loom-warning",
   }),
   def({
@@ -485,6 +637,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 3_600_000,
     orderBy: "rank ASC",
     group: "web",
+    topics: ["culture"],
+    geo: "world",
+    grain: "day",
+    joinKeys: { date: "day" },
     color: "loom-accent",
   }),
   def({
@@ -500,6 +656,9 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 21_600_000,
     orderBy: "peak_players DESC",
     group: "web",
+    topics: ["culture"],
+    geo: "world",
+    grain: "snapshot",
     color: "loom-accent",
   }),
   def({
@@ -515,6 +674,9 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 60_000,
     orderBy: "rank ASC",
     group: "web",
+    topics: ["markets"],
+    geo: "world",
+    grain: "snapshot",
     color: "loom-success",
   }),
   def({
@@ -530,6 +692,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 120_000,
     orderBy: "height DESC",
     group: "web",
+    topics: ["markets"],
+    geo: "world",
+    grain: "event",
+    joinKeys: { date: "ts" },
     color: "loom-warning",
   }),
   def({
@@ -545,6 +711,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 3_600_000,
     orderBy: "as_of DESC, quote",
     group: "web",
+    topics: ["markets", "economy"],
+    geo: "world",
+    grain: "day",
+    joinKeys: { date: "as_of" },
     color: "loom-success",
   }),
   def({
@@ -560,8 +730,52 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 0,
     orderBy: "record_date ASC",
     keepNewest: true,
-    group: "world",
+    group: "us",
+    topics: ["economy", "government"],
+    geo: "us",
+    grain: "day",
+    joinKeys: { date: "record_date" },
     color: "loom-error",
+  }),
+  def({
+    kind: "usafacts_states",
+    label: "US states, year by year",
+    description: "Population, income, poverty, education, and unemployment for every state since 2012 — Census survey data via USAFacts. Loads once.",
+    attribution: "Census ACS via USAFacts · public domain · not endorsed by the Census Bureau",
+    homepage: "https://usafacts.org/mcp/",
+    fileName: "US States (USAFacts)",
+    table: "usafacts_states",
+    // One row per state-year (wide). Income is in each year's dollars; unemployment is the ACS survey rate.
+    columns: ["state_fips", "state_abbr", "state_name", "yr", "population", "median_household_income", "poverty_rate", "median_age", "unemployment_rate", "bachelors_or_higher_pct"],
+    types: ["VARCHAR", "VARCHAR", "VARCHAR", "INTEGER", "BIGINT", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE"],
+    pollMs: 0,
+    orderBy: "yr DESC, state_abbr",
+    group: "us",
+    topics: ["people", "economy"],
+    geo: "us",
+    grain: "year",
+    joinKeys: { state: "state_abbr", year: "yr" },
+    color: "loom-accent",
+  }),
+  def({
+    kind: "usafacts_nation",
+    label: "US economy, month by month",
+    description: "Unemployment, inflation, jobs, interest rates, housing starts, and gas prices since 1990 — federal statistics via USAFacts.",
+    attribution: "FRED (BLS, Fed, Census, EIA) via USAFacts · public domain · not endorsed by the St. Louis Fed",
+    homepage: "https://usafacts.org/mcp/",
+    fileName: "US Economy (USAFacts)",
+    table: "usafacts_nation",
+    columns: ["month", "yr", "unemployment_rate", "inflation_yoy_pct", "payrolls_k", "fed_funds_rate", "housing_starts_k", "gas_price_usd"],
+    types: ["DATE", "INTEGER", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE"],
+    pollMs: 21_600_000,
+    orderBy: "month ASC",
+    keepNewest: true,
+    group: "us",
+    topics: ["economy"],
+    geo: "us",
+    grain: "month",
+    joinKeys: { month: "month", year: "yr" },
+    color: "loom-success",
   }),
   def({
     kind: "fema",
@@ -575,7 +789,11 @@ export const SOURCE_DEFS: SourceDef[] = [
     types: ["VARCHAR", "INTEGER", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "TIMESTAMP", "TIMESTAMP", "INTEGER"],
     pollMs: 600_000,
     orderBy: "declaration_date DESC",
-    group: "world",
+    group: "us",
+    topics: ["disasters", "government"],
+    geo: "us",
+    grain: "event",
+    joinKeys: { state: "state", year: "fy_declared", date: "declaration_date" },
     color: "loom-error",
   }),
   def({
@@ -591,6 +809,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 1_800_000,
     orderBy: "cases DESC",
     group: "world",
+    topics: ["health"],
+    geo: "world",
+    grain: "snapshot",
+    joinKeys: { country: "country" },
     color: "loom-error",
   }),
   def({
@@ -606,6 +828,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 0,
     orderBy: "population DESC",
     group: "world",
+    topics: ["people"],
+    geo: "world",
+    grain: "snapshot",
+    joinKeys: { country: "cca3" },
     color: "loom-success",
   }),
   def({
@@ -622,6 +848,10 @@ export const SOURCE_DEFS: SourceDef[] = [
     pollMs: 0,
     orderBy: "yr DESC, country_code",
     group: "world",
+    topics: ["economy", "people"],
+    geo: "world",
+    grain: "year",
+    joinKeys: { country: "country_code", year: "yr" },
     color: "loom-success",
   }),
 ];

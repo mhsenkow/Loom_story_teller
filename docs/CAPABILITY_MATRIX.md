@@ -7,7 +7,7 @@
 | DuckDB / folder SQL | Yes | No — web data path | No — mock query | No |
 | Own-data import | CSV/Parquet via scan | CSV/TSV/JSON/Parquet/XLSX via picker | Same as iOS | Same; FS Access API varies |
 | Linked folder (FS Access) | N/A | Limited | Chrome/Edge | Safari 17.4+ partial |
-| Live feeds (34 kinds) | Rust poll → DuckDB | Worker `/api/source/*` → buffer | Worker | Worker |
+| Live feeds (36 kinds) | Rust poll → DuckDB | Worker `/api/source/*` → buffer | Worker | Worker |
 | WebGPU scatter | When eligible | Same rules | Same | Same; GPU may be unavailable |
 | On-screen charts | Canvas 2D + gated WebGPU | Same | Same | Same |
 | Vega-Lite | Spec + SVG export only | Same | Same | Same |

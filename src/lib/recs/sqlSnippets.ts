@@ -150,6 +150,17 @@ export const SOURCE_SQL_SNIPPETS = {
     { name: "Latest", sql: "SELECT record_date, total_debt, held_by_public, intragovernmental FROM us_debt ORDER BY record_date DESC LIMIT 10" },
     { name: "Yearly growth", sql: "SELECT EXTRACT(year FROM record_date) AS yr, MAX(total_debt) - MIN(total_debt) AS added FROM us_debt GROUP BY 1 ORDER BY 1" },
   ],
+  usafacts_states: [
+    { name: "Income ranking (latest year)", sql: "SELECT state_name, median_household_income, poverty_rate FROM usafacts_states WHERE yr = (SELECT MAX(yr) FROM usafacts_states) ORDER BY median_household_income DESC" },
+    { name: "Population growth since 2012", sql: "SELECT state_name, MAX(CASE WHEN yr = 2012 THEN population END) AS pop_2012, MAX(CASE WHEN yr = (SELECT MAX(yr) FROM usafacts_states) THEN population END) AS pop_latest, ROUND(100.0 * MAX(CASE WHEN yr = (SELECT MAX(yr) FROM usafacts_states) THEN population END) / MAX(CASE WHEN yr = 2012 THEN population END) - 100, 1) AS growth_pct FROM usafacts_states GROUP BY state_name ORDER BY growth_pct DESC" },
+    { name: "State averages by year", sql: "SELECT yr, ROUND(AVG(unemployment_rate), 2) AS avg_unemployment, ROUND(AVG(poverty_rate), 2) AS avg_poverty, ROUND(AVG(bachelors_or_higher_pct), 1) AS avg_bachelors FROM usafacts_states GROUP BY yr ORDER BY yr" },
+  ],
+  usafacts_nation: [
+    { name: "Latest months", sql: "SELECT month, unemployment_rate, inflation_yoy_pct, fed_funds_rate, gas_price_usd FROM usafacts_nation ORDER BY month DESC LIMIT 12" },
+    { name: "Yearly averages", sql: "SELECT yr, ROUND(AVG(unemployment_rate), 2) AS unemployment, ROUND(AVG(inflation_yoy_pct), 2) AS inflation, ROUND(AVG(gas_price_usd), 2) AS gas FROM usafacts_nation GROUP BY yr ORDER BY yr" },
+    { name: "Highest-inflation months", sql: "SELECT month, inflation_yoy_pct, fed_funds_rate FROM usafacts_nation WHERE inflation_yoy_pct IS NOT NULL ORDER BY inflation_yoy_pct DESC LIMIT 12" },
+    { name: "Jobs added per year", sql: "SELECT yr, MAX(payrolls_k) - MIN(payrolls_k) AS jobs_change_k FROM usafacts_nation GROUP BY yr ORDER BY yr" },
+  ],
   climate: [
     { name: "Warmest years", sql: "SELECT year, ROUND(AVG(anomaly_c), 2) AS anomaly_c FROM global_temperature GROUP BY year ORDER BY anomaly_c DESC LIMIT 15" },
     { name: "By decade", sql: "SELECT (year // 10) * 10 AS decade, ROUND(AVG(anomaly_c), 2) AS anomaly_c FROM global_temperature GROUP BY 1 ORDER BY 1" },

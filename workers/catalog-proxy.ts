@@ -39,6 +39,16 @@ import {
   londonDay,
   pageviewsPrimaryDaysAgo,
   worldBankWide,
+  ACS_STATE_VARS,
+  USAFACTS_GATEWAY,
+  USAFACTS_NATION_SERIES,
+  USAFACTS_NATION_START,
+  acsStateYears,
+  acsStatesWide,
+  fredGraphNationMonthly,
+  fredNationMonthly,
+  usafactsPayload,
+  usafactsToolCall,
 } from "./sourceTransforms";
 import { assertHttpUrlAllowed, fetchWithSsrfGuard } from "../src/lib/ssrfGuard";
 import { applyBaselineSecurityHeaders, baselineSecurityHeaderRecord } from "../src/lib/securityHeaders";
@@ -522,6 +532,57 @@ async function cachedUpstreamJson<T = unknown>(
   return JSON.parse(text) as T;
 }
 
+/** One USAFacts Data gateway tool call (keyless JSON-RPC POST) → the agency payload. */
+async function usafactsCall(sourceId: string, tool: string, args: Record<string, unknown>, timeoutMs = 20_000): Promise<unknown> {
+  let res: Response;
+  try {
+    res = await fetch(USAFACTS_GATEWAY, {
+      method: "POST",
+      headers: {
+        "User-Agent": UA,
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: usafactsToolCall(sourceId, tool, args),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    const name = e instanceof Error ? e.name : "";
+    throw new UpstreamError(
+      name === "TimeoutError" || name === "AbortError"
+        ? `USAFacts timed out after ${Math.round(timeoutMs / 1000)}s`
+        : `USAFacts unreachable: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+  if (!res.ok) {
+    res.body?.cancel().catch(() => {});
+    throw new UpstreamError(`USAFacts ${res.status}`);
+  }
+  try {
+    return usafactsPayload(await res.text());
+  } catch (e) {
+    throw new UpstreamError(e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Run async jobs with at most `limit` in flight (polite fan-out to one upstream). */
+async function settleLimited<T>(jobs: (() => Promise<T>)[], limit: number): Promise<PromiseSettledResult<T>[]> {
+  const out: PromiseSettledResult<T>[] = new Array(jobs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const i = next++;
+      try {
+        out[i] = { status: "fulfilled", value: await jobs[i]!() };
+      } catch (reason) {
+        out[i] = { status: "rejected", reason };
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, jobs.length) }, worker));
+  return out;
+}
+
 type SourceFetcher = (ctx: WaitUntil) => Promise<string>;
 
 const OPEN_METEO_LATS = WORLD_CITIES.map((c) => c.lat).join(",");
@@ -747,6 +808,50 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     return JSON.stringify(worldBankWide(countryList, bodies));
   },
 
+  // USAFacts Data gateway (data.mcp.usafacts.org, keyless beta) — see usafactsCall above.
+  usafacts_states: async () => {
+    // One ACS 1-year call per vintage (2012 → last year); an unreleased year just fails.
+    // No keyless fallback: api.census.gov now requires a key, so the stale cache covers outages.
+    const years = acsStateYears();
+    const settled = await settleLimited(
+      years.map((year) => async () => ({
+        year,
+        table: await usafactsCall("census_acs", "getAcs1", { year: String(year), get: ACS_STATE_VARS.join(","), for: "state:*" }),
+      })),
+      4,
+    );
+    const ok = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (!ok.length) throw new UpstreamError("USAFacts: no ACS vintages returned");
+    return JSON.stringify(acsStatesWide(ok));
+  },
+
+  usafacts_nation: async () => {
+    const settled = await settleLimited(
+      USAFACTS_NATION_SERIES.map((s) => () =>
+        usafactsCall("fred", "getSeriesObservations", {
+          series_id: s.id,
+          observation_start: USAFACTS_NATION_START,
+          ...("units" in s ? { units: s.units } : {}),
+          ...("frequency" in s ? { frequency: s.frequency } : {}),
+        }),
+      ),
+      3,
+    );
+    const payloads = settled.map((r) => (r.status === "fulfilled" ? r.value : null));
+    if (payloads.every((p) => p != null)) return JSON.stringify(fredNationMonthly(payloads));
+    // Any series missing → FRED's keyless CSV export for all of them (gas is weekly, so its own call).
+    try {
+      const [monthly, gas] = await Promise.all([
+        upstreamText("FRED", "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE,CPIAUCSL,PAYEMS,FEDFUNDS,HOUST", 20_000),
+        upstreamText("FRED", `https://fred.stlouisfed.org/graph/fredgraph.csv?id=GASREGW&cosd=${USAFACTS_NATION_START}&fq=Monthly&fam=avg`, 20_000),
+      ]);
+      return JSON.stringify(fredGraphNationMonthly(monthly, gas));
+    } catch (e) {
+      if (payloads.some((p) => p != null)) return JSON.stringify(fredNationMonthly(payloads));
+      throw e;
+    }
+  },
+
   // ---- Columnar feeds (`{ columns, rows }` in registry order) ----
 
   gdacs: async () => {
@@ -883,6 +988,8 @@ export const SOURCE_TTL_SECS: Record<string, number> = {
   steam: 21_600,
   countries: 86_400,
   world_bank: 86_400,
+  usafacts_states: 86_400,
+  usafacts_nation: 43_200,
   climate: 86_400,
   debt: 86_400,
 };

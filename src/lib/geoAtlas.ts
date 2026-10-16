@@ -338,7 +338,8 @@ export function findFeatureIndex(atlas: AtlasBundle, raw: unknown): number {
 /** Heuristic: which atlas fits a region column name + sample values. */
 export function pickAtlasKind(regionField: string, sampleValues: unknown[]): AtlasKind {
   const field = regionField.toLowerCase();
-  if (/\b(state|stusps|fips|province)\b/.test(field) && !/country/.test(field)) {
+  // Token match so snake_case names (`state_abbr`, `state_fips`) count — `\b` treats `_` as a word char.
+  if (/(?:^|[^a-z])(?:state|stusps|fips|province)(?:[^a-z]|$)/.test(field) && !/country/.test(field)) {
     return "us";
   }
   if (usCache && worldCache) {

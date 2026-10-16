@@ -26,6 +26,7 @@ const KEY_CHART_VIEWS = "loom-chart-views";
 const KEY_QUERY_VIEWS = "loom-query-views";
 const KEY_DASHBOARDS = "loom-dashboards";
 const KEY_VIZ_PREFERENCES = "loom-viz-preferences";
+export const KEY_SOURCE_PREFERENCES = "loom-source-preferences";
 const MAX_RECENT_FILES = 20;
 const MAX_QUERY_HISTORY = 50;
 const MAX_QUERY_SNIPPETS = 30;
@@ -369,6 +370,15 @@ export function setPersistedVizPreferences(model: object): boolean {
   return safeSetItem(KEY_VIZ_PREFERENCES, JSON.stringify(model));
 }
 
+/** Raw `{v,data}` envelope JSON — parse with `parseSourcePreferences`. */
+export function getSourcePreferencesRaw(): string | null {
+  return safeGetItem(KEY_SOURCE_PREFERENCES);
+}
+
+export function setPersistedSourcePreferences(prefs: object): boolean {
+  return safeSetItem(KEY_SOURCE_PREFERENCES, JSON.stringify(wrapPersist(prefs)));
+}
+
 /** Keys cleared by preference reset (LOOM-551) — not uploads/IDB. */
 export const LOOM_PREFERENCE_STORAGE_KEYS = [
   KEY_APP_SETTINGS,
@@ -381,6 +391,7 @@ export const LOOM_PREFERENCE_STORAGE_KEYS = [
   KEY_QUERY_VIEWS,
   KEY_DASHBOARDS,
   KEY_VIZ_PREFERENCES,
+  KEY_SOURCE_PREFERENCES,
 ] as const;
 
 export function clearPersistedPreferences(): void {

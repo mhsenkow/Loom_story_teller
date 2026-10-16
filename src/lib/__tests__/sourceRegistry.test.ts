@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  JOIN_ROLES,
   SOURCE_DEFS,
   SOURCE_KINDS,
+  SOURCE_TOPICS,
+  type JoinRole,
+  type SourceColumnType,
   SOURCE_KINDS_FROM_DEFS,
   sourceKindFromPath,
   sourceStreamPath,
@@ -63,6 +67,26 @@ describe("source registry", () => {
       // ORDER BY only names real columns
       for (const part of d.orderBy.split(",")) {
         expect(d.columns, `${d.kind} orderBy`).toContain(part.trim().split(/\s+/)[0]);
+      }
+    }
+  });
+
+  it("tags every feed for browsing and names real, well-typed join columns", () => {
+    const roleTypes: Record<JoinRole, SourceColumnType[]> = {
+      state: ["VARCHAR"],
+      country: ["VARCHAR"],
+      year: ["INTEGER", "BIGINT"],
+      month: ["DATE", "TIMESTAMP", "VARCHAR"],
+      date: ["DATE", "TIMESTAMP"],
+    };
+    for (const d of SOURCE_DEFS) {
+      expect(d.topics.length, `${d.kind} topics`).toBeGreaterThan(0);
+      for (const t of d.topics) expect(SOURCE_TOPICS, `${d.kind} topic`).toContain(t);
+      for (const [role, col] of Object.entries(d.joinKeys ?? {}) as [JoinRole, string][]) {
+        expect(JOIN_ROLES, `${d.kind} role`).toContain(role);
+        const i = d.columns.indexOf(col);
+        expect(i, `${d.kind} joinKeys.${role} → ${col}`).toBeGreaterThanOrEqual(0);
+        expect(roleTypes[role], `${d.kind} joinKeys.${role} type`).toContain(d.types[i]);
       }
     }
   });

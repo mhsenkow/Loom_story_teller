@@ -5,6 +5,8 @@
 // KV and a mocked global `fetch`; no network, production KV or GitHub token.
 // =================================================================
 
+import { readFileSync } from "node:fs";
+import { resolve as resolvePath } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker, { type Env } from "../catalog-proxy";
 import { catalogSearchCacheKey, sourceCacheKey } from "../../src/lib/workerCatalogPolicy";
@@ -622,5 +624,70 @@ describe("routing", () => {
     const asset = await call("/index.html");
     expect(await asset.text()).toBe("asset");
     expect(asset.headers.get("X-Content-Type-Options")).toBeTruthy();
+  });
+});
+
+// ---- /api/source/usafacts_* (USAFacts Data gateway) -------------------
+
+describe("/api/source/usafacts_*", () => {
+  const fixture = (n: string) =>
+    readFileSync(resolvePath(__dirname, "../../src-tauri/tests/fixtures/sources", n), "utf8");
+  const sse = (n: string) => new Response(fixture(n), { headers: { "Content-Type": "text/event-stream" } });
+
+  type ToolArgs = { tool_name: string; arguments: Record<string, string> };
+  const toolArgs = (init?: RequestInit): ToolArgs =>
+    (JSON.parse(String(init?.body)) as { params: { arguments: ToolArgs } }).params.arguments;
+
+  it("states: one ACS call per vintage; unreleased years are skipped", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      expect(url).toBe("https://data.mcp.usafacts.org/mcp");
+      expect(init?.method).toBe("POST");
+      const a = toolArgs(init);
+      expect(a.tool_name).toBe("getAcs1");
+      return a.arguments.year === "2024" ? sse("usafacts_acs1_2024.sse") : sse("usafacts_error.sse");
+    });
+    const res = await call("/api/source/usafacts_states");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    expect(body.columns[0]).toBe("state_fips");
+    expect(body.rows.length).toBe(52);
+    expect(body.rows.every((r) => r[3] === 2024)).toBe(true);
+    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(12);
+  });
+
+  it("states: 502 when every vintage fails and nothing is cached", async () => {
+    fetchMock.mockImplementation(async () => sse("usafacts_error.sse"));
+    const res = await call("/api/source/usafacts_states");
+    expect(res.status).toBe(502);
+  });
+
+  it("nation: any failed series falls back to keyless fredgraph.csv", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("https://fred.stlouisfed.org/graph/fredgraph.csv")) {
+        return new Response(fixture(url.includes("GASREGW") ? "fredgraph_gas.csv" : "fredgraph_monthly.csv"));
+      }
+      const id = toolArgs(init).arguments.series_id;
+      return id === "UNRATE" ? sse("usafacts_fred_unrate.sse") : sse("usafacts_error.sse");
+    });
+    const res = await call("/api/source/usafacts_nation");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    const jan = body.rows.find((r) => r[0] === "2024-01-01")!;
+    expect(body.columns.slice(0, 4)).toEqual(["month", "yr", "unemployment_rate", "inflation_yoy_pct"]);
+    expect(jan[3]).not.toBeNull(); // CPI YoY only exists via the fallback here
+    const fredCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes("fredgraph.csv"));
+    expect(fredCalls.length).toBe(2);
+  });
+
+  it("nation: keeps partial gateway data when the fallback is down too", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("fredgraph.csv")) return new Response("down", { status: 503 });
+      return toolArgs(init).arguments.series_id === "UNRATE" ? sse("usafacts_fred_unrate.sse") : sse("usafacts_error.sse");
+    });
+    const res = await call("/api/source/usafacts_nation");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: unknown[][] };
+    expect(body.rows.length).toBeGreaterThan(12);
+    expect(body.rows.every((r) => r[3] === null)).toBe(true);
   });
 });

@@ -662,6 +662,36 @@ export function recommendSourceStory(
       ]);
   }
 
+  if (kind === "usafacts_states") {
+    return finish("US states, year by year", [
+        mk("choropleth", "Income map", "Median household income by state (peak year, nominal $)", 98, "state_abbr", "median_household_income", null, "max"),
+        mk("choropleth", "Poverty map", "Average share of people below the poverty line since 2012", 96, "state_abbr", "poverty_rate", null, "mean"),
+        mk("bubble", "Education vs income", "Bachelor's-or-higher share against median income, sized by population", 95, "bachelors_or_higher_pct", "median_household_income", null, null, "population"),
+        mk("line", "Unemployment by year", "Average state unemployment rate (Census survey)", 93, "yr", "unemployment_rate", null, "mean"),
+        mk("line", "Income vs poverty over time", "Average state income against average poverty rate", 92, "yr", "median_household_income", null, "mean", null, { y2Field: "poverty_rate" }),
+        mk("bar", "Most populous states", "Peak population since 2012", 90, "state_name", "population", null, "max", null, { topN: 15 }),
+        mk("scatter", "Income vs poverty · residuals", "States off the income–poverty line", 88, "median_household_income", "poverty_rate", null, null, null, { residualOverlay: true }),
+        mk("line", "Median age by year", "The country is getting older", 86, "yr", "median_age", null, "mean"),
+        mk("corrMatrix", "What moves together", "Income · poverty · education · unemployment · age", 84, "median_household_income", "poverty_rate", null),
+        mk("bar", "Most educated states", "Average bachelor's-or-higher share", 82, "state_name", "bachelors_or_higher_pct", null, "mean", null, { topN: 15 }),
+      ]);
+  }
+
+  if (kind === "usafacts_nation") {
+    return finish("US economy, month by month", [
+        mk("line", "Unemployment rate", "Share of the labor force looking for work, since 1990", 98, "month", "unemployment_rate", null, "max"),
+        mk("line", "Inflation", "Consumer prices vs a year earlier (CPI, %)", 97, "month", "inflation_yoy_pct", null, "max"),
+        mk("line", "Rates vs inflation", "Fed funds rate against CPI inflation", 95, "month", "fed_funds_rate", null, "max", null, { y2Field: "inflation_yoy_pct" }),
+        mk("line", "Unemployment vs inflation", "The two halves of the Fed's job", 94, "month", "unemployment_rate", null, "max", null, { y2Field: "inflation_yoy_pct" }),
+        mk("line", "Gas prices", "Average regular gasoline, US$ per gallon", 92, "month", "gas_price_usd", null, "max"),
+        mk("line", "Jobs", "Nonfarm payrolls, thousands of jobs", 90, "month", "payrolls_k", null, "max"),
+        mk("scatter", "Phillips curve", "Unemployment against inflation, one dot per month", 88, "unemployment_rate", "inflation_yoy_pct", null),
+        mk("line", "Housing starts", "New homes started per month (thousands, annualized)", 86, "month", "housing_starts_k", null, "max", null, { rollingWindow: 7 }),
+        mk("bar", "Inflation by year", "Average year-over-year CPI change", 84, "yr", "inflation_yoy_pct", null, "mean"),
+        mk("corrMatrix", "What moves together", "Jobs · prices · rates · housing · gas", 82, "unemployment_rate", "inflation_yoy_pct", null),
+      ]);
+  }
+
   if (kind === "firms") {
     return finish("Active fires (VIIRS)", [
         mk("geoPoints", "Fire map", "Hotspots sized by fire radiative power", 98, "longitude", "latitude", "confidence", null, "frp"),

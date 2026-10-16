@@ -1556,3 +1556,105 @@ async fn live_fetch_every_source() {
     }
     assert!(failed.is_empty(), "failed: {:?}", failed);
 }
+
+// ---------------------------------------------------------------
+// USAFacts Data gateway (usafacts_states / usafacts_nation)
+// ---------------------------------------------------------------
+
+#[test]
+fn usafacts_gateway_envelopes() {
+    let body: Value = serde_json::from_str(&usafacts_tool_call(
+        "fred",
+        "getSeriesObservations",
+        serde_json::json!({"series_id": "UNRATE"}),
+    ))
+    .unwrap();
+    assert_eq!(body["params"]["name"], "call_source_tool");
+    assert_eq!(body["params"]["arguments"]["source_id"], "fred");
+    assert_eq!(
+        body["params"]["arguments"]["arguments"]["series_id"],
+        "UNRATE"
+    );
+
+    let acs = usafacts_payload(&fixture_text("usafacts_acs1_2024.sse")).unwrap();
+    assert_eq!(acs["results"][0][0], "NAME");
+    let plain = r#"{"jsonrpc":"2.0","id":1,"result":{"structuredContent":{"observations":[]}}}"#;
+    assert!(usafacts_payload(plain).unwrap()["observations"].is_array());
+
+    let err = usafacts_payload(&fixture_text("usafacts_error.sse")).unwrap_err();
+    assert!(err.contains("upstream_rejected"), "{err}");
+    assert!(
+        usafacts_payload(r#"{"jsonrpc":"2.0","error":{"message":"boom"}}"#)
+            .unwrap_err()
+            .contains("boom")
+    );
+    assert!(usafacts_payload("<html>").is_err());
+}
+
+#[test]
+fn usafacts_states_from_acs() {
+    let years = acs_state_years(days_from_civil(2026, 10, 16));
+    assert_eq!(years.first(), Some(&2012));
+    assert_eq!(years.last(), Some(&2025));
+    assert!(!years.contains(&2020));
+
+    let table = usafacts_payload(&fixture_text("usafacts_acs1_2024.sse")).unwrap();
+    let rows = acs_states_rows(&[(2024, table)]);
+    assert_eq!(rows.len(), 52);
+    let al = rows.iter().find(|r| r[1] == s("AL")).unwrap();
+    assert_eq!(al[0], s("01"));
+    assert_eq!(al[2], s("Alabama"));
+    assert_eq!(al[3], Cell::I64(2024));
+    assert_eq!(al[4], Cell::I64(5_157_699));
+    assert_eq!(al[5], Cell::F64(66_659.0));
+    assert_eq!(al[6], Cell::F64(15.19));
+    assert_eq!(al[7], Cell::F64(39.6));
+    assert_eq!(al[8], Cell::F64(4.23));
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("usafacts_states"), &rows).unwrap(), 52);
+    assert!(one(
+        &db,
+        "SELECT state_abbr FROM usafacts_states ORDER BY median_household_income DESC LIMIT 1"
+    )
+    .is_some());
+}
+
+#[test]
+fn usafacts_nation_from_fred_and_fallback() {
+    let unrate = usafacts_payload(&fixture_text("usafacts_fred_unrate.sse")).unwrap();
+    let gas = usafacts_payload(&fixture_text("usafacts_fred_gas.sse")).unwrap();
+    let payloads: Vec<Option<Value>> = USAFACTS_NATION_SERIES
+        .iter()
+        .map(|(_, id, _, _)| match *id {
+            "UNRATE" => Some(unrate.clone()),
+            "GASREGW" => Some(gas.clone()),
+            _ => None,
+        })
+        .collect();
+    let rows = fred_nation_rows(&payloads);
+    let jan = rows.iter().find(|r| r[0] == s("2024-01-01")).unwrap();
+    assert_eq!(jan[1], Cell::I64(2024));
+    assert_eq!(jan[3], Cell::Null);
+    assert!(matches!(jan[2], Cell::F64(v) if (v - 3.7).abs() < 0.05));
+
+    let fb = fredgraph_nation_rows(
+        &fixture_text("fredgraph_monthly.csv"),
+        &fixture_text("fredgraph_gas.csv"),
+    );
+    let jan = fb.iter().find(|r| r[0] == s("2024-01-01")).unwrap();
+    assert!(
+        matches!(jan[3], Cell::F64(v) if v > 1.0 && v < 6.0),
+        "{:?}",
+        jan[3]
+    );
+    assert_eq!(jan[7], Cell::F64(3.075));
+    let jan23 = fb.iter().find(|r| r[0] == s("2023-01-01")).unwrap();
+    assert_eq!(jan23[3], Cell::Null);
+
+    let db = test_db();
+    assert_eq!(
+        write_rows(&db, spec("usafacts_nation"), &fb).unwrap() as usize,
+        fb.len()
+    );
+}

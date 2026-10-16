@@ -18,6 +18,8 @@ Desktop (`src-tauri/src/sources.rs` + `stream.rs`) and the catalog Worker (`work
 | starlink | CelesTrak GP JSON | Debris / incomplete objects skipped |
 | fx | `api.frankfurter.dev/v1/` (Worker **and** desktop) | Legacy `api.frankfurter.app` only redirects — not used. Shared `fx.json` + `fx_parity_expected.json` gate (Vitest + Rust) |
 | world_bank / debt / covid / countries | World Bank / OWID-style JSON | Worker cache TTLs in catalog-proxy |
+| usafacts_states | USAFacts Data gateway (`data.mcp.usafacts.org`, beta, keyless) → Census ACS 1-year | 24h cache; no fallback (api.census.gov needs a key) — stale cache on outage |
+| usafacts_nation | USAFacts Data gateway → FRED observations | 12h cache; fallback `fred.stlouisfed.org/graph/fredgraph.csv` (keyless) |
 
 ## Machine-checked inventory
 

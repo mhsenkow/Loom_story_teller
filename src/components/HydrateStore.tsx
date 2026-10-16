@@ -35,7 +35,11 @@ import {
   setPersistedVizPreferences,
   getCustomChartLooks,
   setPersistedCustomChartLooks,
+  getSourcePreferencesRaw,
+  setPersistedSourcePreferences,
+  KEY_SOURCE_PREFERENCES,
 } from "@/lib/persist";
+import { parseSourcePreferences } from "@/lib/sourcePreferences";
 import type { ViewMode } from "@/lib/store";
 import { parseLastSessionViewMode } from "@/lib/persistValidation";
 import {
@@ -72,6 +76,39 @@ export function HydrateStore() {
       }
     });
     // Persistence is owned by this one mount, independent of chart panel visibility.
+  }, []);
+
+  useEffect(() => {
+    // Source ♥ / Less / Hide / Save + opens (envelope parse also migrates v0 maps).
+    const read = (raw: string | null) => {
+      try {
+        return parseSourcePreferences(raw ? JSON.parse(raw) : null);
+      } catch {
+        return parseSourcePreferences(null); // corrupt → empty
+      }
+    };
+    // Loading from storage must not write straight back.
+    let adopting = false;
+    const adopt = () => {
+      adopting = true;
+      useLoomStore.getState().setSourcePrefs(read(getSourcePreferencesRaw()));
+      adopting = false;
+    };
+    adopt();
+    const unsubscribe = useLoomStore.subscribe((s, prev) => {
+      if (s.sourcePrefs !== prev.sourcePrefs && !adopting && !setPersistedSourcePreferences(s.sourcePrefs)) {
+        notifyStorageFailure();
+      }
+    });
+    // Another tab changed them: adopt its copy so a stale tab never writes over newer picks.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === KEY_SOURCE_PREFERENCES || e.key === null) adopt();
+    };
+    window.addEventListener("storage", onStorage);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("storage", onStorage);
+    };
   }, []);
 
   const skipFirstPersist = useRef({

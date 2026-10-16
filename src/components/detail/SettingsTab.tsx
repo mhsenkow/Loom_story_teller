@@ -9,6 +9,7 @@ import { useFocusTrap } from "@/lib/useFocusTrap";
 import { clearPersistedPreferences } from "@/lib/persist";
 import { Button } from "@/components/ui/Button";
 import { WorkspaceBackupControls } from "@/components/WorkspaceBackupControls";
+import { YourSourcesSettings } from "@/components/YourSourcesSettings";
 import { useShallow } from "zustand/react/shallow";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
@@ -156,6 +157,7 @@ export default function SettingsTab() {
           What’s interesting right now
         </button>
       </div>
+      <YourSourcesSettings />
       <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">What’s new</h3>
         <p className="text-2xs text-loom-muted mb-2">Recent features and fixes{CHANGELOG[0] ? ` · latest ${CHANGELOG[0].date}` : ""}.</p>

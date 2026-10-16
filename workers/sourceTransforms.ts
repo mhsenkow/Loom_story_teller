@@ -999,3 +999,246 @@ export function starlinkGp(body: unknown): Columnar {
   }
   return { columns: STARLINK_COLUMNS, rows };
 }
+
+// =================================================================
+// USAFacts Data gateway (https://usafacts.org/mcp/)
+// =================================================================
+// Keyless JSON-RPC proxy over 25 federal sources (Census, FRED, BLS, …).
+// POST one `tools/call` → `call_source_tool`; replies arrive as SSE
+// `data:` lines (or plain JSON). The tool payload is the agency's own JSON,
+// in `structuredContent` or as text in `content[0]`. Errors come back as
+// `{ kind, message, hint }` (JSON-RPC result with `isError`).
+// =================================================================
+
+export const USAFACTS_GATEWAY = "https://data.mcp.usafacts.org/mcp";
+
+/** JSON-RPC body for one gateway tool call. */
+export function usafactsToolCall(sourceId: string, toolName: string, args: Json, id = 1): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id,
+    method: "tools/call",
+    params: { name: "call_source_tool", arguments: { source_id: sourceId, tool_name: toolName, arguments: args } },
+  });
+}
+
+/** Gateway reply text → the tool payload; throws `Error("USAFacts <kind>: …")` on any error shape. */
+export function usafactsPayload(text: string): unknown {
+  const dataLines = text
+    .split(/\r?\n/)
+    .filter((l) => l.startsWith("data:"))
+    .map((l) => l.slice(5).trim());
+  const raw = dataLines.length ? dataLines[dataLines.length - 1]! : text.trim();
+  let msg: Json;
+  try {
+    msg = asObj(JSON.parse(raw));
+  } catch {
+    throw new Error("USAFacts: unreadable reply");
+  }
+  if (msg.error) throw new Error(`USAFacts: ${String(asObj(msg.error).message ?? "gateway error")}`);
+  const result = asObj(msg.result);
+  let payload: unknown = result.structuredContent;
+  if (payload == null) {
+    const t = asObj(asArr(result.content)[0]).text;
+    if (typeof t === "string") {
+      try {
+        payload = JSON.parse(t);
+      } catch {
+        payload = null;
+      }
+    }
+  }
+  const p = asObj(payload);
+  if (result.isError || (typeof p.kind === "string" && typeof p.message === "string" && !("results" in p) && !("observations" in p))) {
+    throw new Error(`USAFacts ${String(p.kind ?? "error")}: ${String(p.message ?? "tool failed").slice(0, 200)}`);
+  }
+  if (payload == null) throw new Error("USAFacts: empty payload");
+  return payload;
+}
+
+// ---- usafacts_states: Census ACS 1-year, one row per state-year ----
+
+/** 2-digit state FIPS → USPS code (50 states + DC + PR, as ACS 1-year returns them). */
+export const STATE_FIPS_ABBR: Record<string, string> = {
+  "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA", "08": "CO", "09": "CT", "10": "DE", "11": "DC",
+  "12": "FL", "13": "GA", "15": "HI", "16": "ID", "17": "IL", "18": "IN", "19": "IA", "20": "KS", "21": "KY",
+  "22": "LA", "23": "ME", "24": "MD", "25": "MA", "26": "MI", "27": "MN", "28": "MS", "29": "MO", "30": "MT",
+  "31": "NE", "32": "NV", "33": "NH", "34": "NJ", "35": "NM", "36": "NY", "37": "NC", "38": "ND", "39": "OH",
+  "40": "OK", "41": "OR", "42": "PA", "44": "RI", "45": "SC", "46": "SD", "47": "TN", "48": "TX", "49": "UT",
+  "50": "VT", "51": "VA", "53": "WA", "54": "WV", "55": "WI", "56": "WY", "72": "PR",
+};
+
+/**
+ * Detailed-table variables (stable across vintages, unlike subject / profile ids).
+ * B15003 + B23025 start with the 2012 vintage, so the panel does too.
+ */
+export const ACS_STATE_VARS = [
+  "NAME",
+  "B01003_001E", // total population
+  "B19013_001E", // median household income (inflation-adjusted to that year's dollars)
+  "B01002_001E", // median age
+  "B17001_001E", // poverty universe
+  "B17001_002E", // below poverty
+  "B15003_001E", // population 25+
+  "B15003_022E", // bachelor's
+  "B15003_023E", // master's
+  "B15003_024E", // professional
+  "B15003_025E", // doctorate
+  "B23025_003E", // civilian labor force
+  "B23025_005E", // unemployed
+] as const;
+
+export const ACS_FIRST_YEAR = 2012;
+
+export const USAFACTS_STATES_COLUMNS = [
+  "state_fips", "state_abbr", "state_name", "yr", "population", "median_household_income",
+  "poverty_rate", "median_age", "unemployment_rate", "bachelors_or_higher_pct",
+];
+
+/** ACS 1-year vintages to request: 2012 → last calendar year (no 2020 release). Unreleased years just fail. */
+export function acsStateYears(now = Date.now()): number[] {
+  const last = new Date(now).getUTCFullYear() - 1;
+  const out: number[] = [];
+  for (let y = ACS_FIRST_YEAR; y <= last; y++) if (y !== 2020) out.push(y);
+  return out;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+/** Census jam values (-666666666 etc.) and negatives are "no estimate". */
+const acsNum = (v: unknown): number | null => {
+  const n = numOrNull(v);
+  return n == null || n < 0 ? null : n;
+};
+const pct = (num: number | null, den: number | null): number | null =>
+  num == null || den == null || den <= 0 ? null : round2((num / den) * 100);
+
+/** `{ results: [[header…], [row…]…] }` (or the bare 2-D array) per year → wide state-year rows, newest year first. */
+export function acsStatesWide(years: { year: number; table: unknown }[]): Columnar {
+  const rows: unknown[][] = [];
+  for (const { year, table } of years) {
+    const grid = asArr(Array.isArray(table) ? table : asObj(table).results);
+    const header = asArr(grid[0]).map(String);
+    const at = (n: string) => header.indexOf(n);
+    const ix = Object.fromEntries([...ACS_STATE_VARS, "state"].map((v) => [v, at(v)])) as Record<string, number>;
+    if (ix.state! < 0 || ix.B01003_001E! < 0) continue;
+    for (const r of grid.slice(1)) {
+      const cells = asArr(r);
+      const get = (v: string) => (ix[v]! >= 0 ? cells[ix[v]!] : undefined);
+      const fips = String(get("state") ?? "").padStart(2, "0");
+      const abbr = STATE_FIPS_ABBR[fips];
+      if (!abbr) continue;
+      const pop = acsNum(get("B01003_001E"));
+      const bach = ["B15003_022E", "B15003_023E", "B15003_024E", "B15003_025E"].map((v) => acsNum(get(v)));
+      rows.push([
+        fips,
+        abbr,
+        strOrNull(get("NAME")),
+        year,
+        pop == null ? null : Math.round(pop),
+        acsNum(get("B19013_001E")),
+        pct(acsNum(get("B17001_002E")), acsNum(get("B17001_001E"))),
+        acsNum(get("B01002_001E")),
+        pct(acsNum(get("B23025_005E")), acsNum(get("B23025_003E"))),
+        bach.some((b) => b == null) ? null : pct(bach.reduce<number>((s, b) => s + b!, 0), acsNum(get("B15003_001E"))),
+      ]);
+    }
+  }
+  rows.sort((a, b) => (b[3] as number) - (a[3] as number) || String(a[1]).localeCompare(String(b[1])));
+  return { columns: USAFACTS_STATES_COLUMNS, rows };
+}
+
+// ---- usafacts_nation: FRED monthly series (BLS, Fed, Census, EIA) ----
+
+/** Government-produced series only — FRED rights-tagged series (e.g. UMCSENT) are refused by the gateway. */
+export const USAFACTS_NATION_SERIES = [
+  { column: "unemployment_rate", id: "UNRATE" },
+  { column: "inflation_yoy_pct", id: "CPIAUCSL", units: "pc1" },
+  { column: "payrolls_k", id: "PAYEMS" },
+  { column: "fed_funds_rate", id: "FEDFUNDS" },
+  { column: "housing_starts_k", id: "HOUST" },
+  { column: "gas_price_usd", id: "GASREGW", frequency: "m" },
+] as const;
+
+export const USAFACTS_NATION_START = "1990-01-01";
+
+export const USAFACTS_NATION_COLUMNS = ["month", "yr", ...USAFACTS_NATION_SERIES.map((s) => s.column)];
+
+const ROUND_BY_COLUMN: Record<string, number> = { inflation_yoy_pct: 100, gas_price_usd: 1000 };
+
+function nationRows(byMonth: Map<string, (number | null)[]>): Columnar {
+  const start = USAFACTS_NATION_START.slice(0, 7);
+  const rows = [...byMonth.entries()]
+    .filter(([m, vals]) => m >= start && vals.some((v) => v != null))
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([m, vals]) => [
+      `${m}-01`,
+      Number(m.slice(0, 4)),
+      ...vals.map((v, i) => {
+        const k = ROUND_BY_COLUMN[USAFACTS_NATION_SERIES[i]!.column];
+        return v == null || !k ? v : Math.round(v * k) / k;
+      }),
+    ]);
+  return { columns: USAFACTS_NATION_COLUMNS, rows };
+}
+
+/** FRED `observations` payload per series (same order as USAFACTS_NATION_SERIES; null = failed) → monthly rows. */
+export function fredNationMonthly(payloads: (unknown | null)[]): Columnar {
+  const byMonth = new Map<string, (number | null)[]>();
+  payloads.forEach((p, i) => {
+    for (const o of asArr(asObj(p).observations)) {
+      const ob = asObj(o);
+      const m = /^(\d{4}-\d{2})-\d{2}$/.exec(String(ob.date ?? ""))?.[1];
+      if (!m) continue;
+      const v = ob.value === "." ? null : numOrNull(ob.value);
+      const vals = byMonth.get(m) ?? Array<number | null>(USAFACTS_NATION_SERIES.length).fill(null);
+      vals[i] = v;
+      byMonth.set(m, vals);
+    }
+  });
+  return nationRows(byMonth);
+}
+
+/**
+ * Keyless fallback: fredgraph.csv for the five monthly series (levels; it ignores `cosd`
+ * when several ids are asked for) + GASREGW averaged to months. CPI YoY is computed here.
+ */
+export function fredGraphNationMonthly(monthlyCsv: string, gasCsv: string): Columnar {
+  const parse = (csv: string) => {
+    const lines = csv.replace(/^﻿/, "").split(/\r?\n/).filter((l) => l.trim());
+    const header = (lines[0] ?? "").split(",").map((h) => h.trim());
+    return {
+      header,
+      rows: lines.slice(1).map((l) => l.split(",")),
+    };
+  };
+  const byMonth = new Map<string, (number | null)[]>();
+  const put = (m: string, i: number, v: number | null) => {
+    const vals = byMonth.get(m) ?? Array<number | null>(USAFACTS_NATION_SERIES.length).fill(null);
+    vals[i] = v;
+    byMonth.set(m, vals);
+  };
+  const cpiLevels = new Map<string, number>();
+  for (const csv of [monthlyCsv, gasCsv]) {
+    const { header, rows } = parse(csv);
+    for (const r of rows) {
+      const m = /^(\d{4}-\d{2})-\d{2}$/.exec(r[0] ?? "")?.[1];
+      if (!m) continue;
+      header.forEach((h, c) => {
+        if (c === 0) return;
+        const v = numOrNull(r[c]);
+        if (h === "CPIAUCSL") {
+          if (v != null) cpiLevels.set(m, v);
+          return;
+        }
+        const i = USAFACTS_NATION_SERIES.findIndex((s) => s.id === h);
+        if (i >= 0) put(m, i, v);
+      });
+    }
+  }
+  const cpiIdx = USAFACTS_NATION_SERIES.findIndex((s) => s.id === "CPIAUCSL");
+  for (const [m, level] of cpiLevels) {
+    const prev = cpiLevels.get(`${Number(m.slice(0, 4)) - 1}${m.slice(4)}`);
+    put(m, cpiIdx, prev ? (level / prev - 1) * 100 : null);
+  }
+  return nationRows(byMonth);
+}

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
 import { activateDataset } from "@/lib/datasetPipeline";
 import { streamClear, streamSnapshot, streamStart, streamStatus, streamStop } from "@/lib/tauri";
+import { feedRef } from "@/lib/sourceRef";
+import { LoveButton, SaveButton, SourcePrefMenu } from "@/components/SourcePrefControls";
 import { ipcErrorMessage, leaveSourcesShowChart } from "./shared";
 
 function useElapsedSeconds(startedAt: number | null, running: boolean): number {
@@ -123,13 +125,16 @@ export function WikiStreamSection() {
   };
 
   return (
-    <div className="border border-loom-border rounded-md p-3 space-y-2.5 bg-loom-surface/40">
+    <div className="relative border border-loom-border rounded-md p-3 space-y-2.5 bg-loom-surface/40" data-source-ref={feedRef("wiki")}>
         <div className="flex items-center gap-2">
           <span className={`w-2 h-2 rounded-full shrink-0 ${streamRunning ? "bg-loom-success animate-pulse" : "bg-loom-muted"}`} />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-loom-text leading-tight">Wikipedia</p>
             <p className="text-2xs text-loom-muted">Recent changes · real-time</p>
           </div>
+          <LoveButton sourceRef={feedRef("wiki")} label="Wikipedia Live" />
+          <SaveButton sourceRef={feedRef("wiki")} label="Wikipedia Live" />
+          <SourcePrefMenu sourceRef={feedRef("wiki")} label="Wikipedia Live" actions={["less", "hide"]} />
           {!streamRunning ? (
             <button
               type="button"

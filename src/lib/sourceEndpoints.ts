@@ -68,5 +68,17 @@ export const SOURCE_ENDPOINTS: Record<SourceKind, SourceEndpointContract> = {
   fema: { primary: ["www.fema.gov"], fallbacks: none, desktop: "same" },
   covid: { primary: ["disease.sh"], fallbacks: none, desktop: "same" },
   countries: { primary: ["raw.githubusercontent.com", "api.worldbank.org"], fallbacks: none, desktop: "same", note: "two-source join; both required" },
+  usafacts_states: {
+    primary: ["data.mcp.usafacts.org"],
+    fallbacks: none,
+    desktop: "same",
+    note: "USAFacts Data gateway (beta, keyless JSON-RPC) → Census ACS 1-year; api.census.gov now needs a key, so outages serve the stale cache",
+  },
+  usafacts_nation: {
+    primary: ["data.mcp.usafacts.org"],
+    fallbacks: ["fred.stlouisfed.org (fredgraph.csv)"],
+    desktop: "same",
+    note: "USAFacts Data gateway → FRED observations; keyless fredgraph.csv when any series fails",
+  },
   world_bank: { primary: ["api.worldbank.org"], fallbacks: none, desktop: "same" },
 };

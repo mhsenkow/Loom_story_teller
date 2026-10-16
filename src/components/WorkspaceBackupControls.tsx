@@ -39,6 +39,7 @@ export function WorkspaceBackupControls() {
   const dashboards = useLoomStore((s) => s.dashboards);
   const querySnippets = useLoomStore((s) => s.querySnippets);
   const customChartLooks = useLoomStore((s) => s.customChartLooks);
+  const sourcePrefs = useLoomStore((s) => s.sourcePrefs);
   const setToast = useLoomStore((s) => s.setToast);
   const [thumbnails, setThumbnails] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -53,9 +54,10 @@ export function WorkspaceBackupControls() {
       dashboards,
       snippets: querySnippets,
       tablePrefsByPath: userPrefsByPath(),
+      sourcePrefs,
     }),
     // Prefs live in localStorage; recompute alongside view lists.
-    [tableViews, chartViews, queryViews, dashboards, querySnippets, customChartLooks],
+    [tableViews, chartViews, queryViews, dashboards, querySnippets, customChartLooks, sourcePrefs],
   );
 
   const preview = useMemo(() => {
@@ -65,7 +67,7 @@ export function WorkspaceBackupControls() {
       bundle,
       bytes: estimateBundleBytes(bundle),
       empty: Object.values(c).every((n) => n === 0),
-      summary: `${c.tableViews} table, ${c.chartViews} chart, ${c.queryViews} query views · ${c.dashboards} dashboards · ${c.snippets} snippets · ${c.customChartLooks} looks`,
+      summary: `${c.tableViews} table, ${c.chartViews} chart, ${c.queryViews} query views · ${c.dashboards} dashboards · ${c.snippets} snippets · ${c.customChartLooks} looks · ${c.sourcePrefs ?? 0} source picks`,
     };
   }, [current, thumbnails]);
 
@@ -94,6 +96,7 @@ export function WorkspaceBackupControls() {
         dashboards: st.dashboards,
         snippets: st.querySnippets,
         tablePrefsByPath: userPrefsByPath(),
+        sourcePrefs: st.sourcePrefs,
       },
       res.bundle.content,
     );
@@ -103,6 +106,7 @@ export function WorkspaceBackupControls() {
     st.setDashboards(merged.dashboards);
     st.setQuerySnippets(merged.snippets);
     useLoomStore.setState({ customChartLooks: merged.customChartLooks ?? [] });
+    if (merged.sourcePrefs) st.setSourcePrefs(merged.sourcePrefs);
     for (const [path, prefs] of Object.entries(merged.tablePrefsByPath)) setTablePrefsForPath(path, prefs);
     const refs = res.bundle.manifest.datasetRefs;
     const total = Object.values(added).reduce((a, b) => a + b, 0);

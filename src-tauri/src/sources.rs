@@ -582,6 +582,42 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         mode: WriteMode::Replace,
     },
     SourceSpec {
+        kind: "usafacts_states",
+        table: "usafacts_states",
+        columns: &[
+            ("state_fips", V),
+            ("state_abbr", V),
+            ("state_name", V),
+            ("yr", I),
+            ("population", BI),
+            ("median_household_income", D),
+            ("poverty_rate", D),
+            ("median_age", D),
+            ("unemployment_rate", D),
+            ("bachelors_or_higher_pct", D),
+        ],
+        order_by: "yr DESC, state_abbr",
+        poll_secs: 0,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "usafacts_nation",
+        table: "usafacts_nation",
+        columns: &[
+            ("month", DT),
+            ("yr", I),
+            ("unemployment_rate", D),
+            ("inflation_yoy_pct", D),
+            ("payrolls_k", D),
+            ("fed_funds_rate", D),
+            ("housing_starts_k", D),
+            ("gas_price_usd", D),
+        ],
+        order_by: "month ASC",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
         kind: "fema",
         table: "fema_disasters",
         columns: &[
@@ -672,7 +708,7 @@ pub fn snapshot_sql(kind: &str) -> Option<String> {
 /// History feeds stored oldest → newest (mirrors `keepNewest` in sourceRegistry.ts).
 /// A limited snapshot of these keeps the most recent rows, still in ascending order —
 /// otherwise a 400-row Discover probe of US debt or global temperature stops in 1913.
-pub const KEEP_NEWEST_KINDS: &[&str] = &["climate", "debt"];
+pub const KEEP_NEWEST_KINDS: &[&str] = &["climate", "debt", "usafacts_nation"];
 
 /// Snapshot SQL honoring `limit` for keep-newest history feeds.
 pub fn snapshot_sql_limited(kind: &str, limit: u32) -> Option<String> {
@@ -3662,6 +3698,484 @@ async fn fetch_world_bank(client: &reqwest::Client) -> Result<Vec<Row>, String> 
     Ok(wb_wide_rows(&countries, &series))
 }
 
+// ---- USAFacts Data gateway (https://usafacts.org/mcp/) ----
+// Keyless JSON-RPC proxy over federal sources. Same calls, columns and math as
+// workers/sourceTransforms.ts (usafactsPayload / acsStatesWide / fredNationMonthly).
+
+const USAFACTS_GATEWAY: &str = "https://data.mcp.usafacts.org/mcp";
+
+pub(crate) fn usafacts_tool_call(source_id: &str, tool_name: &str, args: Value) -> String {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "call_source_tool",
+            "arguments": { "source_id": source_id, "tool_name": tool_name, "arguments": args },
+        },
+    })
+    .to_string()
+}
+
+/// Gateway reply (SSE `data:` lines or plain JSON-RPC) → the tool payload.
+pub(crate) fn usafacts_payload(text: &str) -> Result<Value, String> {
+    let raw = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("data:"))
+        .map(str::trim)
+        .next_back()
+        .unwrap_or_else(|| text.trim());
+    let msg: Value =
+        serde_json::from_str(raw).map_err(|_| "USAFacts: unreadable reply".to_string())?;
+    if let Some(err) = msg.get("error") {
+        let m = err
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("gateway error");
+        return Err(format!("USAFacts: {}", m));
+    }
+    let result = msg.get("result").cloned().unwrap_or(Value::Null);
+    let payload = match result.get("structuredContent") {
+        Some(v) if !v.is_null() => Some(v.clone()),
+        _ => result
+            .pointer("/content/0/text")
+            .and_then(Value::as_str)
+            .and_then(|t| serde_json::from_str::<Value>(t).ok()),
+    };
+    let is_error = result
+        .get("isError")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let p = payload.clone().unwrap_or(Value::Null);
+    let error_shape = p.get("kind").map(Value::is_string).unwrap_or(false)
+        && p.get("message").map(Value::is_string).unwrap_or(false)
+        && p.get("results").is_none()
+        && p.get("observations").is_none();
+    if is_error || error_shape {
+        let kind = p.get("kind").and_then(Value::as_str).unwrap_or("error");
+        let m: String = p
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("tool failed")
+            .chars()
+            .take(200)
+            .collect();
+        return Err(format!("USAFacts {}: {}", kind, m));
+    }
+    payload.ok_or_else(|| "USAFacts: empty payload".to_string())
+}
+
+/// 2-digit state FIPS → USPS code (50 states + DC + PR). Mirrors STATE_FIPS_ABBR.
+pub(crate) const STATE_FIPS_ABBR: &[(&str, &str)] = &[
+    ("01", "AL"),
+    ("02", "AK"),
+    ("04", "AZ"),
+    ("05", "AR"),
+    ("06", "CA"),
+    ("08", "CO"),
+    ("09", "CT"),
+    ("10", "DE"),
+    ("11", "DC"),
+    ("12", "FL"),
+    ("13", "GA"),
+    ("15", "HI"),
+    ("16", "ID"),
+    ("17", "IL"),
+    ("18", "IN"),
+    ("19", "IA"),
+    ("20", "KS"),
+    ("21", "KY"),
+    ("22", "LA"),
+    ("23", "ME"),
+    ("24", "MD"),
+    ("25", "MA"),
+    ("26", "MI"),
+    ("27", "MN"),
+    ("28", "MS"),
+    ("29", "MO"),
+    ("30", "MT"),
+    ("31", "NE"),
+    ("32", "NV"),
+    ("33", "NH"),
+    ("34", "NJ"),
+    ("35", "NM"),
+    ("36", "NY"),
+    ("37", "NC"),
+    ("38", "ND"),
+    ("39", "OH"),
+    ("40", "OK"),
+    ("41", "OR"),
+    ("42", "PA"),
+    ("44", "RI"),
+    ("45", "SC"),
+    ("46", "SD"),
+    ("47", "TN"),
+    ("48", "TX"),
+    ("49", "UT"),
+    ("50", "VT"),
+    ("51", "VA"),
+    ("53", "WA"),
+    ("54", "WV"),
+    ("55", "WI"),
+    ("56", "WY"),
+    ("72", "PR"),
+];
+
+/// Detailed-table ACS variables (stable across vintages). Mirrors ACS_STATE_VARS.
+pub(crate) const ACS_STATE_VARS: &[&str] = &[
+    "NAME",
+    "B01003_001E",
+    "B19013_001E",
+    "B01002_001E",
+    "B17001_001E",
+    "B17001_002E",
+    "B15003_001E",
+    "B15003_022E",
+    "B15003_023E",
+    "B15003_024E",
+    "B15003_025E",
+    "B23025_003E",
+    "B23025_005E",
+];
+
+const ACS_FIRST_YEAR: i64 = 2012;
+
+/// ACS 1-year vintages: 2012 → last calendar year, no 2020 release.
+pub(crate) fn acs_state_years(today: i64) -> Vec<i64> {
+    let (y, _, _) = civil_from_days(today);
+    (ACS_FIRST_YEAR..y).filter(|&yr| yr != 2020).collect()
+}
+
+fn round_to(v: f64, k: f64) -> f64 {
+    (v * k).round() / k
+}
+
+/// Census jam values (-666666666 …) and negatives are "no estimate".
+fn acs_num(v: Option<&Value>) -> Option<f64> {
+    v.and_then(as_f64_loose).filter(|n| *n >= 0.0)
+}
+
+fn pct_of(num: Option<f64>, den: Option<f64>) -> Option<f64> {
+    match (num, den) {
+        (Some(n), Some(d)) if d > 0.0 => Some(round_to(n / d * 100.0, 100.0)),
+        _ => None,
+    }
+}
+
+/// `{ results: [[header…], [row…]…] }` (or a bare grid) per year → wide rows, newest year first.
+pub(crate) fn acs_states_rows(years: &[(i64, Value)]) -> Vec<Row> {
+    let mut rows: Vec<Row> = Vec::new();
+    for (year, table) in years {
+        let grid = match table {
+            Value::Array(a) => a.clone(),
+            other => other
+                .get("results")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        };
+        let Some(header) = grid.first().and_then(Value::as_array) else {
+            continue;
+        };
+        let header: Vec<&str> = header.iter().map(|h| h.as_str().unwrap_or("")).collect();
+        let at = |n: &str| header.iter().position(|h| *h == n);
+        let (Some(state_i), Some(_)) = (at("state"), at("B01003_001E")) else {
+            continue;
+        };
+        for r in grid.iter().skip(1) {
+            let Some(cells) = r.as_array() else { continue };
+            let get = |v: &str| at(v).and_then(|i| cells.get(i));
+            let fips = format!(
+                "{:0>2}",
+                cells.get(state_i).and_then(Value::as_str).unwrap_or("")
+            );
+            let Some(abbr) = STATE_FIPS_ABBR
+                .iter()
+                .find(|(f, _)| *f == fips)
+                .map(|(_, a)| *a)
+            else {
+                continue;
+            };
+            let bach: Vec<Option<f64>> =
+                ["B15003_022E", "B15003_023E", "B15003_024E", "B15003_025E"]
+                    .iter()
+                    .map(|v| acs_num(get(v)))
+                    .collect();
+            let bach_sum = if bach.iter().all(Option::is_some) {
+                Some(bach.iter().flatten().sum::<f64>())
+            } else {
+                None
+            };
+            rows.push(vec![
+                Cell::str(fips),
+                Cell::str(abbr),
+                js(get("NAME")),
+                Cell::I64(*year),
+                Cell::opt_i64(acs_num(get("B01003_001E")).map(|p| p.round() as i64)),
+                Cell::opt_f64(acs_num(get("B19013_001E"))),
+                Cell::opt_f64(pct_of(
+                    acs_num(get("B17001_002E")),
+                    acs_num(get("B17001_001E")),
+                )),
+                Cell::opt_f64(acs_num(get("B01002_001E"))),
+                Cell::opt_f64(pct_of(
+                    acs_num(get("B23025_005E")),
+                    acs_num(get("B23025_003E")),
+                )),
+                Cell::opt_f64(pct_of(bach_sum, acs_num(get("B15003_001E")))),
+            ]);
+        }
+    }
+    let key = |r: &Row| -> (i64, String) {
+        let y = match r[3] {
+            Cell::I64(y) => y,
+            _ => 0,
+        };
+        let a = match &r[1] {
+            Cell::Str(a) => a.clone(),
+            _ => String::new(),
+        };
+        (y, a)
+    };
+    rows.sort_by(|a, b| {
+        let (ya, aa) = key(a);
+        let (yb, ab) = key(b);
+        yb.cmp(&ya).then(aa.cmp(&ab))
+    });
+    rows
+}
+
+/// (column, FRED id, units, frequency) — mirrors USAFACTS_NATION_SERIES.
+pub(crate) const USAFACTS_NATION_SERIES: &[(&str, &str, Option<&str>, Option<&str>)] = &[
+    ("unemployment_rate", "UNRATE", None, None),
+    ("inflation_yoy_pct", "CPIAUCSL", Some("pc1"), None),
+    ("payrolls_k", "PAYEMS", None, None),
+    ("fed_funds_rate", "FEDFUNDS", None, None),
+    ("housing_starts_k", "HOUST", None, None),
+    ("gas_price_usd", "GASREGW", None, Some("m")),
+];
+
+const USAFACTS_NATION_START: &str = "1990-01-01";
+
+fn nation_rows(by_month: BTreeMap<String, Vec<Option<f64>>>) -> Vec<Row> {
+    let start = &USAFACTS_NATION_START[..7];
+    by_month
+        .into_iter()
+        .filter(|(m, vals)| m.as_str() >= start && vals.iter().any(Option::is_some))
+        .map(|(m, vals)| {
+            let mut row = vec![
+                Cell::str(format!("{}-01", m)),
+                Cell::opt_i64(m.get(..4).and_then(|y| y.parse().ok())),
+            ];
+            for (i, v) in vals.into_iter().enumerate() {
+                let k = match USAFACTS_NATION_SERIES[i].0 {
+                    "inflation_yoy_pct" => Some(100.0),
+                    "gas_price_usd" => Some(1000.0),
+                    _ => None,
+                };
+                row.push(Cell::opt_f64(match k {
+                    Some(k) => v.map(|x| round_to(x, k)),
+                    None => v,
+                }));
+            }
+            row
+        })
+        .collect()
+}
+
+fn month_of(date: &str) -> Option<String> {
+    let b = date.as_bytes();
+    (date.len() == 10
+        && b[4] == b'-'
+        && b[7] == b'-'
+        && date[..4].bytes().all(|c| c.is_ascii_digit()))
+    .then(|| date[..7].to_string())
+}
+
+/// FRED `observations` payload per series (registry order; None = failed) → monthly rows.
+pub(crate) fn fred_nation_rows(payloads: &[Option<Value>]) -> Vec<Row> {
+    let n = USAFACTS_NATION_SERIES.len();
+    let mut by_month: BTreeMap<String, Vec<Option<f64>>> = BTreeMap::new();
+    for (i, p) in payloads.iter().enumerate() {
+        let Some(obs) = p
+            .as_ref()
+            .and_then(|p| p.get("observations"))
+            .and_then(Value::as_array)
+        else {
+            continue;
+        };
+        for o in obs {
+            let Some(m) = o.get("date").and_then(Value::as_str).and_then(month_of) else {
+                continue;
+            };
+            let v = match o.get("value") {
+                Some(Value::String(s)) if s == "." => None,
+                other => other.and_then(as_f64_loose),
+            };
+            by_month.entry(m).or_insert_with(|| vec![None; n])[i] = v;
+        }
+    }
+    nation_rows(by_month)
+}
+
+/// Keyless fallback: fredgraph.csv levels (CPI → YoY computed here) + monthly-averaged gas.
+pub(crate) fn fredgraph_nation_rows(monthly_csv: &str, gas_csv: &str) -> Vec<Row> {
+    let n = USAFACTS_NATION_SERIES.len();
+    let mut by_month: BTreeMap<String, Vec<Option<f64>>> = BTreeMap::new();
+    let mut cpi: BTreeMap<String, f64> = BTreeMap::new();
+    for csv in [monthly_csv, gas_csv] {
+        let mut lines = csv
+            .trim_start_matches('\u{feff}')
+            .lines()
+            .filter(|l| !l.trim().is_empty());
+        let Some(header) = lines.next() else { continue };
+        let header: Vec<&str> = header.split(',').map(str::trim).collect();
+        for line in lines {
+            let cells: Vec<&str> = line.split(',').collect();
+            let Some(m) = cells.first().and_then(|d| month_of(d)) else {
+                continue;
+            };
+            for (c, h) in header.iter().enumerate().skip(1) {
+                let v = cells
+                    .get(c)
+                    .and_then(|x| x.trim().parse::<f64>().ok())
+                    .filter(|x| x.is_finite());
+                if *h == "CPIAUCSL" {
+                    if let Some(v) = v {
+                        cpi.insert(m.clone(), v);
+                    }
+                    continue;
+                }
+                if let Some(i) = USAFACTS_NATION_SERIES.iter().position(|s| s.1 == *h) {
+                    by_month.entry(m.clone()).or_insert_with(|| vec![None; n])[i] = v;
+                }
+            }
+        }
+    }
+    let cpi_i = USAFACTS_NATION_SERIES
+        .iter()
+        .position(|s| s.1 == "CPIAUCSL")
+        .unwrap_or(1);
+    for (m, level) in &cpi {
+        let prev_key = m
+            .get(..4)
+            .and_then(|y| y.parse::<i64>().ok())
+            .map(|y| format!("{}{}", y - 1, &m[4..]));
+        let yoy = prev_key
+            .and_then(|k| cpi.get(&k))
+            .map(|prev| (level / prev - 1.0) * 100.0);
+        by_month.entry(m.clone()).or_insert_with(|| vec![None; n])[cpi_i] = yoy;
+    }
+    nation_rows(by_month)
+}
+
+async fn usafacts_call(
+    client: &reqwest::Client,
+    source_id: &str,
+    tool: &str,
+    args: Value,
+) -> Result<Value, String> {
+    let res = client
+        .post(USAFACTS_GATEWAY)
+        .header("Content-Type", "application/json")
+        .header("Accept", "application/json, text/event-stream")
+        .body(usafacts_tool_call(source_id, tool, args))
+        .send()
+        .await
+        .map_err(|e| format!("USAFacts: {}", e))?;
+    let status = res.status();
+    if !status.is_success() {
+        return Err(format!("USAFacts: HTTP {}", status));
+    }
+    let bytes = response_bytes_limited(res, MAX_UPSTREAM_BODY).await?;
+    usafacts_payload(&String::from_utf8_lossy(&bytes))
+}
+
+async fn fetch_usafacts_states(client: &reqwest::Client) -> Result<Vec<Row>, String> {
+    use futures_util::stream::{self, StreamExt};
+    let get = ACS_STATE_VARS.join(",");
+    let calls: Vec<(i64, Value, reqwest::Client)> = acs_state_years(today_days())
+        .into_iter()
+        .map(|year| {
+            let args =
+                serde_json::json!({ "year": year.to_string(), "get": get, "for": "state:*" });
+            (year, args, client.clone())
+        })
+        .collect();
+    let results: Vec<(i64, Result<Value, String>)> = stream::iter(calls)
+        .map(|(year, args, client)| async move {
+            (
+                year,
+                usafacts_call(&client, "census_acs", "getAcs1", args).await,
+            )
+        })
+        .buffer_unordered(4)
+        .collect()
+        .await;
+    let mut ok = Vec::new();
+    for (year, r) in results {
+        match r {
+            Ok(v) => ok.push((year, v)),
+            Err(e) => log::info!(target: "loom", "usafacts_states {year}: {e}"),
+        }
+    }
+    if ok.is_empty() {
+        return Err("USAFacts: no ACS vintages returned".into());
+    }
+    Ok(acs_states_rows(&ok))
+}
+
+async fn fetch_usafacts_nation(client: &reqwest::Client) -> Result<Vec<Row>, String> {
+    use futures_util::stream::{self, StreamExt};
+    let calls: Vec<(String, Value, reqwest::Client)> = USAFACTS_NATION_SERIES
+        .iter()
+        .map(|(_, id, units, freq)| {
+            let mut args =
+                serde_json::json!({ "series_id": id, "observation_start": USAFACTS_NATION_START });
+            if let Some(u) = units {
+                args["units"] = Value::from(*u);
+            }
+            if let Some(f) = freq {
+                args["frequency"] = Value::from(*f);
+            }
+            (id.to_string(), args, client.clone())
+        })
+        .collect();
+    let payloads: Vec<Option<Value>> = stream::iter(calls)
+        .map(|(id, args, client)| async move {
+            match usafacts_call(&client, "fred", "getSeriesObservations", args).await {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    log::warn!(target: "loom", "usafacts_nation {id}: {e}");
+                    None
+                }
+            }
+        })
+        .buffered(3)
+        .collect()
+        .await;
+    if payloads.iter().all(Option::is_some) {
+        return Ok(fred_nation_rows(&payloads));
+    }
+    let fallback = async {
+        let monthly = get_text(client, "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE,CPIAUCSL,PAYEMS,FEDFUNDS,HOUST").await?;
+        let gas = get_text(
+            client,
+            &format!("https://fred.stlouisfed.org/graph/fredgraph.csv?id=GASREGW&cosd={}&fq=Monthly&fam=avg", USAFACTS_NATION_START),
+        )
+        .await?;
+        Ok::<_, String>(fredgraph_nation_rows(&monthly, &gas))
+    };
+    match fallback.await {
+        Ok(rows) => Ok(rows),
+        Err(e) if payloads.iter().any(Option::is_some) => {
+            log::warn!(target: "loom", "usafacts_nation fredgraph fallback: {e}");
+            Ok(fred_nation_rows(&payloads))
+        }
+        Err(e) => Err(e),
+    }
+}
+
 async fn fetch_bitcoin(client: &reqwest::Client) -> Result<Vec<Row>, String> {
     let mut pages = vec![get_json(client, MEMPOOL_BLOCKS_URL).await?];
     for _ in 0..MEMPOOL_EXTRA_PAGES {
@@ -3783,6 +4297,8 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
         "bitcoin" => fetch_bitcoin(&c).await,
         "fx" => fx_rows(&get_json(&c, &fx_url(today)).await?),
         "debt" => debt_rows(&get_json(&c, DEBT_URL).await?),
+        "usafacts_states" => fetch_usafacts_states(&c).await,
+        "usafacts_nation" => fetch_usafacts_nation(&c).await,
         "fema" => fema_rows(&get_json(&c, FEMA_URL).await?),
         "covid" => covid_rows(&get_json(&c, COVID_URL).await?),
         "countries" => {

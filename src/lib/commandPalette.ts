@@ -8,6 +8,8 @@
 
 import { CHART_KIND_CATALOG, searchChartKinds } from "./chartKindSearch";
 import { SOURCE_DEFS, type SourceKind } from "./sourceRegistry";
+import { getCachedSourcePreferences, isHidden, sourceAffinity, type SourcePreferences } from "./sourcePreferences";
+import { feedRef } from "./sourceRef";
 import {
   looksLikeAnalysisTalk,
   resolveAnalysisVernacular,
@@ -424,6 +426,8 @@ export function searchCommandPalette(
     catalogHits?: CommandPaletteCatalogHit[];
     /** Active dataset columns — enables “site vs discharge” style hits. */
     columns?: string[];
+    /** Source ♥ / Less / Hide (defaults to the module cache). */
+    sourcePrefs?: SourcePreferences;
   },
 ): CommandPaletteMatch[] {
   const raw = query.trim();
@@ -447,9 +451,17 @@ export function searchCommandPalette(
 
   for (const m of phraseMatches(raw, opts?.columns)) consider(m);
 
+  const prefs = opts?.sourcePrefs ?? getCachedSourcePreferences();
   for (const item of COMMAND_PALETTE_ITEMS) {
-    const score = scoreKeywords(item, q);
-    if (score > 0) consider({ ...item, score });
+    let score = scoreKeywords(item, q);
+    if (score <= 0) continue;
+    if (item.id.startsWith("source:")) {
+      // Hidden feeds drop out; loved / saved / often-opened ones rise (≈ one keyword hit for a ♥).
+      const ref = feedRef(item.id.slice("source:".length) as SourceKind);
+      if (isHidden(ref, prefs)) continue;
+      score += sourceAffinity(ref, prefs) * 0.4;
+    }
+    consider({ ...item, score });
   }
 
   // Recent files (path-keyed)

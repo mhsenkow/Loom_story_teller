@@ -14,6 +14,7 @@ import {
   type WorkspaceBundleContent,
 } from "../workspaceBackup";
 import type { ChartViewItem } from "../store";
+import { emptySourcePreferences, recordSourceOpen, setSourceReaction, toggleSourceSaved } from "../sourcePreferences";
 
 const chart = {
   id: "c1",
@@ -63,6 +64,30 @@ describe("workspace backup", () => {
     expect(merged.skipped.customChartLooks).toBe(1);
     expect(buildWorkspaceBundle({ customChartLooks: [look] }, { ...DEFAULT_EXPORT_SCOPE, customChartLooks: false }).content.customChartLooks).toEqual([]);
   });
+  it("round-trips source loves / saves / hides alone, keeps local reactions, and leaves opens on the device", () => {
+    let prefs = setSourceReaction(emptySourcePreferences(), "feed:usgs", "love", 1);
+    prefs = setSourceReaction(prefs, "feed:crypto", "hide", 2);
+    prefs = toggleSourceSaved(prefs, "pack:owid-co2-per-capita", 3);
+    prefs = recordSourceOpen(prefs, "file:/Users/me/private.csv", 4);
+    const bundle = buildWorkspaceBundle({ sourcePrefs: prefs });
+    expect(bundle.manifest.counts.sourcePrefs).toBe(3);
+    expect(serializeWorkspaceBundle(bundle)).not.toContain("private.csv");
+    const res = parseWorkspaceBundle(serializeWorkspaceBundle(bundle));
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.bundle.content.sourcePrefs?.entries).toEqual({
+      "feed:usgs": { reaction: "love", reactedAt: 1 },
+      "feed:crypto": { reaction: "hide", reactedAt: 2 },
+      "pack:owid-co2-per-capita": { saved: true, savedAt: 3 },
+    });
+    const current = buildWorkspaceBundle({ sourcePrefs: setSourceReaction(emptySourcePreferences(), "feed:crypto", "love", 9) }).content;
+    const r = mergeWorkspaceBundle(current, res.bundle.content);
+    expect(r.merged.sourcePrefs?.entries["feed:crypto"]?.reaction).toBe("love");
+    expect(r.merged.sourcePrefs?.entries["feed:usgs"]?.reaction).toBe("love");
+    expect([r.added.sourcePrefs, r.skipped.sourcePrefs]).toEqual([2, 1]);
+    expect(buildWorkspaceBundle({ sourcePrefs: prefs }, { ...DEFAULT_EXPORT_SCOPE, sourcePrefs: false }).manifest.counts.sourcePrefs).toBe(0);
+  });
+
   it("round-trips selected work into a fresh profile", () => {
     const text = serializeWorkspaceBundle(buildWorkspaceBundle(sample()));
     const res = parseWorkspaceBundle(text);

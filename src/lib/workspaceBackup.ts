@@ -3,7 +3,8 @@
 // =================================================================
 // A bundle is plain JSON: a manifest (format, version, counts, privacy
 // scope, dataset references) plus saved table/chart/query views,
-// dashboards, SQL snippets and per-file column prefs. Uploaded datasets
+// dashboards, SQL snippets, per-file column prefs and source loves / saves /
+// hides (not the on-device "recently opened" signal). Uploaded datasets
 // are NOT embedded — only file names/paths are recorded so the user knows
 // what to re-add. Import validates every record and never applies
 // settings, URLs or anything outside the lists above.
@@ -21,6 +22,14 @@ import type {
   TableViewItem,
 } from "./store";
 import { parseCustomChartLooks, MAX_CUSTOM_CHART_LOOKS, type CustomChartLook } from "./customChartLooks";
+import {
+  countExplicitSourcePreferences,
+  emptySourcePreferences,
+  explicitOnly,
+  mergeSourcePreferences,
+  parseSourcePreferences,
+  type SourcePreferences,
+} from "./sourcePreferences";
 
 export const WORKSPACE_BUNDLE_FORMAT = "loom-workspace";
 export const WORKSPACE_BUNDLE_VERSION = 1;
@@ -45,6 +54,8 @@ export interface WorkspaceBundleContent {
   dashboards: DashboardItem[];
   snippets: WorkspaceSnippet[];
   tablePrefsByPath: Record<string, WorkspaceTablePrefs>;
+  /** Source ♥ / 👎 / Hide / 🔖 (explicit only). */
+  sourcePrefs?: SourcePreferences;
 }
 
 export interface WorkspaceManifest {
@@ -75,6 +86,7 @@ export interface WorkspaceExportScope {
   dashboards: boolean;
   snippets: boolean;
   tablePrefs: boolean;
+  sourcePrefs?: boolean;
   /** Chart view PNG thumbnails — large, and may show data. */
   thumbnails: boolean;
 }
@@ -87,6 +99,7 @@ export const DEFAULT_EXPORT_SCOPE: WorkspaceExportScope = {
   dashboards: true,
   snippets: true,
   tablePrefs: true,
+  sourcePrefs: true,
   thumbnails: false,
 };
 
@@ -180,6 +193,7 @@ export function buildWorkspaceBundle(
     dashboards: scope.dashboards ? [...(input.dashboards ?? [])] : [],
     snippets: scope.snippets ? [...(input.snippets ?? [])] : [],
     tablePrefsByPath: scope.tablePrefs ? { ...(input.tablePrefsByPath ?? {}) } : {},
+    sourcePrefs: scope.sourcePrefs === false ? emptySourcePreferences() : explicitOnly(input.sourcePrefs ?? emptySourcePreferences()),
   };
   const manifest: WorkspaceManifest = {
     format: WORKSPACE_BUNDLE_FORMAT,
@@ -193,6 +207,7 @@ export function buildWorkspaceBundle(
       dashboards: content.dashboards.length,
       snippets: content.snippets.length,
       tablePrefsByPath: Object.keys(content.tablePrefsByPath).length,
+      sourcePrefs: countExplicitSourcePreferences(content.sourcePrefs),
     },
     includesThumbnails: scope.thumbnails && content.chartViews.some((v) => !!v.snapshotImageDataUrl),
     datasetRefs: collectDatasetRefs(content),
@@ -249,6 +264,7 @@ export function parseWorkspaceBundle(text: string): WorkspaceParseResult {
     dashboards: parsePersistedDashboards(c.dashboards),
     snippets: parseSnippets(c.snippets),
     tablePrefsByPath: parsePrefsByPath(c.tablePrefsByPath),
+    sourcePrefs: explicitOnly(parseSourcePreferences(c.sourcePrefs)),
   };
   const total =
     (content.customChartLooks?.length ?? 0) +
@@ -257,7 +273,8 @@ export function parseWorkspaceBundle(text: string): WorkspaceParseResult {
     content.queryViews.length +
     content.dashboards.length +
     content.snippets.length +
-    Object.keys(content.tablePrefsByPath).length;
+    Object.keys(content.tablePrefsByPath).length +
+    countExplicitSourcePreferences(content.sourcePrefs);
   if (total === 0) {
     return { ok: false, code: "invalid", message: "The backup contains no valid saved work (every record failed validation). Nothing was imported." };
   }
@@ -306,6 +323,7 @@ export function mergeWorkspaceBundle(
   const snippets = [...current.snippets, ...freshSnips].slice(0, 30);
   const prefs = { ...incoming.tablePrefsByPath, ...current.tablePrefsByPath };
   const prefsAdded = Object.keys(prefs).length - Object.keys(current.tablePrefsByPath).length;
+  const sources = mergeSourcePreferences(current.sourcePrefs ?? emptySourcePreferences(), incoming.sourcePrefs ?? emptySourcePreferences());
   return {
     merged: {
       customChartLooks: looks.list,
@@ -315,6 +333,7 @@ export function mergeWorkspaceBundle(
       dashboards: d.list,
       snippets,
       tablePrefsByPath: prefs,
+      sourcePrefs: sources.merged,
     },
     added: {
       customChartLooks: looks.added,
@@ -324,6 +343,7 @@ export function mergeWorkspaceBundle(
       dashboards: d.added,
       snippets: snippets.length - current.snippets.length,
       tablePrefsByPath: prefsAdded,
+      sourcePrefs: sources.added,
     },
     skipped: {
       customChartLooks: incomingLooks.length - looks.added,
@@ -333,6 +353,7 @@ export function mergeWorkspaceBundle(
       dashboards: d.skipped,
       snippets: incoming.snippets.length - (snippets.length - current.snippets.length),
       tablePrefsByPath: Object.keys(incoming.tablePrefsByPath).length - prefsAdded,
+      sourcePrefs: sources.skipped,
     },
   };
 }

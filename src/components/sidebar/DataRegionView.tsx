@@ -6,14 +6,14 @@ import type { CatalogSectionProps } from "@/components/PublicCatalogSections";
 import { WEB_FILE_ACCEPT, WEB_FILE_ACCEPT_LABEL } from "@/lib/webFormats";
 import { WEB_VAULT_LABEL, WEB_VAULT_PATH, type LinkedFolderMeta, type LinkedFolderScanProgress } from "@/lib/webDataFolder";
 import { requestDiscoverScan } from "@/lib/discoverStories";
-import { SOURCE_DEFS, SOURCE_GROUP_LABELS, type SourceGroup } from "@/lib/sourceRegistry";
 import { fetchDataGovRecentCsv, fetchUkDataRecentCsv, isDesktop, saveCsvToFolder, type DataGovDataset, type DataGovSortKey } from "@/lib/tauri";
 import { CkanDiscoverToolbar } from "./CkanDiscoverToolbar";
 import { DatasetPreviewModal } from "./DatasetPreviewModal";
 import { DiscoverDatasetCard } from "./DiscoverDatasetCard";
-import { SourceCard } from "./SourceCard";
-import { WikiStreamSection } from "./WikiStreamSection";
-import { CURATED_OPEN_PACKS, DATA_GOV_ROW_OPTIONS, SectionHeading, filterDatasetsLocal, ipcErrorMessage } from "./shared";
+import { FeedBrowser } from "./FeedBrowser";
+import { packRef } from "@/lib/sourceRef";
+import { LoveButton, SaveButton, SourcePrefMenu } from "@/components/SourcePrefControls";
+import { DATA_GOV_ROW_OPTIONS, SectionHeading, filterDatasetsLocal, ipcErrorMessage } from "./shared";
 import { uniqueDatasets } from "@/lib/openDataCatalog";
 
 const CatalogSectionLoading = () => (
@@ -556,36 +556,17 @@ export function DataRegionView({
           </a>
         </section>
 
-        {/* Live feeds */}
+        {/* Live feeds + curated packs — one searchable, filterable browser (lib/feedBrowser.ts) */}
         <section className="space-y-2.5" style={{ order: isWeb ? 1 : 6 }}>
           <SectionHeading
-            title="Live feeds"
-            lede="Connect a feed, let it fill, then Explore into Chart."
+            title="Live feeds & open packs"
+            lede="Search or filter, ♥ what you like. Connect a feed, let it fill, then Explore into Chart."
           />
-          <WikiStreamSection />
-          {(Object.keys(SOURCE_GROUP_LABELS) as SourceGroup[]).map((group) => (
-            <div key={group} className="space-y-2.5">
-              <h4 className="text-2xs font-medium uppercase tracking-wide text-loom-muted pt-1">
-                {SOURCE_GROUP_LABELS[group]}
-              </h4>
-              {SOURCE_DEFS.filter((d) => d.group === group).map((def) => (
-                <SourceCard key={def.kind} def={def} />
-              ))}
-            </div>
-          ))}
-        </section>
-
-        {/* Curated CSV packs — one-click Explore */}
-        <section className="space-y-2.5" style={{ order: isWeb ? 2 : 7 }}>
-          <SectionHeading
-            title="Curated open packs"
-            lede="Famous public CSVs — Explore loads them straight into Chart."
-          />
-          <ul className="space-y-2">
-            {CURATED_OPEN_PACKS.map((pack) => (
-              <li
-                key={pack.id}
-                className="border border-loom-border rounded-lg p-2.5 bg-loom-surface/50 space-y-1.5"
+          <FeedBrowser
+            renderPack={(pack) => (
+              <div
+                className="relative border border-loom-border rounded-lg p-2.5 bg-loom-surface/50 space-y-1.5"
+                data-source-ref={packRef(pack.id)}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
@@ -627,10 +608,15 @@ export function DataRegionView({
                   >
                     Open source
                   </a>
+                  <div className="flex items-center gap-1 ml-auto">
+                    <LoveButton sourceRef={packRef(pack.id)} label={pack.title} />
+                    <SaveButton sourceRef={packRef(pack.id)} label={pack.title} />
+                    <SourcePrefMenu sourceRef={packRef(pack.id)} label={pack.title} actions={["less", "hide"]} />
+                  </div>
                 </div>
-              </li>
-            ))}
-          </ul>
+              </div>
+            )}
+          />
         </section>
 
         {/* Catalog searches fetch on mount, so load them only in the expanded grid. */}
