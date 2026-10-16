@@ -1,6 +1,32 @@
 # Data feed overhaul, USAFacts, Collections & Metrics — plan
 
-Status (2026-10-16): **Phase 0 and Phase 1 landed** (uncommitted). Phase 2 is in progress in a parallel session. Phases 3–5 haven't started. Update the phase checkboxes as work lands.
+Status (2026-10-16): **Phases 0, 1 and 2 landed** in `9a337d6`. The only exception is Phase 2's Discover ranking, which is still uncommitted (see Handoff). Phases 3–5 haven't started. Update the checkboxes as work lands.
+
+## Handoff (for the next agent / Cursor)
+
+**Already in `main`:**
+- Source catalog: `sourceRef.ts`, `sourceCatalog.ts`, `curatedPacks.ts`, plus registry `topics / geo / grain / joinKeys`.
+- USAFacts feeds `usafacts_states` and `usafacts_nation`, covering Worker, web, Rust, recs, hooks and tests.
+- Source preferences (`sourcePreferences.ts`) and the sidebar feed browser (`feedBrowser.ts`, `sidebar/FeedBrowser.tsx`).
+- ♥ / 🔖 / ⋯ controls (`SourcePrefControls.tsx`), Settings → Your sources, command-palette affinity, and persistence + workspace backup.
+
+**Still uncommitted in the working tree.** These were kept out of the commit on purpose, because they build on the owner's own uncommitted work:
+- **Discover ranking by affinity.** It's interleaved with the owner's Discover gallery rewrite, which includes the untracked files `DiscoverStoryCard.tsx`, `discoverPresentation.ts` and their tests.
+  - Code: `Onboarding.tsx` (`sourceAffinity` memo, hidden filter, "N hidden · Show" chip), `discoverStories.ts` (`applyDiversityFilters(…, affinity)`, loved-first probe order), `discoverPresentation.ts` (`rankDiscoverStories(stories, scoreOf)`), `DiscoverStoryCard.tsx` (♥ eyebrow + `SourcePrefMenu`), and six lines in `globals.css` after `.discover-freshness-due`.
+  - Tests: `discoverStories.test.ts` (second hunk), `discoverPresentation.test.ts`, `Onboarding.test.tsx`.
+  - Commit these together with the owner's Discover rewrite.
+- **`units` on the USAFacts registry entries.** `SourceDef.units` is the owner's pending feature; its values for the two USAFacts kinds ride along with it.
+- **"What's new" items** ("Every US state, year by year" and "Love, save, or hide a source"). They sit inside the owner's uncommitted `2026-10-16g` release in `changelog.ts`.
+- **Full wording of the DOCS "Source preferences" bullet and the README "More of what you like" bullet.** The committed versions leave out the Discover parts.
+
+**Next up:**
+- Phase 3 (Collections + `joinKeys.ts`) → Phase 4 (Metrics in Query) → Phase 5 (starter collections). See below.
+- Q1 (no DuckDB-WASM this pass) and Q2 (♥ / 👎 / Hide / 🔖) are decided.
+
+**Watch-outs:**
+- The USAFacts gateway is a beta with no SLA.
+- `usafacts_states` has no live fallback unless a `CENSUS_API_KEY` Worker secret is added.
+- Don't add rights-tagged FRED series; the gateway refuses them.
 
 ---
 
@@ -187,7 +213,8 @@ Landed:
 
 **Later (not in this phase):** a "US government data (via USAFacts)" catalog section in Data & sources. It would let people search FRED / BLS series by keyword (`searchSeries`) and load one as a dataset. Big "find data" win, but it needs its own UX pass.
 
-### Phase 2 — Feed browsing + preferences (M) · web + desktop + iOS
+### Phase 2 — Feed browsing + preferences (M) · web + desktop + iOS · ✅ landed 2026-10-16 (Discover ranking still uncommitted — see Handoff)
+As built: love +10, less −8, saved +3, opens ≤ +3 (30-day half-life), topic spillover +2 each (≤ +4), clamped ±20; the palette adds 0.4 × affinity. Verified with Vitest + DOM tests.
 **Preference model** (`src/lib/sourcePreferences.ts`, modeled on `vizPreferences.ts`):
 - Explicit reaction per `SourceRef`: `love (+2) | like (+1) | none | less (−1) | hide`. Plus a separate `saved` flag (bookmark).
 - Implicit signal: opens and time-in-dataset from Recent / `appActivity`, decayed with a 30-day half-life and capped small, so explicit signals dominate.
