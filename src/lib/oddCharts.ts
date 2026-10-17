@@ -1410,7 +1410,7 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     ctx.fillText(fitTextEllipsis(ctx, fieldName(env, si), (x1 - x0) / 2 - 6), x1, base.top + headerH / 2 - 2);
   }
 
-  ctx.lineCap = "round";
+  ctx.lineCap = env.opts.lineCap ?? "round";
   for (const p of pairs) {
     ctx.strokeStyle = env.single;
     ctx.globalAlpha = Math.max(0.6, env.alpha);
@@ -1547,7 +1547,7 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
     const color = env.colors[(catIdx.get(s) ?? 0) % env.colors.length]!;
     ctx.strokeStyle = color;
     ctx.lineWidth = mini ? 1.5 : 2.5;
-    ctx.lineJoin = "round";
+    ctx.lineJoin = env.opts.lineJoin ?? "round";
     ctx.globalAlpha = Math.max(0.7, env.alpha);
     ctx.beginPath();
     let pen = false;
@@ -1814,7 +1814,7 @@ function drawSpiral(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.arc(cx, cy, maxR * (0.12 + (0.88 * k) / turns), 0, Math.PI * 2);
     ctx.stroke();
   }
-  ctx.lineCap = "round";
+  ctx.lineCap = env.opts.lineCap ?? "round";
   for (let i = 1; i < pts.length; i++) {
     const a = posOf(i - 1);
     const b = posOf(i);
@@ -1908,7 +1908,7 @@ function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     ctx.font = oddFont(env, 9);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.lineJoin = "round";
+    ctx.lineJoin = env.opts.lineJoin ?? "round";
     for (const v of scale.ticks) {
       if (v <= 0) continue;
       const label = formatAxisValue(v, scale.step);

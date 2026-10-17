@@ -159,6 +159,8 @@ export function getGpuRandomEncoding(
 }
 
 export interface GpuSceneRenderOpts {
+  lineCap?: CanvasLineCap;
+  lineJoin?: CanvasLineJoin;
   colors: string[];
   opacity: number;
   fontFamily?: string;

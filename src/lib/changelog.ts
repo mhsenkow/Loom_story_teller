@@ -25,6 +25,25 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-17c",
+    date: "2026-10-17",
+    title: "Themes that carry through",
+    summary: "One palette button restyles the workspace, the charts, and the type.",
+    items: [
+      { title: "Palette controls that agree", detail: "Automatic density colors and scale choices respect colorblind defaults. Palette previews follow the current theme, explicit choices stay selected, and device-font fallbacks are clearly labeled." },
+      { title: "A proper stage for every chart", detail: "Previews and full charts now share a theme-specific plotting surface. NES keeps its blue workspace with clean, bright chart cards and crisp frames; dialogs and sharing sheets respect your chosen corner geometry." },
+      { title: "Linework with character", detail: "Line endings and corners now follow the theme, including chart previews, Dive, and SVG defaults. Choose rounded, flat, or square ends and rounded, beveled, or sharp corners in Visual → Marks. Large axis values now fit using trillions or scientific notation." },
+      {
+        title: "Type and texture, together",
+        detail: "Follow theme pairs typeface and chrome as you switch looks. Source Sans 3, Source Serif 4, and IBM Plex Mono are available for the app and charts. Subtle surface shadows and icon weights reflect each theme; mobile Settings keeps chart tooltips behind the sheet.",
+      },
+      {
+        title: "A theme that carries through",
+        detail: "Switch themes with the palette button in Discover. Automatic chart colors now follow your theme, from story previews to the full canvas. Marks inherit crisp, soft, or geometric styling while your own Visual choices stay yours.",
+      },
+    ],
+  },
+  {
     id: "2026-10-17b",
     date: "2026-10-17",
     title: "Emoji on more charts",

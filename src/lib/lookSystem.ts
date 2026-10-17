@@ -69,6 +69,9 @@ export const UI_CHROME_LABEL: Record<UiChrome, string> = {
 };
 
 export const APP_FONTS = [
+  "source-sans",
+  "source-serif",
+  "ibm-plex-mono",
   "libre-baskerville",
   "lora",
   "ibm-plex",
@@ -81,6 +84,9 @@ export const APP_FONTS = [
 export type AppFont = (typeof APP_FONTS)[number];
 
 export const APP_FONT_LABEL: Record<AppFont, string> = {
+  "source-sans": "Source Sans 3",
+  "source-serif": "Source Serif 4",
+  "ibm-plex-mono": "IBM Plex Mono",
   "libre-baskerville": "Libre Baskerville",
   lora: "Lora",
   "ibm-plex": "IBM Plex Sans",
@@ -633,7 +639,7 @@ const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]>
   marks: [
     "pointSize", "sizeScale", "markShape", "markerMode", "markEmoji", "markStroke", "markStrokeWidth",
     "markStrokeColor", "markJitter", "barCornerRadius", "lineStrokeStyle",
-    "lineCurveSmooth", "lineWidth", "showDataLabels",
+    "lineCurveSmooth", "lineWidth", "lineCap", "lineJoin", "showDataLabels",
   ],
   axes: [
     "showGrid", "gridStyle", "gridOpacity", "axisLineColor", "axisLineWidth",

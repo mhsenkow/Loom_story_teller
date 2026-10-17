@@ -438,7 +438,7 @@ export function DiveTimeSeries({
                 ))}
                 {visible.map(({ s, i }) =>
                   s.compareByMetric?.[mi] ? (
-                    <path key={`c-${s.key}`} d={path(p, s.compareByMetric[mi]!)} fill="none" stroke={color(i)} strokeWidth={1.25} strokeDasharray="4 3" strokeOpacity={focusKey && focusKey !== s.key ? 0.15 : 0.5} />
+                    <path className="loom-data-line" key={`c-${s.key}`} d={path(p, s.compareByMetric[mi]!)} fill="none" stroke={color(i)} strokeWidth={1.25} strokeDasharray="4 3" strokeOpacity={focusKey && focusKey !== s.key ? 0.15 : 0.5} />
                   ) : null,
                 )}
                 {visible.map(({ s, i }) => {
@@ -446,7 +446,7 @@ export function DiveTimeSeries({
                   const pts = s.byMetric[mi] ?? [];
                   return (
                     <g key={s.key} opacity={dim ? 0.25 : 1}>
-                      <path d={path(p, pts)} fill="none" stroke={color(i)} strokeWidth={focusKey === s.key ? 2.5 : 1.75} strokeLinejoin="round" strokeLinecap="round" />
+                      <path d={path(p, pts)} fill="none" stroke={color(i)} strokeWidth={focusKey === s.key ? 2.5 : 1.75} className="loom-data-line" />
                       {(n <= 2 || pts.filter((v) => v != null).length === 1) &&
                         pts.map((v, j) => (v == null ? null : <circle key={j} cx={xi(j)} cy={y(p, v)} r={3} fill={color(i)} />))}
                     </g>

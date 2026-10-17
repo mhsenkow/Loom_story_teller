@@ -7,6 +7,9 @@
 
 "use client";
 
+import { useChartTheme } from "@/components/useChartTheme";
+import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
+import type { ChartVisualOverrides } from "@/lib/chartVisualTypes";
 import { useEffect, useRef, useCallback, useMemo } from "react";
 import type { ChartRecommendation } from "@/lib/recommendations";
 import type { QueryResult } from "@/lib/store";
@@ -103,7 +106,8 @@ export function ChartCard({
   /** Non-interactive canvas for a story card that owns its own text and action. */
   previewOnly?: boolean;
 }) {
-  const theme = useLoomStore((s) => s.appSettings.theme);
+  const theme = useChartTheme();
+  const themeStyle = useMemo(() => resolveThemeChartStyle(theme), [theme]);
   const colorblind = useLoomStore((s) => s.appSettings.colorblindCharts);
   const appFont = useLoomStore((s) => s.appSettings.font);
   const faces = useLoomStore((s) => s.appSettings.faces);
@@ -196,6 +200,7 @@ export function ChartCard({
       ctx.clip();
       ctx.translate(ox, oy);
       paintKind(ctx, panelRows, {
+        themeStyle,
         kind: rec.kind,
         xIdx,
         yIdx,
@@ -270,7 +275,7 @@ export function ChartCard({
     }
 
     paintPanel(rows, 0, 0, w, h, pad);
-  }, [rec, data, hero, micro, COLORS, SEQ, ui, fontFamily, axisFontSize]);
+  }, [rec, data, hero, micro, COLORS, SEQ, ui, fontFamily, axisFontSize, themeStyle]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -316,7 +321,7 @@ export function ChartCard({
 
   if (previewOnly) {
     return (
-      <div ref={containerRef} aria-hidden="true" className={`relative w-full bg-loom-bg ${hero ? "h-28 sm:h-52" : "h-28 sm:h-36"}`}>
+      <div ref={containerRef} aria-hidden="true" className={`relative w-full loom-plot-surface ${hero ? "h-28 sm:h-52" : "h-28 sm:h-36"}`}>
         <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 w-full h-full" />
       </div>
     );
@@ -341,9 +346,9 @@ export function ChartCard({
         border bg-loom-elevated
         transition-[border-color,box-shadow,transform] duration-150
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent
-        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-xl hover:border-transparent" : "rounded-lg hover:shadow-loom"}
+        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-[var(--radius-lg)] hover:border-transparent" : "rounded-[var(--radius-md)] hover:shadow-loom"}
         ${!hero && isActive ? "border-loom-accent ring-2 ring-loom-accent/40 shadow-loom" : !hero ? "border-loom-border hover:border-loom-accent/50" : ""}
-        ${compact ? "w-[152px] shrink-0 snap-start rounded-md" : "w-full"}
+        ${compact ? "w-[152px] shrink-0 snap-start rounded-[var(--radius-sm)]" : "w-full"}
       `}
       style={
         hero
@@ -361,13 +366,13 @@ export function ChartCard({
     >
       <div
         ref={containerRef}
-        className={`relative w-full bg-loom-bg ${
+        className={`relative w-full loom-plot-surface ${
           hero
-            ? "aspect-[4/3] min-h-[180px] max-h-[42vh] sm:min-h-[220px] sm:max-h-[280px] rounded-t-xl"
+            ? "aspect-[4/3] min-h-[180px] max-h-[42vh] sm:min-h-[220px] sm:max-h-[280px] rounded-t-[var(--radius-lg)]"
             : micro
               ? "aspect-[5/4] min-h-[88px] max-h-[140px] sm:min-h-[96px] sm:max-h-[120px]"
               : compact
-                ? "aspect-[5/3] min-h-[72px] max-h-[96px] rounded-t-md"
+                ? "aspect-[5/3] min-h-[72px] max-h-[96px] rounded-t-[var(--radius-sm)]"
                 : "aspect-[4/3] min-h-[80px] max-h-[160px]"
         }`}
       >
@@ -380,7 +385,7 @@ export function ChartCard({
           <span
               className={`
               absolute bottom-1 left-1 z-[1] max-w-[85%] truncate px-1 py-px text-2xs font-mono font-semibold rounded
-              bg-loom-bg/75 backdrop-blur-[2px] pointer-events-none text-loom-label
+              loom-plot-caption backdrop-blur-[2px] pointer-events-none text-loom-label
               ${kindColor(rec.kind)}
             `}
           >
@@ -515,6 +520,7 @@ function kindColor(kind: string): string {
 // --- Mini renderers (simple, fast, no labels) ---
 
 type PaintArgs = {
+  themeStyle: ChartVisualOverrides;
   pointEncoding: ChartRecommendation;
   kind: string;
   xIdx: number;
@@ -555,6 +561,8 @@ type PaintArgs = {
 };
 
 function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArgs) {
+  ctx.lineCap = a.themeStyle.lineCap ?? "round";
+  ctx.lineJoin = a.themeStyle.lineJoin ?? "round";
   const { kind, xIdx, cIdx, y2Idx, sizeIdx, w, h, pad, colors: COLORS, seq: SEQ, ui } = a;
   let yIdx = a.yIdx;
   if (a.yAggregate && ["pareto", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "sankey", "network", "arcDiagram"].includes(kind)) {
@@ -564,7 +572,9 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
   }
   if (kind === "scatter" && yIdx >= 0) {
     renderFullScatter(ctx, rows, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, {
-      colors: COLORS, opacity: 0.72, pointSize: a.pointEncoding.emojiField ? 12 : 6,
+      markShape: a.themeStyle.markShape,
+      colors: COLORS,
+        lineCap: a.themeStyle.lineCap, lineJoin: a.themeStyle.lineJoin, opacity: 0.72, pointSize: a.pointEncoding.emojiField ? 12 : 6,
       mini: true, fieldNames: a.columns, fontFamily: a.fontFamily,
       themeText: ui.text, themeMuted: ui.muted, themeBorder: ui.border,
       showGrid: false, legendPosition: "none", yScale: a.yScale,
@@ -577,7 +587,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
       opacityIdx: a.columns.indexOf(a.pointEncoding.opacityField ?? ""),
     });
   } else if (kind === "bar") {
-    drawBar(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN, a.barStackMode ?? "grouped", a.yAggregate, a.yScale);
+    drawBar(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN, a.barStackMode ?? "grouped", a.yAggregate, a.yScale, a.themeStyle.barCornerRadius);
   } else if (kind === "pareto") {
     drawPareto(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.topN);
   } else if (kind === "corrMatrix") {
@@ -585,7 +595,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
   } else if (kind === "histogram") {
     drawHistogram(ctx, rows, xIdx, w, h, pad, COLORS);
   } else if (kind === "line") {
-    drawLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize, a.yAggregate, a.yScale);
+    drawLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize, a.yAggregate, a.yScale, a.themeStyle.lineWidth, a.themeStyle.lineCap, a.themeStyle.lineJoin);
   } else if (kind === "heatmap" && yIdx >= 0) {
     drawHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
   } else if (kind === "strip" && yIdx >= 0) {
@@ -647,6 +657,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         pad,
         {
           colors: COLORS,
+        lineCap: a.themeStyle.lineCap, lineJoin: a.themeStyle.lineJoin,
           opacity: 0.85,
           pointSize: 3.2,
           mini: true,
@@ -700,6 +711,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
     if (packed) {
       renderGpuSceneCanvas(kind, ctx, packed, w, h, pad, {
         colors: COLORS,
+        lineCap: a.themeStyle.lineCap, lineJoin: a.themeStyle.lineJoin,
         opacity: 0.85,
         pointSize: 2.6,
         continuousStops: SEQ,
@@ -727,6 +739,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
       pad,
       {
         colors: COLORS,
+        lineCap: a.themeStyle.lineCap, lineJoin: a.themeStyle.lineJoin,
         opacity: 0.85,
         pointSize: 2.5,
         continuousStops: SEQ,
@@ -887,6 +900,13 @@ function drawCorrMatrixThumb(
   ctx.globalAlpha = 1;
 }
 
+function fillBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, radius: number) {
+  if (!radius || typeof ctx.roundRect !== "function") { ctx.fillRect(x, y, w, h); return; }
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, Math.min(radius, Math.abs(w) / 2, Math.abs(h) / 2));
+  ctx.fill();
+}
+
 function drawBar(
   ctx: CanvasRenderingContext2D,
   rows: unknown[][],
@@ -901,6 +921,7 @@ function drawBar(
   stackMode: "grouped" | "stacked" | "percent" = "grouped",
   aggregate?: YAggregateOption | null,
   yScale: YScaleKind = "linear",
+  radius = 0,
 ) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const plotH = h - 2 * pad;
@@ -929,7 +950,7 @@ function drawBar(
           const x = pad + gi * groupW + 2 + si * innerW;
           ctx.fillStyle = COL[si % COL.length];
           ctx.globalAlpha = 0.85;
-          ctx.fillRect(x, h - pad - barH, Math.max(1, innerW - 1), barH);
+          fillBar(ctx, x, h - pad - barH, Math.max(1, innerW - 1), barH, radius);
         }
       }
     } else {
@@ -953,7 +974,7 @@ function drawBar(
           const segH = share * plotH;
           ctx.fillStyle = COL[si % COL.length];
           ctx.globalAlpha = 0.85;
-          ctx.fillRect(x, h - pad - acc - segH, barW, segH);
+          fillBar(ctx, x, h - pad - acc - segH, barW, segH, radius);
           acc += segH;
         }
       }
@@ -987,7 +1008,7 @@ function drawBar(
     const x = pad + i * ((w - 2 * pad) / entries.length);
     ctx.fillStyle = COL[0];
     ctx.globalAlpha = 0.8;
-    ctx.fillRect(x, Math.min(y, zeroY), barW, Math.max(1, Math.abs(zeroY - y)));
+    fillBar(ctx, x, Math.min(y, zeroY), barW, Math.max(1, Math.abs(zeroY - y)), radius);
   });
   ctx.globalAlpha = 1;
 }
@@ -1031,6 +1052,9 @@ function drawLine(
   seriesNormalize: "index100" | "zscore" | null = null,
   aggregate?: YAggregateOption | null,
   yScale: YScaleKind = "linear",
+  lineWidth = 1.75,
+  lineCap: CanvasLineCap = "round",
+  lineJoin: CanvasLineJoin = "round",
 ) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const transform = (ys: number[]) => {
@@ -1061,8 +1085,9 @@ function drawLine(
   const all = [...series.flat(), ...extras.flatMap((e) => e.ys)].filter((v) => Number.isFinite(v));
   if (all.length === 0) return;
   const { min: yMin, max: yMax } = scaleDomain(Math.min(...all), Math.max(...all), yScale);
-  ctx.lineWidth = 1.5;
-  ctx.lineJoin = "round";
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = lineCap;
+  ctx.lineJoin = lineJoin;
   ctx.globalAlpha = 0.9;
   series.forEach((ys, i) => {
     if (ys.length === 0) return;

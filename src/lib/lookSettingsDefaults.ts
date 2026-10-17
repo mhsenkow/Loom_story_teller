@@ -14,6 +14,7 @@ import {
 export function defaultAppLookSettings(current: AppSettings): AppSettings {
   return {
     ...current,
+    themePairing: false,
     theme: DEFAULT_THEME,
     uiChrome: DEFAULT_UI,
     font: DEFAULT_FONT,

@@ -37,14 +37,14 @@ describe("chartPalettes catalog", () => {
 
   it("auto heatmap → sequential continuous", () => {
     const r = resolveChartColors({ paletteId: "auto", chartKind: "heatmap" });
-    expect(r.paletteId).toBe("seq-blue");
+    expect(r.paletteId).toBe("theme-sequential");
     expect(r.continuous).toBe(true);
     expect(r.kind).toBe("sequential");
   });
 
   it("auto treemap → sequential continuous (value ramp)", () => {
     const r = resolveChartColors({ paletteId: "auto", chartKind: "treemap" });
-    expect(r.paletteId).toBe("seq-blue");
+    expect(r.paletteId).toBe("theme-sequential");
     expect(r.continuous).toBe(true);
   });
 
@@ -100,13 +100,13 @@ describe("chartPalettes catalog", () => {
       chartKind: "scatter",
       colorFieldType: "quantitative",
     });
-    expect(r.paletteId).toBe("seq-blue");
+    expect(r.paletteId).toBe("theme-sequential");
     expect(r.continuous).toBe(true);
   });
 
   it("auto scatter nominal → categorical", () => {
     const r = resolveChartColors({ paletteId: "auto", chartKind: "scatter" });
-    expect(r.paletteId).toBe("categorical");
+    expect(r.paletteId).toBe("theme");
     expect(r.continuous).toBe(false);
   });
 
@@ -135,5 +135,23 @@ describe("chartPalettes catalog", () => {
   it("catalog has no duplicate ids", () => {
     const ids = COLOR_PALETTES.map((p) => p.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+
+describe("accessible palette selection", () => {
+  it("keeps density previews and applied charts on a continuous automatic scale", () => {
+    expect(resolveChartColors({ chartKind: "contour", colorblind: true }).paletteId).toBe("cividis");
+    expect(resolveChartColors({ chartKind: "contour" }).paletteId).toBe("theme-sequential");
+  });
+  it("applies accessibility after an automatic scale choice", () => {
+    expect(resolveChartColors({ paletteId: "auto", chartKind: "bar", scaleKind: "sequential", colorblind: true }).paletteId).toBe("cividis");
+    expect(resolveChartColors({ paletteId: "auto", chartKind: "contour", scaleKind: "categorical", colorblind: true }).paletteId).toBe("okabe");
+  });
+  it("preserves explicit palette choices and meaningful diverging scales", () => {
+    for (const paletteId of ["seq-blue", "categorical", "plasma", "okabe"]) {
+      expect(resolveChartColors({ paletteId, colorblind: true }).paletteId).toBe(paletteId);
+    }
+    expect(resolveChartColors({ chartKind: "corrMatrix", colorblind: true }).kind).toBe("diverging");
   });
 });

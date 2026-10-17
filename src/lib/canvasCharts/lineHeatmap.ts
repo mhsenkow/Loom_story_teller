@@ -170,7 +170,8 @@ export function renderFullLine(
     const pts = s.pts.map((p) => ({ x: X(p.t), y: Y(p.v) }));
     ctx.strokeStyle = color;
     ctx.lineWidth = s.compare ? Math.max(1.25, lineW * 0.9) : lineW;
-    ctx.lineJoin = "round";
+    ctx.lineJoin = opts?.lineJoin ?? "round";
+    ctx.lineCap = opts?.lineCap ?? "round";
     ctx.globalAlpha = s.compare ? alpha * 0.7 : alpha;
     if (s.compare) ctx.setLineDash([5, 4]);
     else applyLineDash(ctx, opts?.lineStrokeStyle);

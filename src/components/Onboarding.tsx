@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { ThemeCycleButton } from "@/components/ThemeCycleButton";
 import { Dialog } from "@/components/ui/Dialog";
 import { useLoomStore } from "@/lib/store";
 import { openDataSources } from "@/components/StartHere";
@@ -992,7 +993,7 @@ export function Onboarding() {
       <header className="discover-header">
         <div className="discover-masthead">
           <div className="discover-masthead-top">
-            <h2 id="onboarding-title">What’s interesting right now</h2>
+            <h2 id="onboarding-title">The world, in perspective.</h2>
             <div className="discover-header-actions">
               {showFilters && (
                 <>
@@ -1036,6 +1037,7 @@ export function Onboarding() {
                 </>
               )}
               <span className="discover-header-chrome">
+              <ThemeCycleButton />
               {showFilters && (
                 <button
                   type="button"

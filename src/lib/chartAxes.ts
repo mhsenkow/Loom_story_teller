@@ -66,6 +66,11 @@ export function formatAxisValue(v: number, step?: number): string {
     const decimals = unitStep >= 1 ? 0 : Math.min(3, Math.ceil(-Math.log10(unitStep) - 1e-9));
     return `${Number(n.toFixed(decimals))}${suffix}`;
   };
+  if (abs >= 1e15) {
+    const exponent = Math.floor(Math.log10(abs));
+    return fmt(v / 10 ** exponent, s / 10 ** exponent, `e${exponent}`);
+  }
+  if (abs >= 1e12) return fmt(v / 1e12, s / 1e12, "T");
   if (abs >= 1e9) return fmt(v / 1e9, s / 1e9, "B");
   if (abs >= 1e6) return fmt(v / 1e6, s / 1e6, "M");
   if (abs >= 1e4 || (abs >= 1e3 && s >= 100)) return fmt(v / 1e3, s / 1e3, "k");
@@ -76,6 +81,8 @@ export function formatAxisValue(v: number, step?: number): string {
 export function formatDataValue(v: number): string {
   if (!Number.isFinite(v)) return "";
   const abs = Math.abs(v);
+  if (abs >= 1e15) return v.toExponential(2).replace(/\.?0+e/, "e").replace("e+", "e");
+  if (abs >= 1e12) return `${Number((v / 1e12).toPrecision(3))}T`;
   if (abs >= 1e9) return `${Number((v / 1e9).toPrecision(3))}B`;
   if (abs >= 1e6) return `${Number((v / 1e6).toPrecision(3))}M`;
   if (abs >= 1e4) return `${Number((v / 1e3).toPrecision(3))}k`;

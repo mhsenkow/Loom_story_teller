@@ -15,6 +15,24 @@ export const FONT_CHOICES: Record<
     query: string;
   }
 > = {
+  "source-sans": {
+    family: "Source Sans 3", local: "system-ui",
+    fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    description: "Open, humanist sans for small chart labels and dense tables.",
+    query: "family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700",
+  },
+  "source-serif": {
+    family: "Source Serif 4", local: "Georgia",
+    fallback: 'Georgia, "Times New Roman", serif',
+    description: "Editorial serif for narrative charts, annotations, and reading.",
+    query: "family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700",
+  },
+  "ibm-plex-mono": {
+    family: "IBM Plex Mono", local: "ui-monospace",
+    fallback: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    description: "Technical mono for aligned values, timestamps, and precise readouts.",
+    query: "family=IBM+Plex+Mono:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700",
+  },
   inter: {
     family: "Inter",
     local: "system-ui",
@@ -71,9 +89,9 @@ export const FONT_CHOICES: Record<
 };
 
 export const FONT_GROUPS: { label: string; fonts: AppFont[] }[] = [
-  { label: "Sans serif", fonts: ["inter", "ibm-plex", "geist"] },
-  { label: "Serif", fonts: ["lora", "libre-baskerville"] },
-  { label: "Monospace", fonts: ["jetbrains-mono", "fira-code"] },
+  { label: "Sans serif", fonts: ["inter", "ibm-plex", "geist", "source-sans"] },
+  { label: "Serif", fonts: ["lora", "libre-baskerville", "source-serif"] },
+  { label: "Monospace", fonts: ["jetbrains-mono", "fira-code", "ibm-plex-mono"] },
 ];
 
 const genericFamilies = new Set([

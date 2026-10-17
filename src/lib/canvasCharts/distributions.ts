@@ -329,6 +329,8 @@ export function renderFullArea(
   const X = (ki: number) => rect.left + model.pos[ki]! * span;
   drawChartGrid(ctx, w, h, rect, opts, { x: model.kind === "number" ? model.domain : null, y: [ys.min, ys.max] });
 
+  ctx.lineCap = opts?.lineCap ?? "round";
+  ctx.lineJoin = opts?.lineJoin ?? "round";
   const single = series.length === 1;
   series.forEach((_, si) => {
     const color = cols[si % cols.length]!;
@@ -344,7 +346,7 @@ export function renderFullArea(
     // Crisp top edge so each layer reads as a line, not just a blob
     ctx.globalAlpha = 1;
     ctx.strokeStyle = single ? color : (opts?.themeBg ?? "#111114");
-    ctx.lineWidth = single ? 2 : 0.75;
+    ctx.lineWidth = single ? (opts?.lineWidth ?? 2) : 0.75;
     ctx.beginPath();
     model.keys.forEach((_, ki) => (ki === 0 ? ctx.moveTo(X(ki), Y(top[ki]!)) : ctx.lineTo(X(ki), Y(top[ki]!))));
     ctx.stroke();

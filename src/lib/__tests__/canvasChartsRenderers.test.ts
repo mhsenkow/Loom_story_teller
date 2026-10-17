@@ -30,7 +30,7 @@ import {
 import { renderFullSunburst } from "../canvasCharts/sunburst";
 
 function fakeCtx() {
-  const calls = { paint: 0, labels: [] as { text: string; font: string }[] };
+  const calls = { paint: 0, strokes: [] as { cap: unknown; join: unknown }[], labels: [] as { text: string; font: string }[] };
   const paintOps = new Set(["fill", "stroke", "fillRect", "strokeRect", "fillText", "strokeText", "drawImage"]);
   const target: Record<string, unknown> = {
     measureText: (s: string) => ({ width: String(s).length * 6 }),
@@ -46,6 +46,7 @@ function fakeCtx() {
         calls.paint += 1;
         calls.labels.push({ text, font: String(t.font) });
       };
+      if (prop === "stroke") return () => { calls.paint += 1; calls.strokes.push({ cap: t.lineCap, join: t.lineJoin }); };
       if (paintOps.has(prop)) return () => void (calls.paint += 1);
       return () => {};
     },
@@ -185,4 +186,12 @@ describe("authored plot geometry", () => {
     expect(o.scales!.rect.bottom).toBeLessThanOrEqual(280);
     if (o.scales?.x) expect(Number.isFinite(o.scales.x(12))).toBe(true);
   });
+});
+
+it.each(["round", "square", "butt"] as const)("line and area painters honor %s endings and explicit corners", (lineCap) => {
+  for (const draw of [renderFullLine, renderFullArea]) {
+    const { ctx, calls } = fakeCtx();
+    draw(ctx, rows, 4, 1, -1, W, H, PAD, { ...opts(), lineCap, lineJoin: "bevel" });
+    expect(calls.strokes).toContainEqual({ cap: lineCap, join: "bevel" });
+  }
 });

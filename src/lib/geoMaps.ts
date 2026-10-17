@@ -52,6 +52,8 @@ import { drawMarkerPath } from "./chartMarks";
 import { type MarkSymbol, markSymbols } from "./markSymbols";
 
 export interface GeoRenderOpts {
+  lineCap?: CanvasLineCap;
+  lineJoin?: CanvasLineJoin;
   colors: string[];
   opacity: number;
   /** Preloaded atlas bundle; when missing choropleth shows a loading frame. */
@@ -834,7 +836,7 @@ function renderGlobeLike(
       list.push(p);
       byCat.set(p.category, list);
     }
-    ctx.lineCap = "round";
+    ctx.lineCap = opts.lineCap ?? "round";
     for (const [cat, list] of byCat) {
       const col = colors[cat % colors.length] ?? colors[0]!;
       for (let i = 1; i < list.length; i++) {
@@ -935,7 +937,7 @@ function renderArcMap(
     list.push(p);
     byCat.set(p.category, list);
   }
-  ctx.lineCap = "round";
+  ctx.lineCap = opts.lineCap ?? "round";
   for (const [cat, list] of byCat) {
     if (list.length < 2) continue;
     const col = colors[cat % colors.length] ?? colors[0]!;

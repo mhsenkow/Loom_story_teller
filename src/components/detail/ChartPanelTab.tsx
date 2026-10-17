@@ -1,5 +1,8 @@
 "use client";
 
+import { isNumericType } from "@/lib/canvasCharts/shared";
+import { useChartTheme } from "@/components/useChartTheme";
+import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
 import { useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
 import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
 import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
@@ -23,7 +26,6 @@ import { goToDashboardsAfterSave, saveChartView } from "@/lib/saveChartView";
 import {
   AXIS_LABEL_COLOR_SWATCHES,
   AXIS_LINE_COLOR_SWATCHES,
-  COLOR_PALETTES,
   palettesGrouped,
   resolveChartColors,
   type PaletteKind,
@@ -1048,6 +1050,8 @@ export default function ChartPanelTab() {
   );
   const previewTitle = useLoomStore((s) => s.activeChart ? s.chartTitleOverrides[s.activeChart.id] ?? s.activeChart.title : "Your chart title");
   const setPanelTab = useLoomStore((s) => s.setPanelTab);
+  const effectiveTheme = useChartTheme();
+  const inheritedStyle = resolveThemeChartStyle(effectiveTheme);
   const previewFont = resolveChartFontFamily(chartVisualOverrides.fontFamily, appSettings.font, appSettings.faces);
   const previewType = chartTypeRamp(chartVisualOverrides.axisFontSize);
   const customFont = chartVisualOverrides.fontFamily && chartVisualOverrides.fontFamily !== "inherit" && !Object.values(FONT_CHOICES).some((font) => font.family === chartVisualOverrides.fontFamily);
@@ -3207,8 +3211,7 @@ export default function ChartPanelTab() {
                       type="button"
                       aria-pressed={active}
                       onClick={() => {
-                        const first = COLOR_PALETTES.find((p) => p.kind === id && p.source === "system" && p.id !== "auto");
-                        editChartVisualOverrides({ colorScaleKind: id, colorPalette: id === "auto" ? "auto" : first?.id ?? "auto" });
+                        editChartVisualOverrides({ colorScaleKind: id, colorPalette: "auto" });
                       }}
                       className={`px-2 py-1 text-2xs rounded border ${
                         active
@@ -3231,12 +3234,14 @@ export default function ChartPanelTab() {
                 Reverse scale
               </label>
               {(() => {
+                const colorColumn = caps.colorChannel ? columnStats.find((c) => c.name === activeChart?.colorField) : undefined;
                 const applied = resolveChartColors({
                   paletteId: chartVisualOverrides.colorPalette ?? "auto",
-                  theme: appSettings.theme,
+                  theme: effectiveTheme,
                   colorblind: !!appSettings.colorblindCharts,
                   chartKind: activeChart?.kind ?? null,
-                  reverse: !!chartVisualOverrides.colorPaletteReverse,
+                  reverse: !!chartVisualOverrides.colorPaletteReverse !== !!activeChart?.channelInvert?.color,
+                  colorFieldType: colorColumn ? (isNumericType(colorColumn.data_type) ? "quantitative" : "nominal") : null,
                   scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
                 });
                 const kindFilter = chartVisualOverrides.colorScaleKind ?? "auto";
@@ -3257,7 +3262,7 @@ export default function ChartPanelTab() {
                     {!sections.length && <p role="status" className="text-2xs text-loom-muted">No palettes match this search and scale. Clear the search or choose Auto to browse all scales.</p>}
                     <div className="rounded border border-loom-border/60 bg-loom-elevated/40 px-2 py-1.5">
                       <p className="text-2xs text-loom-muted mb-1">
-                        Applied · {applied.paletteId}
+                        Applied · {applied.paletteId}{selectedId === "auto" ? " · automatic" : ""}
                         {applied.continuous ? " · continuous" : ""}
                       </p>
                       <div className="flex h-3 rounded overflow-hidden">
@@ -3266,8 +3271,10 @@ export default function ChartPanelTab() {
                         ))}
                       </div>
                     </div>
+                    {appSettings.colorblindCharts && <p className="text-2xs text-loom-label">Colorblind defaults are on. Auto uses Okabe–Ito for categories and Cividis for magnitudes; explicit palettes stay selected.</p>}
                     <button
                       type="button"
+                      aria-pressed={selectedId === "auto"}
                       onClick={() => {
                         editChartVisualOverrides({ colorPalette: "auto", colorScaleKind: "auto" });
                       }}
@@ -3278,7 +3285,7 @@ export default function ChartPanelTab() {
                       }`}
                     >
                       <span className="text-2xs text-loom-text font-medium">Auto</span>
-                      <span className="block text-2xs text-loom-muted">Match scale to chart kind</span>
+                      <span className="block text-2xs text-loom-muted">Follow chart, theme, and accessibility settings</span>
                     </button>
                     {sections.map((sec) => (
                       <div key={sec.title} className="space-y-1">
@@ -3305,7 +3312,7 @@ export default function ChartPanelTab() {
                                   <span className="text-2xs text-loom-muted shrink-0">{PALETTE_KIND_LABELS[p.kind]}</span>
                                 </div>
                                 <div className="flex h-2.5 rounded overflow-hidden">
-                                  {p.colors.map((c, i) => (
+                                  {resolveChartColors({ paletteId: p.id, theme: effectiveTheme, colorblind: !!appSettings.colorblindCharts, chartKind: activeChart?.kind, reverse: !!chartVisualOverrides.colorPaletteReverse !== !!activeChart?.channelInvert?.color }).colors.map((c, i) => (
                                     <span key={`${p.id}-${i}`} className="flex-1" style={{ background: c }} />
                                   ))}
                                 </div>
@@ -3663,7 +3670,7 @@ export default function ChartPanelTab() {
                       {MARK_SHAPE_OPTIONS.map((shape) => {
                         const selected =
                           (chartVisualOverrides.markerMode ?? "shape") === "shape" &&
-                          (chartVisualOverrides.markShape ?? "circle") === shape.value;
+                          (chartVisualOverrides.markShape ?? inheritedStyle.markShape ?? "circle") === shape.value;
                         return (
                           <button
                             key={shape.value}
@@ -3786,11 +3793,11 @@ export default function ChartPanelTab() {
                     type="range"
                     min={0}
                     max={12}
-                    value={chartVisualOverrides.barCornerRadius ?? 3}
+                    value={chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}
                     onChange={(e) => updateOverride("barCornerRadius", Number(e.target.value))}
                     className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                   />
-                  <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.barCornerRadius ?? 3}</span>
+                  <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}</span>
                 </div>
               )}
               {caps.lineMarks && (
@@ -3805,6 +3812,20 @@ export default function ChartPanelTab() {
                       { value: "dotted", label: "Dotted", icon: Ico.dotted },
                     ]}
                   />
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-2xs text-loom-label">Line endings
+                      <select aria-label="Line endings" className="loom-input w-full mt-1" value={chartVisualOverrides.lineCap ?? "theme"}
+                        onChange={(e) => updateOverride("lineCap", e.target.value === "theme" ? undefined : e.target.value as "round" | "butt" | "square")}>
+                        <option value="theme">Follow theme</option><option value="round">Rounded</option><option value="butt">Flat</option><option value="square">Square</option>
+                      </select>
+                    </label>
+                    <label className="text-2xs text-loom-label">Line corners
+                      <select aria-label="Line corners" className="loom-input w-full mt-1" value={chartVisualOverrides.lineJoin ?? "theme"}
+                        onChange={(e) => updateOverride("lineJoin", e.target.value === "theme" ? undefined : e.target.value as "round" | "bevel" | "miter")}>
+                        <option value="theme">Follow theme</option><option value="round">Rounded</option><option value="bevel">Beveled</option><option value="miter">Sharp</option>
+                      </select>
+                    </label>
+                  </div>
                   <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
                     <input
                       type="checkbox"

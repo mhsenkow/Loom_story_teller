@@ -159,18 +159,13 @@ export type UiChrome =
   | "terminal"
   | "nyt";
 
-export type AppFontId =
-  | "libre-baskerville"
-  | "lora"
-  | "ibm-plex"
-  | "inter"
-  | "geist"
-  | "jetbrains-mono"
-  | "fira-code";
+export type AppFontId = import("../lookSystem").AppFont;
 
 export type FacesSource = "auto" | "web" | "local";
 
 export interface AppSettings {
+  /** Keep type and chrome paired with the selected theme until manually edited. */
+  themePairing?: boolean;
   theme: AppTheme;
   uiChrome: UiChrome;
   font: AppFontId;

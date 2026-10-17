@@ -10,6 +10,9 @@
 // =================================================================
 
 "use client";
+import { useChartTheme } from "@/components/useChartTheme";
+import { resolveRuntimeTheme } from "@/lib/resolveEffectiveTheme";
+import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { type LoomState, useLoomStore } from "@/lib/store";
@@ -237,7 +240,10 @@ export function ChartView() {
   }, [suggestionsRailOpen]);
 
   const reducedMotion = useReducedMotion();
+  const effectiveTheme = useChartTheme();
   const isMobile = useIsMobile();
+  const panelOpen = useLoomStore((s) => s.panelOpen);
+  const readoutsObscured = isMobile && panelOpen;
   const [arranging, setArranging] = useState(false);
   const [arrangeReady, setArrangeReady] = useState(false);
   const arrangePanelWasOpen = useRef(false);
@@ -261,7 +267,7 @@ export function ChartView() {
   }, [arranging, finishArranging, isMobile, setPanelOpen]);
   const [arrangementPreview, setArrangementPreview] = useState<ArrangeChange | null>(null);
   const [arrangementLayout, setArrangementLayout] = useState<ChartChromeLayout | null>(null);
-  const chartVisualOverrides = useMemo(() => arrangementPreview && "visual" in arrangementPreview ? { ...savedChartVisualOverrides, ...arrangementPreview.visual } : savedChartVisualOverrides, [savedChartVisualOverrides, arrangementPreview]);
+  const chartVisualOverrides = useMemo(() => resolveThemeChartStyle(effectiveTheme, arrangementPreview && "visual" in arrangementPreview ? { ...savedChartVisualOverrides, ...arrangementPreview.visual } : savedChartVisualOverrides), [effectiveTheme, savedChartVisualOverrides, arrangementPreview]);
   const reportArrangementLayout = useCallback((layout: ChartChromeLayout) => {
     setArrangementLayout((old) => JSON.stringify(old) === JSON.stringify(layout) ? old : layout);
   }, []);
@@ -322,7 +328,7 @@ export function ChartView() {
       : null;
     const resolved = resolveChartColors({
       paletteId: chartVisualOverrides.colorPalette ?? "auto",
-      theme: appSettings.theme,
+      theme: effectiveTheme,
       colorblind: !!appSettings.colorblindCharts,
       chartKind: activeChart?.kind ?? null,
       colorFieldType,
@@ -334,7 +340,7 @@ export function ChartView() {
     chartVisualOverrides.colorPalette,
     chartVisualOverrides.colorPaletteReverse,
     chartVisualOverrides.colorScaleKind,
-    appSettings.theme,
+    effectiveTheme,
     appSettings.colorblindCharts,
     activeChart?.kind,
     activeChart?.channelInvert?.color,
@@ -352,7 +358,7 @@ export function ChartView() {
       : null;
     return resolveChartColors({
       paletteId: chartVisualOverrides.colorPalette ?? "auto",
-      theme: appSettings.theme,
+      theme: effectiveTheme,
       colorblind: !!appSettings.colorblindCharts,
       chartKind: activeChart?.kind ?? null,
       colorFieldType,
@@ -363,7 +369,7 @@ export function ChartView() {
     chartVisualOverrides.colorPalette,
     chartVisualOverrides.colorPaletteReverse,
     chartVisualOverrides.colorScaleKind,
-    appSettings.theme,
+    effectiveTheme,
     appSettings.colorblindCharts,
     activeChart?.kind,
     activeChart?.channelInvert?.color,
@@ -386,7 +392,7 @@ export function ChartView() {
       paletteId: chartVisualOverrides.colorPalette ?? "auto",
       scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
       reverse: !!chartVisualOverrides.colorPaletteReverse !== !!activeChart?.channelInvert?.color,
-      theme: appSettings.theme,
+      theme: effectiveTheme,
       colorblind: !!appSettings.colorblindCharts,
       colorFieldType,
       channelLabel: encodingChannelLabels(activeChart.kind).color,
@@ -398,7 +404,7 @@ export function ChartView() {
     chartVisualOverrides.colorPalette,
     chartVisualOverrides.colorScaleKind,
     chartVisualOverrides.colorPaletteReverse,
-    appSettings.theme,
+    effectiveTheme,
     appSettings.colorblindCharts,
   ]);
 
@@ -542,7 +548,7 @@ export function ChartView() {
     ],
   );
 
-  const themeUi = useMemo(() => getThemeUiColors(appSettings.theme), [appSettings.theme]);
+  const themeUi = useMemo(() => getThemeUiColors(effectiveTheme), [effectiveTheme]);
 
   // Chart stage pixel size — must be in draw-effect deps so aspect/device
   // framing (and any resize that clears canvases) triggers a redraw.
@@ -616,6 +622,8 @@ export function ChartView() {
       sizeScale: chartVisualOverrides.sizeScale ?? 1,
       barCornerRadius: chartVisualOverrides.barCornerRadius ?? (motif === "bar" ? 0 : 3),
       lineStrokeStyle: chartVisualOverrides.lineStrokeStyle ?? "solid",
+      lineCap: chartVisualOverrides.lineCap,
+      lineJoin: chartVisualOverrides.lineJoin,
       lineCurveSmooth: chartVisualOverrides.lineCurveSmooth ?? false,
       lineWidth: chartVisualOverrides.lineWidth ?? (motif === "ticks" ? 1 : 1.5),
       axisLineColor: chartVisualOverrides.axisLineColor ?? themeUi.border,
@@ -1665,7 +1673,7 @@ export function ChartView() {
         off.height = h;
         const ctx = off.getContext("2d");
         if (!ctx) return null;
-        const themeUi = getThemeUiColors(st.appSettings.theme);
+        const themeUi = getThemeUiColors(resolveRuntimeTheme(st.appSettings.theme));
         ctx.fillStyle = themeUi.bg;
         ctx.fillRect(0, 0, w, h);
         const cubeFrame = ac.kind === "dataCube" ? cubeFrameRef.current : null;
@@ -1711,6 +1719,7 @@ export function ChartView() {
             const ui = themeUi;
             const sceneOpts = {
               colors: exp.colors,
+              lineCap: overrides.lineCap, lineJoin: overrides.lineJoin,
               opacity: exp.opacity,
               fontFamily: resolveChartFontFamily(overrides.fontFamily, st.appSettings.font, st.appSettings.faces),
               axisFontSize: resolveChartAxisFontSize(overrides.axisFontSize),
@@ -1818,8 +1827,8 @@ export function ChartView() {
         // colors on an opaque background so it reads wherever it's opened.
         const { vegaExportConfigForTheme } = await import("@/lib/vegaThemeConfig");
         const current = useLoomStore.getState();
-        const visual = current.chartVisualOverrides;
-        const exportConfig = vegaExportConfigForTheme(current.appSettings.theme, { ...visual, fontFamily: resolveChartFontFamily(visual.fontFamily, current.appSettings.font, current.appSettings.faces) });
+        const visual = resolveThemeChartStyle(resolveRuntimeTheme(current.appSettings.theme), current.chartVisualOverrides);
+        const exportConfig = vegaExportConfigForTheme(resolveRuntimeTheme(current.appSettings.theme), { ...visual, colorblindCharts: current.appSettings.colorblindCharts, fontFamily: resolveChartFontFamily(visual.fontFamily, current.appSettings.font, current.appSettings.faces) });
         const base = (spec as { config?: Record<string, unknown> }).config ?? {};
         const specWithData = {
           ...spec,
@@ -2662,6 +2671,8 @@ export function ChartView() {
 
     // The footnote band is already carved off h — renderers shouldn't reserve it again
     const opts: ChartRenderOpts = { ...chartRenderOpts, sourceFootnote: false };
+    ctx.lineCap = opts.lineCap ?? "round";
+    ctx.lineJoin = opts.lineJoin ?? "round";
     const padArgs = {
       kind: activeChart.kind,
       width: w,
@@ -2945,6 +2956,7 @@ export function ChartView() {
               pad,
               {
                 colors: opts.colors,
+                  lineCap: opts.lineCap, lineJoin: opts.lineJoin,
                 opacity: opts.opacity,
                 fontFamily: opts.fontFamily,
                   axisFontSize: opts.axisFontSize,
@@ -2994,6 +3006,7 @@ export function ChartView() {
                 pad,
                 {
                   colors: opts.colors,
+                  lineCap: opts.lineCap, lineJoin: opts.lineJoin,
                   opacity: opts.opacity,
                   fontFamily: opts.fontFamily,
                   axisFontSize: opts.axisFontSize,
@@ -3040,6 +3053,7 @@ export function ChartView() {
               if (packed) {
                 renderGpuSceneCanvas(activeChart.kind, ctx, packed, w, h, pad, {
                   colors: opts.colors,
+                  lineCap: opts.lineCap, lineJoin: opts.lineJoin,
                   opacity: opts.opacity,
                   fontFamily: opts.fontFamily,
                   axisFontSize: opts.axisFontSize,
@@ -3072,6 +3086,7 @@ export function ChartView() {
                 pad,
                 {
                   colors: opts.colors,
+                  lineCap: opts.lineCap, lineJoin: opts.lineJoin,
                   opacity: opts.opacity,
                   fontFamily: opts.fontFamily,
                   axisFontSize: opts.axisFontSize,
@@ -3420,7 +3435,7 @@ export function ChartView() {
 
     const paintFootnote = () => {
       if (!chartFootnoteText && !chartColorInfo?.stops?.length) return;
-      const ui = getThemeUiColors(appSettings.theme);
+      const ui = getThemeUiColors(effectiveTheme);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       drawChartSourceFootnote(ctx, w, h, 24, chartFootnoteText ?? "", {
         ...footnoteOpts(ui.label, ui.border),
@@ -3449,7 +3464,7 @@ export function ChartView() {
         sourceFootnote: chartRenderOpts.sourceFootnote,
         chromeInfoBand: chartRenderOpts.chromeInfoBand,
       });
-      const ui = getThemeUiColors(appSettings.theme);
+      const ui = getThemeUiColors(effectiveTheme);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
       drawChartTitleBlock(ctx, w, h, scenePad, titleText, activeChart.subtitle, {
@@ -3496,7 +3511,7 @@ export function ChartView() {
       yMin = d.min;
       yMax = d.max;
     }
-    const ui = getThemeUiColors(appSettings.theme);
+    const ui = getThemeUiColors(effectiveTheme);
     const overlayOpts: ChartRenderOpts = {
       ...chartRenderOpts,
       chartPadding: overlayPad,
@@ -3562,7 +3577,7 @@ export function ChartView() {
       );
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, refreshKey, appSettings.theme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h, selectedFile, sampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, fontEpoch]);
+  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, refreshKey, effectiveTheme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h, selectedFile, sampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, fontEpoch]);
 
   useEffect(() => {
     if (activeChart?.kind === "scatter") setScatterView({ scale: 1, panX: 0, panY: 0 });
@@ -4500,7 +4515,7 @@ export function ChartView() {
             </div>
           )}
           {/* Pinned readouts share typography and viewport fitting with hover tips. */}
-          {pinnedTooltips.filter((t) => t.chartId === activeChart?.id).map((t) => (
+          {!readoutsObscured && pinnedTooltips.filter((t) => t.chartId === activeChart?.id).map((t) => (
             <ChartTooltipCard
               key={t.id}
               tip={{ clientX: t.x, clientY: t.y, rowIndex: t.rowIndex, row: t.row, columns: t.columns }}
@@ -4642,7 +4657,7 @@ export function ChartView() {
           )}
           </div>
         </div>
-        {tooltipPresentation !== "off" && (scatterTooltip || chartTooltip) && (
+        {!readoutsObscured && tooltipPresentation !== "off" && (scatterTooltip || chartTooltip) && (
           <ChartTooltipCard
             fontFamily={chartFontFamily}
             axisFontSize={chartRenderOpts.axisFontSize}

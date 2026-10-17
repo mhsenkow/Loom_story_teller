@@ -181,6 +181,7 @@ export function HydrateStore() {
               window.matchMedia("(prefers-reduced-motion: reduce)").matches
             ? { reducedMotion: true }
             : {}),
+        ...(typeof saved.themePairing === "boolean" && { themePairing: saved.themePairing }),
         ...(typeof saved.colorblindCharts === "boolean" && { colorblindCharts: saved.colorblindCharts }),
         ...(saved.chartAspect && { chartAspect: saved.chartAspect as typeof prev.chartAspect }),
         ...(saved.chartDevice && { chartDevice: saved.chartDevice as typeof prev.chartDevice }),

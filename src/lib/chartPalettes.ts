@@ -1,7 +1,8 @@
 // Shared color system for chart visual overrides (right panel + ChartView).
 // Primary catalog: Loom data-viz palettes. "theme" follows look-system tokens.
 
-import { normalizeTheme, type LookTheme } from "./lookSystem";
+import { resolveRuntimeTheme } from "./resolveEffectiveTheme";
+import { type LookTheme } from "./lookSystem";
 
 /** Dark-theme series stops — bumped luminance for AA on #0a0a0c (LOOM-071). */
 const LOOM_DEFAULT = ["#8b7cf8", "#34e0a1", "#ff8585", "#ffe066", "#4dcae8", "#f09578", "#c4b5fd", "#93c5fd"];
@@ -121,6 +122,14 @@ export const COLOR_PALETTES: ColorPalette[] = [
     colors: VIZ_CATEGORICAL,
     blurb: "Picks scale from chart kind / color field",
     source: "system",
+  },
+  {
+    id: "theme-sequential",
+    name: "Theme magnitude",
+    kind: "sequential",
+    colors: VIZ_CAT_8,
+    blurb: "An ordered lightness ramp from the active theme",
+    source: "theme",
   },
   {
     id: "theme",
@@ -325,12 +334,18 @@ export function getPaletteById(id: string | undefined | null): ColorPalette | un
 
 /** Theme-aware chart series colors. Prefer `theme` id so we never lag CSS paint. */
 export function getThemeChartColors(theme?: string | null): string[] {
-  const t = normalizeTheme(theme);
+  const t = resolveRuntimeTheme(theme);
   return THEME_CHART[t] ?? VIZ_CAT_8;
 }
 
 function stopsForPalette(p: ColorPalette, theme?: string | null): string[] {
   if (p.id === "theme") return getThemeChartColors(theme);
+  if (p.id === "theme-sequential") {
+    const ink = getThemeChartColors(theme)[0]!;
+    const dark = sampleContinuous(["#000000", ink], 0.45);
+    const light = sampleContinuous([ink, "#ffffff"], 0.78);
+    return Array.from({ length: 7 }, (_, i) => sampleContinuous([dark, ink, light], i / 6));
+  }
   return p.colors.slice();
 }
 
@@ -405,6 +420,7 @@ function pickAutoPaletteId(
 ): string {
   const kind = chartKind ?? "";
   if (
+    kind === "contour" ||
     kind === "heatmap" ||
     kind === "choropleth" ||
     kind === "dataCube" ||
@@ -413,13 +429,13 @@ function pickAutoPaletteId(
     kind === "forceBubble" ||
     kind === "hexbin"
   ) {
-    return "seq-blue";
+    return "theme-sequential";
   }
   if (kind === "waterfall") return "semantic";
   // r runs −1…+1 around a meaningful zero
   if (kind === "corrMatrix") return "div-cool-warm";
-  if (colorFieldType === "quantitative" || colorFieldType === "ordinal") return "seq-blue";
-  return "categorical";
+  if (colorFieldType === "quantitative" || colorFieldType === "ordinal") return "theme-sequential";
+  return "theme";
 }
 
 function isContinuousKind(kind: PaletteKind): boolean {
@@ -433,32 +449,25 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
   const reverse = !!opts.reverse;
   let id = normalizePaletteId(opts.paletteId ?? "auto");
 
-  // Colorblind override when still on auto / theme / default system palettes
-  if (opts.colorblind) {
-    const locked = id !== "auto" && id !== "theme" && id !== "categorical" && id !== "seq-blue";
-    if (!locked) {
-      const autoId = pickAutoPaletteId(opts.chartKind, opts.colorFieldType);
-      const autoP = getPaletteById(autoId);
-      id = autoP && isContinuousKind(autoP.kind) ? "cividis" : "okabe";
-    }
-  }
-
+  const inherited = id === "auto" || id === "theme" || id === "theme-sequential";
   if (id === "auto") {
     id = pickAutoPaletteId(opts.chartKind, opts.colorFieldType);
+    if (opts.scaleKind && opts.scaleKind !== "auto") {
+      id = opts.scaleKind === "categorical" ? "theme"
+        : opts.scaleKind === "sequential" ? "theme-sequential"
+        : COLOR_PALETTES.find((p) => p.kind === opts.scaleKind && p.source === "system" && p.id !== "auto")?.id ?? id;
+    }
   }
-
+  // Accessibility follows the resolved scale; explicit palettes remain intentional choices.
+  if (opts.colorblind && inherited) {
+    const kind = getPaletteById(id)?.kind;
+    if (kind === "sequential" || kind === "spectrum") id = "cividis";
+    else if (kind === "categorical") id = "okabe";
+  }
   let palette = getPaletteById(id);
   if (!palette) {
     palette = getPaletteById("categorical")!;
     id = "categorical";
-  }
-
-  if (opts.scaleKind && opts.scaleKind !== "auto" && (opts.paletteId === "auto" || !opts.paletteId)) {
-    const match = COLOR_PALETTES.find((p) => p.kind === opts.scaleKind && p.source === "system" && p.id !== "auto");
-    if (match) {
-      palette = match;
-      id = match.id;
-    }
   }
 
   // Correlation cells interpolate a ramp — a categorical set reads as random hues
@@ -627,7 +636,7 @@ export function getPaletteColors(paletteId: string | undefined, theme?: string |
 
 /** Theme UI colors for chart background, title, axes. */
 export function getThemeUiColors(theme?: string | null): ThemeUiColors {
-  return THEME_UI[normalizeTheme(theme)] ?? THEME_UI.dark;
+  return THEME_UI[resolveRuntimeTheme(theme)] ?? THEME_UI.dark;
 }
 
 /** Parse hex color to 0–1 RGB for WebGPU clear value. */

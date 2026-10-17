@@ -78,6 +78,8 @@ const STRING_ENUMS: Partial<Record<keyof ChartVisualOverrides, readonly string[]
   markShape: MARK_SHAPE_IDS,
   markEmoji: CURATED_MARK_EMOJIS,
   gridStyle: ["solid", "dashed", "dotted", "none"],
+  lineCap: ["round", "butt", "square"],
+  lineJoin: ["round", "bevel", "miter"],
   lineStrokeStyle: ["solid", "dashed", "dotted"],
   backgroundStyle: ["default", "tufte", "newsprint", "bauhaus", "carbon", "blueprint", "ruled", "gradient", "paper", "transparent"],
   blendMode: ["source-over", "screen", "multiply", "lighten"],

@@ -209,6 +209,12 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 
 ## Theming and tokens
 
+`themePairing.ts` supplies opt-in font/chrome pairings. `setAppSettings` applies them on theme changes and releases pairing when a user edits font or chrome; it never changes download consent, accessibility settings, or per-chart overrides. `themePairing` persists with app settings. Typefaces override chrome font declarations; chrome retains geometry and spacing. Source Sans 3, Source Serif 4, and IBM Plex Mono use the existing catalog/loader/device fallback path. `useChartTheme` resolves System mode reactively for the chart, thumbnails, and theme switch. Material shadows, surface highlights, and control icon strokes live in CSS tokens; no blur or glow is added to data marks. Mobile inspector sheets hide both pinned and hover chart readouts while open.
+
+`themeChartStyle.ts` also owns line caps and joins: round for soft themes, butt/bevel for Paper and Contrast, square/miter for geometric themes. Canvas line/area/trails, relevant creative/geo paths, Dive SVG, and Vega export consume this grammar. Visual → Marks can override endings/corners with sanitized, shareable values; interpolation remains a separate explicit choice.
+
+`themeChartStyle.ts` resolves theme mark defaults below explicit Visual overrides, without persisting inherited values. `ChartView` uses this for Canvas/GPU options and export typography; `ChartCard` uses it for scatter silhouettes, bar corners, and line weight. Auto categorical colors resolve to `THEME_CHART`; automatic magnitude ramps derive ordered lightness stops from the theme’s first chart color; semantic and diverging scales retain their analytical meaning. `ThemeCycleButton` updates the existing settings slice. Dark CSS chart stops match the portable palette, keeping Dive SVG and Canvas consistent. No per-row theme work or new native/Worker path is introduced.
+
 - **Catalog** — `src/lib/lookSystem.ts`: 10 themes, 8 chrome faces, app fonts, faces source; Visual presets.
 - **Tokens** — `src/styles/globals.css`: `data-theme` / `data-ui` / `data-font` / `data-faces` / `data-a11y` on `<html>`. Semantic `--color-*` with `--loom-*` aliases for Tailwind (`bg-loom-bg`, …). Per-theme `--chart-1`…`8`.
 - **Apply** — `ThemeApplicator` sets attributes + legacy class aliases; syncs `ibm.tools.shared` when same-origin.
@@ -280,3 +286,7 @@ Run `make test` for Vitest only; run `make ci` before tagging releases.
 Geometry lives as normalized visual overrides, sanitized by `chartVisualSanitize`, and follows existing persistence, chart links, looks and Undo/Redo. Annotation geometry lives beside its text in `chartAnnotations`. Pointer changes use a local animation-frame preview and commit one history entry on release; pointer cancellation/Escape drops the preview. Keyboard arrows move, Shift uses 10px increments, and Ctrl/⌘ arrows resize. All handles are focusable. Edge/center snapping is disabled by Alt. PNG captures preserve arrangement and notes; SVG remains explicitly labeled as a Vega approximation.
 
 `canvasArrangement.ts` supplies bounds and geometry. Cartesian renderers, ticks, reference lines and hit targets share `ChartRenderOpts.plotBounds`; scatter pointer projection uses those same bounds. Custom scatter plot geometry uses the Canvas renderer so live pixels and PNG agree. Export captures omit arrangement handles.
+
+Plot backgrounds use `--chart-bg`, mirrored by `THEME_UI.bg` for Canvas and exports and guarded by theme inheritance tests. This separates plotting surfaces from workspace colors (especially NES). Dialogs and sharing sheets inherit the selected corner geometry.
+
+Automatic chart palettes resolve scale before accessibility: categorical uses Okabe–Ito and magnitude uses Cividis when colorblind defaults are enabled. Explicit palette choices are preserved; the Visual panel shows the resolved palette and theme-aware swatches. Device-font mode labels named faces as fallbacks.

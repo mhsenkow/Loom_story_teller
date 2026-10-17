@@ -124,9 +124,9 @@ export function renderGpuSceneCanvas(
   if (kind === "quakeTerrain") {
     drawQuakeTerrain(ctx, packed, w, h, pad, ink, font, mini, opts);
   } else if (kind === "loomWeave") {
-    drawLoomWeave(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, opts.axisFontSize);
+    drawLoomWeave(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, opts.axisFontSize, opts);
   } else if (kind === "trailRibbon") {
-    drawTrailRibbons(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, radiusFromPointSize(opts.pointSize, 2.6), opts.axisFontSize);
+    drawTrailRibbons(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, radiusFromPointSize(opts.pointSize, 2.6), opts.axisFontSize, opts);
   } else {
     drawOrbitPoints(kind, ctx, packed, w, h, pad, colors, ink, font, mini, opts);
   }
@@ -348,6 +348,7 @@ function drawTrailRibbons(
   opacity: number,
   baseSize: number,
   axisFontSize?: number,
+  edge: Pick<GpuSceneRenderOpts, "lineCap" | "lineJoin"> = {},
 ): void {
   const { points, yMin, yMax } = packed;
   const byTrail = new Map<number, GpuScenePoint[]>();
@@ -412,8 +413,8 @@ function drawTrailRibbons(
   }
 
   ctx.save();
-  ctx.lineCap = "round";
-  ctx.lineJoin = "round";
+  ctx.lineCap = edge.lineCap ?? "round";
+  ctx.lineJoin = edge.lineJoin ?? "round";
   for (const list of trails) {
     const tipCol = colors[list[list.length - 1]!.category % colors.length] ?? colors[0]!;
     if (list.length < 2) {
@@ -678,6 +679,7 @@ function drawLoomWeave(
   mini: boolean,
   opacity: number,
   axisFontSize?: number,
+  edge: Pick<GpuSceneRenderOpts, "lineCap" | "lineJoin"> = {},
 ): void {
   const { points } = packed;
   const cats = [...new Set(points.map((p) => p.category))].sort((a, b) => a - b);
@@ -723,7 +725,7 @@ function drawLoomWeave(
   let maxV = 0;
   for (const v of bins.values()) maxV = Math.max(maxV, v.sum / v.n);
   const maxThick = Math.max(2, Math.min(gapY * 0.85, 9));
-  ctx.lineCap = "round";
+  ctx.lineCap = edge.lineCap ?? "round";
   for (const [key, v] of bins) {
     const [wiS, weS] = key.split(":");
     const wi = Number(wiS);

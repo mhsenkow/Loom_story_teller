@@ -404,7 +404,7 @@ export function renderFullNetwork(ctx: CanvasRenderingContext2D, rows: unknown[]
     ctx.strokeStyle = col;
     ctx.globalAlpha = Math.min(0.55, alpha * 0.55);
     ctx.lineWidth = e.width;
-    ctx.lineCap = "round";
+    ctx.lineCap = opts?.lineCap ?? "round";
     ctx.beginPath();
     ctx.moveTo(e.x1, e.y1);
     ctx.lineTo(e.x2, e.y2);
@@ -479,7 +479,7 @@ export function renderFullArcDiagram(ctx: CanvasRenderingContext2D, rows: unknow
     ctx.strokeStyle = nodeColor.get(e.source) ?? palette[0]!;
     ctx.globalAlpha = Math.min(0.5, alpha * 0.6);
     ctx.lineWidth = e.width;
-    ctx.lineCap = "round";
+    ctx.lineCap = opts?.lineCap ?? "round";
     strokeArcLink(ctx, e.x1, e.y1, e.x2, e.y2);
   }
 

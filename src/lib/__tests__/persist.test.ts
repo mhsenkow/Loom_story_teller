@@ -60,8 +60,8 @@ describe("safeSetItem", () => {
         },
       },
     });
-    expect(setPersistedAppSettings({ theme: "dark", fontScale: 1 })).toBe(true);
-    expect(getPersistedAppSettings()).toMatchObject({ theme: "dark", fontScale: 1 });
+    expect(setPersistedAppSettings({ theme: "dark", fontScale: 1, themePairing: true, font: "source-serif" })).toBe(true);
+    expect(getPersistedAppSettings()).toMatchObject({ theme: "dark", fontScale: 1, themePairing: true, font: "source-serif" });
     setPersistedRecentFiles([
       { path: "web://a.csv", name: "a.csv", extension: "csv", row_count: 1, size_bytes: 10 },
     ]);

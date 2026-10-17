@@ -74,6 +74,8 @@ export const ODD_NON_CARTESIAN = new Set<string>([
 ]);
 
 export interface OddRenderOpts {
+  lineCap?: CanvasLineCap;
+  lineJoin?: CanvasLineJoin;
   colors: string[];
   opacity?: number;
   fontFamily?: string;

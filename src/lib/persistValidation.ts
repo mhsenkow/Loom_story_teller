@@ -57,6 +57,7 @@ export function parsePersistedAppSettings(raw: unknown): PersistedAppSettings | 
   if (typeof raw.fontScale === "number" && (FONT_SCALES as Set<number>).has(raw.fontScale)) {
     out.fontScale = raw.fontScale as PersistedAppSettings["fontScale"];
   }
+  if (typeof raw.themePairing === "boolean") out.themePairing = raw.themePairing;
   if (typeof raw.reducedMotion === "boolean") out.reducedMotion = raw.reducedMotion;
   if (typeof raw.colorblindCharts === "boolean") out.colorblindCharts = raw.colorblindCharts;
   if (isString(raw.chartAspect) && ASPECTS.has(raw.chartAspect as ChartAspectId)) {

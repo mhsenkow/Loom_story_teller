@@ -48,6 +48,9 @@ describe("niceTicks", () => {
 
 describe("formatting", () => {
   it("matches precision to the step", () => {
+    expect(formatAxisValue(40e12, 10e12)).toBe("40T");
+    expect(formatAxisValue(5.5e15, 5e14)).toBe("5.5e15");
+    expect(formatAxisValue(-2e16, 1e16)).toBe("-2e16");
     expect(formatAxisValue(2500, 500)).toBe("2.5k");
     expect(formatAxisValue(3000, 1000)).toBe("3k");
     expect(formatAxisValue(0.25, 0.05)).toBe("0.25");

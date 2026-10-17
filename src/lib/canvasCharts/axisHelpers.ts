@@ -156,7 +156,8 @@ export function drawScatterTrail(
   }
   ctx.save();
   ctx.lineWidth = 1;
-  ctx.lineJoin = "round";
+  ctx.lineJoin = opts?.lineJoin ?? "round";
+    ctx.lineCap = opts?.lineCap ?? "round";
   let i = 0;
   for (const pts of paths.values()) {
     ctx.strokeStyle = cols[i++ % cols.length]!;

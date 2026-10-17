@@ -132,3 +132,19 @@ describe("Visual inspector", () => {
     ).toBeInTheDocument();
   });
 });
+
+
+it("keeps accessible Auto and explicit palette selection connected to undo", () => {
+  useLoomStore.getState().setAppSettings((s) => ({ ...s, colorblindCharts: true }));
+  render(<ChartPanelTab />);
+  fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+  fireEvent.click(screen.getByRole("button", { name: "Sequential" }));
+  expect(screen.getByText(/Applied · cividis/)).toBeTruthy();
+  expect(useLoomStore.getState().chartVisualOverrides).toMatchObject({ colorPalette: "auto", colorScaleKind: "sequential" });
+  const explicit = screen.getByRole("button", { name: "Sequential Blue Sequential" });
+  fireEvent.click(explicit);
+  expect(explicit.getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByText(/Applied · seq-blue/)).toBeTruthy();
+  act(() => useLoomStore.getState().undoChartEdit());
+  expect(screen.getByText(/Applied · cividis/)).toBeTruthy();
+});

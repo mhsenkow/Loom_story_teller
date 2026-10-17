@@ -117,10 +117,10 @@ export function Dialog({
       ? "items-end sm:items-center p-0 sm:p-4"
       : "items-center p-4";
   const panelShape = stage
-    ? "rounded-2xl"
+    ? "rounded-[var(--radius-lg)]"
     : useSheet
-      ? "rounded-t-2xl sm:rounded-xl mb-[var(--safe-bottom)] sm:mb-0 animate-slide-up"
-      : "rounded-xl";
+      ? "rounded-t-[var(--radius-lg)] sm:rounded-[var(--radius-lg)] mb-[var(--safe-bottom)] sm:mb-0 animate-slide-up"
+      : "rounded-[var(--radius-lg)]";
   const frameMax = stage
     ? "max-w-[calc(100vw-0.75rem)] sm:max-w-[calc(100vw-1.25rem)] h-[min(96dvh,calc(100dvh-0.75rem))] sm:h-[min(94dvh,calc(100dvh-1.25rem))]"
     : "max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)]";

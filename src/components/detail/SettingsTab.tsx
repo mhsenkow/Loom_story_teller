@@ -1,5 +1,6 @@
 "use client";
 
+import { THEME_PAIRINGS } from "@/lib/themePairing";
 import { useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
 import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
 import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
@@ -15,6 +16,8 @@ import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, 
 import { formatNumber } from "@/lib/format";
 import { ChartKindPicker } from "@/components/ChartKindPicker";
 import {
+  THEME_CHART,
+  THEME_UI,
   AXIS_LABEL_COLOR_SWATCHES,
   AXIS_LINE_COLOR_SWATCHES,
   COLOR_PALETTES,
@@ -172,7 +175,7 @@ export default function SettingsTab() {
       </div>
       <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">Theme</h3>
-        <p className="text-2xs text-loom-label mb-2">Shared ibm.io look spectrum</p>
+        <p className="text-2xs text-loom-label mb-2">Color, material, and chart palette</p>
         <div className="grid grid-cols-2 gap-1.5">
           <button
             type="button"
@@ -198,7 +201,13 @@ export default function SettingsTab() {
                   : "border-loom-border text-loom-label hover:text-loom-text"
               }`}
             >
-              {THEME_LABEL[t]}
+              <span className="loom-theme-option">
+                <span>{THEME_LABEL[t]}</span>
+                <span aria-hidden className="loom-theme-specimen" style={{ background: THEME_UI[t].bg, color: THEME_UI[t].text, fontFamily: chartFontStack(resolveChartFontFamily(undefined, THEME_PAIRINGS[t].font, "local")) }}>
+                  <span>Aa</span>
+                  <span className="loom-theme-palette">{THEME_CHART[t].slice(0, 3).map((color) => <i key={color} style={{ background: color }} />)}</span>
+                </span>
+              </span>
             </button>
           ))}
         </div>
@@ -211,14 +220,25 @@ export default function SettingsTab() {
         </button>
       </div>
 
+      <div className="loom-pairing-card">
+        <label className="flex items-center justify-between gap-3 cursor-pointer">
+          <span className="text-sm font-semibold">Follow theme</span>
+          <input type="checkbox" checked={!!appSettings.themePairing}
+            onChange={(event) => setAppSettings((prev) => ({ ...prev, themePairing: event.target.checked }))} />
+        </label>
+        <p className="text-2xs text-loom-label mt-2">{themePref === "system" ? "System follows your device’s light/dark appearance with neutral type and chrome." : THEME_PAIRINGS[normalizeTheme(themePref)].description}</p>
+        <p className="text-2xs text-loom-muted mt-1">Pairs typeface and chrome with each theme. Choosing either manually keeps your custom combination. Chart-specific fonts stay yours.</p>
+      </div>
+
       <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">Chrome</h3>
-        <p className="text-2xs text-loom-label mb-2">Shell face (type + borders)</p>
+        <p className="text-2xs text-loom-label mb-2">Spacing, corners, and borders. Typeface below takes priority.</p>
         <div className="grid grid-cols-2 gap-1.5">
           {UI_CHROMES.map((u) => (
             <button
               key={u}
               type="button"
+              aria-pressed={appSettings.uiChrome === u}
               onClick={() => setAppSettings((prev) => ({ ...prev, uiChrome: u as UiChrome }))}
               className={`px-2 py-1.5 text-2xs rounded-md border text-left transition-colors ${
                 appSettings.uiChrome === u
@@ -241,7 +261,7 @@ export default function SettingsTab() {
         >
           {FONT_GROUPS.map((group) => (
             <optgroup key={group.label} label={group.label}>
-              {group.fonts.map((id) => <option key={id} value={id}>{FONT_CHOICES[id].family}</option>)}
+              {group.fonts.map((id) => <option key={id} value={id}>{FONT_CHOICES[id].family}{appSettings.faces !== "web" ? " · device fallback" : ""}</option>)}
             </optgroup>
           ))}
         </select>
@@ -308,7 +328,7 @@ export default function SettingsTab() {
           />
           <span className="text-xs text-loom-text">Colorblind chart palette</span>
         </label>
-        <p className="text-2xs text-loom-muted mt-1 ml-6">Paul Tol–safe series; shell theme unchanged</p>
+        <p className="text-2xs text-loom-muted mt-1 ml-6">Auto uses Okabe–Ito for categories and Cividis for magnitudes. Explicit chart palettes stay selected.</p>
       </div>
 
       <div>

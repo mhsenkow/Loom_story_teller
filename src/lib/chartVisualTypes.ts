@@ -39,6 +39,8 @@ export interface ChartVisualOverrides {
   lineStrokeStyle?: string;
   lineCurveSmooth?: boolean;
   lineWidth?: number;
+  lineCap?: "round" | "butt" | "square";
+  lineJoin?: "round" | "bevel" | "miter";
   axisLineColor?: string;
   axisLineWidth?: number;
   gridStyle?: string;

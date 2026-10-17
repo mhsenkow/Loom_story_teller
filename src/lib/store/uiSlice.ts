@@ -2,6 +2,7 @@
 // uiSlice — settings, toast, recent files, prompt, export, stream
 // =================================================================
 
+import { resolveThemePairing } from "../themePairing";
 import type { ExportBurnInOptions, SocialExportTarget, SocialPresetId } from "../socialExport";
 import { DEFAULT_BURN_IN } from "../socialExport";
 import type { VizPreferenceModel } from "../vizPreferences";
@@ -89,7 +90,7 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
     },
     isActiveWebImport: (id: number) => get().webImportOperationId === id,
     setAppSettings: (settings: AppSettings | ((prev: AppSettings) => AppSettings)) =>
-      set((s) => ({ appSettings: typeof settings === "function" ? settings(s.appSettings) : settings })),
+      set((s) => ({ appSettings: resolveThemePairing(s.appSettings, typeof settings === "function" ? settings(s.appSettings) : settings) })),
     setRecentFiles: (files: FileEntry[]) => set({ recentFiles: files }),
     addRecentFile: (file: FileEntry) =>
       set((s) => {

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { APP_FONTS } from "../lookSystem";
 import {
@@ -36,6 +37,15 @@ describe("chart and app font catalog", () => {
     expect(links[1].remove).toHaveBeenCalled();
     ensureLookFontLoaded("geist", "web");
     expect(links).toHaveLength(3);
+  });
+  it("provides CSS and matching device/download faces for every catalog entry", () => {
+    const css = readFileSync(new URL("../../styles/globals.css", import.meta.url), "utf8");
+    for (const id of APP_FONTS) {
+      expect(css).toContain(`html[data-font="${id}"]`);
+      expect(css).toContain(`html[data-faces="web"][data-font="${id}"]`);
+      expect(resolveChartFontFamily(undefined, id, "local")).toBe(FONT_CHOICES[id].local);
+      expect(resolveChartFontFamily(undefined, id, "web")).toBe(FONT_CHOICES[id].family);
+    }
   });
   it("offers each supported font once in a readable category", () => {
     const grouped = FONT_GROUPS.flatMap((group) => group.fonts);

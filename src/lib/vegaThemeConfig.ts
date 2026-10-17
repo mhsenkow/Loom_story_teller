@@ -2,12 +2,14 @@
 // Vega-Lite config from Loom look themes (axis/title/legend ink)
 // =================================================================
 
-import { getThemeUiColors, type ThemeUiColors } from "./chartPalettes";
+import { getThemeChartColors, getThemeUiColors, resolveChartColors, type ThemeUiColors } from "./chartPalettes";
+import type { ChartVisualOverrides } from "./chartVisualTypes";
+import { resolveThemeChartStyle } from "./themeChartStyle";
 import { chartFontStack } from "./fontCatalog";
 import { chartTypeRamp } from "./chartType";
 import { ensureContrast } from "./wcagColor";
 
-type Typography = { fontFamily?: string; axisFontSize?: number; titleFontWeight?: number; titleItalic?: boolean };
+type Typography = ChartVisualOverrides & { colorblindCharts?: boolean };
 
 export function vegaConfigFromUi(ui: ThemeUiColors, typography: Typography = {}) {
   const type = chartTypeRamp(typography.axisFontSize);
@@ -50,15 +52,21 @@ export function vegaConfigFromUi(ui: ThemeUiColors, typography: Typography = {})
 
 /** Portable spec defaults (in-app); matches dark look tokens — not hard-coded one-offs. */
 export function vegaBaseConfigForTheme(theme?: string | null) {
-  return vegaConfigFromUi(getThemeUiColors(theme ?? "dark"));
+  return { ...vegaConfigFromUi(getThemeUiColors(theme ?? "dark")), range: { category: getThemeChartColors(theme) } };
 }
 
 /** Opaque background + merged axis/title for SVG/file export. */
 export function vegaExportConfigForTheme(theme?: string | null, typography?: Typography) {
   const ui = getThemeUiColors(theme ?? "dark");
   const base = vegaConfigFromUi(ui, typography);
+  const style = resolveThemeChartStyle(theme, typography);
   return {
     ...base,
+    range: { category: resolveChartColors({ theme, paletteId: typography?.colorPalette, colorblind: typography?.colorblindCharts, reverse: typography?.colorPaletteReverse }).colors },
+    line: { strokeWidth: style.lineWidth, strokeCap: style.lineCap, strokeJoin: style.lineJoin },
+    area: { strokeCap: style.lineCap, strokeJoin: style.lineJoin },
+    point: { shape: style.markShape },
+    bar: { cornerRadius: style.barCornerRadius },
     background: ui.bg,
     axis: { ...base.axis, titleColor: ui.text },
     title: { ...base.title, subtitleColor: ui.muted },

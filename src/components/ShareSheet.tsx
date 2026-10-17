@@ -500,10 +500,10 @@ function ShareSheetBody() {
     shellMode === "phone" ? "items-end" : "items-center";
   const panelShape =
     shellMode === "phone"
-      ? "rounded-t-2xl max-h-[94dvh]"
+      ? "rounded-t-[var(--radius-lg)] max-h-[94dvh]"
       : shellMode === "tablet"
-        ? "rounded-2xl max-h-[min(92dvh,58rem)] w-full max-w-[min(56rem,calc(100vw-1.25rem))]"
-        : "rounded-2xl max-h-[min(90dvh,54rem)] w-full max-w-[min(68rem,calc(100vw-2rem))]";
+        ? "rounded-[var(--radius-lg)] max-h-[min(92dvh,58rem)] w-full max-w-[min(56rem,calc(100vw-1.25rem))]"
+        : "rounded-[var(--radius-lg)] max-h-[min(90dvh,54rem)] w-full max-w-[min(68rem,calc(100vw-2rem))]";
   const overlayPad =
     shellMode === "phone" ? "p-0" : "p-2 sm:p-3";
   const previewMaxH = shellMode === "phone"
@@ -579,7 +579,7 @@ function ShareSheetBody() {
   const previewBlock = (
     <div className={`flex flex-col ${split ? "h-full min-h-0" : ""}`}>
       <div
-        className="relative flex-1 min-h-0 flex items-center justify-center rounded-2xl bg-loom-bg/80 p-4 sm:p-6"
+        className="relative flex-1 min-h-0 flex items-center justify-center rounded-[var(--radius-lg)] bg-loom-bg/80 p-4 sm:p-6"
         style={{
           minHeight: split ? "14rem" : "11rem",
           maxHeight: previewMaxH,
@@ -594,7 +594,7 @@ function ShareSheetBody() {
             {copied === "caption" ? "Copied" : "Copy caption"}
           </button>
         ) : null}
-        <div className="relative max-w-full max-h-full overflow-hidden rounded-xl shadow-loom-md bg-loom-surface">
+        <div className="relative max-w-full max-h-full overflow-hidden rounded-[var(--radius-lg)] shadow-loom-md bg-loom-surface">
           {previewUrl ? (
             <img
               src={previewUrl}
@@ -635,7 +635,7 @@ function ShareSheetBody() {
 
   const destinationList = destinations ? (
     <div role="group" aria-label="Where to share">
-      <div className="rounded-2xl border border-loom-border overflow-hidden divide-y divide-loom-border/70">
+      <div className="rounded-[var(--radius-lg)] border border-loom-border overflow-hidden divide-y divide-loom-border/70">
         <button type="button" onClick={() => void openInstagram()} disabled={!ready} className={destClass} title={desktopApp ? "Caption copied, image in Finder" : "Image and caption in the share sheet"}>
           Instagram
         </button>

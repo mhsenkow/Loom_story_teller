@@ -52,6 +52,7 @@ export function safeSetItem(key: string, value: string): boolean {
 }
 
 export interface PersistedAppSettings {
+  themePairing?: boolean;
   theme?: string;
   uiChrome?: string;
   font?: string;
