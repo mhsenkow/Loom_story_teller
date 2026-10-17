@@ -47,6 +47,8 @@ import {
 export * from "./geoMapsRec";
 import type { GeoMapKind } from "./geoMapsRec";
 import { formatTooltipNumber, type HitTarget } from "./chartTooltip";
+import { categoryShape, drawMarkerPath } from "./chartMarks";
+import { firstGrapheme } from "./chartText";
 
 export interface GeoRenderOpts {
   colors: string[];
@@ -55,6 +57,7 @@ export interface GeoRenderOpts {
   atlas?: AtlasBundle | null;
   hits?: HitTarget[];
   fontFamily?: string;
+  axisFontSize?: number;
   themeText?: string;
   themeMuted?: string;
   themeBorder?: string;
@@ -68,6 +71,12 @@ export interface GeoRenderOpts {
   zoom?: number;
   continuousStops?: string[];
   mini?: boolean;
+  channelInvert?: import("./channelInvert").ChannelInvert;
+  markShape?: string;
+  markerMode?: "shape" | "emoji";
+  markEmoji?: string;
+  shapeField?: string | null;
+  emojiField?: string | null;
 }
 
 function num(v: unknown): number {
@@ -256,11 +265,11 @@ function drawBasemap(
 }
 
 /** Key strip height reserved under the map when a ramp / size key is shown. */
-const MAP_KEY_H = rampKeyHeight(true) + 6;
+const mapKeyHeight = (axisFontSize?: number) => rampKeyHeight(true, false, axisFontSize) + 6;
 
-function keyOrigin(w: number, h: number, pad: number): { x: number; y: number; width: number } {
+function keyOrigin(w: number, h: number, pad: number, axisFontSize?: number): { x: number; y: number; width: number } {
   const { side, bottom } = mapInsets(pad);
-  return { x: side, y: h - bottom - MAP_KEY_H + 4, width: Math.max(80, Math.min(180, w * 0.36)) };
+  return { x: side, y: h - bottom - mapKeyHeight(axisFontSize) + 4, width: Math.max(80, Math.min(180, w * 0.36)) };
 }
 
 /** Real polygon choropleth. */
@@ -282,7 +291,7 @@ export function renderGeoChoropleth(
   paintBackground(ctx, w, h, ink);
   const ri = columns.indexOf(regionField);
   if (ri < 0) {
-    drawEmptyMessage(ctx, w, h, "Choose a country / state column", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "Choose a country / state column", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
@@ -297,7 +306,7 @@ export function renderGeoChoropleth(
     try {
       atlas = getAtlas(atlasKind);
     } catch {
-      drawEmptyMessage(ctx, w, h, "Loading map…", ink, font, mini);
+      drawEmptyMessage(ctx, w, h, "Loading map…", ink, font, mini, opts.axisFontSize);
       ctx.restore();
       return;
     }
@@ -333,7 +342,7 @@ export function renderGeoChoropleth(
     w,
     h,
     pad,
-    showKey ? MAP_KEY_H : 0,
+    showKey ? mapKeyHeight(opts.axisFontSize) : 0,
   );
   const path = geoPath(projection, undefined);
   const stops = sequentialStops(ink, opts.continuousStops);
@@ -384,9 +393,9 @@ export function renderGeoChoropleth(
   }
   ctx.globalAlpha = 1;
   if (values.size === 0) {
-    drawEmptyMessage(ctx, w, h, `No ${regionField} values matched map regions`, ink, font, mini);
+    drawEmptyMessage(ctx, w, h, `No ${regionField} values matched map regions`, ink, font, mini, opts.axisFontSize);
   } else if (showKey) {
-    const k = keyOrigin(w, h, pad);
+    const k = keyOrigin(w, h, pad, opts.axisFontSize);
     drawRampKey(ctx, {
       ...k,
       min: minV,
@@ -395,7 +404,7 @@ export function renderGeoChoropleth(
       title: (valueField && vi >= 0 ? `${AGG_WORD[how]} of ${valueField}` : "Rows") + (useLog ? " (log scale)" : ""),
       log: useLog,
       ink,
-      fontFamily: font,
+      axisFontSize: opts.axisFontSize, fontFamily: font,
     });
   }
   ctx.restore();
@@ -426,7 +435,7 @@ function resolveLonLat(
   return { lonI, latI };
 }
 
-type GeoPoint = { lon: number; lat: number; category: number; size: number };
+type GeoPoint = { lon: number; lat: number; category: number; size: number; row: unknown[] };
 
 function collectPoints(
   rows: unknown[][],
@@ -447,7 +456,7 @@ function collectPoints(
     if (lat === 0 && lon === 0) continue;
     const cat = colorI >= 0 ? (catMap.get(String(r[colorI])) ?? 0) : 0;
     const size = sizeI >= 0 ? num(r[sizeI]) : NaN;
-    out.push({ lon, lat, category: cat, size });
+    out.push({ lon, lat, category: cat, size, row: r });
   }
   return out;
 }
@@ -457,6 +466,7 @@ function sizeScale(
   pts: GeoPoint[],
   rMin: number,
   rMax: number,
+  invert = false,
 ): { radiusOf: (v: number) => number; min: number; max: number } | null {
   let lo = Infinity;
   let hi = -Infinity;
@@ -470,8 +480,9 @@ function sizeScale(
   const zeroBased = lo >= 0;
   const radiusOf = (v: number) => {
     if (!Number.isFinite(v)) return rMin;
-    const t = zeroBased ? Math.max(0, v) / hi : (v - lo) / (hi - lo);
-    return Math.max(rMin, rMax * Math.sqrt(Math.max(0, Math.min(1, t))));
+    const raw = zeroBased ? Math.max(0, v) / hi : (v - lo) / (hi - lo);
+    const t = invert ? 1 - Math.max(0, Math.min(1, raw)) : Math.max(0, Math.min(1, raw));
+    return Math.max(rMin, rMax * Math.sqrt(t));
   };
   return { radiusOf, min: lo, max: hi };
 }
@@ -486,6 +497,45 @@ function drawDot(ctx: CanvasRenderingContext2D, x: number, y: number, r: number,
   ctx.fillStyle = withAlpha(fill, alpha);
   ctx.fill();
   if (haloW > 0) {
+    ctx.strokeStyle = withAlpha(halo, 0.85);
+    ctx.lineWidth = haloW;
+    ctx.stroke();
+  }
+}
+
+function drawGeoMarker(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  fill: string,
+  alpha: number,
+  halo: string,
+  haloW: number,
+  shape: string,
+  glyph: string | null,
+) {
+  if (glyph) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.font = `${Math.max(8, r * 2.35)}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(glyph, x, y + r * 0.05);
+    ctx.restore();
+    return;
+  }
+  ctx.beginPath();
+  drawMarkerPath(ctx, shape, x, y, r);
+  if (shape === "ring") {
+    ctx.strokeStyle = withAlpha(fill, alpha);
+    ctx.lineWidth = Math.max(1, r * 0.4);
+    ctx.stroke();
+  } else {
+    ctx.fillStyle = withAlpha(fill, alpha);
+    ctx.fill();
+  }
+  if (haloW > 0 && shape !== "ring") {
     ctx.strokeStyle = withAlpha(halo, 0.85);
     ctx.lineWidth = haloW;
     ctx.stroke();
@@ -514,36 +564,38 @@ function renderProjectedPoints(
   const { lonI, latI } = resolveLonLat(columns, xField, yField);
   const atlas = opts.atlas ?? peekWorldAtlas();
   if (!atlas) {
-    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
   if (lonI < 0 || latI < 0) {
-    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const sizeI = sizeField ? columns.indexOf(sizeField) : -1;
+  const shapeI = opts.shapeField ? columns.indexOf(opts.shapeField) : -1;
+  const emojiI = opts.emojiField ? columns.indexOf(opts.emojiField) : -1;
   const pts = collectPoints(rows, lonI, latI, colorI, sizeI);
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
   const sized = mode !== "hex" && sizeI >= 0;
   const showKey = !mini && pts.length > 0 && (mode === "hex" || sized);
 
-  const { projection, regional } = fitPointsProjection(pts, atlas, w, h, pad, showKey ? MAP_KEY_H : 0);
+  const { projection, regional } = fitPointsProjection(pts, atlas, w, h, pad, showKey ? mapKeyHeight(opts.axisFontSize) : 0);
   const path = geoPath(projection, undefined);
   drawBasemap(ctx, path, atlas, ink, !mini && !regional);
   if (regional) drawRegionalDetail(ctx, path, regional, ink);
 
   if (pts.length === 0) {
-    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
 
   const alpha = opts.opacity ?? 0.85;
   if (mode === "hex") {
-    const { side, top, bottom } = mapInsets(pad, showKey ? MAP_KEY_H : 0);
+    const { side, top, bottom } = mapInsets(pad, showKey ? mapKeyHeight(opts.axisFontSize) : 0);
     const plotW = w - 2 * side;
     const plotH = h - top - bottom;
     const hr = mini
@@ -591,7 +643,7 @@ function renderProjectedPoints(
       ctx.stroke();
     }
     if (showKey) {
-      drawRampKey(ctx, { ...keyOrigin(w, h, pad), min: minC, max: Math.max(minC, maxC), colorAt, title: "Rows per hex", ink, fontFamily: font });
+      drawRampKey(ctx, { ...keyOrigin(w, h, pad, opts.axisFontSize), min: minC, max: Math.max(minC, maxC), colorAt, title: "Rows per hex", ink, axisFontSize: opts.axisFontSize, fontFamily: font });
     }
     ctx.restore();
     return;
@@ -604,16 +656,33 @@ function renderProjectedPoints(
   const rMax = mode === "bubbles"
     ? Math.max(rMin * 2, Math.min(mini ? 9 : 26, Math.min(w, h) * (mini ? 0.06 : 0.045)))
     : Math.max(rMin * 2, base * 2.2);
-  const scale = sized ? sizeScale(pts, rMin, rMax) : null;
+  const scale = sized ? sizeScale(pts, rMin, rMax, !!opts.channelInvert?.size) : null;
   const radius = (p: GeoPoint) => (scale ? scale.radiusOf(p.size) : Math.max(rMin, base));
   // Largest first so small markers stay visible on top.
   const drawn = scale ? [...pts].sort((a, b) => (Number.isFinite(b.size) ? b.size : -Infinity) - (Number.isFinite(a.size) ? a.size : -Infinity)) : pts;
   const markAlpha = mode === "bubbles" ? Math.min(alpha, 0.75) : alpha * (n > 1500 ? 0.8 : 1);
   const haloW = n > 4000 ? 0 : mode === "bubbles" ? 1 : 0.75;
+  const shapeMap = new Map<string, number>();
+  if (shapeI >= 0) {
+    for (const p of pts) {
+      const key = String(p.row[shapeI] ?? "");
+      if (!shapeMap.has(key)) shapeMap.set(key, shapeMap.size);
+    }
+  }
   for (const p of drawn) {
     const xy = projection([p.lon, p.lat]);
     if (!xy) continue;
-    drawDot(ctx, xy[0], xy[1], radius(p), pointColor(colors, p), markAlpha, ink.halo, haloW);
+    const shapeKey = shapeI >= 0 ? String(p.row[shapeI] ?? "") : "";
+    const shape = shapeI >= 0 ? categoryShape(shapeMap.get(shapeKey)!) : (opts.markShape ?? "circle");
+    const glyph =
+      n <= 1200
+        ? emojiI >= 0
+          ? firstGrapheme(p.row[emojiI])
+          : opts.markerMode === "emoji"
+            ? firstGrapheme(opts.markEmoji)
+            : null
+        : null;
+    drawGeoMarker(ctx, xy[0], xy[1], radius(p), pointColor(colors, p), markAlpha, ink.halo, haloW, shape, glyph);
   }
   if (showKey && scale) {
     const { side, bottom } = mapInsets(pad);
@@ -625,7 +694,7 @@ function renderProjectedPoints(
       radiusOf: scale.radiusOf,
       title: sizeField ?? undefined,
       ink,
-      fontFamily: font,
+      axisFontSize: opts.axisFontSize, fontFamily: font,
       fill: colorI >= 0 ? ink.muted : colors[0],
       maxWidth: w - 2 * side,
     });
@@ -719,16 +788,18 @@ function renderGlobeLike(
   paintBackground(ctx, w, h, ink);
   const { lonI, latI } = resolveLonLat(columns, xField, yField);
   if (lonI < 0 || latI < 0) {
-    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const sizeI = sizeField ? columns.indexOf(sizeField) : -1;
+  const shapeI = opts.shapeField ? columns.indexOf(opts.shapeField) : -1;
+  const emojiI = opts.emojiField ? columns.indexOf(opts.emojiField) : -1;
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
   const atlas = opts.atlas ?? peekWorldAtlas();
   if (!atlas) {
-    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
@@ -743,7 +814,7 @@ function renderGlobeLike(
   const rMin = Math.max(mini ? 1.6 : 2.2, base * 0.7);
   const scale = sizeI >= 0 ? sizeScale(pts, rMin, Math.max(rMin * 2, base * 2.6)) : null;
   const showKey = !mini && !!scale;
-  const frame = globeFrame(w, h, pad, zoom, showKey ? MAP_KEY_H : 0);
+  const frame = globeFrame(w, h, pad, zoom, showKey ? mapKeyHeight(opts.axisFontSize) : 0);
   const { cx, cy, R } = frame;
 
   // Ocean disc + rim
@@ -764,9 +835,30 @@ function renderGlobeLike(
 
   const radius = (p: GeoPoint) => (scale ? scale.radiusOf(p.size) : Math.max(rMin, base));
   const alpha = opts.opacity ?? 0.85;
+  const shapeMap = new Map<string, number>();
+  if (shapeI >= 0) {
+    for (const p of pts) {
+      const key = String(p.row[shapeI] ?? "");
+      if (!shapeMap.has(key)) shapeMap.set(key, shapeMap.size);
+    }
+  }
+  const markerFor = (p: GeoPoint): { shape: string; glyph: string | null } => {
+    const key = shapeI >= 0 ? String(p.row[shapeI] ?? "") : "";
+    return {
+      shape: shapeI >= 0 ? categoryShape(shapeMap.get(key)!) : (opts.markShape ?? "circle"),
+      glyph:
+        pts.length <= 1200
+          ? emojiI >= 0
+            ? firstGrapheme(p.row[emojiI])
+            : opts.markerMode === "emoji"
+              ? firstGrapheme(opts.markEmoji)
+              : null
+          : null,
+    };
+  };
 
   if (pts.length === 0) {
-    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini, opts.axisFontSize);
   } else if (trails && pts.length >= 2) {
     const projected = pts.map((p) => ({ ...p, ...lonLatToSphere(p.lon, p.lat, yaw, pitch, frame) }));
     // Each color group is its own path in row order (time order upstream).
@@ -792,7 +884,10 @@ function renderGlobeLike(
         ctx.stroke();
       }
       const tip = list[list.length - 1];
-      if (tip?.visible) drawDot(ctx, tip.sx, tip.sy, Math.max(rMin, radius(tip) * 1.3), col, Math.min(1, alpha + 0.1), ink.halo, 1);
+      if (tip?.visible) {
+        const marker = markerFor(tip);
+        drawGeoMarker(ctx, tip.sx, tip.sy, Math.max(rMin, radius(tip) * 1.3), col, Math.min(1, alpha + 0.1), ink.halo, 1, marker.shape, marker.glyph);
+      }
     }
   } else {
     const drawn = pts
@@ -801,7 +896,8 @@ function renderGlobeLike(
       .sort((a, b) => a.depth - b.depth);
     const haloW = drawn.length > 4000 ? 0 : 0.75;
     for (const p of drawn) {
-      drawDot(ctx, p.sx, p.sy, radius(p), pointColor(colors, p), alpha * (0.55 + 0.45 * p.depth), ink.halo, haloW);
+      const marker = markerFor(p);
+      drawGeoMarker(ctx, p.sx, p.sy, radius(p), pointColor(colors, p), alpha * (0.55 + 0.45 * p.depth), ink.halo, haloW, marker.shape, marker.glyph);
     }
   }
 
@@ -815,7 +911,7 @@ function renderGlobeLike(
       radiusOf: scale.radiusOf,
       title: sizeField ?? undefined,
       ink,
-      fontFamily: font,
+      axisFontSize: opts.axisFontSize, fontFamily: font,
       fill: colorI >= 0 ? ink.muted : colors[0],
       maxWidth: w - 2 * side,
     });
@@ -842,7 +938,7 @@ function renderArcMap(
   paintBackground(ctx, w, h, ink);
   const { lonI, latI } = resolveLonLat(columns, xField, yField);
   if (lonI < 0 || latI < 0) {
-    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "Need latitude + longitude columns", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
@@ -851,7 +947,7 @@ function renderArcMap(
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
   const atlas = opts.atlas ?? peekWorldAtlas();
   if (!atlas) {
-    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, mini ? "…" : "Loading map…", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
@@ -860,7 +956,7 @@ function renderArcMap(
   drawBasemap(ctx, path, atlas, ink, !mini && !regional);
   if (regional) drawRegionalDetail(ctx, path, regional, ink);
   if (pts.length === 0) {
-    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }

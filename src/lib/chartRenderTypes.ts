@@ -33,11 +33,17 @@ export interface ChartRenderOpts {
   tickRotation?: number;
   axisFontSize?: number;
   markShape?: string;
+  markerMode?: "shape" | "emoji";
+  markEmoji?: string;
+  shapeField?: string | null;
+  emojiField?: string | null;
   markStroke?: boolean;
   markStrokeWidth?: number;
   markStrokeColor?: string;
   markJitter?: number;
   sizeScale?: number;
+  /** High values draw as the low end of the named channels. */
+  channelInvert?: import("./channelInvert").ChannelInvert;
   barCornerRadius?: number;
   lineStrokeStyle?: string;
   lineCurveSmooth?: boolean;
@@ -50,6 +56,7 @@ export interface ChartRenderOpts {
   axisLabelColor?: string;
   showGrid?: boolean;
   chartPadding?: number;
+  spaceUse?: "auto" | "fill" | "roomy";
   rowSourceIndices?: number[];
   legendPosition?: string;
   showDataLabels?: boolean;
@@ -85,9 +92,12 @@ export interface ChartRenderOpts {
   anomalyHighlight?: boolean | null;
   layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
   bumpMode?: "rank" | "delta" | null;
+  pyramidScaleMode?: "auto" | "shared" | "independent" | null;
+  /** Dual-measure delta ink: off / signed diff / percent. */
+  deltaDisplay?: "off" | "diff" | "pct" | null;
   hits?: HitTarget[];
   fieldNames?: string[];
-  legend?: { label: string; color: string }[] | null;
+  legend?: { label: string; color: string; shape?: string; glyph?: string }[] | null;
   scales?: { x?: (v: number) => number; y?: (v: number) => number; valueAxis?: "x" | "y"; rect: PlotRect } | null;
   connectTrail?: boolean;
   showMarginals?: boolean;

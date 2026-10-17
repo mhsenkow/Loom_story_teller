@@ -236,7 +236,7 @@ const AGG_LABEL: Record<string, string> = {
 export function formatChartAggregationSummary(chart: ChartRecommendation): string {
   const kindsWithAgg = new Set([
     "bar", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble",
-    "funnel", "dumbbell",
+    "funnel", "dumbbell", "pyramid",
   ]);
   if (!kindsWithAgg.has(chart.kind)) {
     if (chart.kind === "histogram") return "Y axis: count per bin";
@@ -255,6 +255,15 @@ export function formatChartAggregationSummary(chart: ChartRecommendation): strin
   const label = AGG_LABEL[agg] ?? agg;
   if (chart.kind === "dumbbell" && chart.sizeField) {
     return `${label} of ${chart.yField} → ${chart.sizeField}`;
+  }
+  if (chart.kind === "pyramid" && chart.sizeField) {
+    const scale =
+      chart.pyramidScaleMode === "shared"
+        ? "same scale"
+        : chart.pyramidScaleMode === "independent"
+          ? "separate scales"
+          : "auto scale";
+    return `${label} of ${chart.yField} ↔ ${chart.sizeField} · ${scale}`;
   }
   if (!chart.yField) return `${label} of rows per category`;
   return `${label} of ${chart.yField}`;
@@ -285,7 +294,13 @@ export interface ChartCapabilities {
   topN: boolean;
   /** Second Y measure overlay (line / area). */
   compareY: boolean;
+  /** Overlay earlier half of ordered X (line / area / bar). */
+  comparePrevious: boolean;
+  /** Dual-measure Δ / % labels (dumbbell, slope, pyramid). */
+  deltaDisplay: boolean;
   markPoints: boolean;
+  /** Per-row category shapes or emoji glyphs. */
+  symbolChannel: boolean;
   opacityChannel: boolean;
   glowOutline: boolean;
   markMotif: boolean;
@@ -318,6 +333,8 @@ export interface ChartCapabilities {
   anomalyHighlight: boolean;
   /** Bump chart Δrank vs absolute rank. */
   bumpMode: boolean;
+  /** Mirror pyramid: same scale vs separate scales vs auto. */
+  pyramidScaleMode: boolean;
 }
 
 export type EncodingPanelHintLevel = "info" | "warn" | "error";
@@ -550,6 +567,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
   const cartesian = !NON_CARTESIAN.has(kind);
   const scatterLike = kind === "scatter";
   const bubbleLike = kind === "bubble";
+  const mapPoints = kind === "geoPoints" || kind === "geoBubbles" || kind === "globe" || kind === "globeTrail";
   const odd = isOddChartKind(kind);
   const gpu = isGpuSceneKind(kind);
   return {
@@ -584,13 +602,15 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       kind === "globe" ||
       kind === "globeTrail" ||
       (gpu && kind !== "quakeTerrain"),
-    aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind),
+    aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid"].includes(kind),
     facetRow: kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble",
     // Only kinds whose canvas path actually ranks/caps categories (see ChartView / oddCharts).
-    topN: kind === "bar" || kind === "pareto" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle" || kind === "isotype" || kind === "radialBar" || kind === "isoBars",
+    topN: kind === "bar" || kind === "pareto" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle" || kind === "isotype" || kind === "radialBar" || kind === "isoBars" || kind === "pyramid",
     compareY: kind === "line" || kind === "area",
-    // Visual mark shape / jitter / glow — only scatter's canvas mark pipeline
-    markPoints: scatterLike,
+    comparePrevious: kind === "line" || kind === "area" || kind === "bar",
+    deltaDisplay: kind === "dumbbell" || kind === "slope" || kind === "pyramid",
+    markPoints: scatterLike || mapPoints,
+    symbolChannel: scatterLike || mapPoints,
     // Per-row opacity encoding (not global opacity slider)
     opacityChannel: scatterLike || kind === "strip",
     // Per-row glow / outline fields
@@ -601,7 +621,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     // lineStrokeStyle / smooth / width — line + area canvas only
     lineMarks: kind === "line" || kind === "area",
     // Kinds that check opts.showDataLabels (or odd env.opts.showDataLabels)
-    dataLabels: ["bar", "pareto", "pie", "lollipop", "radialBar", "pyramid", "isoBars", "corrMatrix"].includes(kind),
+    dataLabels: ["bar", "pareto", "pie", "lollipop", "radialBar", "pyramid", "isoBars", "corrMatrix", "dumbbell", "slope"].includes(kind),
     legend: (cartesian && !["histogram", "heatmap", "hexbin", "corrMatrix"].includes(kind)) || (isGeoMapKind(kind) && kind !== "geoHex") || kind === "radar" || kind === "pie" || kind === "sankey" || kind === "network" || kind === "arcDiagram" || kind === "parallel" || kind === "funnel" || kind === "pareto" || odd || gpu,
     // Reference lines need ropts.scales from the main cartesian path — not odd/GPU/geo
     referenceLines: cartesian && !odd && !["heatmap", "hexbin", "box", "violin", "ridgeline", "contour", "voronoi", "corrMatrix"].includes(kind) && !gpu,
@@ -624,6 +644,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     residualOverlay: scatterLike,
     anomalyHighlight: scatterLike || kind === "line" || kind === "area",
     bumpMode: kind === "bump",
+    pyramidScaleMode: kind === "pyramid",
   };
 }
 
@@ -754,11 +775,11 @@ export function encodingKindBlurb(kind: ChartKind): string | null {
     case "mosaic":
       return "Source → Target flow; Weight sizes the links. Pick two categorical columns plus a measure.";
     case "dumbbell":
-      return "Start and End are two numeric measures on the same category — Size is the end measure.";
+      return "Start and End are two numeric measures on the same category — Size is the end measure. Delta shows the signed change or % on each row.";
     case "pyramid":
-      return "Left and Right are opposing measures (e.g. male/female). Size carries the right-hand measure.";
+      return "Left and Right are opposing measures (e.g. male/female or cases/deaths). Scale picks same vs separate arm domains; Delta annotates Right−Left.";
     case "slope":
-      return "Start and End are two timepoints or states for each category. Size is the end measure.";
+      return "Start and End are two timepoints or states for each category. Size is the end measure. Delta labels the rise or fall.";
     case "heatmap":
       return "Column × Row cells; Heat colors by a third measure (or count when unset).";
     case "hexbin":

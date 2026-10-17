@@ -39,7 +39,7 @@ export function valueTitle(opts: ChartRenderOpts | undefined, yi: number, fallba
   return aggregateAxisTitle(agg, yi >= 0 ? fieldLabel(opts, yi) : null);
 }
 
-export function setLegend(opts: ChartRenderOpts | undefined, entries: { label: string; color: string }[]) {
+export function setLegend(opts: ChartRenderOpts | undefined, entries: { label: string; color: string; shape?: string; glyph?: string }[]) {
   if (opts) opts.legend = entries;
 }
 

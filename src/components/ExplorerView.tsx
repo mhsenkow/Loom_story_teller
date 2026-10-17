@@ -182,6 +182,8 @@ export function ExplorerView() {
     if (activeChart.yField) map.set(activeChart.yField, labels.y);
     if (activeChart.colorField) map.set(activeChart.colorField, labels.color);
     if (activeChart.sizeField) map.set(activeChart.sizeField, labels.size);
+    if (activeChart.shapeField) map.set(activeChart.shapeField, "Shape");
+    if (activeChart.emojiField) map.set(activeChart.emojiField, "Emoji");
     return map;
   }, [activeChart]);
   const [displayOpen, setDisplayOpen] = useState(false);
@@ -254,7 +256,12 @@ export function ExplorerView() {
   const allColumns = sampleRows?.columns ?? [];
   const types = sampleRows?.types;
   const rawRows = sampleRows?.rows ?? [];
-  const totalRowCount = selectedFile?.row_count ?? 0;
+  // Prefer live sample total — mount may leave FileEntry.row_count at 0 until patched.
+  const totalRowCount = Math.max(
+    selectedFile?.row_count ?? 0,
+    sampleRows?.total_rows ?? 0,
+    rawRows.length,
+  );
 
   const columns = useMemo(
     () => applyVisibleColumnOrder(allColumns, tablePrefs.visibleColumns, tablePrefs.columnOrder),

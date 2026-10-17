@@ -139,6 +139,8 @@ export function PreviewFooter() {
       glowField: activeChart.glowField ?? null,
       outlineField: activeChart.outlineField ?? null,
       opacityField: activeChart.opacityField ?? null,
+      shapeField: activeChart.shapeField ?? null,
+      emojiField: activeChart.emojiField ?? null,
       yAggregate: activeChart.yAggregate ?? null,
       topN: activeChart.topN ?? null,
       y2Field: activeChart.y2Field ?? null,

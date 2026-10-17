@@ -22,4 +22,10 @@ describe("canUseWebGpuScatter", () => {
   it("disables during capture", () => {
     expect(canUseWebGpuScatter({ ...base, forceCanvasCapture: true })).toBe(false);
   });
+
+  it("disables for static emoji and per-row marker encodings", () => {
+    expect(canUseWebGpuScatter({ ...base, overrides: { markerMode: "emoji" } })).toBe(false);
+    expect(canUseWebGpuScatter({ ...base, chart: { ...base.chart, shapeField: "group" } })).toBe(false);
+    expect(canUseWebGpuScatter({ ...base, chart: { ...base.chart, emojiField: "mood" } })).toBe(false);
+  });
 });

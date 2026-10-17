@@ -52,6 +52,8 @@ export function chartEncodedColumnNames(chart: ChartLink | null | undefined): st
     c.glowField,
     c.outlineField,
     c.opacityField,
+    c.shapeField,
+    c.emojiField,
     c.y2Field,
     c.timeWindowField,
     c.tooltipKeyField,

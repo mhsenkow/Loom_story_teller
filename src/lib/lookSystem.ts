@@ -631,20 +631,20 @@ const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]>
     "emphasisStyle", "backgroundStyle",
   ],
   marks: [
-    "pointSize", "sizeScale", "markShape", "markStroke", "markStrokeWidth",
+    "pointSize", "sizeScale", "markShape", "markerMode", "markEmoji", "markStroke", "markStrokeWidth",
     "markStrokeColor", "markJitter", "barCornerRadius", "lineStrokeStyle",
     "lineCurveSmooth", "lineWidth", "showDataLabels",
   ],
   axes: [
     "showGrid", "gridStyle", "gridOpacity", "axisLineColor", "axisLineWidth",
-    "axisLabelColor", "tickCount", "tickRotation", "axisFontSize", "chartPadding",
+    "axisLabelColor", "tickCount", "tickRotation", "chartPadding", "spaceUse",
     "legendPosition", "legendOffsetX", "legendOffsetY",
   ],
   atmosphere: [
     "blendMode", "glowEnabled", "glowIntensity", "animateEntrance",
     "ghostEnabled", "ghostWeight", "ghostPlace",
   ],
-  type: ["fontFamily", "titleFontWeight", "titleItalic"],
+  type: ["fontFamily", "axisFontSize", "titleFontWeight", "titleItalic"],
 };
 
 export const CHART_VISUAL_OVERRIDE_KEYS: (keyof ChartVisualOverrides)[] = (

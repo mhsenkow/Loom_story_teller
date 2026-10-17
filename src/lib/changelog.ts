@@ -25,6 +25,270 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-16i",
+    date: "2026-10-16",
+    title: "Give every point a shape or a face",
+    summary: "Scatterplots and point maps can speak with silhouettes, category shapes, and emoji.",
+    items: [
+      {
+        title: "A broader marker palette",
+        detail: "Choose circles, pills, dashes, polygons, rings, pins, and more from a visual grid — or use a curated emoji for every point.",
+      },
+      {
+        title: "Shape and emoji from data",
+        detail: "Shape by category cycles groups through readable silhouettes. Emoji from column draws each row’s first complete symbol, with matching legends and shared-link support.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-16h",
+    date: "2026-10-16",
+    title: "Flip a channel, and a quieter Encoding header",
+    summary: "A large number can draw as a small mark. Chart type gets the full width of the panel.",
+    items: [
+      {
+        title: "High can mean small",
+        detail: "On Size, Color, Depth, Glow, Outline, and Opacity, ↕ flips the direction. A large value draws small, or takes the low end of the color ramp.",
+      },
+      {
+        title: "Chart type on its own row",
+        detail: "The type menu spans the panel. Shuffle and Random sit underneath. A small lock marks the channels that stay put while you shuffle.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-16g",
+    date: "2026-10-16",
+    title: "The preview is the chart",
+    summary: "A shared link carries a large picture that Threads, LinkedIn, Slack, iMessage, and the rest can show.",
+    items: [
+      {
+        title: "One picture, every network",
+        detail: "The chart fills the card. Share again so the new link can unfurl with that picture.",
+      },
+      {
+        title: "Every US state, year by year",
+        detail: "New in Data & sources → United States: population, income, poverty, education, and unemployment for all 50 states, DC, and Puerto Rico since 2012, plus the US economy month by month since 1990 — unemployment, inflation, jobs, rates, housing starts, and gas prices. Both come from federal statistics via USAFacts and open on a state map or a trend line.",
+      },
+      {
+        title: "Love, save, or hide a source",
+        detail: "Tap ♡ on a feed or pack to see more of it in Discover, the sidebar, and search. Save it with the bookmark, or use ⋯ for Less like this and Hide. Data & sources now has search, Topic / Where / Freshness filters, and a Saved group. Manage them all in Settings → Your sources.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-16f",
+    date: "2026-10-16",
+    title: "Share links name the chart",
+    summary: "A shared chart lives at loom.ibm.io/plot/your-title/… so the address says what it is.",
+    items: [
+      {
+        title: "A plot, not a code",
+        detail: "New links look like loom.ibm.io/plot/correlation-matrix/…. Share again to get one. Older /s/ links still open.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-16e",
+    date: "2026-10-16",
+    title: "The story page is the chart",
+    summary: "A shared link shows the same chart image, and Threads can read that picture for the preview.",
+    items: [
+      {
+        title: "The picture you shared",
+        detail: "The public page is the chart from Share, not a redraw. Share again to replace an older link.",
+      },
+      {
+        title: "Preview without a Facebook app",
+        detail: "Threads and Facebook read the public chart image. No developer account is required. Share again so the new link can unfurl.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-16c",
+    date: "2026-10-16",
+    title: "Share keeps the chart you see",
+    summary: "Share uses the chart on screen, then one button opens Instagram, Facebook, LinkedIn, Threads, or email.",
+    items: [
+      {
+        title: "Same chart, not a new crop",
+        detail: "The preview is the chart you already have open. Square, Story, and Wide sizes stay under Other sizes.",
+      },
+      {
+        title: "One Share button",
+        detail: "Share lists Instagram, Facebook, LinkedIn, Threads, and email. Copy caption sits in the corner of the image.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-16b",
+    date: "2026-10-16",
+    title: "Chart hover stays on the chart",
+    summary: "Hovering an axis, title, or legend outlines it. The side panel opens and highlights the matching control only when you click.",
+    items: [
+      {
+        title: "Click to open, hover to preview",
+        detail: "A closed panel stays closed while you move across the chart. Click the outlined region to open Encoding and jump to that control. If the panel is already open, the click is what rings and scrolls it.",
+      },
+      {
+        title: "LinkedIn, Threads, and Instagram from the link",
+        detail: "After Share or Get link, the result offers LinkedIn (chart card plus a caption to paste), Threads (caption and link), and Instagram (the image). On iPad, LinkedIn and Threads open in Safari and Instagram uses the share sheet. On Mac, saving the image also publishes the link, then LinkedIn and Threads open in your browser and Instagram puts the PNG in Finder.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-16a",
+    date: "2026-10-16",
+    title: "Type that follows your chart",
+    summary: "Readable labels, thoughtful font choices, and consistent typography from chart to export.",
+    items: [
+      {
+        title: "More room for your chart",
+        detail: "Auto width uses the whole center panel, and plots leave only the space their labels need on each side. Visual → Layout adds Auto, Fill, and Roomy space choices that stay distinct on phones. Fixed device previews and manual arrangements stay available; Restore automatic sizing brings a shrunken canvas back to fit.",
+      },
+      {
+        title: "Labels that hold together",
+        detail: "Long labels wrap without splitting emoji or accented characters. Cube tables and pinned values follow your chart’s type, with clearer headers and shaded-cell contrast. Phone What’s interesting titles stay at least 12px. Correlation and heatmap numbers keep the chart type size or stay off the cell. Readouts stay inside the screen, the live type sample reflects your title styling, and floating tools stay clear of the phone editor.",
+      },
+      {
+        title: "One place to tune your chart’s type",
+        detail: "Visual → Typography now groups font family, chart text size, title weight, and italics with a live sample. All chart families follow the selected font and size, including map keys, 3D labels, tooltips, notes, and exports. Choose App typeface to follow Settings.",
+      },
+      {
+        title: "Clearer at every size",
+        detail: "Chart labels have a readable minimum, larger text stays large on phones, and crowded charts space or skip labels instead of shrinking them. Stronger contrast, full correlation headers, and wrapping field names make the panels easier to read. Settings groups sans, serif, and monospace choices, with device fallbacks or optional font downloads.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15j",
+    date: "2026-10-15",
+    title: "Find your next story",
+    summary: "Daily picks, instant reopening, and a richer chart gallery that fits your phone.",
+    items: [
+      {
+        title: "Your place, your perspective",
+        detail: "Back to stories restores your filters, layout, and scroll position. Related charts share one card with a perspective picker, and technical field names read more naturally. Each card shows its own check age; due feeds refresh quietly, with updates ready when you choose to show them.",
+      },
+      {
+        title: "Fresh each day, quick every time",
+        detail: "Saved picks reopen without another scan. Loom refreshes them in the background on a new day while the app is open, keeps older picks usable during the update, and reconnects a selected feed after its chart is already on screen. Refresh is always available when you want it.",
+      },
+      {
+        title: "More ideas on your phone",
+        detail: "Compact previews and smaller type fit three columns on wider phones, with two on narrow screens. Filters stay tucked away until you need them.",
+      },
+      {
+        title: "More perspectives, less hunting",
+        detail: "Switch between Flow, square Tiles, Masonry, and List. Larger stories continue down the Flow layout, and more ideas load automatically as you approach the bottom. A smaller toolbar leaves more room for charts; search by topic, source, chart, or setting, and filter for comparisons, time windows, small multiples, and trends.",
+      },
+      {
+        title: "Know what you’re opening",
+        detail: "Cards show their row coverage and observation dates. Opening a chart preserves its previewed snapshot and settings; Source & data takes you to its provenance. Comparisons with different units use separate scales without a misleading difference label.",
+      },
+      {
+        title: "Previews that stay true to the data",
+        detail: "Fresh snapshots keep their own thumbnail data. Counts, averages, scales, and mirror settings now carry through to previews more faithfully.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15i",
+    date: "2026-10-15",
+    title: "More compare charts in What’s interesting",
+    summary: "World Bank, countries, crypto, air quality, HN, and weather now lead with mirror / dumbbell / slope — and short lists reserve half the slots for them.",
+    items: [
+      {
+        title: "Curated dual-measure stories",
+        detail: "Feeds with two numeric measures get ready-made pyramid, dumbbell, and slope cards with Δ labels — not just COVID.",
+      },
+      {
+        title: "Discover ranks compares higher",
+        detail: "Alt cards prefer those kinds after the primary hook, with a score bump so they don’t sink under bars and maps. Missing fills pick a stable category + measure pair instead of a random shuffle.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15h",
+    date: "2026-10-15",
+    title: "What’s interesting shows compare charts",
+    summary: "Mirror pyramids, dumbbells, slopes, and Δ variants stay in the discover rail — even on phone’s shorter list.",
+    items: [
+      {
+        title: "Complex compares aren’t truncated away",
+        detail: "Discover keeps one of each priority compare kind (pyramid, dumbbell, slope, bump, Pareto, …) in the first cards per feed, and phones get eight variants per source instead of six.",
+      },
+      {
+        title: "Scale and Δ ideas in the rail",
+        detail: "Suggestion expand adds same-scale / separate-scale pyramid copies and Δ / % labels on slope and dumbbell, and promotes dual-measure bars into those chart types when the schema fits.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15g",
+    date: "2026-10-15",
+    title: "Delta compare across charts",
+    summary: "Show Δ or % change on dumbbell, slope, and pyramid — and earlier-half overlays now work on bars too.",
+    items: [
+      {
+        title: "Delta on dual-measure charts",
+        detail: "Encoding → Delta adds signed change (Δ) or percent on dumbbell, slope, and mirror pyramid so Start→End / Left→Right isn’t only in the tooltip.",
+      },
+      {
+        title: "Earlier-half overlay on bars",
+        detail: "Ordered bar charts can ghost the first half of categories onto the later half — the same compare pattern line and area already had.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15f",
+    date: "2026-10-15",
+    title: "Mirror pyramid scales you can trust",
+    summary: "Same scale, separate scales, or Auto — plus Top N, aggregate, and swap for opposing-bar charts.",
+    items: [
+      {
+        title: "Same vs separate scales",
+        detail: "Mirror pyramid Encoding now has Scale: Auto (separate when magnitudes diverge ~5×), Same (comparable bar lengths), or Separate (each arm keeps its own domain). The chart labels which mode is active.",
+      },
+      {
+        title: "Top N, aggregate, swap",
+        detail: "Cap categories, sum/mean/min/max across rows (handy when Category is continent), and Swap Left ↔ Right. Hover hits land on the bars, not a fake scatter.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15e",
+    date: "2026-10-15",
+    title: "Sharper charts on every screen",
+    summary: "Retina and phone stages stay crisp without melting the GPU; dense scatters paint leaner on phones.",
+    items: [
+      {
+        title: "Pixel-perfect chart stage",
+        detail: "Charts cap on-screen pixel density and size the canvas from the browser’s device-pixel box, so iPhone 3× and big iPads stay sharp without huge buffers. Exports still use the full capture resolution.",
+      },
+      {
+        title: "Phone density that keeps up",
+        detail: "Dense scatter / bubble / hexbin ideas draw fewer points on phones for steadier touch FPS, with a compact status strip and safer idea-rail swipe scrolling.",
+      },
+      {
+        title: "Gatekeeper stays quiet",
+        detail: "Desktop Loom still refuses unsigned DuckDB extension downloads. Opening Parquet/JSON/Excel without helpers now explains the CSV workaround instead of a raw engine error.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-15d",
+    date: "2026-10-15",
+    title: "No more macOS “extension Not Opened” alerts",
+    summary: "Desktop Loom no longer downloads unsigned DuckDB extensions that Gatekeeper blocks.",
+    items: [
+      {
+        title: "Gatekeeper stays quiet",
+        detail: "On launch we used to auto-install parquet/json/excel helpers into ~/.duckdb. Those binaries aren’t Apple-signed, so macOS showed “Not Opened” dialogs. Loom now refuses that download path; CSV keeps working, and we’ll ship signed helpers later for Parquet/JSON/Excel.",
+      },
+    ],
+  },
+  {
     id: "2026-10-15c",
     date: "2026-10-15",
     title: "Data chip on What’s interesting",

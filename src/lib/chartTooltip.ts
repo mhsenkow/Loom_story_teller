@@ -272,6 +272,8 @@ export function resolveTooltipFieldNames(chart: ChartRecommendation, allColumns:
   push(chart.glowField);
   push(chart.outlineField);
   push(chart.opacityField);
+  push(chart.shapeField);
+  push(chart.emojiField);
   return names.length > 0 ? names : [...allColumns].slice(0, 8);
 }
 

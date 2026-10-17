@@ -20,6 +20,7 @@ import {
 import { CHART_ASPECTS, type ChartAspectId, type ChartDeviceId } from "./chartViewport";
 import type { AppSettings, ChartVisualOverrides, ColumnInfo, FileEntry } from "./store";
 import { sanitizeChartVisualOverrides } from "./chartVisualSanitize";
+import { packChannelInvert, unpackChannelInvert } from "./channelInvert";
 
 export const CHART_LINK_VERSION = 1;
 
@@ -40,6 +41,8 @@ export interface ChartLinkChart {
   glowField?: string;
   outlineField?: string;
   opacityField?: string;
+  shapeField?: string;
+  emojiField?: string;
   yAggregate?: YAggregateOption;
   topN?: number;
   y2Field?: string;
@@ -50,12 +53,16 @@ export interface ChartLinkChart {
   residualOverlay?: boolean;
   anomalyHighlight?: boolean;
   bumpMode?: "rank" | "delta";
+  pyramidScaleMode?: "auto" | "shared" | "independent";
+  deltaDisplay?: "diff" | "pct";
   timeWindowField?: string;
   timeWindow?: "all" | "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y";
   tooltipFields?: string[];
   tooltipKeyField?: string;
   /** Measure grows up / down / left / right (omit = auto). */
   layoutDirection?: "up" | "down" | "right" | "left";
+  /** Packed invert flags (`s` size, `c` color, `o` opacity, `g` glow, `l` outline, `z` depth). */
+  channelInvert?: string;
   /** The recommendation's own title / subtitle (story recs carry hand-written ones). */
   title?: string;
   subtitle?: string;
@@ -153,6 +160,8 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     glowField: str(rec.glowField),
     outlineField: str(rec.outlineField),
     opacityField: str(rec.opacityField),
+    shapeField: str(rec.shapeField),
+    emojiField: str(rec.emojiField),
     yAggregate: rec.yAggregate ?? undefined,
     topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
     y2Field: str(rec.y2Field),
@@ -163,6 +172,13 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     residualOverlay: rec.residualOverlay || undefined,
     anomalyHighlight: rec.anomalyHighlight || undefined,
     bumpMode: rec.bumpMode === "delta" || rec.bumpMode === "rank" ? rec.bumpMode : undefined,
+    pyramidScaleMode:
+      rec.pyramidScaleMode === "shared" ||
+      rec.pyramidScaleMode === "independent" ||
+      rec.pyramidScaleMode === "auto"
+        ? rec.pyramidScaleMode
+        : undefined,
+    deltaDisplay: rec.deltaDisplay === "diff" || rec.deltaDisplay === "pct" ? rec.deltaDisplay : undefined,
     timeWindowField: str(rec.timeWindowField),
     timeWindow: rec.timeWindow && rec.timeWindow !== "all" ? rec.timeWindow : undefined,
     tooltipFields: rec.tooltipFields?.length ? [...rec.tooltipFields] : undefined,
@@ -174,6 +190,7 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
       rec.layoutDirection === "left"
         ? rec.layoutDirection
         : undefined,
+    channelInvert: packChannelInvert(rec.channelInvert),
     title: str(rec.title),
     subtitle: str(rec.subtitle),
   };
@@ -210,6 +227,8 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["glowField", "g"],
   ["outlineField", "o"],
   ["opacityField", "op"],
+  ["shapeField", "sh"],
+  ["emojiField", "em"],
   ["yAggregate", "a"],
   ["topN", "tn"],
   ["y2Field", "y2"],
@@ -220,11 +239,14 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["residualOverlay", "ro"],
   ["anomalyHighlight", "ah"],
   ["bumpMode", "bm"],
+  ["pyramidScaleMode", "ps"],
+  ["deltaDisplay", "dd"],
   ["timeWindowField", "twf"],
   ["timeWindow", "tw"],
   ["tooltipFields", "tf"],
   ["tooltipKeyField", "tk"],
   ["layoutDirection", "ld"],
+  ["channelInvert", "inv"],
   ["title", "ti"],
   ["subtitle", "st"],
 ];
@@ -304,6 +326,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
       f === "residualOverlay" ||
       f === "anomalyHighlight" ||
       f === "bumpMode" ||
+      f === "pyramidScaleMode" ||
+      f === "deltaDisplay" ||
       f === "timeWindow" ||
       f === "layoutDirection"
     ) {
@@ -321,6 +345,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
   if (cr.ro === true) chart.residualOverlay = true;
   if (cr.ah === true) chart.anomalyHighlight = true;
   if (cr.bm === "delta" || cr.bm === "rank") chart.bumpMode = cr.bm;
+  if (cr.ps === "shared" || cr.ps === "independent" || cr.ps === "auto") chart.pyramidScaleMode = cr.ps;
+  if (cr.dd === "diff" || cr.dd === "pct") chart.deltaDisplay = cr.dd;
   if (typeof cr.tw === "string" && TIME_WINDOWS.has(cr.tw) && cr.tw !== "all") {
     chart.timeWindow = cr.tw as ChartLinkChart["timeWindow"];
   }
@@ -365,6 +391,8 @@ const ENCODING_FIELDS = [
   "glowField",
   "outlineField",
   "opacityField",
+  "shapeField",
+  "emojiField",
   "y2Field",
   "timeWindowField",
 ] as const;
@@ -405,6 +433,8 @@ export function restoreChartRec(
       glowField: c.glowField ?? null,
       outlineField: c.outlineField ?? null,
       opacityField: c.opacityField ?? null,
+      shapeField: c.shapeField ?? null,
+      emojiField: c.emojiField ?? null,
       yAggregate: c.yAggregate ?? null,
       topN: c.topN ?? null,
       y2Field: c.y2Field ?? null,
@@ -415,6 +445,8 @@ export function restoreChartRec(
       residualOverlay: c.residualOverlay ?? null,
       anomalyHighlight: c.anomalyHighlight ?? null,
       bumpMode: c.bumpMode ?? null,
+      pyramidScaleMode: c.pyramidScaleMode ?? null,
+      deltaDisplay: c.deltaDisplay ?? null,
       timeWindowField: c.timeWindowField ?? null,
       timeWindow: c.timeWindow ?? null,
       tooltipFields: c.tooltipFields ?? null,
@@ -448,6 +480,8 @@ export function restoreChartRec(
   if (c.tooltipFields) out.tooltipFields = c.tooltipFields;
   if (c.tooltipKeyField) out.tooltipKeyField = c.tooltipKeyField;
   if (c.layoutDirection) out.layoutDirection = c.layoutDirection;
+  const inverted = unpackChannelInvert(c.channelInvert);
+  if (inverted) out.channelInvert = inverted;
   if (c.title) out.title = c.title;
   if (c.subtitle !== undefined) out.subtitle = c.subtitle;
   if (c.timeWindow) out.timeWindow = c.timeWindow;

@@ -7,63 +7,10 @@ import { drawChartGrid, drawChartTicks } from "../chartLooks";
 import { type ChartRenderOpts } from "../chartRenderTypes";
 import { refLineColor, smartOverlayPalette } from "../chartSmartOverlayStyle";
 import { type SmartResults } from "../store";
+import { drawMarkerPath } from "../chartMarks";
 
 export function drawShape(ctx: CanvasRenderingContext2D, shape: string, cx: number, cy: number, r: number) {
-  switch (shape) {
-    case "square":
-      ctx.rect(cx - r, cy - r, r * 2, r * 2);
-      break;
-    case "diamond":
-      ctx.moveTo(cx, cy - r * 1.3);
-      ctx.lineTo(cx + r, cy);
-      ctx.lineTo(cx, cy + r * 1.3);
-      ctx.lineTo(cx - r, cy);
-      ctx.closePath();
-      break;
-    case "triangle":
-      ctx.moveTo(cx, cy - r * 1.2);
-      ctx.lineTo(cx + r * 1.1, cy + r * 0.8);
-      ctx.lineTo(cx - r * 1.1, cy + r * 0.8);
-      ctx.closePath();
-      break;
-    case "cross": {
-      const a = r * 0.35;
-      ctx.moveTo(cx - a, cy - r); ctx.lineTo(cx + a, cy - r);
-      ctx.lineTo(cx + a, cy - a); ctx.lineTo(cx + r, cy - a);
-      ctx.lineTo(cx + r, cy + a); ctx.lineTo(cx + a, cy + a);
-      ctx.lineTo(cx + a, cy + r); ctx.lineTo(cx - a, cy + r);
-      ctx.lineTo(cx - a, cy + a); ctx.lineTo(cx - r, cy + a);
-      ctx.lineTo(cx - r, cy - a); ctx.lineTo(cx - a, cy - a);
-      ctx.closePath();
-      break;
-    }
-    case "star": {
-      for (let i = 0; i < 10; i++) {
-        const angle = (Math.PI / 5) * i - Math.PI / 2;
-        const rad = i % 2 === 0 ? r * 1.2 : r * 0.5;
-        const px = cx + Math.cos(angle) * rad;
-        const py = cy + Math.sin(angle) * rad;
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      break;
-    }
-    case "hexagon":
-      for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i - Math.PI / 2;
-        const px = cx + Math.cos(angle) * r;
-        const py = cy + Math.sin(angle) * r;
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
-      }
-      ctx.closePath();
-      break;
-    case "ring":
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      break;
-    default: // circle
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      break;
-  }
+  drawMarkerPath(ctx, shape, cx, cy, r);
 }
 
 export interface PointVisualOverrides {
@@ -121,6 +68,23 @@ export function drawMark(
     ctx.shadowColor = "transparent";
     ctx.shadowBlur = 0;
   }
+}
+
+export function drawEmojiMark(
+  ctx: CanvasRenderingContext2D,
+  glyph: string,
+  cx: number,
+  cy: number,
+  r: number,
+  alpha: number,
+): void {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.font = `${Math.max(8, r * 2.35)}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(glyph, cx, cy + r * 0.05);
+  ctx.restore();
 }
 
 // --- Jitter helper (deterministic per point index) ---

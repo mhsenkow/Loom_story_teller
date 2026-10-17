@@ -72,6 +72,21 @@ describe("shareLineage", () => {
     expect(snap?.rows[0]).toEqual([1, 2]);
   });
 
+  it("keeps shape and emoji encoding columns in shared snapshots", () => {
+    expect(
+      chartEncodedColumnNames({
+        src: "file:local.csv",
+        chart: {
+          kind: "scatter",
+          xField: "x",
+          yField: "y",
+          shapeField: "group",
+          emojiField: "mood",
+        },
+      }),
+    ).toEqual(["x", "y", "group", "mood"]);
+  });
+
   it("defaults include-data off for local files and on for streams", () => {
     expect(defaultIncludeShareData({ path: "/Users/me/secret.csv" })).toBe(false);
     expect(defaultIncludeShareData({ path: "web://upload/foo.csv" })).toBe(false);

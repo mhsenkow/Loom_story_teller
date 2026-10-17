@@ -16,8 +16,15 @@ describe("sanitizeChartVisualOverrides", () => {
   });
 
   it("rejects invalid enum values", () => {
-    const out = sanitizeChartVisualOverrides({ legendPosition: "center" as never, showGrid: true });
+    const out = sanitizeChartVisualOverrides({
+      legendPosition: "center" as never,
+      markerMode: "html" as never,
+      markEmoji: "<script>",
+      showGrid: true,
+    });
     expect(out?.legendPosition).toBeUndefined();
+    expect(out?.markerMode).toBeUndefined();
+    expect(out?.markEmoji).toBeUndefined();
     expect(out?.showGrid).toBe(true);
   });
 
@@ -31,6 +38,8 @@ describe("sanitizeChartVisualOverrides", () => {
       emphasisStyle: "alarm",
       backgroundStyle: "blueprint",
       markShape: "hexagon",
+      markerMode: "emoji",
+      markEmoji: "📍",
       gridStyle: "none",
       blendMode: "lighten",
       legendPosition: "right",

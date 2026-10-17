@@ -4,6 +4,10 @@
 
 import { fitTextEllipsis } from "./chartLayout";
 import type { ChartChromeLayout } from "./chartChromeLink";
+import { chartFont, chartTypeRamp } from "./chartType";
+import { drawMarkerPath } from "./chartMarks";
+
+export type ChartLegendEntry = { label: string; color: string; shape?: string; glyph?: string };
 
 export function roundedBox(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
   ctx.moveTo(x + r, y);
@@ -35,7 +39,7 @@ export function buildCategoricalLegendEntries(
 
 export function drawLegend(
   ctx: CanvasRenderingContext2D,
-  entries: { label: string; color: string }[],
+  entries: ChartLegendEntry[],
   position: string,
   w: number,
   h: number,
@@ -50,17 +54,19 @@ export function drawLegend(
   avoidCorners: readonly string[] = [],
   /** Normalized 0–1 placement when `position` is `custom` (share / drag). */
   offsets?: { x?: number; y?: number; width?: number; height?: number } | null,
+  axisFontSize?: number,
 ): ChartChromeLayout["legend"] {
   if (position === "none" || entries.length === 0) return null;
+  const type = chartTypeRamp(axisFontSize);
+  const lineH = type.legend + 8;
   const plot = typeof pad === "number" ? { left: pad, top: pad, right: w - pad, bottom: h - pad } : pad;
   const availableH = Math.min(h - 8, Math.max(64, plot.bottom - plot.top));
   const requestedH = Math.min(availableH, offsets?.height == null ? 232 : Math.max(64, offsets.height * h));
-  const maxRows = Math.max(1, Math.min(offsets?.height == null ? 10 : entries.length, Math.floor((requestedH - 10) / 18) - (title ? 1 : 0) - 1));
+  const maxRows = Math.max(1, Math.min(offsets?.height == null ? 10 : entries.length, Math.floor((requestedH - 10) / lineH) - (title ? 1 : 0) - 1));
   const shown = entries.slice(0, maxRows);
   const extra = entries.length - shown.length;
-  const font = `11px '${fontFamily}', system-ui, sans-serif`;
-  const titleFont = `600 11px '${fontFamily}', system-ui, sans-serif`;
-  const lineH = 18;
+  const font = chartFont(type.legend, fontFamily);
+  const titleFont = chartFont(type.legendTitle, fontFamily, 600);
   const sw = 10;
   const maxText = Math.min(170, Math.max(60, (plot.right - plot.left) * 0.32));
   ctx.save();
@@ -122,7 +128,7 @@ export function drawLegend(
   lx = Math.max(4, Math.min(w - legendW - 4, lx));
   ly = Math.max(4, Math.min(h - legendH - 4, ly));
 
-  ctx.globalAlpha = 0.92;
+  ctx.globalAlpha = 0.97;
   ctx.fillStyle = themeBg;
   ctx.strokeStyle = themeBorder;
   ctx.lineWidth = 1;
@@ -143,16 +149,34 @@ export function drawLegend(
   }
   ctx.font = font;
   for (const e of shown) {
-    ctx.fillStyle = e.color;
-    ctx.beginPath();
-    roundedBox(ctx, lx + 10, ey - sw / 2, sw, sw, 2);
-    ctx.fill();
+    if (e.glyph) {
+      ctx.font = `${Math.max(11, type.legend + 2)}px "Apple Color Emoji", "Segoe UI Emoji", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.fillText(e.glyph, lx + 10 + sw / 2, ey);
+      ctx.textAlign = "left";
+      ctx.font = font;
+    } else if (e.shape) {
+      ctx.fillStyle = e.color;
+      ctx.beginPath();
+      drawMarkerPath(ctx, e.shape, lx + 10 + sw / 2, ey, sw / 2);
+      if (e.shape === "ring") {
+        ctx.strokeStyle = e.color;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        ctx.fill();
+      }
+    } else {
+      ctx.fillStyle = e.color;
+      ctx.beginPath();
+      roundedBox(ctx, lx + 10, ey - sw / 2, sw, sw, 2);
+      ctx.fill();
+    }
     ctx.fillStyle = themeText;
     ctx.fillText(fitTextEllipsis(ctx, e.label, textW), lx + 10 + sw + 6, ey);
     ey += lineH;
   }
   if (extra > 0) {
-    ctx.globalAlpha = 0.7;
     ctx.fillStyle = themeText;
     ctx.fillText(`+${extra} more`, lx + 10 + sw + 6, ey);
   }

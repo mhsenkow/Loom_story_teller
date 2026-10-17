@@ -112,6 +112,10 @@ export interface ChartRecommendation {
   outlineField?: string | null;
   /** Optional opacity encoding (scatter, strip): column drives per-point opacity. */
   opacityField?: string | null;
+  /** Optional nominal field that cycles point shapes by category. */
+  shapeField?: string | null;
+  /** Optional field whose first grapheme is drawn as each point's emoji. */
+  emojiField?: string | null;
   /** Aggregation for Y (or theta) when chart type uses it: bar, line, area, pie. */
   yAggregate?: YAggregateOption | null;
   /** Cap categories by value rank (bar and similar). Null = default. */
@@ -134,6 +138,10 @@ export interface ChartRecommendation {
   anomalyHighlight?: boolean | null;
   /** Bump: plot Δrank instead of absolute rank. */
   bumpMode?: "rank" | "delta" | null;
+  /** Pyramid: shared / independent / auto arm scales. */
+  pyramidScaleMode?: "auto" | "shared" | "independent" | null;
+  /** Dual-measure / compare: show signed Δ or % change on marks. */
+  deltaDisplay?: "off" | "diff" | "pct" | null;
   /** Timestamp column used to slice rows (independent of X). */
   timeWindowField?: string | null;
   /** Keep rows in this window, counted back from the newest value. */
@@ -144,4 +152,6 @@ export interface ChartRecommendation {
   tooltipKeyField?: string | null;
   /** Bar-like layout: measure grows up / down / left / right (null = auto). */
   layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
+  /** High values draw as the low end of size, color, opacity, glow, outline, or depth. */
+  channelInvert?: import("../channelInvert").ChannelInvert | null;
 }

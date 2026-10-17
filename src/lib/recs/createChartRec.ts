@@ -43,6 +43,8 @@ export function createScatterRec(
     glowField?: string | null;
     outlineField?: string | null;
     opacityField?: string | null;
+    shapeField?: string | null;
+    emojiField?: string | null;
     rowField?: string | null;
     tooltipFields?: string[] | null;
     tooltipKeyField?: string | null;
@@ -284,6 +286,8 @@ export function createChartRec(
     glowField?: string | null;
     outlineField?: string | null;
     opacityField?: string | null;
+    shapeField?: string | null;
+    emojiField?: string | null;
     yAggregate?: YAggregateOption | null;
     topN?: number | null;
     y2Field?: string | null;
@@ -297,6 +301,8 @@ export function createChartRec(
     residualOverlay?: boolean | null;
     anomalyHighlight?: boolean | null;
     bumpMode?: "rank" | "delta" | null;
+    pyramidScaleMode?: "auto" | "shared" | "independent" | null;
+    deltaDisplay?: "off" | "diff" | "pct" | null;
     timeWindowField?: string | null;
     timeWindow?: "all" | "1h" | "6h" | "24h" | "7d" | "30d" | "90d" | "1y" | null;
     layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
@@ -312,6 +318,8 @@ export function createChartRec(
   const glowField = extra?.glowField ?? null;
   const outlineField = extra?.outlineField ?? null;
   const opacityField = extra?.opacityField ?? null;
+  const shapeField = extra?.shapeField ?? null;
+  const emojiField = extra?.emojiField ?? null;
   const yAggregate = extra?.yAggregate ?? null;
   const topN = extra?.topN ?? null;
   const y2Field = extra?.y2Field && numCols.some((c) => c.name === extra.y2Field) ? extra.y2Field : null;
@@ -323,6 +331,16 @@ export function createChartRec(
   const residualOverlay = extra?.residualOverlay ?? null;
   const anomalyHighlight = extra?.anomalyHighlight ?? null;
   const bumpMode = extra?.bumpMode ?? null;
+  const pyramidScaleMode =
+    extra?.pyramidScaleMode === "shared" ||
+    extra?.pyramidScaleMode === "independent" ||
+    extra?.pyramidScaleMode === "auto"
+      ? extra.pyramidScaleMode
+      : null;
+  const deltaDisplay =
+    extra?.deltaDisplay === "diff" || extra?.deltaDisplay === "pct" || extra?.deltaDisplay === "off"
+      ? extra.deltaDisplay
+      : null;
   const timeWindowField = extra?.timeWindowField ?? null;
   const timeWindow = extra?.timeWindow && extra.timeWindow !== "all" ? extra.timeWindow : null;
   const layoutDirection =
@@ -347,6 +365,8 @@ export function createChartRec(
     });
     return {
       ...scatter,
+      shapeField: shapeField || undefined,
+      emojiField: emojiField || undefined,
       residualOverlay: residualOverlay || undefined,
       anomalyHighlight: anomalyHighlight || undefined,
       yScale: yScale || undefined,
@@ -749,6 +769,8 @@ export function createChartRec(
         if (!geo) return null;
         return {
           ...geo,
+          shapeField: shapeField || undefined,
+          emojiField: emojiField || undefined,
           tooltipFields: extra?.tooltipFields,
           tooltipKeyField: extra?.tooltipKeyField,
           timeWindowField: timeWindowField || undefined,
@@ -765,6 +787,14 @@ export function createChartRec(
         return {
           ...odd,
           topN: topN ?? undefined,
+          bumpMode: bumpMode || undefined,
+          pyramidScaleMode: kind === "pyramid" ? (pyramidScaleMode || "auto") : undefined,
+          deltaDisplay:
+            kind === "pyramid" || kind === "slope"
+              ? deltaDisplay && deltaDisplay !== "off"
+                ? deltaDisplay
+                : undefined
+              : undefined,
           tooltipFields: extra?.tooltipFields,
           tooltipKeyField: extra?.tooltipKeyField,
           timeWindowField: timeWindowField || undefined,
@@ -860,6 +890,8 @@ export function createChartRec(
     glowField: glowField ?? undefined,
     outlineField: outlineField ?? undefined,
     opacityField: opacityField ?? undefined,
+    shapeField: shapeField ?? undefined,
+    emojiField: emojiField ?? undefined,
     yAggregate: effectiveYAggregate ?? undefined,
     topN: topN ?? undefined,
     y2Field: y2Field ?? undefined,
@@ -871,6 +903,8 @@ export function createChartRec(
     residualOverlay: residualOverlay || undefined,
     anomalyHighlight: anomalyHighlight || undefined,
     bumpMode: bumpMode || undefined,
+    deltaDisplay:
+      kind === "dumbbell" && deltaDisplay && deltaDisplay !== "off" ? deltaDisplay : undefined,
     timeWindowField: timeWindowField || undefined,
     timeWindow: timeWindow || undefined,
     tooltipFields: extra?.tooltipFields,

@@ -28,6 +28,8 @@ export interface ChartVisualOverrides {
   titleItalic?: boolean;
   tickRotation?: number;
   markShape?: string;
+  markerMode?: "shape" | "emoji";
+  markEmoji?: string;
   markStroke?: boolean;
   markStrokeWidth?: number;
   markStrokeColor?: string;
@@ -44,6 +46,8 @@ export interface ChartVisualOverrides {
   tickCount?: number;
   axisLabelColor?: string;
   chartPadding?: number;
+  /** How much optional space surrounds the chart; text keeps its necessary room. */
+  spaceUse?: "auto" | "fill" | "roomy";
   legendPosition?: string;
   /** Normalized 0–1 offsets within the plot when legendPosition is `custom` (share-stable). */
   legendOffsetX?: number;

@@ -9,8 +9,11 @@ import { type ChartRenderOpts } from "../chartRenderTypes";
 import { formatTooltipNumber } from "../chartTooltip";
 import { type YScaleKind, anomalyRowIndices, residualYs, scaleDomain, scaleY } from "../dsTransforms";
 import { drawScatterMarginals, drawScatterTrail } from "./axisHelpers";
-import { type PointVisualOverrides, drawAxisTicks, drawGridLines, drawMark, encodingNorm, jitter, numRange } from "./primitives";
+import { type PointVisualOverrides, drawAxisTicks, drawEmojiMark, drawGridLines, drawMark, encodingNorm, jitter, numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
+import { directedUnit } from "../channelInvert";
+import { categoryShape } from "../chartMarks";
+import { firstGrapheme } from "../chartText";
 
 export function renderFullScatter(
   ctx: CanvasRenderingContext2D,
@@ -125,6 +128,10 @@ export function renderFullScatter(
   }
 
   const shape = opts?.markShape ?? "circle";
+  const shapeIdx = opts?.shapeField ? (opts.fieldNames?.indexOf(opts.shapeField) ?? -1) : -1;
+  const emojiIdx = opts?.emojiField ? (opts.fieldNames?.indexOf(opts.emojiField) ?? -1) : -1;
+  const shapeMap = new Map<string, number>();
+  const emojiMap = new Map<string, string>();
   const jitterPx = opts?.markJitter ?? 0;
   let pointIdx = 0;
   for (let ri = 0; ri < rows.length; ri++) {
@@ -142,8 +149,8 @@ export function renderFullScatter(
     if (sizeIdx >= 0) {
       const s = Number(r[sizeIdx]);
       if (!isNaN(s)) {
-        const t = (s - sizeMin) / sizeRange;
-        radius = baseRadius + Math.sqrt(Math.max(0, Math.min(1, t))) * (maxSizeRadius - baseRadius);
+        const t = directedUnit((s - sizeMin) / sizeRange, opts?.channelInvert?.size);
+        radius = baseRadius + Math.sqrt(t) * (maxSizeRadius - baseRadius);
       }
     } else {
       radius = (baseRadius + maxSizeRadius) / 2;
@@ -163,9 +170,9 @@ export function renderFullScatter(
 
     let pointOverrides: PointVisualOverrides | undefined;
     if (getGlowNorm || getOutlineNorm || getOpacityNorm) {
-      const gNorm = getGlowNorm ? getGlowNorm(r) : 0;
-      const oNorm = getOutlineNorm ? getOutlineNorm(r) : 0;
-      const pNorm = getOpacityNorm ? getOpacityNorm(r) : 1;
+      const gNorm = getGlowNorm ? directedUnit(getGlowNorm(r), opts?.channelInvert?.glow) : 0;
+      const oNorm = getOutlineNorm ? directedUnit(getOutlineNorm(r), opts?.channelInvert?.outline) : 0;
+      const pNorm = getOpacityNorm ? directedUnit(getOpacityNorm(r), opts?.channelInvert?.opacity) : 1;
       pointOverrides = {
         alpha: getOpacityNorm != null ? Math.max(0.15, baseAlpha * (0.3 + 0.7 * pNorm)) : undefined,
         glow: getGlowNorm != null ? (gNorm > 0.05 ? gNorm * glowIntensity : 0) : undefined,
@@ -174,7 +181,26 @@ export function renderFullScatter(
       };
     }
 
-    drawMark(ctx, shape, sx, sy, radius, fillColor, baseAlpha, opts, pointOverrides);
+    let pointShape = shape;
+    if (shapeIdx >= 0) {
+      const key = String(r[shapeIdx] ?? "");
+      if (!shapeMap.has(key)) shapeMap.set(key, shapeMap.size);
+      pointShape = categoryShape(shapeMap.get(key)!);
+    }
+    const glyph =
+      nValid <= 1200
+        ? emojiIdx >= 0
+          ? firstGrapheme(r[emojiIdx])
+          : opts?.markerMode === "emoji"
+            ? firstGrapheme(opts.markEmoji)
+            : null
+        : null;
+    if (glyph) {
+      if (emojiIdx >= 0) emojiMap.set(String(r[emojiIdx] ?? ""), glyph);
+      drawEmojiMark(ctx, glyph, sx, sy, radius, pointOverrides?.alpha ?? baseAlpha);
+    } else {
+      drawMark(ctx, pointShape, sx, sy, radius, fillColor, baseAlpha, opts, pointOverrides);
+    }
     if (anom?.has(sampleIdxOf(ri))) {
       ctx.strokeStyle = fillColor ?? cols[0]!;
       ctx.lineWidth = 1.5;
@@ -197,6 +223,12 @@ export function renderFullScatter(
     }
   }
   ctx.globalAlpha = 1;
-  if (ci >= 0 && !clusterByRow) setLegend(opts, [...catMap.entries()].map(([label, i]) => ({ label, color: cols[i % cols.length]! })));
+  if (emojiIdx >= 0 && emojiMap.size > 1) {
+    setLegend(opts, [...emojiMap.entries()].map(([label, glyph]) => ({ label, glyph, color: cols[0]! })));
+  } else if (shapeIdx >= 0 && shapeMap.size > 1) {
+    setLegend(opts, [...shapeMap.entries()].map(([label, i]) => ({ label, shape: categoryShape(i), color: cols[i % cols.length]! })));
+  } else if (ci >= 0 && !clusterByRow) {
+    setLegend(opts, [...catMap.entries()].map(([label, i]) => ({ label, color: cols[i % cols.length]! })));
+  }
   drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
 }

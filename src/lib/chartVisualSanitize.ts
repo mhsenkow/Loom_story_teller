@@ -4,6 +4,7 @@
 
 import type { ChartVisualOverrides } from "./chartVisualTypes";
 import { CHART_VISUAL_OVERRIDE_KEYS } from "./lookSystem";
+import { CURATED_MARK_EMOJIS, MARK_SHAPE_IDS } from "./chartMarks";
 
 const WHITELIST = new Set<string>(CHART_VISUAL_OVERRIDE_KEYS);
 const BOOLEAN_KEYS = new Set<keyof ChartVisualOverrides>([
@@ -32,7 +33,7 @@ const CLAMPS: Partial<Record<keyof ChartVisualOverrides, ClampRule>> = {
   opacity: { min: 0, max: 1 },
   gridOpacity: { min: 0, max: 1 },
   tickCount: { min: 2, max: 10, int: true },
-  axisFontSize: { min: 8, max: 16, int: true },
+  axisFontSize: { min: 11, max: 16, int: true },
   markJitter: { min: 0, max: 12, int: true },
   lineWidth: { min: 0.5, max: 4 },
   axisLineWidth: { min: 0.5, max: 4 },
@@ -63,13 +64,16 @@ const STRING_ENUMS: Partial<Record<keyof ChartVisualOverrides, readonly string[]
   ghostPlace: allOf<"ghostPlace">({ se: true, sw: true, ne: true, nw: true }),
   titleLayout: allOf<"titleLayout">({ pair: true, stack: true, spine: true, caption: true, ticket: true, slab: true }),
   chartFrame: allOf<"chartFrame">({ hero: true, compact: true, focus: true }),
+  spaceUse: allOf<"spaceUse">({ auto: true, fill: true, roomy: true }),
   sourceFootnote: allOf<"sourceFootnote">({ off: true, name: true, credit: true, full: true }),
   sourceFootnoteAlign: allOf<"sourceFootnoteAlign">({ left: true, center: true, right: true }),
   chromeInfoBand: allOf<"chromeInfoBand">({ footer: true, header: true }),
   tooltipMode: allOf<"tooltipMode">({ auto: true, hover: true, glass: true, dock: true, compact: true, off: true }),
+  markerMode: allOf<"markerMode">({ shape: true, emoji: true }),
   // Plain-string overrides: the values the Visual panel and look presets write
   legendPosition: ["auto", "none", "custom", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"],
-  markShape: ["circle", "square", "diamond", "triangle", "cross", "star", "hexagon", "ring"],
+  markShape: MARK_SHAPE_IDS,
+  markEmoji: CURATED_MARK_EMOJIS,
   gridStyle: ["solid", "dashed", "dotted", "none"],
   lineStrokeStyle: ["solid", "dashed", "dotted"],
   backgroundStyle: ["default", "tufte", "newsprint", "bauhaus", "carbon", "blueprint", "ruled", "gradient", "paper", "transparent"],

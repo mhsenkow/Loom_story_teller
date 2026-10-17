@@ -42,6 +42,15 @@ describe("chartTooltip fields", () => {
     ).toContain("peak_players");
   });
 
+  it("includes shape and emoji fields in default tooltips", () => {
+    expect(
+      resolveTooltipFieldNames(
+        chart({ shapeField: "developer", emojiField: "name", tooltipFields: null }),
+        cols,
+      ),
+    ).toEqual(expect.arrayContaining(["developer", "name"]));
+  });
+
   it("mergeChartTooltip keeps cube/bar summary then appends panel fields", () => {
     const structural = {
       columns: ["owners_min", "peak_players", "positive", "Sum of negative", "Rows"],

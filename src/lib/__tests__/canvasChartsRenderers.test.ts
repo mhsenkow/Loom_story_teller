@@ -30,7 +30,7 @@ import {
 import { renderFullSunburst } from "../canvasCharts/sunburst";
 
 function fakeCtx() {
-  const calls = { paint: 0 };
+  const calls = { paint: 0, labels: [] as { text: string; font: string }[] };
   const paintOps = new Set(["fill", "stroke", "fillRect", "strokeRect", "fillText", "strokeText", "drawImage"]);
   const target: Record<string, unknown> = {
     measureText: (s: string) => ({ width: String(s).length * 6 }),
@@ -42,6 +42,10 @@ function fakeCtx() {
   const ctx = new Proxy(target, {
     get(t, prop: string) {
       if (prop in t) return t[prop];
+      if (prop === "fillText" || prop === "strokeText") return (text: string) => {
+        calls.paint += 1;
+        calls.labels.push({ text, font: String(t.font) });
+      };
       if (paintOps.has(prop)) return () => void (calls.paint += 1);
       return () => {};
     },
@@ -122,11 +126,41 @@ describe("extracted canvas renderers", () => {
     expect(calls.paint).toBeGreaterThan(0);
   });
 
+  it.each(renderers)("%s keeps rendered text at a readable size", (_name, render) => {
+    const { ctx, calls } = fakeCtx();
+    render(ctx, rows, opts());
+    for (const label of calls.labels.filter((label) => label.text)) {
+      const size = Number(label.font.match(/([\d.]+)px/)?.[1]);
+      expect(size, `${_name}: ${label.text} (${label.font})`).toBeGreaterThanOrEqual(11);
+    }
+  });
+
+  it.each(renderers)("%s honors the chosen family and larger chart text", (_name, render) => {
+    const { ctx, calls } = fakeCtx();
+    render(ctx, rows, { ...opts(), fontFamily: "Lora", axisFontSize: 16, showDataLabels: true });
+    for (const label of calls.labels.filter((label) => label.text)) {
+      expect(label.font, `${_name}: ${label.text}`).toContain('"Lora"');
+      const size = Number(label.font.match(/([\d.]+)px/)?.[1]);
+      expect(size, `${_name}: ${label.text} (${label.font})`).toBeGreaterThanOrEqual(14);
+    }
+  });
+
   it("registers hit targets for bar marks", () => {
     const { ctx } = fakeCtx();
     const o = opts();
     renderFullBar(ctx, rows, 0, 1, -1, W, H, PAD, o);
     expect(o.hits!.length).toBeGreaterThan(0);
+  });
+
+  it("renders complete emoji glyphs from a scatter column", () => {
+    const { ctx, calls } = fakeCtx();
+    const o = {
+      ...opts(),
+      fieldNames: ["x", "y", "mood"],
+      emojiField: "mood",
+    };
+    renderFullScatter(ctx, [[1, 2, "👩🏽‍🔬"], [2, 3, "⚠️"]], 0, 1, -1, -1, W, H, PAD, o);
+    expect(calls.labels.map((label) => label.text)).toEqual(expect.arrayContaining(["👩🏽‍🔬", "⚠️"]));
   });
 });
 
