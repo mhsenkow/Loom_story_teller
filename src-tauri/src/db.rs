@@ -20,6 +20,51 @@ pub(crate) fn escape_path_for_sql(path: &str) -> String {
     path.replace('\'', "''")
 }
 
+/// Friendlier copy when Parquet/JSON/Excel fail without network-installed extensions.
+pub(crate) fn map_duckdb_file_err(err: impl std::fmt::Display, file_path: &str) -> String {
+    let msg = err.to_string();
+    let lower = msg.to_lowercase();
+    let needs_helper = file_path.ends_with(".parquet")
+        || file_path.ends_with(".xlsx")
+        || file_path.ends_with(".json")
+        || file_path.ends_with(".ndjson")
+        || file_path.ends_with(".jsonl");
+    // Match DuckDB "function/extension missing" noise — not every "not found" path miss.
+    let missing_helper = lower.contains("extension")
+        || lower.contains("autoload")
+        || lower.contains("autoinstall")
+        || lower.contains("table function")
+        || lower.contains("catalog error")
+        || lower.contains("read_parquet")
+        || lower.contains("read_json")
+        || lower.contains("read_xlsx");
+    if needs_helper && missing_helper {
+        return "This file type needs a signed DuckDB helper Loom doesn’t ship yet (avoids macOS Gatekeeper blocks). Open a CSV for now, or export CSV from your tool.".into();
+    }
+    msg
+}
+
+/// Stop DuckDB from downloading / dlopening unsigned community extensions (Gatekeeper).
+pub(crate) fn disable_extension_auto_fetch(conn: &Connection) -> Result<(), duckdb::Error> {
+    // Prefer SET; fall back to older aliases if a build renames them.
+    for sql in [
+        "SET autoinstall_known_extensions = false",
+        "SET autoload_known_extensions = false",
+        "SET allow_unsigned_extensions = false",
+        "SET allow_community_extensions = false",
+    ] {
+        match conn.execute_batch(sql) {
+            Ok(()) => {}
+            Err(e) => {
+                // Unknown setting on older builds — keep going; other SETs may still apply.
+                log::debug!("duckdb setting skipped ({sql}): {e}");
+            }
+        }
+    }
+    Ok(())
+}
+
+
 /// Compute the table expression (read_* or sqlite_src.main."table") for a file path.
 /// Used by table_expr and testable without a DB connection.
 pub(crate) fn table_expr_for_path(file_path: &str) -> String {
@@ -115,17 +160,11 @@ impl LoomDb {
 
     pub fn new() -> Result<Self, duckdb::Error> {
         let conn = Connection::open_in_memory()?;
-        // Prefer bundled/ cached extensions — avoid network INSTALL on first launch (LOOM-083).
-        for sql in [
-            "LOAD parquet;",
-            "INSTALL parquet; LOAD parquet;",
-            "LOAD json;",
-            "INSTALL json; LOAD json;",
-            "LOAD excel;",
-            "INSTALL excel; LOAD excel;",
-        ] {
-            let _ = conn.execute_batch(sql);
-        }
+        // Bundled libduckdb defaults AUTOINSTALL/AUTOLOAD on. On macOS that downloads
+        // ad-hoc–signed *.duckdb_extension files into ~/.duckdb; Gatekeeper then blocks
+        // dlopen (parquet/json/excel "Not Opened" dialogs). Never INSTALL from the network.
+        // CSV is built-in; parquet/json/xlsx need a future signed-bundle or static link.
+        disable_extension_auto_fetch(&conn)?;
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -184,18 +223,18 @@ impl LoomDb {
     fn probe_file(conn: &Connection, path: &PathBuf, ext: &str) -> Result<FileEntry, String> {
         let path_str = path.to_string_lossy().to_string();
         let escaped = escape_path_for_sql(&path_str);
-
         let size_bytes = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
 
+        // CSV is built-in — COUNT at mount so the sidebar isn't stuck on "0 rows".
+        // Parquet/json/xlsx need signed helpers we don't autoinstall (Gatekeeper).
         let row_count: u64 = match ext {
-            "parquet" => {
-                let count_sql = format!("SELECT COUNT(*) FROM read_parquet('{}')", escaped);
+            "csv" => {
+                let count_sql = format!("SELECT COUNT(*) FROM read_csv_auto('{}')", escaped);
                 conn.query_row(&count_sql, params![], |row| row.get(0))
                     .map(|v: i64| v as u64)
                     .unwrap_or(0)
             }
-            // Defer full parse counts for text/tabular files — metadata only at mount time.
-            "csv" | "json" | "ndjson" | "jsonl" | "xlsx" => 0,
+            "parquet" | "json" | "ndjson" | "jsonl" | "xlsx" => 0,
             _ => return Err(format!("Unsupported file type: {}", ext)),
         };
 
@@ -293,11 +332,17 @@ impl LoomDb {
                 "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
                 table_expr
             ))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| map_duckdb_file_err(e, file_path))?;
 
             let stats = Self::column_stats_inner(conn, file_path)?;
-            let sample =
+            let mut sample =
                 Self::query_inner(conn, file_path, "SELECT * FROM loom_active", sample_limit)?;
+            // Sample LIMIT must not masquerade as the table size (Explorer "0 rows" / "N of N").
+            let total: u64 = conn
+                .query_row("SELECT COUNT(*) FROM loom_active", params![], |r| r.get::<_, i64>(0))
+                .map(|n| n as u64)
+                .unwrap_or(sample.rows.len() as u64);
+            sample.total_rows = total;
             Ok((stats, sample))
         })
     }
@@ -332,7 +377,7 @@ impl LoomDb {
             "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
             table_expr
         ))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| map_duckdb_file_err(e, file_path))?;
         crate::query_engine::column_stats_for_table(conn, "loom_active")
     }
 
@@ -350,7 +395,7 @@ impl LoomDb {
             "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
             table_expr
         ))
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| map_duckdb_file_err(e, file_path))?;
 
         crate::query_engine::run_user_query(
             conn,
@@ -491,6 +536,49 @@ mod tests {
         assert_eq!(escape_path_for_sql("'"), "''");
     }
 
+    fn setting_value(conn: &Connection, name: &str) -> String {
+        let mut stmt = conn
+            .prepare("SELECT value FROM duckdb_settings() WHERE name = ?")
+            .expect("prepare");
+        stmt.query_row(params![name], |r| r.get::<_, String>(0))
+            .unwrap_or_else(|e| format!("ERR:{e}"))
+    }
+
+    #[test]
+    fn map_duckdb_file_err_explains_missing_helpers() {
+        let msg = map_duckdb_file_err(
+            "Catalog Error: Table Function with name read_parquet does not exist!",
+            "/data/x.parquet",
+        );
+        assert!(msg.contains("CSV"), "got: {msg}");
+        assert!(!msg.to_lowercase().contains("catalog error"));
+    }
+
+    #[test]
+    fn new_disables_extension_autoinstall() {
+        let db = LoomDb::new().expect("LoomDb::new");
+        let conn = db.lock_connection();
+        let autoinstall = setting_value(&conn, "autoinstall_known_extensions");
+        let autoload = setting_value(&conn, "autoload_known_extensions");
+        let community = setting_value(&conn, "allow_community_extensions");
+        assert!(
+            autoinstall.eq_ignore_ascii_case("false"),
+            "autoinstall must stay off (Gatekeeper); got {autoinstall}"
+        );
+        assert!(
+            autoload.eq_ignore_ascii_case("false"),
+            "autoload must stay off (Gatekeeper); got {autoload}"
+        );
+        assert!(
+            community.eq_ignore_ascii_case("false"),
+            "community extensions must stay off; got {community}"
+        );
+        let n: i64 = conn
+            .query_row("SELECT 1 + 1", [], |r| r.get(0))
+            .expect("builtin sql");
+        assert_eq!(n, 2);
+    }
+
     #[test]
     fn table_expr_for_path_parquet_csv() {
         assert_eq!(
@@ -593,7 +681,7 @@ mod tests {
         assert!(!result.is_empty());
         let entry = result.iter().find(|e| e.name == "data.csv").unwrap();
         assert_eq!(entry.extension, "csv");
-        assert_eq!(entry.row_count, 0);
+        assert_eq!(entry.row_count, 2);
     }
 
     #[test]
@@ -616,6 +704,25 @@ mod tests {
         assert_eq!(stats.len(), 2);
         assert_eq!(sample.columns, vec!["x", "y"]);
         assert_eq!(sample.rows.len(), 3);
+        assert_eq!(sample.total_rows, 3);
+    }
+
+    #[test]
+    fn inspect_file_total_rows_is_full_count_not_sample_limit() {
+        let db = LoomDb::new().unwrap();
+        let tmp = std::env::temp_dir().join("loom_test_inspect_total");
+        let _ = std::fs::create_dir_all(&tmp);
+        let csv_path = tmp.join("many.csv");
+        let mut body = String::from("n\n");
+        for i in 0..20 {
+            body.push_str(&format!("{i}\n"));
+        }
+        std::fs::write(&csv_path, body).unwrap();
+        let path_str = csv_path.to_string_lossy();
+        let (_stats, sample) = db.inspect_file(path_str.as_ref(), 5).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+        assert_eq!(sample.rows.len(), 5);
+        assert_eq!(sample.total_rows, 20);
     }
 
     #[test]
@@ -641,10 +748,18 @@ mod tests {
         let path = tmp.join("arr.json");
         std::fs::write(&path, r#"[{"tags":[1,2]}]"#).unwrap();
         let path_str = path.to_string_lossy().into_owned();
-        let sample = db
-            .query_file(&path_str, "SELECT tags FROM loom_active", 10)
-            .unwrap();
-        assert_eq!(sample.rows[0][0], serde_json::json!([1, 2]));
+        match db.query_file(&path_str, "SELECT tags FROM loom_active", 10) {
+            Ok(sample) => {
+                assert_eq!(sample.rows[0][0], serde_json::json!([1, 2]));
+            }
+            Err(e) => {
+                // Gatekeeper path: json extension is not auto-fetched; users get CSV guidance.
+                assert!(
+                    e.contains("CSV") || e.to_lowercase().contains("helper"),
+                    "unexpected json open error: {e}"
+                );
+            }
+        }
         let _ = std::fs::remove_dir_all(&tmp);
     }
 

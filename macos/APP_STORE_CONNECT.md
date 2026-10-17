@@ -61,12 +61,45 @@ Privacy: https://loom.ibm.io/privacy
 - Release: After approval  
 - Uses IDFA: **No**  
 
-## Still required before Submit for Review
-1. **Mac App Store–signed build** attached to version 1.0  
-   - Not the notarized Developer ID DMG (`Loom_0.1.1_aarch64.dmg`) — that is direct distribution only.  
-   - Needs App Sandbox entitlements + Mac App Store provisioning + `productbuild` / Transporter `.pkg`.  
-2. **App Privacy** nutrition labels in ASC web UI (API JWT cannot set) — choose **Data Not Collected** unless you add tracking SDKs.  
-3. Confirm pricing / availability matches iOS ($4.95, same territories).  
+## Mac App Store build (sandbox + user folders)
+
+Same folder model as desktop/iPad: **only folders the user picks** (App Sandbox + `files.user-selected.read-write` + app-scope bookmarks). No blanket home-directory access.
+
+| Piece | Path |
+|-------|------|
+| Entitlements | `src-tauri/Entitlements.plist` |
+| Bundle merge config | `src-tauri/tauri.appstore.conf.json` |
+| Provisioning profile | `src-tauri/macos/Loom_Mac_App_Store.provisionprofile` |
+| Build script | `make weave-mas` → `src-tauri/target/mas/Loom.pkg` |
+
+```bash
+make weave-mas
+xcrun altool --upload-app --type macos \
+  --file src-tauri/target/mas/Loom.pkg \
+  --apiKey "$APPLE_API_KEY_ID" --apiIssuer "$APPLE_API_ISSUER"
+```
+
+Signing: **Apple Distribution** (app) + **3rd Party Mac Developer Installer** (pkg). Identity overrides: `APPLE_DISTRIBUTION_IDENTITY`, `APPLE_INSTALLER_IDENTITY`.
+
+## Build attached (2026-10-17)
+- **Build:** CFBundleVersion `7` (upload UUID `078c8561-4e4a-4fc5-9fbf-45f4a46c76c6`) — theme release
+- Prior: CFBundleVersion `6` (upload UUID `61164006-5c75-45d8-9f0e-3b9a25b67f18`) — typography and spacing
+- Prior: CFBundleVersion `5` (upload UUID `39e94bf0-26ea-4460-ba88-770f491136f5`) — Codex UI + What’s interesting compare charts
+- Prior: CFBundleVersion `4` (upload UUID `6cbb5ef1-59c2-43ee-8064-833bec8f935b`) — Gatekeeper fix + honest CSV row counts (`COUNT(*)` on mount/inspect; activateDataset patches deferred zeros)
+- Prior: CFBundleVersion `3` (upload UUID `ff90c05f-4476-4dd6-9cef-db1822803759`) — Gatekeeper only
+- Prior: CFBundleVersion `2` (`da1394d7-362e-4f85-968d-c4ae8de30ac9`) — VALID, linked to macOS **1.0**
+- Local pkg: `src-tauri/target/mas/Loom.pkg` (`bundleVersion` in `tauri.appstore.conf.json`)
+
+## Submitted (2026-10-15)
+- macOS **1.0** · build **2** · **WAITING_FOR_REVIEW** (listing)
+- **TestFlight:** build **7** uploaded 2026-10-17 — theme release
+- Build **6** uploaded 2026-10-16 — typography and spacing
+- Build **5** — Codex updates + discover compares
+- Build **4** — CSV row counts + no unsigned extension autoinstall
+- Build **3** — Gatekeeper only
+- Screenshots: Mac 16:10 ×5 · App preview: `macos/store/preview-mac.mp4` (COMPLETE)
+- Rebuild preview: `node scripts/build-app-previews.mjs` · upload: `node scripts/upload-store-media.mjs`
+- Confirm **App Privacy** in ASC web UI if Apple still flags it.  
 
 ## Notarized DMG (outside the Store)
 Already built and notarized for direct install:
