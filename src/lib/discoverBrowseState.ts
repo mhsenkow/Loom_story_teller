@@ -6,6 +6,7 @@ import type { DiscoverSettingFilter } from "./discoverPresentation";
 
 export type DiscoverLayout = "flow" | "tiles" | "masonry" | "list";
 export type DiscoverSort = "score" | "category" | "chart" | "source" | "name";
+export type DiscoverSize = "compact" | "comfort" | "broadsheet";
 export interface DiscoverBrowseState {
   search: string;
   settingFilter: DiscoverSettingFilter;
@@ -14,6 +15,7 @@ export interface DiscoverBrowseState {
   sourceFilter: string;
   sortMode: DiscoverSort;
   layout: DiscoverLayout;
+  size: DiscoverSize;
   filtersOpen: boolean;
   shownCount: number;
   scrollTop: number;
@@ -27,6 +29,7 @@ export const DEFAULT_DISCOVER_BROWSE: DiscoverBrowseState = {
   sourceFilter: "all",
   sortMode: "score",
   layout: "flow",
+  size: "comfort",
   filtersOpen: false,
   shownCount: 24,
   scrollTop: 0,
@@ -46,6 +49,8 @@ export function readDiscoverBrowseState(): DiscoverBrowseState {
       if (typeof raw[key] === "string") state[key] = raw[key].slice(0, 300);
     if (["flow", "tiles", "masonry", "list"].includes(raw.layout))
       state.layout = raw.layout;
+    if (["compact", "comfort", "broadsheet"].includes(raw.size))
+      state.size = raw.size;
     if (["score", "category", "chart", "source", "name"].includes(raw.sortMode))
       state.sortMode = raw.sortMode;
     if (

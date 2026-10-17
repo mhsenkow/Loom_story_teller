@@ -73,4 +73,6 @@ export interface ChartVisualOverrides {
   /** Where source / time / color-ramp chrome sits on the canvas. */
   chromeInfoBand?: "footer" | "header";
   tooltipMode?: "auto" | "hover" | "glass" | "dock" | "compact" | "off";
+  /** Geographic basemap; `auto` picks from the region column / chart kind. */
+  geoAtlas?: "auto" | "world" | "worldDetail" | "us" | "usCounties";
 }

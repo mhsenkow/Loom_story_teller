@@ -34,7 +34,8 @@ import {
 } from "@/lib/discoverPresentation";
 import {
   discoverFlowColumnCount,
-  discoverFlowSpans,
+  discoverFlowTiers,
+  type DiscoverFlowTier,
 } from "@/lib/discoverFlowLayout";
 import {
   scanDiscoverStories,
@@ -94,6 +95,7 @@ import {
   saveDiscoverBrowseState,
   type DiscoverBrowseState,
   type DiscoverLayout,
+  type DiscoverSize,
   type DiscoverSort,
 } from "@/lib/discoverBrowseState";
 
@@ -130,6 +132,31 @@ const GALLERY_LAYOUTS: {
     description: "Quickly scan stories in rows",
   },
 ];
+const SIZE_OPTIONS: {
+  value: DiscoverSize;
+  label: string;
+  short: string;
+  description: string;
+}[] = [
+  {
+    value: "compact",
+    label: "Compact",
+    short: "S",
+    description: "Denser cards for scanning more stories",
+  },
+  {
+    value: "comfort",
+    label: "Comfort",
+    short: "M",
+    description: "Balanced card size",
+  },
+  {
+    value: "broadsheet",
+    label: "Broadsheet",
+    short: "L",
+    description: "Larger headlines and charts",
+  },
+];
 const SORT_LABELS: Record<SortMode, string> = {
   score: "Recommended",
   category: "Category",
@@ -154,6 +181,7 @@ export function Onboarding() {
   const [scanning, setScanning] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(initialBrowse.filtersOpen);
   const [layout, setLayout] = useState<GalleryLayout>(initialBrowse.layout);
+  const [size, setSize] = useState<DiscoverSize>(initialBrowse.size);
   const [flowColumns, setFlowColumns] = useState(1);
   const [pendingStories, setPendingStories] = useState<DiscoverStory[] | null>(
     null,
@@ -204,6 +232,7 @@ export function Onboarding() {
       settingFilter,
       sortMode,
       layout,
+      size,
       filtersOpen,
       shownCount,
       scrollTop: scrollPositionRef.current,
@@ -217,6 +246,7 @@ export function Onboarding() {
     settingFilter,
     sortMode,
     layout,
+    size,
     filtersOpen,
     shownCount,
   ]);
@@ -784,14 +814,16 @@ export function Onboarding() {
     return () => observer.disconnect();
   }, [layout, show, whatsNewOpen, shownCount, displayed.length]);
 
-  const flowSpans = useMemo(() => {
+  const flowTiers = useMemo((): DiscoverFlowTier[] => {
     if (layout !== "flow") return [];
     const featured = displayed.map(
       (group) =>
         !filtersActive && spotlights.has(group.stories[0]!.id),
     );
-    return discoverFlowSpans(displayed.length, flowColumns, featured);
+    return discoverFlowTiers(displayed.length, flowColumns, featured);
   }, [layout, displayed, filtersActive, spotlights, flowColumns]);
+  const tierSpan = (tier: DiscoverFlowTier | undefined) =>
+    tier === "lead" ? (flowColumns >= 5 ? 3 : 2) : tier === "wide" ? 2 : 1;
 
   const filterKey = JSON.stringify([
     categoryFilter,
@@ -935,6 +967,16 @@ export function Onboarding() {
 
   if (show !== true || whatsNewOpen) return null;
   const showFilters = stories.length > 0;
+  const statusLine = filtersActive
+    ? `${groups.length} matching stories`
+    : `${groups.length} stories · ${chartKinds.length} chart types`;
+  const statusExtra = scanning
+    ? stories.length
+      ? " · updating…"
+      : ` · ${sources.length} sources found · scanning…`
+    : /unavailable|Couldn’t/.test(scannedHint)
+      ? ` · ${scannedHint.replace(/^.*?(\d+ unavailable)$/, "$1")}`
+      : "";
 
   return (
     <Dialog
@@ -948,237 +990,212 @@ export function Onboarding() {
       panelClassName="discover-landing"
     >
       <header className="discover-header">
-        <div className="min-w-0 flex-1">
-          <h2 id="onboarding-title">What’s interesting right now</h2>
-          <p id="onboarding-desc">
-            Fresh perspectives on open data. Pick a chart. Make it yours.
-          </p>
-        </div>
-        <div className="discover-header-actions">
-          <button
-            type="button"
-            onClick={browseSources}
-            className="discover-header-link"
-          >
-            Your data <span aria-hidden>↗</span>
-          </button>
-          {showFilters && (
-            <button
-              type="button"
-              onClick={() => requestDiscoverScan({ refresh: true })}
-              disabled={scanning || !!openingId}
-              className="discover-icon-button"
-              data-spinning={scanning || undefined}
-              aria-label={scanning ? "Refreshing stories" : "Refresh"}
-              title={[
-                scanning
-                  ? "Updating picks in background"
-                  : "Refresh stories from all sources",
-                savedAt != null
-                  ? `Daily scan ${new Date(savedAt).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}`
-                  : null,
-              ]
-                .filter(Boolean)
-                .join("\n")}
-            >
-              <span aria-hidden>↻</span>
-            </button>
-          )}
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={dismiss}
-            className="discover-icon-button"
-            aria-label="Close"
-          >
-            ×
-          </button>
-        </div>
-      </header>
-
-      {showFilters && (
-        <div className="discover-controls">
-          <div className="discover-search-row">
-            <label className="discover-search">
-              <span aria-hidden>⌕</span>
-              <span className="sr-only">
-                Search stories, sources, charts, and settings
-              </span>
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Find a story, chart, or setting…"
-              />
-            </label>
-            <div
-              className="discover-layout-picker"
-              role="group"
-              aria-label="Story layout"
-            >
-              {GALLERY_LAYOUTS.map((option) => (
+        <div className="discover-masthead">
+          <div className="discover-masthead-top">
+            <h2 id="onboarding-title">What’s interesting right now</h2>
+            <div className="discover-header-actions">
+              {showFilters && (
                 <button
-                  key={option.value}
                   type="button"
-                  aria-label={`${option.label} view`}
-                  aria-pressed={layout === option.value}
-                  title={`${option.label}: ${option.description}`}
-                  onClick={() => setLayout(option.value)}
+                  className="discover-filter-toggle"
+                  aria-controls="discover-filters"
+                  aria-expanded={filtersOpen}
+                  onClick={() => setFiltersOpen((open) => !open)}
                 >
-                  <span aria-hidden>{option.icon}</span>
-                  <span className="discover-layout-label">{option.label}</span>
+                  {filtersOpen
+                    ? "Hide"
+                    : filtersActive
+                      ? "Filters ·"
+                      : "Filters"}{" "}
+                  <span aria-hidden>{filtersOpen ? "−" : "+"}</span>
                 </button>
-              ))}
+              )}
+              {showFilters && (
+                <button
+                  type="button"
+                  onClick={() => requestDiscoverScan({ refresh: true })}
+                  disabled={scanning || !!openingId}
+                  className="discover-icon-button"
+                  data-spinning={scanning || undefined}
+                  aria-label={scanning ? "Refreshing stories" : "Refresh"}
+                  title={[
+                    scanning
+                      ? "Updating picks in background"
+                      : "Refresh stories from all sources",
+                    savedAt != null
+                      ? `Daily scan ${new Date(savedAt).toLocaleString(undefined, {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join("\n")}
+                >
+                  <span aria-hidden>↻</span>
+                </button>
+              )}
+              <button
+                ref={closeRef}
+                type="button"
+                onClick={dismiss}
+                className="discover-icon-button"
+                aria-label="Close"
+              >
+                ×
+              </button>
             </div>
           </div>
-          <button
-            type="button"
-            className="discover-filter-toggle"
-            aria-controls="discover-filters"
-            aria-expanded={filtersOpen}
-            onClick={() => setFiltersOpen((open) => !open)}
-          >
-            {filtersOpen
-              ? "Hide filters"
-              : filtersActive
-                ? "Filters active"
-                : "Filters"}{" "}
-            <span aria-hidden>{filtersOpen ? "−" : "+"}</span>
-          </button>
-          <div
-            id="discover-filters"
-            className="discover-filter-row"
-            data-expanded={filtersOpen}
-          >
-            <label>
-              <span className="sr-only">Topic</span>
-              <select
-                value={categoryFilter}
-                onChange={(event) => setCategoryFilter(event.target.value)}
-              >
-                <option value="all">All topics</option>
-                {categories.map((category) => (
-                  <option key={category}>{category}</option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span className="sr-only">Chart</span>
-              <select
-                value={chartFilter}
-                onChange={(event) => setChartFilter(event.target.value)}
-              >
-                <option value="all">All charts</option>
-                <option value="maps">Maps & globes</option>
-                <optgroup label="Ways to explore">
-                  {Object.entries(DISCOVER_FAMILIES).map(([key, family]) => (
-                    <option key={key} value={`family:${key}`}>
-                      {family.label}
+          <p id="onboarding-desc" className="sr-only">
+            Fresh perspectives on open data. Pick a chart. Make it yours.
+          </p>
+          {showFilters && (
+            <div
+              id="discover-filters"
+              className="discover-sentence"
+              data-expanded={filtersOpen}
+            >
+              <span className="discover-sentence-lead" aria-hidden>
+                showing
+              </span>
+              <label>
+                <span className="sr-only">Perspective</span>
+                <select
+                  value={chartFilter}
+                  onChange={(event) => setChartFilter(event.target.value)}
+                >
+                  <option value="all">All perspectives</option>
+                  <option value="maps">Maps &amp; globes</option>
+                  <optgroup label="Ways to explore">
+                    {Object.entries(DISCOVER_FAMILIES)
+                      .filter(([key]) => familyCounts.has(key))
+                      .map(([key, family]) => (
+                        <option key={key} value={`family:${key}`}>
+                          {family.label} ({familyCounts.get(key)!.size})
+                        </option>
+                      ))}
+                  </optgroup>
+                  <optgroup label="Chart types">
+                    {chartKinds.map((kind) => (
+                      <option key={kind} value={kind}>
+                        {discoverChartLabel(kind)}
+                      </option>
+                    ))}
+                  </optgroup>
+                </select>
+              </label>
+              <span aria-hidden>in</span>
+              <label>
+                <span className="sr-only">Topic</span>
+                <select
+                  value={categoryFilter}
+                  onChange={(event) => setCategoryFilter(event.target.value)}
+                >
+                  <option value="all">All topics</option>
+                  {categories.map((category) => (
+                    <option key={category}>{category}</option>
+                  ))}
+                </select>
+              </label>
+              <span aria-hidden>from</span>
+              <label>
+                <span className="sr-only">Source</span>
+                <select
+                  value={sourceFilter}
+                  onChange={(event) => setSourceFilter(event.target.value)}
+                >
+                  <option value="all">All sources</option>
+                  {sources.map((source) => (
+                    <option key={source.kind} value={source.kind}>
+                      {source.fileName}
                     </option>
                   ))}
-                </optgroup>
-                <optgroup label="Chart types">
-                  {chartKinds.map((kind) => (
-                    <option key={kind} value={kind}>
-                      {discoverChartLabel(kind)}
+                </select>
+              </label>
+              <span aria-hidden>with</span>
+              <label>
+                <span className="sr-only">Settings</span>
+                <select
+                  value={settingFilter}
+                  onChange={(event) =>
+                    setSettingFilter(event.target.value as DiscoverSettingFilter)
+                  }
+                >
+                  {DISCOVER_SETTING_FILTERS.map((setting) => (
+                    <option key={setting.value} value={setting.value}>
+                      {setting.label}
                     </option>
                   ))}
-                </optgroup>
-              </select>
-            </label>
-            <label>
-              <span className="sr-only">Settings</span>
-              <select
-                value={settingFilter}
-                onChange={(event) =>
-                  setSettingFilter(event.target.value as DiscoverSettingFilter)
-                }
+                </select>
+              </label>
+              <span aria-hidden>by</span>
+              <label>
+                <span className="sr-only">Sort</span>
+                <select
+                  value={sortMode}
+                  onChange={(event) =>
+                    setSortMode(event.target.value as SortMode)
+                  }
+                >
+                  {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+                    <option key={mode} value={mode}>
+                      {SORT_LABELS[mode]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {filtersActive && (
+                <button
+                  type="button"
+                  className="discover-clear-inline"
+                  onClick={clearFilters}
+                >
+                  Clear
+                </button>
+              )}
+              <div
+                className="discover-size-picker"
+                role="group"
+                aria-label="Card size"
               >
-                {DISCOVER_SETTING_FILTERS.map((setting) => (
-                  <option key={setting.value} value={setting.value}>
-                    {setting.label}
-                  </option>
+                {SIZE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-label={`${option.label} size`}
+                    aria-pressed={size === option.value}
+                    title={`${option.label}: ${option.description}`}
+                    onClick={() => setSize(option.value)}
+                  >
+                    {option.short}
+                  </button>
                 ))}
-              </select>
-            </label>
-            <label>
-              <span className="sr-only">Source</span>
-              <select
-                value={sourceFilter}
-                onChange={(event) => setSourceFilter(event.target.value)}
+              </div>
+              <div
+                className="discover-layout-picker"
+                role="group"
+                aria-label="Story layout"
               >
-                <option value="all">All sources</option>
-                {sources.map((source) => (
-                  <option key={source.kind} value={source.kind}>
-                    {source.fileName}
-                  </option>
+                {GALLERY_LAYOUTS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-label={`${option.label} view`}
+                    aria-pressed={layout === option.value}
+                    title={`${option.label}: ${option.description}`}
+                    onClick={() => setLayout(option.value)}
+                  >
+                    <span aria-hidden>{option.icon}</span>
+                    <span className="discover-layout-label">{option.label}</span>
+                  </button>
                 ))}
-              </select>
-            </label>
-            <label>
-              <span className="sr-only">Sort</span>
-              <select
-                value={sortMode}
-                onChange={(event) =>
-                  setSortMode(event.target.value as SortMode)
-                }
-              >
-                {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
-                  <option key={mode} value={mode}>
-                    {SORT_LABELS[mode]}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="discover-results-summary">
-            <p role="status">
-              {filtersActive
-                ? `${groups.length} matching stories`
-                : `${groups.length} stories · ${chartKinds.length} chart types`}
-              {scanning
-                ? stories.length
-                  ? " · updating…"
-                  : ` · ${sources.length} sources found · scanning…`
-                : /unavailable|Couldn’t/.test(scannedHint)
-                  ? ` · ${scannedHint.replace(/^.*?(\d+ unavailable)$/, "$1")}`
-                  : ""}
-            </p>
-            {pendingStories && (
-              <button
-                type="button"
-                onClick={acceptUpdates}
-                className="discover-updates-ready"
-              >
-                New data ready · {pendingSourceCount}{" "}
-                {pendingSourceCount === 1 ? "source" : "sources"} · Show updates
-              </button>
-            )}
-            {(hiddenSourceCount > 0 || showHiddenSources) && (
-              <button
-                type="button"
-                onClick={() => setShowHiddenSources((v) => !v)}
-                aria-pressed={showHiddenSources}
-                data-testid="discover-hidden-toggle"
-              >
-                {showHiddenSources
-                  ? "Hide hidden sources"
-                  : `${hiddenSourceCount} hidden · Show`}
-              </button>
-            )}
-            {filtersActive && (
-              <button type="button" onClick={clearFilters}>
-                Clear filters
-              </button>
-            )}
-          </div>
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </header>
 
       <div
         ref={scrollRef}
@@ -1188,49 +1205,6 @@ export function Onboarding() {
         }}
         aria-busy={scanning && !stories.length}
       >
-        {showFilters && (
-          <div className="discover-perspectives-row">
-          <nav
-            className="discover-perspectives"
-            aria-label="Explore a perspective"
-          >
-            <button
-              type="button"
-              aria-pressed={chartFilter === "all"}
-              onClick={() => setChartFilter("all")}
-            >
-              All perspectives
-            </button>
-            {Object.entries(DISCOVER_FAMILIES)
-              .filter(([key]) => familyCounts.has(key))
-              .map(([key, family]) => (
-                <button
-                  key={key}
-                  type="button"
-                  aria-pressed={chartFilter === `family:${key}`}
-                  title={`${family.prompt} ${familyCounts.get(key)!.size} sources available`}
-                  onClick={() =>
-                    setChartFilter(
-                      chartFilter === `family:${key}` ? "all" : `family:${key}`,
-                    )
-                  }
-                >
-                  {family.label}
-                  <span aria-hidden>{familyCounts.get(key)!.size}</span>
-                </button>
-              ))}
-          </nav>
-            <details className="discover-method">
-              <summary>How picks are chosen</summary>
-              <p>
-                We consider every chart type against each source, check the
-                observed data, then balance useful signals with a mix of topics,
-                sources, and perspectives. Related views stay together. Your
-                source preferences help shape the order.
-              </p>
-            </details>
-          </div>
-        )}
         {!stories.length && phase === "scan" && (
           <div className="discover-loading" role="status">
             <p className="discover-kicker">Finding your next story</p>
@@ -1291,6 +1265,7 @@ export function Onboarding() {
               ref={galleryRef}
               id="onboarding-stories"
               className={`discover-grid discover-layout-${layout}`}
+              data-size={size}
             >
               {displayed.map((group, index) => {
                 const story =
@@ -1301,22 +1276,32 @@ export function Onboarding() {
                   !filtersActive &&
                   spotlights.has(group.stories[0]!.id) &&
                   (layout === "flow" || layout === "masonry");
-                const wide = layout === "flow" && (flowSpans[index] ?? 1) > 1;
+                const tier =
+                  layout === "flow"
+                    ? (flowTiers[index] ?? "standard")
+                    : "standard";
+                const span = layout === "flow" ? tierSpan(tier) : 1;
                 return (
                   <li
                     key={group.id}
                     data-source={story.kind}
+                    data-tier={tier}
                     className={
-                      wide
-                        ? featured
-                          ? "discover-grid-lead"
-                          : "discover-grid-wide"
-                        : ""
+                      span >= 3
+                        ? "discover-grid-lead"
+                        : span === 2
+                          ? featured
+                            ? "discover-grid-lead"
+                            : "discover-grid-wide"
+                          : tier === "brief"
+                            ? "discover-grid-brief"
+                            : ""
                     }
                   >
                     <DiscoverStoryCard
                       story={story}
                       featured={featured}
+                      tier={tier}
                       opening={openingId === story.id}
                       disabled={!!openingId}
                       onOpen={openStory}
@@ -1347,6 +1332,79 @@ export function Onboarding() {
           </>
         )}
       </div>
+
+      {showFilters && (
+        <footer className="discover-footer">
+          <div className="discover-footer-meta">
+            <p role="status">
+              {statusLine}
+              {statusExtra}
+            </p>
+            {pendingStories && (
+              <button
+                type="button"
+                onClick={acceptUpdates}
+                className="discover-updates-ready"
+              >
+                New data ready · {pendingSourceCount}{" "}
+                {pendingSourceCount === 1 ? "source" : "sources"} · Show
+              </button>
+            )}
+            {(hiddenSourceCount > 0 || showHiddenSources) && (
+              <button
+                type="button"
+                onClick={() => setShowHiddenSources((v) => !v)}
+                aria-pressed={showHiddenSources}
+                data-testid="discover-hidden-toggle"
+              >
+                {showHiddenSources
+                  ? "Hide hidden"
+                  : `${hiddenSourceCount} hidden · Show`}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={browseSources}
+              className="discover-header-link"
+            >
+              Your data <span aria-hidden>↗</span>
+            </button>
+            <details className="discover-method">
+              <summary>How picks work</summary>
+              <p>
+                We consider every chart type against each source, check the
+                observed data, then balance useful signals with a mix of topics,
+                sources, and perspectives. Related views stay together. Your
+                source preferences help shape the order.
+              </p>
+            </details>
+          </div>
+          <label className="discover-search">
+            <span className="sr-only">
+              Search stories, sources, charts, and settings
+            </span>
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Find a story, chart, or setting…"
+            />
+            {search ? (
+              <button
+                type="button"
+                className="discover-search-clear"
+                aria-label="Clear search"
+                onClick={() => setSearch("")}
+              >
+                ×
+              </button>
+            ) : null}
+            <span aria-hidden className="discover-search-icon">
+              ⌕
+            </span>
+          </label>
+        </footer>
+      )}
     </Dialog>
   );
 }

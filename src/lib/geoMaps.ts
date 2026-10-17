@@ -24,6 +24,7 @@ import {
   isGeoRegionField,
   isLatField,
   isLonField,
+  isUsAtlasKind,
   peekWorldAtlas,
   peekUsAtlas,
   type AtlasBundle,
@@ -339,7 +340,9 @@ export function renderGeoChoropleth(
   const showKey = !mini && values.size > 0;
   const projection = fitProjection(
     // Albers USA insets Alaska / Hawaii so the lower 48 fill the frame
-    atlasKind === "us" ? geoAlbersUsa() : geoEqualEarth(),
+    isUsAtlasKind(atlas.kind) || isUsAtlasKind(atlasKind)
+      ? geoAlbersUsa()
+      : geoEqualEarth(),
     atlas,
     w,
     h,

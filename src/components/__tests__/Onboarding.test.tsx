@@ -296,7 +296,7 @@ describe("discovery landing journey", () => {
     expect(scanDiscoverStories).not.toHaveBeenCalled();
   });
 
-  it("switches layouts without losing filters or the chart settings", async () => {
+  it("switches layouts and card sizes without losing filters or the chart settings", async () => {
     render(<Onboarding />);
     const search = await screen.findByRole("searchbox");
     fireEvent.change(search, { target: { value: "stacked" } });
@@ -306,6 +306,19 @@ describe("discovery landing journey", () => {
       expect(button).toHaveAttribute("aria-pressed", "true");
       expect(search).toHaveValue("stacked");
       expect(screen.getAllByRole("article")).toHaveLength(1);
+    }
+    for (const label of ["Compact", "Broadsheet", "Comfort"]) {
+      const button = screen.getByRole("button", { name: `${label} size` });
+      fireEvent.click(button);
+      expect(button).toHaveAttribute("aria-pressed", "true");
+      expect(document.querySelector(".discover-grid")).toHaveAttribute(
+        "data-size",
+        label === "Compact"
+          ? "compact"
+          : label === "Broadsheet"
+            ? "broadsheet"
+            : "comfort",
+      );
     }
     fireEvent.click(
       screen.getByRole("button", { name: "Open chart: Temperatures by city" }),
@@ -446,7 +459,7 @@ describe("discovery landing journey", () => {
       name: /Chart perspective/,
     });
     expect(screen.getAllByRole("article")).toHaveLength(1);
-    expect(screen.getByText("2 views")).toBeInTheDocument();
+    expect(screen.getByText("2↗")).toBeInTheDocument();
     fireEvent.change(select, { target: { value: alternative.id } });
     fireEvent.click(
       screen.getByRole("button", {
@@ -487,17 +500,17 @@ describe("discovery landing journey", () => {
     };
     setDiscoverStoryCache([base, relationship]);
     render(<Onboarding />);
-    const perspective = await screen.findByRole("button", {
-      name: /Relationships/,
+    const perspective = await screen.findByRole("combobox", {
+      name: "Perspective",
     });
     expect(screen.getAllByRole("article")).toHaveLength(2);
     expect(screen.getByText(relationship.insight!.detail)).toBeInTheDocument();
-    fireEvent.click(perspective);
-    expect(perspective).toHaveAttribute("aria-pressed", "true");
+    fireEvent.change(perspective, { target: { value: "family:relationship" } });
+    expect(perspective).toHaveValue("family:relationship");
     expect(screen.getAllByRole("article")).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "All perspectives" }));
+    fireEvent.change(perspective, { target: { value: "all" } });
     expect(screen.getAllByRole("article")).toHaveLength(2);
-    fireEvent.click(perspective);
+    fireEvent.change(perspective, { target: { value: "family:relationship" } });
     fireEvent.click(
       screen.getByRole("button", {
         name: "Open chart: Temperature and humidity",

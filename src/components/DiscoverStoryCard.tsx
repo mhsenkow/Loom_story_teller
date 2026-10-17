@@ -17,10 +17,14 @@ import { readableDiscoverText, discoverFieldLabel } from "@/lib/discoverEditoria
 import { DISCOVER_FAMILIES, discoverFamily } from "@/lib/discoverChartCatalog";
 import { feedRef } from "@/lib/sourceRef";
 import { SourcePrefMenu, useSourcePref } from "./SourcePrefControls";
+import type { DiscoverFlowTier } from "@/lib/discoverFlowLayout";
+
+const SETTINGS_VISIBLE = 2;
 
 export const DiscoverStoryCard = memo(function DiscoverStoryCard({
   story,
   featured = false,
+  tier = "standard",
   opening = false,
   disabled = false,
   onOpen,
@@ -32,6 +36,7 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
 }: {
   story: DiscoverStory;
   featured?: boolean;
+  tier?: DiscoverFlowTier;
   opening?: boolean;
   disabled?: boolean;
   onOpen: (story: DiscoverStory) => void;
@@ -47,6 +52,8 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
     () => discoverChartSettings(story.chart),
     [story.chart],
   );
+  const visibleSettings = settings.slice(0, SETTINGS_VISIBLE);
+  const hiddenSettings = settings.length - visibleSettings.length;
   const freshness = discoverFreshness(story, now);
   const sourceRef = feedRef(story.kind);
   const pref = useSourcePref(sourceRef);
@@ -70,10 +77,12 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
   ]
     .filter(Boolean)
     .join("\n");
+  const hasVariants = !!(variants && variants.length > 1 && groupId);
   return (
     <article
-      className={`discover-story relative ${featured ? "discover-story-featured" : ""} ${pref.reaction === "hide" ? "opacity-60" : ""}`}
+      className={`discover-story relative discover-tier-${tier} ${featured ? "discover-story-featured" : ""} ${pref.reaction === "hide" ? "opacity-60" : ""}`}
       data-source-ref={sourceRef}
+      data-tier={tier}
     >
       <button
         type="button"
@@ -90,7 +99,7 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
             isActive={false}
             onClick={() => onOpen(story)}
             previewOnly
-            hero={featured}
+            hero={featured || tier === "lead"}
           />
           <span className="discover-story-kind">
             {discoverChartLabel(story.chartKind)}
@@ -123,48 +132,59 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
               <span>{story.insight.detail}</span>
             </div>
           )}
-          {settings.length > 0 && (
+          {visibleSettings.length > 0 && (
             <ul className="discover-story-settings" aria-label="Chart settings">
-              {settings.map((setting) => (
+              {visibleSettings.map((setting) => (
                 <li key={setting}>{setting}</li>
               ))}
+              {hiddenSettings > 0 && (
+                <li title={settings.slice(SETTINGS_VISIBLE).join(" · ")}>
+                  +{hiddenSettings}
+                </li>
+              )}
             </ul>
           )}
         </div>
       </button>
-      {variants && variants.length > 1 && groupId && (
-        <label className="discover-story-views">
-          <span>{variants.length} views</span>
-          <select
-            aria-label={`Chart perspective for ${story.hook}`}
-            value={story.id}
-            disabled={disabled}
-            onChange={(event) => onChooseVariant?.(groupId, event.target.value)}
-          >
-            {variants.map((variant) => (
-              <option key={variant.id} value={variant.id}>
-                {[
-                  discoverChartLabel(variant.chartKind),
-                  readableDiscoverText(
-                    variant.chart.title,
-                    variant.sample.columns,
-                  ),
-                  ...discoverChartSettings(variant.chart),
-                ].join(" · ")}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
       <div className="discover-story-proof">
         <p className="discover-story-meta" title={metaTitle}>
           <span className={freshness.due ? "discover-freshness-due" : ""}>
-            {freshness.label}
-            {freshness.due ? " · due" : ""}
+            <span className="sr-only">{freshness.label}</span>
+            <span aria-hidden>
+              {freshness.shortLabel}
+              {freshness.due ? " · due" : ""}
+            </span>
           </span>
           <span aria-hidden> · </span>
-          <span>{evidence.coverage}</span>
+          <span>{evidence.shortCoverage}</span>
         </p>
+        {hasVariants && (
+          <label className="discover-story-views">
+            <span className="sr-only">{variants!.length} views</span>
+            <select
+              aria-label={`Chart perspective for ${story.hook}`}
+              value={story.id}
+              disabled={disabled}
+              onChange={(event) => onChooseVariant?.(groupId!, event.target.value)}
+            >
+              {variants!.map((variant) => (
+                <option key={variant.id} value={variant.id}>
+                  {[
+                    discoverChartLabel(variant.chartKind),
+                    readableDiscoverText(
+                      variant.chart.title,
+                      variant.sample.columns,
+                    ),
+                    ...discoverChartSettings(variant.chart),
+                  ].join(" · ")}
+                </option>
+              ))}
+            </select>
+            <span aria-hidden className="discover-story-views-count">
+              {variants!.length}↗
+            </span>
+          </label>
+        )}
         <div className="discover-story-source">
           <button
             type="button"

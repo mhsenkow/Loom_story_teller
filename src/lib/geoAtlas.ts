@@ -9,8 +9,25 @@
 import { feature as topoFeature, mesh as topoMesh } from "topojson-client";
 import type { Topology, GeometryCollection } from "topojson-specification";
 import type { Feature, FeatureCollection, GeoJsonProperties, Geometry } from "geojson";
+import { isLatField, isLonField } from "./geoFields";
 
-export type AtlasKind = "world" | "us";
+/** Basemap atlas. Lon/lat charts default to world; choropleths pick from the data. */
+export type AtlasKind = "world" | "worldDetail" | "us" | "usCounties";
+
+export const ATLAS_OPTIONS: {
+  value: AtlasKind;
+  label: string;
+  description: string;
+}[] = [
+  { value: "world", label: "World", description: "Countries — clear globe and world maps" },
+  { value: "worldDetail", label: "World detail", description: "Countries at higher resolution" },
+  { value: "us", label: "US states", description: "United States with Alaska & Hawaii insets" },
+  { value: "usCounties", label: "US counties", description: "County polygons for detailed US fills" },
+];
+
+export function isUsAtlasKind(kind: AtlasKind): boolean {
+  return kind === "us" || kind === "usCounties";
+}
 
 export type GeoFeature = Feature<Geometry, GeoJsonProperties> & { id?: string | number };
 
@@ -170,13 +187,17 @@ function addKey(map: Map<string, number>, key: string, idx: number) {
   map.set(k, idx);
 }
 
-async function buildWorldAtlas(): Promise<AtlasBundle> {
-  const [{ default: worldCountries }, { default: worldLand }] = await Promise.all([
-    import("world-atlas/countries-110m.json"),
-    import("world-atlas/land-110m.json"),
-  ]);
-  const topo = worldCountries as unknown as Topology<{ countries: GeometryCollection }>;
-  const landTopo = worldLand as unknown as Topology<{ land: GeometryCollection }>;
+async function buildWorldAtlas(kind: "world" | "worldDetail"): Promise<AtlasBundle> {
+  const countriesMod =
+    kind === "worldDetail"
+      ? await import("world-atlas/countries-50m.json")
+      : await import("world-atlas/countries-110m.json");
+  const landMod =
+    kind === "worldDetail"
+      ? await import("world-atlas/land-50m.json")
+      : await import("world-atlas/land-110m.json");
+  const topo = countriesMod.default as unknown as Topology<{ countries: GeometryCollection }>;
+  const landTopo = landMod.default as unknown as Topology<{ land: GeometryCollection }>;
   const fc = topoFeature(topo, topo.objects.countries) as FeatureCollection;
   const features = fc.features as GeoFeature[];
   let outline: Geometry | null = null;
@@ -213,10 +234,10 @@ async function buildWorldAtlas(): Promise<AtlasBundle> {
     if (idx == null) continue;
     addKey(byKey, iso2, idx);
   }
-  return { kind: "world", features, outline, byKey };
+  return { kind, features, outline, byKey };
 }
 
-async function buildUsAtlas(): Promise<AtlasBundle> {
+async function buildUsStatesAtlas(): Promise<AtlasBundle> {
   const { default: usStates } = await import("us-atlas/states-10m.json");
   const topo = usStates as unknown as Topology<{ states: GeometryCollection; nation: GeometryCollection }>;
   const fc = topoFeature(topo, topo.objects.states) as FeatureCollection;
@@ -242,57 +263,92 @@ async function buildUsAtlas(): Promise<AtlasBundle> {
   return { kind: "us", features, outline, byKey };
 }
 
-let worldCache: AtlasBundle | null = null;
-let usCache: AtlasBundle | null = null;
+async function buildUsCountiesAtlas(): Promise<AtlasBundle> {
+  const { default: usCounties } = await import("us-atlas/counties-10m.json");
+  const topo = usCounties as unknown as Topology<{
+    counties: GeometryCollection;
+    states: GeometryCollection;
+  }>;
+  const fc = topoFeature(topo, topo.objects.counties) as FeatureCollection;
+  const features = fc.features as GeoFeature[];
+  let outline: Geometry | null = null;
+  try {
+    outline = topoMesh(topo, topo.objects.states, (a, b) => a !== b) as Geometry;
+  } catch {
+    outline = null;
+  }
+  const byKey = new Map<string, number>();
+  features.forEach((f, i) => {
+    const id = f.id != null ? String(f.id).padStart(5, "0") : "";
+    const name = String(f.properties?.name ?? "");
+    if (id) {
+      addKey(byKey, id, i);
+      addKey(byKey, String(Number(id)), i);
+    }
+    if (name) addKey(byKey, name, i);
+  });
+  return { kind: "usCounties", features, outline, byKey };
+}
+
+const atlasCache: Partial<Record<AtlasKind, AtlasBundle>> = {};
 const loadPromises: Partial<Record<AtlasKind, Promise<AtlasBundle>>> = {};
+
+function buildAtlas(kind: AtlasKind): Promise<AtlasBundle> {
+  switch (kind) {
+    case "worldDetail":
+      return buildWorldAtlas("worldDetail");
+    case "us":
+      return buildUsStatesAtlas();
+    case "usCounties":
+      return buildUsCountiesAtlas();
+    case "world":
+    default:
+      return buildWorldAtlas("world");
+  }
+}
 
 /** Lazy-load TopoJSON into separate chunks (LOOM-063). */
 export async function loadAtlas(kind: AtlasKind): Promise<AtlasBundle> {
-  if (kind === "us") {
-    if (usCache) return usCache;
-    if (!loadPromises.us) {
-      loadPromises.us = buildUsAtlas().then((b) => {
-        usCache = b;
-        return b;
-      });
-    }
-    return loadPromises.us;
-  }
-  if (worldCache) return worldCache;
-  if (!loadPromises.world) {
-    loadPromises.world = buildWorldAtlas().then((b) => {
-      worldCache = b;
+  const cached = atlasCache[kind];
+  if (cached) return cached;
+  if (!loadPromises[kind]) {
+    loadPromises[kind] = buildAtlas(kind).then((b) => {
+      atlasCache[kind] = b;
       return b;
     });
   }
-  return loadPromises.world;
+  return loadPromises[kind]!;
 }
 
 export function getWorldAtlas(): AtlasBundle {
-  if (!worldCache) throw new Error("World atlas not loaded — call loadAtlas('world') first");
-  return worldCache;
+  const world = atlasCache.world;
+  if (!world) throw new Error("World atlas not loaded — call loadAtlas('world') first");
+  return world;
 }
 
 export function getUsAtlas(): AtlasBundle {
-  if (!usCache) throw new Error("US atlas not loaded — call loadAtlas('us') first");
-  return usCache;
+  const us = atlasCache.us;
+  if (!us) throw new Error("US atlas not loaded — call loadAtlas('us') first");
+  return us;
 }
 
 export function getAtlas(kind: AtlasKind): AtlasBundle {
-  return kind === "us" ? getUsAtlas() : getWorldAtlas();
+  const bundle = atlasCache[kind];
+  if (!bundle) throw new Error(`Atlas '${kind}' not loaded — call loadAtlas('${kind}') first`);
+  return bundle;
 }
 
 /** Non-throwing peek for thumbs / first paint before loadAtlas resolves. */
 export function peekWorldAtlas(): AtlasBundle | null {
-  return worldCache;
+  return atlasCache.world ?? null;
 }
 
 export function peekUsAtlas(): AtlasBundle | null {
-  return usCache;
+  return atlasCache.us ?? null;
 }
 
 export function peekAtlas(kind: AtlasKind): AtlasBundle | null {
-  return kind === "us" ? usCache : worldCache;
+  return atlasCache[kind] ?? null;
 }
 
 export function isAtlasLoaded(kind: AtlasKind): boolean {
@@ -335,25 +391,45 @@ export function findFeatureIndex(atlas: AtlasBundle, raw: unknown): number {
   return -1;
 }
 
+/** Lon/lat columns must never drive US atlas selection — numeric degrees collide with FIPS. */
+function isCoordinateField(regionField: string): boolean {
+  return isLatField(regionField) || isLonField(regionField);
+}
+
+function isNumberishRegion(v: unknown): boolean {
+  return typeof v === "number" || (typeof v === "string" && /^\s*-?\d+(\.\d+)?\s*$/.test(v));
+}
+
 /** Heuristic: which atlas fits a region column name + sample values. */
 export function pickAtlasKind(regionField: string, sampleValues: unknown[]): AtlasKind {
   const field = regionField.toLowerCase();
+  // Point maps / globes encode lon or lat on X — always draw the world coastline.
+  if (isCoordinateField(regionField)) return "world";
   // Token match so snake_case names (`state_abbr`, `state_fips`) count — `\b` treats `_` as a word char.
+  if (/(?:^|[^a-z])(?:county|counties)(?:[^a-z]|$)/.test(field)) {
+    return "usCounties";
+  }
   if (/(?:^|[^a-z])(?:state|stusps|fips|province)(?:[^a-z]|$)/.test(field) && !/country/.test(field)) {
     return "us";
   }
-  if (usCache && worldCache) {
+  const codesOk = /(fips|iso|code|_num|numeric|cca|abbr)/i.test(field);
+  const samples = sampleValues
+    .slice(0, 40)
+    .filter((v) => codesOk || !isNumberishRegion(v));
+  const us = atlasCache.us;
+  const world = atlasCache.world;
+  if (us && world) {
     let usHits = 0;
     let worldHits = 0;
-    for (const v of sampleValues.slice(0, 40)) {
-      if (findFeatureIndex(usCache, v) >= 0) usHits++;
-      if (findFeatureIndex(worldCache, v) >= 0) worldHits++;
+    for (const v of samples) {
+      if (findFeatureIndex(us, v) >= 0) usHits++;
+      if (findFeatureIndex(world, v) >= 0) worldHits++;
     }
     if (usHits >= worldHits && usHits >= 2) return "us";
-  } else if (usCache) {
+  } else if (us) {
     let usHits = 0;
-    for (const v of sampleValues.slice(0, 40)) {
-      if (findFeatureIndex(usCache, v) >= 0) usHits++;
+    for (const v of samples) {
+      if (findFeatureIndex(us, v) >= 0) usHits++;
     }
     if (usHits >= 2) return "us";
   }

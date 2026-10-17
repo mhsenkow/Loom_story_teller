@@ -180,6 +180,7 @@ export function rankDiscoverStories(
 
 export function discoverEvidence(story: DiscoverStory): {
   coverage: string;
+  shortCoverage: string;
   period: string | null;
   cached: boolean;
 } {
@@ -195,6 +196,11 @@ export function discoverEvidence(story: DiscoverStory): {
     : total > count
       ? `${count.toLocaleString()} of ${total.toLocaleString()} rows`
       : `${count.toLocaleString()} rows`;
+  const shortCoverage = timed.filtered
+    ? `${count.toLocaleString()} in window`
+    : total > count
+      ? `${count.toLocaleString()}/${total.toLocaleString()} rows`
+      : `${count.toLocaleString()} rows`;
   const field =
     story.chart.timeWindowField ??
     pickDefaultTimeField(story.stats, story.chart);
@@ -205,6 +211,7 @@ export function discoverEvidence(story: DiscoverStory): {
   );
   return {
     coverage,
+    shortCoverage,
     period: span ? formatChartTimeSpanRange(span.minMs, span.maxMs) : window,
     cached: story.snapshotCached === true,
   };

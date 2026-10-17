@@ -65,6 +65,14 @@ describe("geoAtlas", () => {
     expect(pickAtlasKind("home_state", ["CA"])).toBe("us");
     expect(pickAtlasKind("statement", ["CA"])).toBe("world");
     expect(pickAtlasKind("country_code", ["USA", "BRA", "DEU"])).toBe("world");
+    expect(pickAtlasKind("county_fips", ["06037", "36061"])).toBe("usCounties");
+  });
+
+  it("never picks US atlas for longitude or latitude columns", () => {
+    // Degrees collide with FIPS (e.g. 36 = New York) — globes must stay world.
+    expect(pickAtlasKind("longitude", [-122.4, -74.0, 36.1, 48.8])).toBe("world");
+    expect(pickAtlasKind("latitude", [37.7, 40.7, 36.1, 48.8])).toBe("world");
+    expect(pickAtlasKind("lon", [10, 20, 30, 40, 50])).toBe("world");
   });
 
   it("detects geo field names", () => {

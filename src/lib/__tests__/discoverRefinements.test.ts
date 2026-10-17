@@ -57,17 +57,18 @@ describe("discovery refinements", () => {
     expect(discoverFreshness(base, now)).toMatchObject({
       due: false,
       label: "Checked 2m ago",
+      shortLabel: "2m",
     });
     expect(discoverFreshness({ ...base, kind: "usgs" }, now).due).toBe(true);
     expect(
-      discoverFreshness({ ...base, capturedAt: now - 86_400_000 }, now).label,
-    ).toBe("Checked 1d ago");
+      discoverFreshness({ ...base, capturedAt: now - 86_400_000 }, now),
+    ).toMatchObject({ label: "Checked 1d ago", shortLabel: "1d" });
     expect(discoverFreshness({ ...base, capturedAt: undefined }, now).due).toBe(
       true,
     );
     expect(
-      discoverFreshness({ ...base, capturedAt: now + 120_000 }, now).label,
-    ).toBe("Check time unknown");
+      discoverFreshness({ ...base, capturedAt: now + 120_000 }, now),
+    ).toMatchObject({ label: "Check time unknown", shortLabel: "?" });
   });
 
   it("bounds refresh work, removes duplicate feeds and backs off failed checks", () => {

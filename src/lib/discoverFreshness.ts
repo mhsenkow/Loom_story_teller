@@ -18,6 +18,7 @@ export function discoverFreshness(
 ): {
   due: boolean;
   label: string;
+  shortLabel: string;
   title: string;
 } {
   const captured = story.capturedAt;
@@ -25,10 +26,19 @@ export function discoverFreshness(
     return {
       due: true,
       label: "Check time unknown",
+      shortLabel: "?",
       title: "This saved snapshot has no verified check time.",
     };
   const age = Math.max(0, now - captured);
   const minutes = Math.floor(age / 60_000);
+  const shortLabel =
+    minutes < 1
+      ? "now"
+      : minutes < 60
+        ? `${minutes}m`
+        : minutes < 1440
+          ? `${Math.floor(minutes / 60)}h`
+          : `${Math.floor(minutes / 1440)}d`;
   const relative =
     minutes < 1
       ? "just now"
@@ -40,6 +50,7 @@ export function discoverFreshness(
   return {
     due: age >= discoverRefreshInterval(story.kind),
     label: `Checked ${relative}`,
+    shortLabel,
     title: `Snapshot checked ${new Date(captured).toLocaleString()}. Observation dates are shown separately.`,
   };
 }

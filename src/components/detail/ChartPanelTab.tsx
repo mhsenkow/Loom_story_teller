@@ -91,6 +91,8 @@ import {
   type ChartChromeTarget,
 } from "@/lib/chartChromeLink";
 import { CHART_TOOLTIP_MODES, type ChartTooltipMode } from "@/lib/chartTooltipMode";
+import { ATLAS_OPTIONS } from "@/lib/geoAtlas";
+import { isGeoFamilyKind } from "@/lib/geoMaps";
 import {
   resolveDataProvenance,
   provenanceKindLabel,
@@ -3460,6 +3462,57 @@ export default function ChartPanelTab() {
                 </p>
               ) : null}
                 </ChartInspectorSection>
+
+            {isGeoFamilyKind(activeChart.kind) && (
+              <ChartInspectorSection
+                title="Basemap"
+                open={visualSections.map !== false}
+                onToggle={() => toggleVisualSection("map")}
+              >
+                <div>
+                  <span className="block text-2xs text-loom-muted mb-1">Geography</span>
+                  <div className="grid grid-cols-2 gap-1" role="radiogroup" aria-label="Basemap">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={(chartVisualOverrides.geoAtlas ?? "auto") === "auto"}
+                      title="Pick from the region column or chart kind"
+                      onClick={() => updateOverride("geoAtlas", "auto")}
+                      className={`min-h-8 rounded border px-2 text-2xs text-left ${
+                        (chartVisualOverrides.geoAtlas ?? "auto") === "auto"
+                          ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                          : "border-loom-border text-loom-muted hover:text-loom-text"
+                      }`}
+                    >
+                      Auto
+                    </button>
+                    {ATLAS_OPTIONS.map((option) => {
+                      const selected = chartVisualOverrides.geoAtlas === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          title={option.description}
+                          onClick={() => updateOverride("geoAtlas", option.value)}
+                          className={`min-h-8 rounded border px-2 text-2xs text-left ${
+                            selected
+                              ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                              : "border-loom-border text-loom-muted hover:text-loom-text"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-2xs text-loom-muted mt-1.5 leading-snug">
+                    Globes and lat/lon maps default to the full world. Switch to US states or counties when the story is domestic.
+                  </p>
+                </div>
+              </ChartInspectorSection>
+            )}
 
             {/* Marks — only for kinds that draw marks this way */}
             {(caps.markPoints || caps.barMarks || caps.lineMarks) && (

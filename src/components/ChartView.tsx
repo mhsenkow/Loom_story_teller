@@ -37,12 +37,12 @@ import { CanvasArrangeOverlay, type ArrangeChange } from "./CanvasArrangeOverlay
 import { ARRANGEMENT_KEYS, ARRANGE_PLOT_KINDS, arrangementPlot, arrangedFrameSize, hasCanvasArrangement, titleArrangementRect } from "@/lib/canvasArrangement";
 import type { ChartVisualOverrides } from "@/lib/chartVisualTypes";
 import { type ChartChromeLayout, type ChartChromeTarget, chromeHighlightRect, chromeSectionFor, pickChartChromeRegion } from "@/lib/chartChromeLink";
-import { type AtlasBundle, loadAtlas } from "@/lib/geoAtlas";
+import { type AtlasBundle, type AtlasKind, loadAtlas } from "@/lib/geoAtlas";
 import { resolveTooltipPresentation } from "@/lib/chartTooltipMode";
 import { ChartTooltipCard } from "@/components/ChartTooltipCard";
 import { isOddChartKind, renderOddChart } from "@/lib/oddCharts";
 import { extractGpuScenePoints, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
-import { globeCameraForData, isGeoMapKind, isWebGpuGlobeKind, pickAtlasKind, renderGeoMapCanvas } from "@/lib/geoMaps";
+import { globeCameraForData, isGeoFamilyKind, isGeoMapKind, isWebGpuGlobeKind, pickAtlasKind, renderGeoMapCanvas } from "@/lib/geoMaps";
 import { type CubeAxisSlot, type CubeHoverCell, DataCubePivotBar, DataCubePivotTable } from "@/components/DataCubePivot";
 import { buildDataCube, buildPivotTable, cubeCellCenter, cubeCellKey, cubeCellTooltip, dataCubeChartView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
 import { FOOTNOTE_BAND_PX, densityAwarePointMarks, fitTextEllipsis, resolveChartPad, subsampleRowsForDensity, titleBandBottom } from "@/lib/chartLayout";
@@ -1504,16 +1504,24 @@ export function ChartView() {
 
   useEffect(() => {
     const kind = activeChart?.kind ?? "";
-    if (!isGeoMapKind(kind) && kind !== "choropleth") {
+    if (!isGeoFamilyKind(kind)) {
       setGeoAtlasBundle(null);
       return;
     }
+    const override = chartVisualOverrides.geoAtlas;
     const regionField = activeChart?.xField ?? "";
     const samples = sampleRows?.rows.slice(0, 40).map((r) => {
       const xi = sampleRows.columns.indexOf(regionField);
       return xi >= 0 ? r[xi] : null;
     }) ?? [];
-    const atlasKind = pickAtlasKind(regionField, samples);
+    // Lon/lat maps (globe, geoPoints, …) must use a world coastline — US FIPS
+    // digits collide with longitude values and used to paint only the United States.
+    const atlasKind: AtlasKind =
+      override && override !== "auto"
+        ? override
+        : kind === "choropleth"
+          ? pickAtlasKind(regionField, samples)
+          : "world";
     let cancelled = false;
     void loadAtlas(atlasKind).then((bundle) => {
       if (!cancelled) setGeoAtlasBundle(bundle);
@@ -1521,7 +1529,12 @@ export function ChartView() {
     return () => {
       cancelled = true;
     };
-  }, [activeChart?.kind, activeChart?.xField, sampleRows]);
+  }, [
+    activeChart?.kind,
+    activeChart?.xField,
+    sampleRows,
+    chartVisualOverrides.geoAtlas,
+  ]);
 
   // Firefly pulse clock
   useEffect(() => {

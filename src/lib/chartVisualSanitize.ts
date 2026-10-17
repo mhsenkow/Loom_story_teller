@@ -69,6 +69,9 @@ const STRING_ENUMS: Partial<Record<keyof ChartVisualOverrides, readonly string[]
   sourceFootnoteAlign: allOf<"sourceFootnoteAlign">({ left: true, center: true, right: true }),
   chromeInfoBand: allOf<"chromeInfoBand">({ footer: true, header: true }),
   tooltipMode: allOf<"tooltipMode">({ auto: true, hover: true, glass: true, dock: true, compact: true, off: true }),
+  geoAtlas: allOf<"geoAtlas">({
+    auto: true, world: true, worldDetail: true, us: true, usCounties: true,
+  }),
   markerMode: allOf<"markerMode">({ shape: true, emoji: true }),
   // Plain-string overrides: the values the Visual panel and look presets write
   legendPosition: ["auto", "none", "custom", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"],

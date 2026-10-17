@@ -25,6 +25,26 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-17",
+    date: "2026-10-17",
+    title: "A newspaper you can scan",
+    summary: "Discover reads in one glance, and globes show the whole planet.",
+    items: [
+      {
+        title: "Stories, then the fine print",
+        detail: "Each card keeps one quiet line for how fresh it is, how many rows it covers, and where the data came from. The headline and the chart stay in front.",
+      },
+      {
+        title: "The page reads like a sentence",
+        detail: "What’s interesting right now sits with the filters in one line: showing a perspective, in a topic, from a source. Search lives at the lower right, where a thumb can reach it. S, M, and L change how large the cards are, and the page mixes a lead story with wider and shorter ones.",
+      },
+      {
+        title: "Globes show every country",
+        detail: "Spinning a globe, or any map of latitude and longitude, draws the world. In Basemap you can switch to a more detailed world, US states, or US counties when the story is local.",
+      },
+    ],
+  },
+  {
     id: "2026-10-16i",
     date: "2026-10-16",
     title: "Give every point a shape or a face",

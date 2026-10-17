@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   discoverFlowColumnCount,
   discoverFlowSpans,
+  discoverFlowTiers,
 } from "../discoverFlowLayout";
 
 function rows(spans: number[], columns: number): number[][] {
@@ -32,34 +33,24 @@ describe("discoverFlowSpans", () => {
     const featured = Array.from({ length: 18 }, (_, i) => i % 8 === 0);
     for (const columns of [4, 5, 6, 8, 12]) {
       const spans = discoverFlowSpans(18, columns, featured);
-      expect(spans.some((span) => span === 2)).toBe(true);
-      expect(spans.every((span) => span === 1 || span === 2)).toBe(true);
+      expect(spans.some((span) => span >= 2)).toBe(true);
+      expect(spans.every((span) => span === 1 || span === 2 || span === 3)).toBe(true);
       const packed = rows(spans, columns);
       for (const row of packed.slice(0, -1)) {
         expect(row.reduce((sum, span) => sum + span, 0)).toBe(columns);
       }
-      const wideIndexes = spans.flatMap((span, index) => (span === 2 ? [index] : []));
-      expect(wideIndexes.length).toBeGreaterThan(2);
-      expect(spans[0]).toBe(2);
+      const wideIndexes = spans.flatMap((span, index) => (span >= 2 ? [index] : []));
+      expect(wideIndexes.length).toBeGreaterThan(1);
+      expect(spans[0]).toBeGreaterThanOrEqual(2);
     }
   });
 
-  it("puts more than one large card in the first row of a wide desktop", () => {
-    const plain = Array.from({ length: 16 }, () => false);
-    const six = discoverFlowSpans(16, 6, plain);
-    expect(six.slice(0, 4)).toEqual([2, 1, 2, 1]);
-    const five = discoverFlowSpans(16, 5, plain);
-    expect(five.slice(0, 3)).toEqual([2, 1, 2]);
-    const twelve = discoverFlowSpans(16, 12, plain);
-    expect(twelve.slice(0, 12).filter((span) => span === 2).length).toBe(3);
-    for (const [spans, columns] of [
-      [six, 6],
-      [five, 5],
-      [twelve, 12],
-    ] as const) {
-      for (const row of rows(spans, columns).slice(0, -1)) {
-        expect(row.reduce((sum, span) => sum + span, 0)).toBe(columns);
-      }
+  it("puts a lead span of 3 on wide desktops when featured", () => {
+    const featured = Array.from({ length: 12 }, (_, i) => i === 0);
+    const six = discoverFlowSpans(12, 6, featured);
+    expect(six[0]).toBe(3);
+    for (const row of rows(six, 6).slice(0, -1)) {
+      expect(row.reduce((sum, span) => sum + span, 0)).toBe(6);
     }
   });
 
@@ -74,11 +65,28 @@ describe("discoverFlowSpans", () => {
       false,
       false,
     ]);
-    expect(spans[0]).toBe(2);
-    expect(spans.filter((span) => span === 2).length).toBeGreaterThan(1);
+    expect(spans[0]).toBeGreaterThanOrEqual(2);
+    expect(spans.filter((span) => span >= 2).length).toBeGreaterThan(0);
     for (const row of rows(spans, 6).slice(0, -1)) {
       expect(row.reduce((sum, span) => sum + span, 0)).toBe(6);
     }
+  });
+});
+
+describe("discoverFlowTiers", () => {
+  it("assigns lead, wide, standard, and brief roles", () => {
+    const featured = Array.from({ length: 16 }, (_, i) => i % 7 === 0);
+    const tiers = discoverFlowTiers(16, 6, featured);
+    expect(tiers).toContain("lead");
+    expect(tiers.some((t) => t === "wide" || t === "lead")).toBe(true);
+    expect(tiers).toContain("standard");
+    expect(new Set(tiers).size).toBeGreaterThan(1);
+  });
+
+  it("uses brief cards on a single column for rhythm", () => {
+    const tiers = discoverFlowTiers(8, 1, Array(8).fill(false));
+    expect(tiers.every((t) => t === "standard" || t === "brief")).toBe(true);
+    expect(tiers).toContain("brief");
   });
 });
 

@@ -649,7 +649,7 @@ const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]>
 
 export const CHART_VISUAL_OVERRIDE_KEYS: (keyof ChartVisualOverrides)[] = (
   Object.values(SECTION_KEYS) as (keyof ChartVisualOverrides)[][]
-).flat().concat(["sourceFootnote", "sourceFootnoteAlign", "chromeInfoBand", "tooltipMode", "canvasWidth", "canvasHeight", "plotX", "plotY", "plotWidth", "plotHeight", "titleX", "titleY", "titleWidth", "titleScale", "legendWidth", "legendHeight"]);
+).flat().concat(["sourceFootnote", "sourceFootnoteAlign", "chromeInfoBand", "tooltipMode", "geoAtlas", "canvasWidth", "canvasHeight", "plotX", "plotY", "plotWidth", "plotHeight", "titleX", "titleY", "titleWidth", "titleScale", "legendWidth", "legendHeight"]);
 
 function pickOne<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]!;

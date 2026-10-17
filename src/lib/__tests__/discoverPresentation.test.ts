@@ -141,6 +141,7 @@ describe("discover presentation", () => {
   it("labels partial and cached snapshots honestly", () => {
     expect(discoverEvidence({ ...story, snapshotCached: true })).toEqual({
       coverage: "2 of 800 rows",
+      shortCoverage: "2/800 rows",
       period: null,
       cached: true,
     });
