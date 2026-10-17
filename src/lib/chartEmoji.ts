@@ -47,6 +47,11 @@ const FALLBACK_EMOJIS = [
   "⭐", "🔥", "🌊", "🌀", "🌋", "❄️", "🌱", "📍", "💡", "🚀", "✨", "🌍",
 ];
 
+/** The symbol an unmapped category gets, by first-seen position. */
+export function fallbackEmoji(index: number): string {
+  return FALLBACK_EMOJIS[Math.abs(Math.trunc(index)) % FALLBACK_EMOJIS.length]!;
+}
+
 /** Distinct non-empty values for an emoji column, in first-seen order. */
 export function emojiFieldKeys(
   rows: readonly unknown[][],
@@ -97,7 +102,7 @@ export function seedEmojiMap(
       mappedGlyph(current, field, key) ??
       mappedGlyph(semantic, field, key) ??
       own ??
-      FALLBACK_EMOJIS[index % FALLBACK_EMOJIS.length]!;
+      fallbackEmoji(index);
     const label =
       (current?.field === field ? current.labels?.[key] : undefined) ??
       (semantic?.field === field ? semantic.labels?.[key] : undefined);

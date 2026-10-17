@@ -25,6 +25,30 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-17b",
+    date: "2026-10-17",
+    title: "Emoji on more charts",
+    summary: "More charts can carry a symbol per category, and Discover’s controls sit where you can reach them.",
+    items: [
+      {
+        title: "Pick a symbol for each category",
+        detail: "Bubble, line, radar, lollipop, isometric scatter, beeswarm, slope, and bump charts now have Emoji from column and Shape by category under More channels. Each value gets its own emoji, and the key shows which is which.",
+      },
+      {
+        title: "Change the points on a line",
+        detail: "Visual → Marks sets one marker for every point: a shape or an emoji, and its size. On a line with no color split, an emoji column draws one line per category.",
+      },
+      {
+        title: "No more letters",
+        detail: "A column without a saved set of emoji gets real symbols, not the first letter of each name. Busy charts switch to shapes once there are too many points for emoji.",
+      },
+      {
+        title: "Discover’s controls moved up",
+        detail: "Card size and Flow, Tiles, Masonry, and List sit with refresh and close. The filters stay on one line with the title, and the search field is larger.",
+      },
+    ],
+  },
+  {
     id: "2026-10-17",
     date: "2026-10-17",
     title: "A newspaper you can scan",

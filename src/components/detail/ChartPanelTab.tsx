@@ -3640,10 +3640,10 @@ export default function ChartPanelTab() {
             )}
 
             {/* Marks — only for kinds that draw marks this way */}
-            {(caps.markPoints || caps.barMarks || caps.lineMarks) && (
+            {(caps.pointMarker || caps.barMarks || caps.lineMarks) && (
             <ChartInspectorSection title="Marks" open={!!visualSections.marks} onToggle={() => toggleVisualSection("marks")}>
 
-              {caps.markPoints && (
+              {caps.pointMarker && (
                 <>
                   <div>
                     <label className="block text-2xs text-loom-muted mb-1">Point size</label>
@@ -3707,7 +3707,16 @@ export default function ChartPanelTab() {
                         );
                       })}
                     </div>
+                    {showSymbolEnc && (
+                      <p className="text-2xs text-loom-muted mt-1.5 leading-snug">
+                        One marker for every point. For a symbol per category, use Encoding → Emoji or Shape from column.
+                      </p>
+                    )}
                   </div>
+                </>
+              )}
+              {caps.markPoints && (
+                <>
                   <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
                     <input
                       type="checkbox"

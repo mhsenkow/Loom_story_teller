@@ -12,9 +12,7 @@ import { drawScatterMarginals, drawScatterTrail } from "./axisHelpers";
 import { type PointVisualOverrides, drawAxisTicks, drawEmojiMark, drawGridLines, drawMark, encodingNorm, jitter, numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
 import { directedUnit } from "../channelInvert";
-import { categoryShape } from "../chartMarks";
-import { firstGrapheme } from "../chartText";
-import { chartEmoji, chartEmojiLabel } from "../chartEmoji";
+import { markSymbols } from "../markSymbols";
 
 export function renderFullScatter(
   ctx: CanvasRenderingContext2D,
@@ -128,11 +126,7 @@ export function renderFullScatter(
     ctx.setLineDash([]);
   }
 
-  const shape = opts?.markShape ?? "circle";
-  const shapeIdx = opts?.shapeField ? (opts.fieldNames?.indexOf(opts.shapeField) ?? -1) : -1;
-  const emojiIdx = opts?.emojiField ? (opts.fieldNames?.indexOf(opts.emojiField) ?? -1) : -1;
-  const shapeMap = new Map<string, number>();
-  const emojiMap = new Map<string, string>();
+  const symbols = markSymbols(opts, opts?.fieldNames, rows, nValid);
   const jitterPx = opts?.markJitter ?? 0;
   let pointIdx = 0;
   for (let ri = 0; ri < rows.length; ri++) {
@@ -182,25 +176,11 @@ export function renderFullScatter(
       };
     }
 
-    let pointShape = shape;
-    if (shapeIdx >= 0) {
-      const key = String(r[shapeIdx] ?? "");
-      if (!shapeMap.has(key)) shapeMap.set(key, shapeMap.size);
-      pointShape = categoryShape(shapeMap.get(key)!);
-    }
-    const glyph =
-      nValid <= 1200
-        ? emojiIdx >= 0
-          ? chartEmoji(r[emojiIdx], opts?.emojiField, opts?.emojiMap)
-          : opts?.markerMode === "emoji"
-            ? firstGrapheme(opts.markEmoji)
-            : null
-        : null;
-    if (glyph) {
-      if (emojiIdx >= 0) emojiMap.set(String(r[emojiIdx] ?? ""), glyph);
-      drawEmojiMark(ctx, glyph, sx, sy, radius, pointOverrides?.alpha ?? baseAlpha);
+    const symbol = symbols.of(r);
+    if (symbol.glyph) {
+      drawEmojiMark(ctx, symbol.glyph, sx, sy, radius, pointOverrides?.alpha ?? baseAlpha);
     } else {
-      drawMark(ctx, pointShape, sx, sy, radius, fillColor, baseAlpha, opts, pointOverrides);
+      drawMark(ctx, symbol.shape, sx, sy, radius, fillColor, baseAlpha, opts, pointOverrides);
     }
     if (anom?.has(sampleIdxOf(ri))) {
       ctx.strokeStyle = fillColor ?? cols[0]!;
@@ -224,10 +204,9 @@ export function renderFullScatter(
     }
   }
   ctx.globalAlpha = 1;
-  if (emojiIdx >= 0 && emojiMap.size > 1) {
-    setLegend(opts, [...emojiMap.entries()].map(([label, glyph]) => ({ label: chartEmojiLabel(label, opts?.emojiField, opts?.emojiMap), glyph, color: cols[(catMap.get(label) ?? 0) % cols.length]! })));
-  } else if (shapeIdx >= 0 && shapeMap.size > 1) {
-    setLegend(opts, [...shapeMap.entries()].map(([label, i]) => ({ label, shape: categoryShape(i), color: cols[i % cols.length]! })));
+  const symbolLegend = symbols.legend((row) => cols[ci >= 0 ? (catMap.get(String(row[ci])) ?? 0) % cols.length : 0]!);
+  if (symbolLegend) {
+    setLegend(opts, symbolLegend);
   } else if (ci >= 0 && !clusterByRow) {
     setLegend(opts, [...catMap.entries()].map(([label, i]) => ({ label, color: cols[i % cols.length]! })));
   }

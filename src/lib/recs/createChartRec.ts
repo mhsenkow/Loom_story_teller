@@ -806,6 +806,9 @@ export function createChartRec(
           timeWindowField: timeWindowField || undefined,
           timeWindow: timeWindow || undefined,
           layoutDirection: layoutDirection || undefined,
+          shapeField: shapeField || undefined,
+          emojiField: emojiField || undefined,
+          emojiMap,
         };
       }
       return null;

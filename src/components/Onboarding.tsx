@@ -995,6 +995,48 @@ export function Onboarding() {
             <h2 id="onboarding-title">What’s interesting right now</h2>
             <div className="discover-header-actions">
               {showFilters && (
+                <>
+                  <div
+                    className="discover-size-picker"
+                    role="group"
+                    aria-label="Card size"
+                  >
+                    {SIZE_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-label={`${option.label} size`}
+                        aria-pressed={size === option.value}
+                        title={`${option.label}: ${option.description}`}
+                        onClick={() => setSize(option.value)}
+                      >
+                        {option.short}
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    className="discover-layout-picker"
+                    role="group"
+                    aria-label="Story layout"
+                  >
+                    {GALLERY_LAYOUTS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        aria-label={`${option.label} view`}
+                        aria-pressed={layout === option.value}
+                        title={`${option.label}: ${option.description}`}
+                        onClick={() => setLayout(option.value)}
+                      >
+                        <span aria-hidden>{option.icon}</span>
+                        <span className="discover-layout-label">{option.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+              <span className="discover-header-chrome">
+              {showFilters && (
                 <button
                   type="button"
                   className="discover-filter-toggle"
@@ -1046,6 +1088,7 @@ export function Onboarding() {
               >
                 ×
               </button>
+              </span>
             </div>
           </div>
           <p id="onboarding-desc" className="sr-only">
@@ -1155,43 +1198,6 @@ export function Onboarding() {
                   Clear
                 </button>
               )}
-              <div
-                className="discover-size-picker"
-                role="group"
-                aria-label="Card size"
-              >
-                {SIZE_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-label={`${option.label} size`}
-                    aria-pressed={size === option.value}
-                    title={`${option.label}: ${option.description}`}
-                    onClick={() => setSize(option.value)}
-                  >
-                    {option.short}
-                  </button>
-                ))}
-              </div>
-              <div
-                className="discover-layout-picker"
-                role="group"
-                aria-label="Story layout"
-              >
-                {GALLERY_LAYOUTS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-label={`${option.label} view`}
-                    aria-pressed={layout === option.value}
-                    title={`${option.label}: ${option.description}`}
-                    onClick={() => setLayout(option.value)}
-                  >
-                    <span aria-hidden>{option.icon}</span>
-                    <span className="discover-layout-label">{option.label}</span>
-                  </button>
-                ))}
-              </div>
             </div>
           )}
         </div>

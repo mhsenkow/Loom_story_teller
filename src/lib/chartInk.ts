@@ -354,7 +354,15 @@ export function drawRampKey(ctx: CanvasRenderingContext2D, a: RampKeyArgs): { x:
   return { x: a.x, y: a.y, w: a.width, h: boxH };
 }
 
-export type SwatchEntry = { label: string; color: string; shape?: "square" | "circle" | "line" };
+export type SwatchEntry = {
+  label: string;
+  color: string;
+  shape?: "square" | "circle" | "line";
+  /** Emoji drawn in place of the swatch. */
+  glyph?: string;
+  /** Marker shape id (chartMarks) drawn in place of the swatch. */
+  mark?: string;
+};
 
 /**
  * Wrapping row(s) of swatches + labels, left-aligned in [x, x + maxWidth].

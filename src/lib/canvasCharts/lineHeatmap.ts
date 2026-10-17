@@ -16,6 +16,8 @@ import { type YAggregateOption } from "../recommendations";
 import { axisFont, densityStops, drawXModelAxis, drawZeroLine, labelGutter, timeBuckets } from "./axisHelpers";
 import { applyLineDash, drawSmoothLine, numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
+import { chartEmojiLabel } from "../chartEmoji";
+import { drawMarkSymbol, markSymbols } from "../markSymbols";
 
 export function renderFullLine(
   ctx: CanvasRenderingContext2D,
@@ -159,6 +161,9 @@ export function renderFullLine(
       if (k) anomKeys.add(k);
     }
   }
+  const symbols = markSymbols(opts, opts?.fieldNames, rows);
+  const symbolOf = (s: { name: string; compare: boolean }) => symbols.of(seriesRows.get(s.name)?.[0]);
+  const markR = Math.max(3, (opts?.pointSize ?? 10) * 0.45);
   applyLineDash(ctx, opts?.lineStrokeStyle);
   data.forEach((s, si) => {
     const color = cols[si % cols.length]!;
@@ -173,7 +178,12 @@ export function renderFullLine(
     if (opts?.lineCurveSmooth && pts.length >= 2) drawSmoothLine(ctx, pts);
     else pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y)));
     ctx.stroke();
-    if (!s.compare && pts.length <= 40) {
+    if (!s.compare && symbols.active && pts.length <= 160) {
+      ctx.setLineDash([]);
+      const symbol = symbolOf(s);
+      for (const p of pts) drawMarkSymbol(ctx, symbol, p.x, p.y, markR, color, 1, opts?.themeBg);
+      applyLineDash(ctx, opts?.lineStrokeStyle);
+    } else if (!s.compare && pts.length <= 40) {
       ctx.setLineDash([]);
       ctx.fillStyle = color;
       for (const p of pts) {
@@ -210,7 +220,15 @@ export function renderFullLine(
   ctx.globalAlpha = 1;
   const legendSrc = data.filter((s) => !s.compare || y2Idx >= 0 || comparePrev);
   if (ci >= 0 || y2Idx >= 0 || comparePrev) {
-    setLegend(opts, legendSrc.map((s, si) => ({ label: s.name || "series", color: cols[si % cols.length]! })));
+    setLegend(opts, legendSrc.map((s, si) => {
+      const symbol = symbols.categorical && !s.compare ? symbolOf(s) : null;
+      const label = s.name || "series";
+      return {
+        label: symbol?.glyph && opts?.emojiField === opts?.fieldNames?.[ci] ? chartEmojiLabel(label, opts?.emojiField, opts?.emojiMap) : label,
+        color: cols[si % cols.length]!,
+        ...(symbol?.glyph ? { glyph: symbol.glyph } : symbol ? { shape: symbol.shape } : {}),
+      };
+    }));
   }
   if (ys.min < 0 && ys.max > 0) drawZeroLine(ctx, rect.left, Y(0), rect.right, Y(0), opts);
   drawChartTicks(ctx, 0, 1, ys.min, ys.max, w, h, rect, opts, { x: false });

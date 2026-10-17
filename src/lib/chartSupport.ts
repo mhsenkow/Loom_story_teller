@@ -299,6 +299,8 @@ export interface ChartCapabilities {
   /** Dual-measure Δ / % labels (dumbbell, slope, pyramid). */
   deltaDisplay: boolean;
   markPoints: boolean;
+  /** Point size + one marker (shape or emoji) for every point. */
+  pointMarker: boolean;
   /** Per-row category shapes or emoji glyphs. */
   symbolChannel: boolean;
   opacityChannel: boolean;
@@ -562,6 +564,11 @@ export function resolveLayoutDirection(
 
 export { measureSuggestsGrowDown } from "./chartFieldHeuristics";
 
+/** Non-scatter kinds whose point marks read markSymbols (shape / emoji). */
+const SYMBOL_MARK_KINDS = new Set<ChartKind>([
+  "bubble", "line", "radar", "lollipop", "isoScatter", "beeswarm", "slope", "bump",
+]);
+
 /** Which Encoding / Visual controls actually affect this chart kind. */
 export function chartCapabilities(kind: ChartKind): ChartCapabilities {
   const cartesian = !NON_CARTESIAN.has(kind);
@@ -610,7 +617,8 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     comparePrevious: kind === "line" || kind === "area" || kind === "bar",
     deltaDisplay: kind === "dumbbell" || kind === "slope" || kind === "pyramid",
     markPoints: scatterLike || mapPoints,
-    symbolChannel: scatterLike || mapPoints,
+    pointMarker: scatterLike || mapPoints || SYMBOL_MARK_KINDS.has(kind),
+    symbolChannel: scatterLike || mapPoints || SYMBOL_MARK_KINDS.has(kind),
     // Per-row opacity encoding (not global opacity slider)
     opacityChannel: scatterLike || kind === "strip",
     // Per-row glow / outline fields

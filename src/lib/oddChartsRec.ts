@@ -84,6 +84,13 @@ export interface OddRenderOpts {
   themeBorder?: string;
   showDataLabels?: boolean;
   pointSize?: number;
+  /** Point marks: one shape / emoji for all, or per category (see markSymbols). */
+  markShape?: string;
+  markerMode?: "shape" | "emoji";
+  markEmoji?: string;
+  shapeField?: string | null;
+  emojiField?: string | null;
+  emojiMap?: import("./chartEmoji").ChartEmojiMap | null;
   continuousStops?: string[];
   yAggregate?: YAggregateOption | null;
   /** Theme background (for halos / contrast); falls back to the document theme. */

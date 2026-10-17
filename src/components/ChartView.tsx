@@ -104,8 +104,7 @@ import { renderFullBubble, renderFullPie } from "@/lib/canvasCharts/pieBubble";
 import { renderFullLollipop, renderFullRadar, renderFullViolin, renderFullWaterfall } from "@/lib/canvasCharts/violinRadar";
 import { renderFullArcDiagram, renderFullForceBubble, renderFullNetwork, renderFullSankey, renderFullTreemap } from "@/lib/canvasCharts/flowCharts";
 import { renderFullCorrMatrix, renderFullDumbbell, renderFullFunnel, renderFullHexbin, renderFullParallel, renderFullPareto, renderFullRidgeline } from "@/lib/canvasCharts/statCharts";
-import { categoryShape } from "@/lib/chartMarks";
-import { chartEmoji, chartEmojiLabel } from "@/lib/chartEmoji";
+import { markSymbols } from "@/lib/markSymbols";
 export type { ChartRenderOpts } from "@/lib/chartRenderTypes";
 
 // The WebGPU globe pass (globe.wgsl) only draws glowing points — no sphere,
@@ -121,6 +120,8 @@ const FRAMED_KINDS = new Set<string>([
 ]);
 /** Charts with a category-label gutter: they draw their own frame; dispatch still titles the axes. */
 const OWN_FRAME_KINDS = new Set<string>(["strip", "lollipop", "dumbbell", "ridgeline", "heatmap"]);
+/** Series kinds split by the Shape / Emoji column when Color is empty. */
+const SYMBOL_SERIES_KINDS = new Set<string>(["line", "radar", "bump"]);
 
 
 /**
@@ -2691,7 +2692,14 @@ export function ChartView() {
     }
     const xIdx = cols.indexOf(activeChart.xField);
     const yIdx = activeChart.yField ? cols.indexOf(activeChart.yField) : -1;
-    const cIdx = activeChart.colorField ? cols.indexOf(activeChart.colorField) : -1;
+    const symbolSeriesField = SYMBOL_SERIES_KINDS.has(activeChart.kind)
+      ? (activeChart.emojiField ?? activeChart.shapeField)
+      : null;
+    const cIdx = activeChart.colorField
+      ? cols.indexOf(activeChart.colorField)
+      : symbolSeriesField
+        ? cols.indexOf(symbolSeriesField)
+        : -1;
     const sizeIdx = activeChart.sizeField ? cols.indexOf(activeChart.sizeField) : -1;
     const glowIdx = activeChart.glowField ? cols.indexOf(activeChart.glowField) : -1;
     const outlineIdx = activeChart.outlineField ? cols.indexOf(activeChart.outlineField) : -1;
@@ -3073,6 +3081,12 @@ export function ChartView() {
                   themeBorder: opts.themeBorder,
                   showDataLabels: opts.showDataLabels,
                   pointSize: opts.pointSize,
+                  markShape: opts.markShape,
+                  markerMode: opts.markerMode,
+                  markEmoji: opts.markEmoji,
+                  shapeField: activeChart.shapeField,
+                  emojiField: activeChart.emojiField,
+                  emojiMap: activeChart.emojiMap,
                   continuousStops: opts.continuousStops,
                   channelInvert: opts.channelInvert,
                   yAggregate: opts.yAggregate,
@@ -3117,21 +3131,17 @@ export function ChartView() {
         const categoricalMap = isGeoMapKind(kind) && kind !== "geoHex";
         const symbolField = activeChart.emojiField ?? activeChart.shapeField;
         if (legendEntries == null && symbolField && (categoricalMap || kind === "scatter")) {
-          const symbolIdx = cols.indexOf(symbolField);
-          if (symbolIdx >= 0) {
-            const seen = new Map<string, number>();
-            for (const r of rows) {
-              const label = String(r[symbolIdx] ?? "");
-              if (!seen.has(label)) seen.set(label, seen.size);
-            }
-            legendEntries = [...seen.entries()].map(([label, i]) => ({
-              label: chartEmojiLabel(label, activeChart.emojiField, activeChart.emojiMap),
-              color: opts.colors[i % opts.colors.length]!,
-              ...(activeChart.emojiField
-                ? { glyph: chartEmoji(label, activeChart.emojiField, activeChart.emojiMap) ?? undefined }
-                : { shape: categoryShape(i) }),
-            }));
-          }
+          const symbols = markSymbols(
+            { ...opts, shapeField: activeChart.shapeField, emojiField: activeChart.emojiField, emojiMap: activeChart.emojiMap },
+            cols,
+            rows,
+            rows.length,
+          );
+          const colorSeen = new Map<string, number>();
+          if (cIdx >= 0) for (const r of rows) if (!colorSeen.has(String(r[cIdx]))) colorSeen.set(String(r[cIdx]), colorSeen.size);
+          legendEntries = symbols.legend((r) =>
+            opts.colors[(cIdx >= 0 ? (colorSeen.get(String(r[cIdx])) ?? 0) : 0) % opts.colors.length]!,
+          );
         }
         if (legendEntries == null && cIdx >= 0 && (!paintsOwnBackground || categoricalMap) && !isOddChartKind(kind)) {
           const seen = new Map<string, number>();

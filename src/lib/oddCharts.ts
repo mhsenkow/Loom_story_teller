@@ -59,6 +59,7 @@ import { resolveIsoFloorOrient } from "./isoOrient";
 import { resolvePyramidScaleMode } from "./pyramidScale";
 import { formatDeltaLabel } from "./deltaCompare";
 import { chartFont, chartTypeRamp } from "./chartType";
+import { type MarkSymbols, drawMarkSymbol, markSymbols } from "./markSymbols";
 
 
 // ---------------------------------------------------------------------------
@@ -85,6 +86,7 @@ interface OddEnv {
   pad: number;
   columns: string[];
   opts: OddRenderOpts;
+  symbols: MarkSymbols;
 }
 
 function oddFont(env: OddEnv, size: number, weight: number | string = 400): string {
@@ -133,6 +135,7 @@ export function renderOddChart(
     pad,
     columns,
     opts,
+    symbols: markSymbols(opts, columns, rows),
     look: {
       fontFamily: font,
       axisLabelColor: ink.muted,
@@ -322,6 +325,31 @@ function legendEntriesFor(rows: unknown[][], ci: number, colors: string[]): Swat
   return [...categoryIndex(rows, ci).entries()].map(([label, i]) => ({ label, color: colors[i % colors.length]! }));
 }
 
+/** Symbol key when marks vary by a shape / emoji column, else the color key. */
+function markLegendEntries(rows: unknown[][], env: OddEnv, ci: number): { entries: SwatchEntry[]; title: string | undefined } | null {
+  const catIdx = categoryIndex(rows, ci);
+  const colorOf = (row: readonly unknown[]) =>
+    ci >= 0 ? env.colors[(catIdx.get(String(row[ci])) ?? 0) % env.colors.length]! : env.single;
+  const symbolic = env.symbols.legend(colorOf);
+  if (symbolic) {
+    return {
+      entries: symbolic.map((e) => ({ label: e.label, color: e.color, glyph: e.glyph, mark: e.shape })),
+      title: env.opts.emojiField ?? env.opts.shapeField ?? undefined,
+    };
+  }
+  return ci >= 0 ? { entries: legendEntriesFor(rows, ci, env.colors), title: fieldName(env, ci) } : null;
+}
+
+/** A point mark: the encoded symbol when marks are customized, else a dot. */
+function mark(ctx: CanvasRenderingContext2D, env: OddEnv, row: readonly unknown[] | undefined, x: number, y: number, r: number, fill: string, alpha: number, halo: string | null) {
+  if (!env.symbols.active) {
+    dot(ctx, x, y, r, fill, alpha, halo);
+    return;
+  }
+  const symbol = env.symbols.of(row);
+  drawMarkSymbol(ctx, symbol, x, y, symbol.glyph ? Math.max(r * 1.4, 4.5) : r * 1.15, fill, symbol.glyph ? 1 : alpha, halo);
+}
+
 /** Vertical legend in a translucent panel at a plot corner. */
 function drawPanelLegend(
   ctx: CanvasRenderingContext2D,
@@ -362,7 +390,12 @@ function drawPanelLegend(
   ctx.font = oddFont(env, 10);
   for (const e of shown) {
     ctx.fillStyle = e.color;
-    if (e.shape === "line") ctx.fillRect(x + 8, cy - 1.5, 9, 3);
+    if (e.glyph || e.mark) {
+      drawMarkSymbol(ctx, { glyph: e.glyph ?? null, shape: e.mark ?? "circle" }, x + 12.5, cy, 4.5, e.color, 1);
+      ctx.font = oddFont(env, 10);
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+    } else if (e.shape === "line") ctx.fillRect(x + 8, cy - 1.5, 9, 3);
     else ctx.fillRect(x + 8, cy - 4.5, 9, 9);
     ctx.fillStyle = env.ink.muted;
     ctx.fillText(fitTextEllipsis(ctx, e.label, textW), x + 23, cy);
@@ -739,10 +772,11 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
       if (Math.abs(px - cx) > bandW * 0.45) px = cx + (jitter(cat, placed.length) - 0.5) * bandW * 0.8;
       placed.push({ x: px, y: py, r: rr });
       const color = ci >= 0 ? env.colors[(catIdx.get(String(row[ci])) ?? 0) % env.colors.length]! : env.single;
-      dot(ctx, px, py, rr, color, env.alpha, total <= 800 ? ink.bg : null);
+      mark(ctx, env, row, px, py, rr, color, env.alpha, total <= 800 ? ink.bg : null);
     }
   });
-  if (ci >= 0 && ci !== xi) drawPanelLegend(ctx, env, legendEntriesFor(rows, ci, env.colors), fieldName(env, ci), plot, "top-right");
+  const swarmKey = markLegendEntries(rows, env, ci !== xi ? ci : -1);
+  if (swarmKey) drawPanelLegend(ctx, env, swarmKey.entries, swarmKey.title, plot, "top-right");
   if (sScale && !mini) {
     drawSizeKey(ctx, {
       x: plot.left + 6,
@@ -1308,13 +1342,13 @@ function drawPyramid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 
 function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, _ci: number, si: number) {
   if (xi < 0 || yi < 0 || si < 0) return "Slope needs a category and two numeric columns";
-  const groups = new Map<string, { a: number[]; b: number[] }>();
+  const groups = new Map<string, { a: number[]; b: number[]; row: unknown[] }>();
   for (const r of rows) {
     const k = String(r[xi]);
     let g = groups.get(k);
     if (!g) {
       if (groups.size >= 14) continue;
-      g = { a: [], b: [] };
+      g = { a: [], b: [], row: r };
       groups.set(k, g);
     }
     const a = toNum(r[yi]);
@@ -1324,7 +1358,7 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
   }
   const pairs = [...groups.entries()]
     .filter(([, g]) => g.a.length && g.b.length)
-    .map(([c, g]) => ({ c, a: agg(g.a, "mean"), b: agg(g.b, "mean") }));
+    .map(([c, g]) => ({ c, a: agg(g.a, "mean"), b: agg(g.b, "mean"), row: g.row }));
   if (!pairs.length) return "No rows have both values";
   const { mini, ink } = env;
   const vals = pairs.flatMap((p) => [p.a, p.b]);
@@ -1386,8 +1420,8 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     ctx.lineTo(x1, sy(p.b));
     ctx.stroke();
     ctx.globalAlpha = 1;
-    dot(ctx, x0, sy(p.a), mini ? 2.2 : 3.5, env.single, 1, mini ? null : ink.bg);
-    dot(ctx, x1, sy(p.b), mini ? 2.2 : 3.5, env.single, 1, mini ? null : ink.bg);
+    mark(ctx, env, p.row, x0, sy(p.a), mini ? 2.2 : 3.5, env.single, 1, mini ? null : ink.bg);
+    mark(ctx, env, p.row, x1, sy(p.b), mini ? 2.2 : 3.5, env.single, 1, mini ? null : ink.bg);
   }
   if (mini) return;
   const targets = pairs.map((p) => sy(p.b));
@@ -1422,10 +1456,12 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
   const catIdx = categoryIndex(rows, ci);
   const cell = new Map<string, number[]>();
   const totals = new Map<string, number>();
+  const seriesRow = new Map<string, unknown[]>();
   for (const r of rows) {
     const v = toNum(r[yi]);
     if (!Number.isFinite(v)) continue;
     const s = String(r[ci]);
+    if (!seriesRow.has(s)) seriesRow.set(s, r);
     const key = `${model.keyOf(r)}||${s}`;
     const l = cell.get(key) ?? [];
     l.push(v);
@@ -1534,7 +1570,7 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
     if (!mini) {
       model.keys.forEach((_, i) => {
         const v = values[i]!.get(s);
-        if (v != null) dot(ctx, xAt(i), deltaMode ? yAtDelta(v) : yAt(v), 3.2, color, 1, ink.bg);
+        if (v != null) mark(ctx, env, seriesRow.get(s), xAt(i), deltaMode ? yAtDelta(v) : yAt(v), 3.2, color, 1, ink.bg);
       });
     }
     if (last) ends.push({ s, y: (last as { y: number }).y, color });
@@ -2135,7 +2171,7 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number, si: number) {
   if (xi < 0 || yi < 0) return "Isometric scatter needs two numeric columns";
   let pts = rows
-    .map((r) => ({ x: toNum(r[xi]), y: toNum(r[yi]), z: si >= 0 ? toNum(r[si]) : NaN, c: ci >= 0 ? String(r[ci]) : "" }))
+    .map((r) => ({ x: toNum(r[xi]), y: toNum(r[yi]), z: si >= 0 ? toNum(r[si]) : NaN, c: ci >= 0 ? String(r[ci]) : "", row: r }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (!pts.length) return `No rows have numeric ${fieldName(env, xi, "x")} and ${fieldName(env, yi, "y")}`;
   const cap = env.mini ? 80 : 400;
@@ -2236,7 +2272,7 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
       ctx.stroke();
     }
     const color = ci >= 0 ? env.colors[(catIdx.get(d.p.c) ?? 0) % env.colors.length]! : env.single;
-    dot(ctx, top.sx, top.sy, r, color, env.alpha, ink.bg);
+    mark(ctx, env, d.p.row, top.sx, top.sy, r, color, env.alpha, ink.bg);
   }
   if (mini) return;
   // Tick labels on the two floor edges from the origin — stay on the diamond after Direction.
@@ -2304,7 +2340,8 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     ctx.textBaseline = "bottom";
     ctx.fillText(fitTextEllipsis(ctx, `↑ ${fieldName(env, si)}`, 140), p1.sx, p1.sy - 4);
   }
-  if (ci >= 0) drawPanelLegend(ctx, env, legendEntriesFor(rows, ci, env.colors), fieldName(env, ci), base, "top-right");
+  const isoKey = markLegendEntries(rows, env, ci);
+  if (isoKey) drawPanelLegend(ctx, env, isoKey.entries, isoKey.title, base, "top-right");
 }
 
 // ---- mosaic ----------------------------------------------------------------

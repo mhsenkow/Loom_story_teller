@@ -48,9 +48,8 @@ import {
 export * from "./geoMapsRec";
 import type { GeoMapKind } from "./geoMapsRec";
 import { formatTooltipNumber, type HitTarget } from "./chartTooltip";
-import { categoryShape, drawMarkerPath } from "./chartMarks";
-import { firstGrapheme } from "./chartText";
-import { chartEmoji } from "./chartEmoji";
+import { drawMarkerPath } from "./chartMarks";
+import { type MarkSymbol, markSymbols } from "./markSymbols";
 
 export interface GeoRenderOpts {
   colors: string[];
@@ -580,8 +579,6 @@ function renderProjectedPoints(
   }
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const sizeI = sizeField ? columns.indexOf(sizeField) : -1;
-  const shapeI = opts.shapeField ? columns.indexOf(opts.shapeField) : -1;
-  const emojiI = opts.emojiField ? columns.indexOf(opts.emojiField) : -1;
   const pts = collectPoints(rows, lonI, latI, colorI, sizeI);
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
   const sized = mode !== "hex" && sizeI >= 0;
@@ -667,27 +664,12 @@ function renderProjectedPoints(
   const drawn = scale ? [...pts].sort((a, b) => (Number.isFinite(b.size) ? b.size : -Infinity) - (Number.isFinite(a.size) ? a.size : -Infinity)) : pts;
   const markAlpha = mode === "bubbles" ? Math.min(alpha, 0.75) : alpha * (n > 1500 ? 0.8 : 1);
   const haloW = n > 4000 ? 0 : mode === "bubbles" ? 1 : 0.75;
-  const shapeMap = new Map<string, number>();
-  if (shapeI >= 0) {
-    for (const p of pts) {
-      const key = String(p.row[shapeI] ?? "");
-      if (!shapeMap.has(key)) shapeMap.set(key, shapeMap.size);
-    }
-  }
+  const symbols = markSymbols(opts, columns, pts.map((p) => p.row), n);
   for (const p of drawn) {
     const xy = projection([p.lon, p.lat]);
     if (!xy) continue;
-    const shapeKey = shapeI >= 0 ? String(p.row[shapeI] ?? "") : "";
-    const shape = shapeI >= 0 ? categoryShape(shapeMap.get(shapeKey)!) : (opts.markShape ?? "circle");
-    const glyph =
-      n <= 1200
-        ? emojiI >= 0
-          ? chartEmoji(p.row[emojiI], opts.emojiField, opts.emojiMap)
-          : opts.markerMode === "emoji"
-            ? firstGrapheme(opts.markEmoji)
-            : null
-        : null;
-    drawGeoMarker(ctx, xy[0], xy[1], radius(p), pointColor(colors, p), markAlpha, ink.halo, haloW, shape, glyph);
+    const symbol = symbols.of(p.row);
+    drawGeoMarker(ctx, xy[0], xy[1], radius(p), pointColor(colors, p), markAlpha, ink.halo, haloW, symbol.shape, symbol.glyph);
   }
   if (showKey && scale) {
     const { side, bottom } = mapInsets(pad);
@@ -799,8 +781,6 @@ function renderGlobeLike(
   }
   const colorI = colorField ? columns.indexOf(colorField) : -1;
   const sizeI = sizeField ? columns.indexOf(sizeField) : -1;
-  const shapeI = opts.shapeField ? columns.indexOf(opts.shapeField) : -1;
-  const emojiI = opts.emojiField ? columns.indexOf(opts.emojiField) : -1;
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
   const atlas = opts.atlas ?? peekWorldAtlas();
   if (!atlas) {
@@ -840,27 +820,8 @@ function renderGlobeLike(
 
   const radius = (p: GeoPoint) => (scale ? scale.radiusOf(p.size) : Math.max(rMin, base));
   const alpha = opts.opacity ?? 0.85;
-  const shapeMap = new Map<string, number>();
-  if (shapeI >= 0) {
-    for (const p of pts) {
-      const key = String(p.row[shapeI] ?? "");
-      if (!shapeMap.has(key)) shapeMap.set(key, shapeMap.size);
-    }
-  }
-  const markerFor = (p: GeoPoint): { shape: string; glyph: string | null } => {
-    const key = shapeI >= 0 ? String(p.row[shapeI] ?? "") : "";
-    return {
-      shape: shapeI >= 0 ? categoryShape(shapeMap.get(key)!) : (opts.markShape ?? "circle"),
-      glyph:
-        pts.length <= 1200
-          ? emojiI >= 0
-            ? chartEmoji(p.row[emojiI], opts.emojiField, opts.emojiMap)
-            : opts.markerMode === "emoji"
-              ? firstGrapheme(opts.markEmoji)
-              : null
-          : null,
-    };
-  };
+  const symbols = markSymbols(opts, columns, pts.map((p) => p.row), pts.length);
+  const markerFor = (p: GeoPoint): MarkSymbol => symbols.of(p.row);
 
   if (pts.length === 0) {
     drawEmptyMessage(ctx, w, h, "No rows have valid latitude / longitude", ink, font, mini, opts.axisFontSize);

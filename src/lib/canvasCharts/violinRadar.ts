@@ -16,6 +16,8 @@ import { axisFont, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
 import { numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
+import { chartEmojiLabel } from "../chartEmoji";
+import { drawMarkSymbol, markSymbols } from "../markSymbols";
 
 export function renderFullViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   if (yi < 0) return;
@@ -219,8 +221,11 @@ export function renderFullRadar(
   }
   ctx.restore();
 
-  groupEntries.forEach(([gName], gi) => {
+  const symbols = markSymbols(opts, opts?.fieldNames ?? columnNames, rows);
+  const vertexR = symbols.active ? Math.max(4, (opts?.pointSize ?? 10) * 0.5) : 3.5;
+  groupEntries.forEach(([gName, gRows], gi) => {
     const avgs = groupAvgs[gi]!;
+    const symbol = symbols.of(gRows[0]);
     const normals = avgs.map((avg, ai) => axisNorm[ai]!(avg));
     const vertex = (i: number) => {
       const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
@@ -248,9 +253,13 @@ export function renderFullRadar(
     ctx.globalAlpha = 1;
     normals.forEach((_, i) => {
       const p = vertex(i);
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, 3.5, 0, Math.PI * 2);
-      ctx.fill();
+      if (symbols.active) {
+        drawMarkSymbol(ctx, symbol, p.x, p.y, vertexR, color, 1, opts?.themeBg);
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, vertexR, 0, Math.PI * 2);
+        ctx.fill();
+      }
       pushHit(opts, {
         shape: "circle", cx: p.x, cy: p.y, r: 8,
         match: ci >= 0 ? [[ci, gName]] : [],
@@ -263,7 +272,14 @@ export function renderFullRadar(
     });
   });
 
-  setLegend(opts, ci >= 0 ? groupEntries.map(([label], gi) => ({ label, color: palette[gi % palette.length]! })) : []);
+  setLegend(opts, ci >= 0 ? groupEntries.map(([label, gRows], gi) => {
+    const symbol = symbols.categorical ? symbols.of(gRows[0]) : null;
+    return {
+      label: symbol?.glyph ? chartEmojiLabel(label, opts?.emojiField, opts?.emojiMap) : label,
+      color: palette[gi % palette.length]!,
+      ...(symbol?.glyph ? { glyph: symbol.glyph } : symbol ? { shape: symbol.shape } : {}),
+    };
+  }) : []);
   ctx.globalAlpha = 1;
 }
 
@@ -382,14 +398,23 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
     }
   }
 
-  const groups = new Map<string, { vals: number[]; cat: string }>();
+  const groups = new Map<string, { vals: number[]; cat: string; row: unknown[] }>();
   for (const r of rows) {
     const k = String(r[xi]);
-    if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "" });
+    if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "", row: r });
     groups.get(k)!.vals.push(yi >= 0 ? Number(r[yi]) : 1);
   }
+  const symbols = markSymbols(opts, opts?.fieldNames, rows);
+  const drawHead = (row: unknown[], x: number, y: number, r: number, color: string) => {
+    if (symbols.active) drawMarkSymbol(ctx, symbols.of(row), x, y, r * 1.3, color, alpha, opts?.themeBg);
+    else {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
   const entries = [...groups.entries()]
-    .map(([label, g]) => ({ label, value: aggregateValues(g.vals.filter(v => !isNaN(v)), agg), cat: g.cat }))
+    .map(([label, g]) => ({ label, value: aggregateValues(g.vals.filter(v => !isNaN(v)), agg), cat: g.cat, row: g.row }))
     .sort((a, b) => b.value - a.value)
     .slice(0, opts?.topN != null ? clampTopN(opts.topN) : 20);
   if (entries.length === 0) return;
@@ -398,6 +423,11 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
   const vTitle = valueTitle(opts, yi);
   const colorOf = (cat: string) =>
     catColorMap.size ? palette[(catColorMap.get(cat) ?? 0) % palette.length]! : palette[0]!;
+  const lollipopLegend = () => {
+    const symbolLegend = symbols.legend((row) => colorOf(ci >= 0 ? String(row[ci]) : ""));
+    if (symbolLegend && symbolLegend.length <= 24) setLegend(opts, symbolLegend);
+    else if (catColorMap.size) setLegend(opts, [...catColorMap.entries()].map(([label, i]) => ({ label, color: palette[i % palette.length]! })));
+  };
 
   if (horizontal) {
     const gutter = labelGutter(ctx, entries.map((e) => e.label), w, pad, opts);
@@ -413,7 +443,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
     const bandH = (rect.bottom - rect.top) / entries.length;
     const dotR = Math.max(3, Math.min(6, bandH * 0.3));
     const centers: number[] = [];
-    entries.forEach(({ label, value, cat }, i) => {
+    entries.forEach(({ label, value, cat, row }, i) => {
       const cy = rect.top + (i + 0.5) * bandH;
       centers.push(cy);
       const color = colorOf(cat);
@@ -426,9 +456,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
       ctx.stroke();
       ctx.fillStyle = color;
       ctx.globalAlpha = alpha;
-      ctx.beginPath();
-      ctx.arc(X(value), cy, dotR, 0, Math.PI * 2);
-      ctx.fill();
+      drawHead(row, X(value), cy, dotR, color);
       if (opts?.showDataLabels) {
         ctx.globalAlpha = 1;
         ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
@@ -446,7 +474,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
     });
     ctx.globalAlpha = 1;
     ctx.textBaseline = "alphabetic";
-    if (catColorMap.size) setLegend(opts, [...catColorMap.entries()].map(([label, i]) => ({ label, color: palette[i % palette.length]! })));
+    lollipopLegend();
     drawChartTicks(ctx, xs.min, xs.max, 0, 1, w, h, rect, opts, { y: false });
     drawBandAxisY(ctx, entries.map((e) => e.label), centers, bandH, rect.left - 8, gutter - 10, opts);
     return;
@@ -463,7 +491,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
   const band = (rect.right - rect.left) / entries.length;
   const dotR = Math.max(3, Math.min(6, band * 0.25));
   const centers: number[] = [];
-  entries.forEach(({ label, value, cat }, i) => {
+  entries.forEach(({ label, value, cat, row }, i) => {
     const cx = rect.left + (i + 0.5) * band;
     centers.push(cx);
     const color = colorOf(cat);
@@ -476,9 +504,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
     ctx.stroke();
     ctx.fillStyle = color;
     ctx.globalAlpha = alpha;
-    ctx.beginPath();
-    ctx.arc(cx, Y(value), dotR, 0, Math.PI * 2);
-    ctx.fill();
+    drawHead(row, cx, Y(value), dotR, color);
     if (opts?.showDataLabels) {
       ctx.globalAlpha = 1;
       ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
@@ -496,7 +522,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
   });
   ctx.globalAlpha = 1;
   ctx.textBaseline = "alphabetic";
-  if (catColorMap.size) setLegend(opts, [...catColorMap.entries()].map(([label, i]) => ({ label, color: palette[i % palette.length]! })));
+  lollipopLegend();
   if (ys.min < 0) drawZeroLine(ctx, rect.left, Y(0), rect.right, Y(0), opts);
   drawChartTicks(ctx, 0, 1, ys.min, ys.max, w, h, rect, opts, { x: false });
   drawBandAxisX(ctx, entries.map((e) => e.label), centers, band, w, h, rect, opts, "nominal");

@@ -10,10 +10,11 @@ import { type ChartRenderOpts } from "../chartRenderTypes";
 import { formatTooltipNumber } from "../chartTooltip";
 import { type YAggregateOption } from "../recommendations";
 import { widestText } from "./axisHelpers";
-import { drawAxisTicks, drawGridLines, numRange } from "./primitives";
+import { drawAxisTicks, drawEmojiMark, drawGridLines, drawMark, numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
 import { directedUnit } from "../channelInvert";
 import { chartFont, chartTypeRamp } from "../chartType";
+import { markSymbols } from "../markSymbols";
 
 /** Top slices + "Other" so a pie never has more than 8 wedges. */
 export function pieSlices(rows: unknown[][], xi: number, yi: number, agg: YAggregateOption) {
@@ -227,17 +228,25 @@ export function renderFullBubble(
     bubbles.push({ sx, sy, r: radius, cat, row: r });
   }
 
+  const symbols = markSymbols(opts, opts?.fieldNames ?? columnNames, rows, bubbles.length);
   // Big bubbles first so small ones stay visible on top
   bubbles.sort((a, b) => b.r - a.r);
 
   for (const b of bubbles) {
     const color = palette[b.cat % palette.length]!;
-    ctx.globalAlpha = alpha;
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.arc(b.sx, b.sy, b.r, 0, Math.PI * 2);
-    ctx.fill();
-    if (drawStroke) {
+    const symbol = symbols.of(b.row);
+    if (symbol.glyph) {
+      drawEmojiMark(ctx, symbol.glyph, b.sx, b.sy, b.r, Math.max(alpha, 0.9));
+    } else if (symbol.shape !== "circle") {
+      drawMark(ctx, symbol.shape, b.sx, b.sy, b.r, color, alpha, opts);
+    } else {
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.arc(b.sx, b.sy, b.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (drawStroke && !symbol.glyph && symbol.shape === "circle") {
       ctx.globalAlpha = Math.min(alpha + 0.25, 0.85);
       ctx.strokeStyle = color;
       ctx.lineWidth = 0.75;
@@ -256,7 +265,9 @@ export function renderFullBubble(
   ctx.globalAlpha = 1;
 
   drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
-  if (ci >= 0) setLegend(opts, [...catMap.entries()].map(([label, i]) => ({ label, color: palette[i % palette.length]! })));
+  const symbolLegend = symbols.legend((row) => palette[ci >= 0 ? (catMap.get(String(row[ci])) ?? 0) % palette.length : 0]!);
+  if (symbolLegend) setLegend(opts, symbolLegend);
+  else if (ci >= 0) setLegend(opts, [...catMap.entries()].map(([label, i]) => ({ label, color: palette[i % palette.length]! })));
 
   // Size key: three nested reference circles, bottom-right inside the plot
   if (sizeIdx >= 0 && maxR >= 4) {
