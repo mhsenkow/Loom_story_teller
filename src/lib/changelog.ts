@@ -36,7 +36,7 @@ export const CHANGELOG: ChangelogRelease[] = [
       },
       {
         title: "More ways to find something interesting",
-        detail: "Discover considers all 59 chart types, then balances useful signals with a broader mix of sources and questions. Browse eight perspectives, see measured evidence on each pick, and explore related views together. Trends need real history; stronger charts get more room, and phones consider the same breadth before choosing their picks.",
+        detail: "Discover considers all 59 chart types, then balances useful signals with a broader mix of sources and questions. Browse eight perspectives, see measured evidence on each pick, and explore related views together. Trends need real history; stronger charts get more room. Flow keeps a newspaper mix of large and small cards on a wide desktop, and phones consider the same breadth before choosing their picks.",
       },
       {
         title: "A broader marker palette",

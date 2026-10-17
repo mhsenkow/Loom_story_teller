@@ -50,6 +50,26 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
   const freshness = discoverFreshness(story, now);
   const sourceRef = feedRef(story.kind);
   const pref = useSourcePref(sourceRef);
+  const clock = now ?? Date.now();
+  const recentlyUpdated =
+    story.dataChangedAt != null &&
+    story.dataChangedAt <= clock + 60_000 &&
+    clock - story.dataChangedAt < 900_000;
+  const fields = [
+    discoverFieldLabel(story.chart.xField),
+    story.chart.yField ? discoverFieldLabel(story.chart.yField) : "count",
+    story.chart.sizeField ? discoverFieldLabel(story.chart.sizeField) : null,
+  ]
+    .filter(Boolean)
+    .join(" × ");
+  const metaTitle = [
+    DISCOVER_FAMILIES[discoverFamily(story.chartKind)].prompt,
+    freshness.title,
+    `${evidence.cached ? "Saved snapshot · " : ""}${evidence.coverage}`,
+    evidence.period,
+  ]
+    .filter(Boolean)
+    .join("\n");
   return (
     <article
       className={`discover-story relative ${featured ? "discover-story-featured" : ""} ${pref.reaction === "hide" ? "opacity-60" : ""}`}
@@ -76,9 +96,17 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
             {discoverChartLabel(story.chartKind)}
           </span>
           {featured && <span className="discover-story-spotlight">Worth a closer look</span>}
+          {recentlyUpdated && (
+            <span className="discover-story-updated" title="Updated data">
+              <span className="sr-only">Updated data</span>
+            </span>
+          )}
+          <span className="discover-story-cta" aria-hidden>
+            {opening ? "Opening…" : "Open ↗"}
+          </span>
         </div>
         <div className="discover-story-copy">
-          <p className="discover-story-eyebrow">
+          <p className="discover-story-eyebrow" title={fields}>
             {pref.reaction === "love" && (
               <span className="text-loom-accent" title="You love this source">
                 ♥{" "}
@@ -95,20 +123,6 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
               <span>{story.insight.detail}</span>
             </div>
           )}
-          <p
-            className="discover-story-fields"
-            title={[
-              story.chart.xField,
-              story.chart.yField,
-              story.chart.sizeField,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          >
-            {discoverFieldLabel(story.chart.xField)}
-            {story.chart.yField ? ` × ${discoverFieldLabel(story.chart.yField)}` : " · count"}
-            {story.chart.sizeField ? ` · ${discoverFieldLabel(story.chart.sizeField)}` : ""}
-          </p>
           {settings.length > 0 && (
             <ul className="discover-story-settings" aria-label="Chart settings">
               {settings.map((setting) => (
@@ -116,10 +130,6 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
               ))}
             </ul>
           )}
-          <span className="discover-story-cta">
-            {opening ? "Opening…" : "Explore this chart"}{" "}
-            <span aria-hidden>↗</span>
-          </span>
         </div>
       </button>
       {variants && variants.length > 1 && groupId && (
@@ -147,20 +157,14 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
         </label>
       )}
       <div className="discover-story-proof">
-        {story.dataChangedAt != null && story.dataChangedAt <= (now ?? Date.now()) + 60_000 && (now ?? Date.now()) - story.dataChangedAt < 900_000 && <p className="text-loom-accent">Updated data</p>}
-        <p className="discover-story-question">{DISCOVER_FAMILIES[discoverFamily(story.chartKind)].prompt}</p>
-        <p
-          className={freshness.due ? "discover-freshness-due" : ""}
-          title={freshness.title}
-        >
-          {freshness.label}
-          {freshness.due ? " · update due" : ""}
+        <p className="discover-story-meta" title={metaTitle}>
+          <span className={freshness.due ? "discover-freshness-due" : ""}>
+            {freshness.label}
+            {freshness.due ? " · due" : ""}
+          </span>
+          <span aria-hidden> · </span>
+          <span>{evidence.coverage}</span>
         </p>
-        <p>
-          {evidence.cached ? "Saved snapshot · " : ""}
-          {evidence.coverage}
-        </p>
-        {evidence.period && <p>{evidence.period}</p>}
         <div className="discover-story-source">
           <button
             type="button"
@@ -168,7 +172,8 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
             disabled={disabled}
             title={`${brief.tldr}\n${brief.credit}`}
           >
-            Source &amp; data <span aria-hidden>↗</span>
+            <span className="sr-only">Source &amp; data</span>
+            <span aria-hidden>Source</span>
           </button>
           <SourcePrefMenu
             sourceRef={sourceRef}

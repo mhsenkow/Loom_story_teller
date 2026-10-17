@@ -33,6 +33,10 @@ import {
   type DiscoverSettingFilter,
 } from "@/lib/discoverPresentation";
 import {
+  discoverFlowColumnCount,
+  discoverFlowSpans,
+} from "@/lib/discoverFlowLayout";
+import {
   scanDiscoverStories,
   refreshDiscoverStories,
   requestDiscoverScan,
@@ -150,6 +154,7 @@ export function Onboarding() {
   const [scanning, setScanning] = useState(true);
   const [filtersOpen, setFiltersOpen] = useState(initialBrowse.filtersOpen);
   const [layout, setLayout] = useState<GalleryLayout>(initialBrowse.layout);
+  const [flowColumns, setFlowColumns] = useState(1);
   const [pendingStories, setPendingStories] = useState<DiscoverStory[] | null>(
     null,
   );
@@ -761,6 +766,33 @@ export function Onboarding() {
     };
   }, [layout, show, whatsNewOpen, shownCount, visible, chosenVariants]);
 
+  useLayoutEffect(() => {
+    const gallery = galleryRef.current;
+    if (layout !== "flow" || !gallery || typeof ResizeObserver === "undefined")
+      return;
+    const measure = () => {
+      const narrow = window.matchMedia("(max-width: 767px)").matches;
+      const columns = discoverFlowColumnCount(
+        getComputedStyle(gallery).gridTemplateColumns,
+        narrow,
+      );
+      setFlowColumns((current) => (current === columns ? current : columns));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(gallery);
+    return () => observer.disconnect();
+  }, [layout, show, whatsNewOpen, shownCount, displayed.length]);
+
+  const flowSpans = useMemo(() => {
+    if (layout !== "flow") return [];
+    const featured = displayed.map(
+      (group) =>
+        !filtersActive && spotlights.has(group.stories[0]!.id),
+    );
+    return discoverFlowSpans(displayed.length, flowColumns, featured);
+  }, [layout, displayed, filtersActive, spotlights, flowColumns]);
+
   const filterKey = JSON.stringify([
     categoryFilter,
     chartFilter,
@@ -917,25 +949,42 @@ export function Onboarding() {
     >
       <header className="discover-header">
         <div className="min-w-0 flex-1">
-          <p className="discover-kicker">Loom / Discover</p>
           <h2 id="onboarding-title">What’s interesting right now</h2>
           <p id="onboarding-desc">
             Fresh perspectives on open data. Pick a chart. Make it yours.
           </p>
         </div>
         <div className="discover-header-actions">
+          <button
+            type="button"
+            onClick={browseSources}
+            className="discover-header-link"
+          >
+            Your data <span aria-hidden>↗</span>
+          </button>
           {showFilters && (
             <button
               type="button"
               onClick={() => requestDiscoverScan({ refresh: true })}
               disabled={scanning || !!openingId}
               className="discover-icon-button"
+              data-spinning={scanning || undefined}
               aria-label={scanning ? "Refreshing stories" : "Refresh"}
-              title={
+              title={[
                 scanning
                   ? "Updating picks in background"
-                  : "Refresh stories from all sources"
-              }
+                  : "Refresh stories from all sources",
+                savedAt != null
+                  ? `Daily scan ${new Date(savedAt).toLocaleString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                    })}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join("\n")}
             >
               <span aria-hidden>↻</span>
             </button>
@@ -1089,14 +1138,16 @@ export function Onboarding() {
           </div>
           <div className="discover-results-summary">
             <p role="status">
+              {filtersActive
+                ? `${groups.length} matching stories`
+                : `${groups.length} stories · ${chartKinds.length} chart types`}
               {scanning
                 ? stories.length
-                  ? "Updating picks in background…"
-                  : `${sources.length} sources found · scanning…`
-                : scannedHint.replace("chart ideas", "chart views")}
-              {filtersActive
-                ? ` · ${groups.length} matching stories`
-                : ` · ${groups.length} stories · ${chartKinds.length} chart types`}
+                  ? " · updating…"
+                  : ` · ${sources.length} sources found · scanning…`
+                : /unavailable|Couldn’t/.test(scannedHint)
+                  ? ` · ${scannedHint.replace(/^.*?(\d+ unavailable)$/, "$1")}`
+                  : ""}
             </p>
             {pendingStories && (
               <button
@@ -1107,21 +1158,6 @@ export function Onboarding() {
                 New data ready · {pendingSourceCount}{" "}
                 {pendingSourceCount === 1 ? "source" : "sources"} · Show updates
               </button>
-            )}
-            {savedAt != null && (
-              <p
-                className="discover-cache-time"
-                title={`Picks checked ${new Date(savedAt).toLocaleString()}. Refreshes daily while Loom is open.`}
-              >
-                Daily scan{" "}
-                {new Date(savedAt).toLocaleString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                })}{" "}
-                · daily picks
-              </p>
             )}
             {(hiddenSourceCount > 0 || showHiddenSources) && (
               <button
@@ -1153,6 +1189,7 @@ export function Onboarding() {
         aria-busy={scanning && !stories.length}
       >
         {showFilters && (
+          <div className="discover-perspectives-row">
           <nav
             className="discover-perspectives"
             aria-label="Explore a perspective"
@@ -1183,13 +1220,6 @@ export function Onboarding() {
                 </button>
               ))}
           </nav>
-        )}
-        {showFilters && !filtersActive && (
-          <div className="discover-editorial-intro">
-            <div>
-              <p className="discover-kicker">Follow your curiosity</p>
-              <h3>Different questions. New ways to see.</h3>
-            </div>
             <details className="discover-method">
               <summary>How picks are chosen</summary>
               <p>
@@ -1262,7 +1292,7 @@ export function Onboarding() {
               id="onboarding-stories"
               className={`discover-grid discover-layout-${layout}`}
             >
-              {displayed.map((group) => {
+              {displayed.map((group, index) => {
                 const story =
                   group.stories.find(
                     (candidate) => candidate.id === chosenVariants[group.id],
@@ -1271,12 +1301,17 @@ export function Onboarding() {
                   !filtersActive &&
                   spotlights.has(group.stories[0]!.id) &&
                   (layout === "flow" || layout === "masonry");
+                const wide = layout === "flow" && (flowSpans[index] ?? 1) > 1;
                 return (
                   <li
                     key={group.id}
                     data-source={story.kind}
                     className={
-                      featured && layout === "flow" ? "discover-grid-lead" : ""
+                      wide
+                        ? featured
+                          ? "discover-grid-lead"
+                          : "discover-grid-wide"
+                        : ""
                     }
                   >
                     <DiscoverStoryCard
@@ -1312,12 +1347,6 @@ export function Onboarding() {
           </>
         )}
       </div>
-      <footer className="discover-footer">
-        <button type="button" onClick={browseSources}>
-          Bring your own data or browse sources <span aria-hidden>↗</span>
-        </button>
-        <span>Real datasets. Editable charts.</span>
-      </footer>
     </Dialog>
   );
 }

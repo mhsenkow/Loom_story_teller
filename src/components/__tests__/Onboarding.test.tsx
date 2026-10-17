@@ -339,7 +339,7 @@ describe("discovery landing journey", () => {
       screen.getByRole("button", { name: "Open chart: Temperatures by city" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Updating picks in background/),
+      screen.getByText(/updating…/),
     ).toBeInTheDocument();
     finish([
       {
