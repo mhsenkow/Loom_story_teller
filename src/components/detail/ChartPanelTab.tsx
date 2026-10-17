@@ -1014,6 +1014,7 @@ export default function ChartPanelTab() {
       opacityField: activeChart?.opacityField ?? null,
       shapeField: activeChart?.shapeField ?? null,
       emojiField: activeChart?.emojiField ?? null,
+      emojiMap: activeChart?.emojiMap,
       yAggregate: activeChart?.yAggregate ?? null,
       topN: activeChart?.topN ?? null,
       y2Field: activeChart?.y2Field ?? null,
@@ -1045,6 +1046,7 @@ export default function ChartPanelTab() {
       activeChart?.shapeField,
       activeChart?.emojiField,
       activeChart?.yAggregate,
+      activeChart?.emojiMap,
       activeChart?.topN,
       activeChart?.y2Field,
       activeChart?.comparePrevious,
@@ -1834,7 +1836,7 @@ export default function ChartPanelTab() {
             </div>
 
             <ShuffleKeepRow
-              tip="Only affects Shuffle fields (⟳) and Random chart (✦). Kept channels stay put; the rest reshuffle. Separate from Pin on Color, which sticks across chart-type changes."
+              tip="Only affects Shuffle fields (⟳) and Random chart (✦). Kept channels stay put; the rest reshuffle."
               chips={(
                 [
                   { id: "kind", label: "Type", show: true as boolean },
@@ -1872,13 +1874,6 @@ export default function ChartPanelTab() {
                 chromeActive={chartChromeFocus?.target === "x"}
                   onChromeEnter={focusChromeFromPanel}
                   onChromeLeave={clearChromeFromPanel}
-                  invert={activeChart.colorField ? {
-                    on: !!activeChart.channelInvert?.color,
-                    hint: activeChart.channelInvert?.color
-                      ? "Color is inverted — a high value uses the low end of the ramp"
-                      : "Invert color — a high value uses the low end of the ramp",
-                    onToggle: () => toggleChannelInvert("color"),
-                  } : null}
                 />
               )}
 
@@ -1955,42 +1950,8 @@ export default function ChartPanelTab() {
                     onToggle: () => toggleChannelInvert("color"),
                   } : null}
                   trailing={
-                    activeChart.colorField || activeChart.kind === "bar" ? (
+                    activeChart.kind === "bar" ? (
                       <div className="flex items-center gap-1.5 flex-wrap pl-0.5 pt-0.5">
-                        {activeChart.colorField ? (
-                          <span className="inline-flex items-center gap-1">
-                            <button
-                              type="button"
-                              title={
-                                lockedColorField === activeChart.colorField
-                                  ? `Pinned · ${activeChart.colorField} stays when you change chart type`
-                                  : "Pin this color field across chart-type changes"
-                              }
-                              aria-pressed={lockedColorField === activeChart.colorField}
-                              className={`min-h-7 px-2 py-0.5 rounded-md text-2xs border ${
-                                lockedColorField === activeChart.colorField
-                                  ? "border-loom-accent/50 bg-loom-accent/15 text-loom-accent"
-                                  : "border-loom-border text-loom-muted hover:text-loom-text hover:border-loom-accent/40"
-                              }`}
-                              onClick={() => {
-                                if (lockedColorField === activeChart.colorField) {
-                                  unlockColorAndResetLocks();
-                                  setToast("Color unpinned");
-                                } else if (activeChart.colorField) {
-                                  setLockedColorField(activeChart.colorField);
-                                  setToast(`Color pinned · ${activeChart.colorField}`);
-                                }
-                              }}
-                            >
-                              {lockedColorField === activeChart.colorField ? "Pinned across types" : "Pin across types"}
-                            </button>
-                            <EncodingInfoTip
-                              label="About pinning color"
-                              text="Different from Keep above. Pin remembers this color field when you switch chart types (bar → scatter → map). Keep only protects Color during Shuffle/Random."
-                            />
-                          </span>
-                        ) : null}
-                        {activeChart.kind === "bar" && (
                           <>
                             <span className="text-2xs text-loom-muted shrink-0">Layout</span>
                             <div className="flex gap-1 flex-wrap">
@@ -2024,7 +1985,6 @@ export default function ChartPanelTab() {
                               ))}
                             </div>
                           </>
-                        )}
                       </div>
                     ) : undefined
                   }
@@ -3107,7 +3067,7 @@ export default function ChartPanelTab() {
                 </p>
                 <EncodingInfoTip
                   label="About color scales"
-                  text="Auto picks categorical, sequential, or semantic from the chart. This is visual ink — Encoding → Color chooses which field; Keep/Pin there control shuffle and type switches."
+                  text="Auto picks categorical, sequential, or semantic from the chart. This is visual ink — Encoding → Color chooses which field; the lock row above Shuffle keeps it during Shuffle and Random."
                 />
               </div>
               <div className="flex flex-wrap gap-1">
