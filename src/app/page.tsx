@@ -27,7 +27,6 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toast } from "@/components/Toast";
 import { requestWhatsNew } from "@/lib/changelog";
 import { SuiteMenu } from "@/components/SuiteMenu";
-import { DISCOVER_SEEN_KEY } from "@/lib/discoverStories";
 import { Dialog } from "@/components/ui/Dialog";
 import { useMobileLiveEdit, useShellMode, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
 import {
@@ -77,23 +76,11 @@ const FeedbackNotes = dynamic(() => import("@/components/FeedbackNotes").then((m
 
 function OccasionalOverlays() {
   const shareSheetOpen = useLoomStore((s) => s.shareSheetOpen);
-  const whatsNewOpen = useLoomStore((s) => s.whatsNewOpen);
   const vizSwipeOpen = useLoomStore((s) => s.vizSwipeOpen);
   const promptDialog = useLoomStore((s) => s.promptDialog);
-  const [mountDiscover, setMountDiscover] = useState(false);
-  useEffect(() => {
-    try {
-      if (!window.localStorage.getItem(DISCOVER_SEEN_KEY)) setMountDiscover(true);
-    } catch {
-      setMountDiscover(true);
-    }
-    const onDiscover = () => setMountDiscover(true);
-    window.addEventListener("loom-discover", onDiscover);
-    return () => window.removeEventListener("loom-discover", onDiscover);
-  }, []);
   return (
     <>
-      {(mountDiscover || whatsNewOpen) && <Onboarding />}
+      <Onboarding />
       <WhatsNew />
       {shareSheetOpen && <ShareSheet />}
       {vizSwipeOpen && <VizSwipeDeck />}

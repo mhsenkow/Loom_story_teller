@@ -27,9 +27,6 @@ import {
   THEME_LABEL,
   UI_CHROMES,
   UI_CHROME_LABEL,
-  APP_FONTS,
-  APP_FONT_LABEL,
-  FACES_SOURCES,
   VISUAL_PRESETS,
   VISUAL_PRESET_BLURB,
   shuffleVisualOverrides,
@@ -43,6 +40,7 @@ import {
   type AppFont,
   type FacesSource,
 } from "@/lib/lookSystem";
+import { FONT_CHOICES, FONT_GROUPS, chartFontStack, resolveChartFontFamily } from "@/lib/fontCatalog";
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
 import {
@@ -235,31 +233,39 @@ export default function SettingsTab() {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-loom-text mb-1">Typeface</h3>
-        <select
+        <h3 className="text-sm font-semibold text-loom-text mb-1"><label htmlFor="app-typeface">Typeface</label></h3>
+        <select id="app-typeface" aria-label="App typeface"
           value={appSettings.font}
           onChange={(e) => setAppSettings((prev) => ({ ...prev, font: e.target.value as AppFont }))}
           className="loom-input w-full text-xs py-1.5"
         >
-          {APP_FONTS.map((f) => (
-            <option key={f} value={f}>{APP_FONT_LABEL[f]}</option>
+          {FONT_GROUPS.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.fonts.map((id) => <option key={id} value={id}>{FONT_CHOICES[id].family}</option>)}
+            </optgroup>
           ))}
         </select>
         <div className="flex gap-1.5 mt-2">
-          {FACES_SOURCES.map((f) => (
+          {(["local", "web"] as const).map((f) => (
             <button
               key={f}
               type="button"
               onClick={() => setAppSettings((prev) => ({ ...prev, faces: f as FacesSource }))}
+              aria-pressed={(appSettings.faces === "web" ? "web" : "local") === f}
               className={`px-2 py-1 text-2xs rounded border ${
-                appSettings.faces === f ? "border-loom-accent text-loom-text" : "border-loom-border text-loom-muted"
+                (appSettings.faces === "web" ? "web" : "local") === f ? "border-loom-accent text-loom-text" : "border-loom-border text-loom-muted"
               }`}
             >
-              {f}
+              {f === "web" ? "Download fonts" : "Device fonts"}
             </button>
           ))}
         </div>
-        <p className="text-2xs text-loom-muted mt-1">Faces: web fonts vs local system stacks</p>
+        <p className="text-2xs text-loom-muted mt-2">{FONT_CHOICES[appSettings.font].description}</p>
+        <div className="loom-type-preview" style={{ fontFamily: chartFontStack(resolveChartFontFamily(undefined, appSettings.font, appSettings.faces)) }}>
+          <span>Clear stories. Readable details.</span>
+          <span className="tabular-nums">Aa Bb 0123456789 · −8.2%</span>
+        </div>
+        <p className="text-2xs text-loom-muted mt-1">{appSettings.faces === "web" ? "Downloads the selected face from Google Fonts. Device fonts appear while it loads or when offline." : "No font downloads. Uses system sans, Georgia, or system mono to match your selection."} Charts set to App typeface follow this choice.</p>
       </div>
 
       <div>

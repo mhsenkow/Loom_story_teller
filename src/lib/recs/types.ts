@@ -116,6 +116,8 @@ export interface ChartRecommendation {
   shapeField?: string | null;
   /** Optional field whose first grapheme is drawn as each point's emoji. */
   emojiField?: string | null;
+  /** Semantic emoji for codes/categories, bound to its original column. */
+  emojiMap?: import("../chartEmoji").ChartEmojiMap | null;
   /** Aggregation for Y (or theta) when chart type uses it: bar, line, area, pie. */
   yAggregate?: YAggregateOption | null;
   /** Cap categories by value rank (bar and similar). Null = default. */

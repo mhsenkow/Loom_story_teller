@@ -162,6 +162,7 @@ export interface GpuSceneRenderOpts {
   colors: string[];
   opacity: number;
   fontFamily?: string;
+  axisFontSize?: number;
   themeText?: string;
   themeMuted?: string;
   themeBorder?: string;
@@ -176,6 +177,7 @@ export interface GpuSceneRenderOpts {
   continuousStops?: string[];
   /** Encoding → Direction: rotate / flip the isometric floor (terrain). */
   layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
+  channelInvert?: import("./channelInvert").ChannelInvert;
   /** Thumbnail mode — marks only, no axes / keys. Inferred from size when omitted. */
   mini?: boolean;
   hits?: import("./chartTooltip").HitTarget[];
@@ -244,6 +246,8 @@ export function extractGpuScenePoints(
     sizeField?: string | null;
     timeField?: string | null;
     trailId?: string | null;
+    invertSize?: boolean;
+    invertZ?: boolean;
   },
   maxPoints = 8000,
 ): GpuScenePacked | null {
@@ -337,7 +341,8 @@ export function extractGpuScenePoints(
 
   const points: GpuScenePoint[] = raw.map((p) => ({
     ...p,
-    size: (p.size - sizeMin) / sizeSpan,
+    z: encoding.invertZ ? zMin + zMax - p.z : p.z,
+    size: encoding.invertSize ? 1 - (p.size - sizeMin) / sizeSpan : (p.size - sizeMin) / sizeSpan,
     t: (p.t - tMin) / tSpan,
   }));
 

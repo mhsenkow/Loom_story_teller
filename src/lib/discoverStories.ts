@@ -8,8 +8,14 @@
 
 import { recommendSourceStory, recommendStreamStory } from "./recommendations";
 import type { ChartRecommendation } from "./recommendations";
+import { discoverRecipeKey, discoverRecipeId } from "./discoverChartCatalog";
+import { createDiscoverAssessor, type DiscoverInsight } from "./discoverSignals";
+import { orderDiscoverStories } from "./discoverRanking";
+import { discoverSnapshotFingerprint, stampDiscoverDataChanges } from "./discoverUpdates";
 import type { ColumnInfo, QueryResult } from "./store";
 import { applyChartTimeWindow } from "./chartTime";
+import { qualifyDiscoverChart } from "./discoverChartQuality";
+import { editorialDiscoverStory } from "./discoverEditorial";
 import {
   ALL_SOURCE_KINDS,
   isMobileOs,
@@ -23,8 +29,8 @@ import {
   streamStatus,
   type SourceKind,
 } from "./tauri";
-import { SOURCE_BY_KIND, SOURCE_DEFS } from "./sourceRegistry";
-import { stormLevel } from "./webStreams";
+import { SOURCE_BY_KIND, SOURCE_DEFS, SOURCE_EXPLORE_ROWS } from "./sourceRegistry";
+import { discoverAffinityMap } from "./sourcePreferences";
 
 export type DiscoverKind = SourceKind | "wiki";
 
@@ -44,6 +50,14 @@ export interface DiscoverStory {
   score: number;
   stats: ColumnInfo[];
   sample: QueryResult;
+  /** When this snapshot was checked, distinct from the observation dates in its rows. */
+  capturedAt?: number;
+  snapshotCached?: boolean;
+  /** Snapshot evidence used for ranking and the card's explanation. */
+  insight?: DiscoverInsight;
+  quality?: number;
+  /** Actual content change, separate from a successful unchanged poll. */
+  dataChangedAt?: number;
 }
 
 /** TLDR + credit for What’s interesting data chips (hover bubble / inspect). */
@@ -83,11 +97,13 @@ export const DISCOVER_SEEN_KEY = "loom-discover-v1";
  * otherwise suppress cold-start onboarding.
  */
 let pendingDiscoverForce = false;
+let pendingDiscoverRefresh = false;
 
 /** Clear the dismiss flag and ask Onboarding to scan again. */
-export function requestDiscoverScan(): void {
+export function requestDiscoverScan(opts?: { refresh?: boolean }): void {
   if (typeof window === "undefined") return;
   pendingDiscoverForce = true;
+  pendingDiscoverRefresh = opts?.refresh === true;
   try {
     window.localStorage.removeItem(DISCOVER_SEEN_KEY);
   } catch {
@@ -106,6 +122,13 @@ export function consumeDiscoverForceRequest(): boolean {
 /** Test helper — reset the pending force flag. */
 export function clearDiscoverForceRequest(): void {
   pendingDiscoverForce = false;
+  pendingDiscoverRefresh = false;
+}
+
+export function consumeDiscoverRefreshRequest(): boolean {
+  const refresh = pendingDiscoverRefresh;
+  pendingDiscoverRefresh = false;
+  return refresh;
 }
 
 /** All poll sources (same set as Sidebar live cards). */
@@ -118,10 +141,10 @@ export const DISCOVER_STORY_LIMIT = 10_000;
 export const DISCOVER_STORY_LIMIT_MOBILE = 120;
 
 /** How many chart variants to keep per live source (kinds + encodings). */
-export const VARIANTS_PER_SOURCE = 40;
+export const VARIANTS_PER_SOURCE = 160;
 
-/** Fewer encodings per feed on mobile — probe + thumbs cost less. */
-export const VARIANTS_PER_SOURCE_MOBILE = 6;
+/** Consider the same breadth on mobile; only the final gallery is capped. */
+export const VARIANTS_PER_SOURCE_MOBILE = VARIANTS_PER_SOURCE;
 
 /** Story cap for the current device (120 on iPad/phone, full set on desktop). */
 export function discoverStoryLimit(): number {
@@ -134,71 +157,55 @@ function variantsPerSource(): number {
 
 /** Session cache so closing What’s interesting and reopening stays instant. */
 let discoverStoryCache: DiscoverStory[] | null = null;
+let discoverCacheSavedAt: number | null = null;
 
 /** Sources discover started for probing — stopped after scan unless retained. */
-const discoverStartedSources = new Set<SourceKind>();
-let discoverStartedWiki = false;
+const discoverStartedSources = new Map<SourceKind, symbol>();
+let discoverStartedWiki: symbol | null = null;
+const activeDiscoverScans = new Set<symbol>();
+const retainedDiscoverFeeds = new Set<DiscoverKind>();
 
 /** Keep a probed feed running after the user picks it from discover. */
 export function retainDiscoverFeed(kind: DiscoverKind): void {
-  if (kind === "wiki") discoverStartedWiki = false;
+  if (activeDiscoverScans.size) retainedDiscoverFeeds.add(kind);
+  if (kind === "wiki") discoverStartedWiki = null;
   else discoverStartedSources.delete(kind);
 }
 
-export async function stopDiscoverProbes(): Promise<void> {
-  const kinds = [...discoverStartedSources];
-  discoverStartedSources.clear();
-  await Promise.all(kinds.map((k) => sourceStop(k)));
-  if (discoverStartedWiki) {
-    discoverStartedWiki = false;
-    await streamStop();
-  }
+export async function stopDiscoverProbes(owner?: symbol): Promise<void> {
+  const kinds = [...discoverStartedSources.entries()]
+    .filter(([, session]) => !owner || session === owner).map(([kind]) => kind);
+  for (const kind of kinds) discoverStartedSources.delete(kind);
+  const stopWiki = discoverStartedWiki && (!owner || discoverStartedWiki === owner);
+  if (stopWiki) discoverStartedWiki = null;
+  await Promise.allSettled([
+    ...kinds.map((kind) => sourceStop(kind)),
+    ...(stopWiki ? [streamStop()] : []),
+  ]);
+}
+
+async function finishDiscoverProbes(owner: symbol): Promise<void> {
+  await stopDiscoverProbes(owner);
+  activeDiscoverScans.delete(owner);
+  if (!activeDiscoverScans.size) retainedDiscoverFeeds.clear();
 }
 
 export function getDiscoverStoryCache(): DiscoverStory[] | null {
   return discoverStoryCache;
 }
 
-export function setDiscoverStoryCache(stories: DiscoverStory[]): void {
+export function getDiscoverCacheSavedAt(): number | null {
+  return discoverCacheSavedAt;
+}
+
+export function setDiscoverStoryCache(stories: DiscoverStory[], savedAt: number | null = Date.now()): void {
   discoverStoryCache = stories.length ? stories : null;
+  discoverCacheSavedAt = stories.length ? savedAt : null;
 }
 
 export function clearDiscoverStoryCache(): void {
   discoverStoryCache = null;
-}
-
-function colIndex(sample: QueryResult, name: string): number {
-  return sample.columns.indexOf(name);
-}
-
-function numAt(sample: QueryResult, row: number, col: string): number {
-  const i = colIndex(sample, col);
-  if (i < 0) return NaN;
-  const v = sample.rows[row]?.[i];
-  return typeof v === "number" ? v : Number(v);
-}
-
-function strAt(sample: QueryResult, row: number, col: string): string {
-  const i = colIndex(sample, col);
-  if (i < 0) return "";
-  return String(sample.rows[row]?.[i] ?? "");
-}
-
-/** Max finite value in a column (ignores null/NaN so hooks never say “peak FRP NaN”). */
-function maxFiniteAt(
-  sample: QueryResult,
-  col: string,
-): { value: number; row: number } | null {
-  let best = -Infinity;
-  let row = -1;
-  for (let r = 0; r < sample.rows.length; r++) {
-    const v = numAt(sample, r, col);
-    if (Number.isFinite(v) && v > best) {
-      best = v;
-      row = r;
-    }
-  }
-  return row < 0 ? null : { value: best, row };
+  discoverCacheSavedAt = null;
 }
 
 /** Sample for a chart’s Time window — hooks should match what the chart will show. */
@@ -206,35 +213,7 @@ function sampleForChart(chart: ChartRecommendation, sample: QueryResult): QueryR
   if (!chart.timeWindow || chart.timeWindow === "all" || !chart.timeWindowField) return sample;
   const slice = applyChartTimeWindow(sample.rows, sample.columns, chart);
   if (!slice.filtered || slice.kept === 0) return sample;
-  return { ...sample, rows: slice.rows };
-}
-
-/** Alt charts demote hard so one hot feed doesn’t flood the top of Discover. */
-function altStoryScore(primaryScore: number, altIdx: number): number {
-  return Math.max(18, Math.round(primaryScore * 0.52) - 8 * altIdx);
-}
-
-function chartVariantKey(chart: ChartRecommendation): string {
-  return [
-    chart.kind,
-    chart.xField,
-    chart.yField ?? "",
-    chart.colorField ?? "",
-    chart.sizeField ?? "",
-    chart.rowField ?? "",
-    chart.topN ?? "",
-    chart.y2Field ?? "",
-    chart.comparePrevious ? "1" : "",
-    chart.barStackMode ?? "",
-    chart.rollingWindow ?? "",
-    chart.yScale ?? "",
-    chart.seriesNormalize ?? "",
-    chart.residualOverlay ? "1" : "",
-    chart.anomalyHighlight ? "1" : "",
-    chart.bumpMode ?? "",
-    chart.timeWindowField ?? "",
-    chart.timeWindow ?? "",
-  ].join("|");
+  return { ...sample, rows: slice.rows, total_rows: slice.kept };
 }
 
 /** Drop time-windowed charts that keep zero rows in the live sample. */
@@ -271,159 +250,196 @@ type ProbeStatus = "ok" | "empty" | "error" | "timeout";
 async function waitForSourceRows(
   kind: SourceKind,
   maxWaitMs = 6_000,
+  signal?: AbortSignal,
+  checkedAfter?: number,
 ): Promise<Awaited<ReturnType<typeof sourceSnapshot>> | null> {
   const started = Date.now();
   let delay = kind === "iss" || kind === "opensky" || kind === "countries" ? 400 : 250;
-  while (Date.now() - started < maxWaitMs) {
-    const snap = await sourceSnapshot(kind, 400);
-    if (snap.sample.rows.length) return snap;
+  while (Date.now() - started < maxWaitMs && !signal?.aborted) {
+    const snap = await sourceSnapshot(kind, SOURCE_EXPLORE_ROWS);
+    if (snap.sample.rows.length) {
+      if (checkedAfter == null) return snap;
+      const status = await sourceStatus(kind);
+      const captured = status.last_success_at ?? (status.last_ok_at != null ? status.last_ok_at * 1000 : undefined);
+      if ((captured == null && !status.snapshot_stale) || (captured != null && captured >= checkedAfter) || status.last_error) return snap;
+    }
     await new Promise((r) => setTimeout(r, delay));
     delay = Math.min(900, Math.round(delay * 1.35));
   }
-  const last = await sourceSnapshot(kind, 400);
-  return last.sample.rows.length ? last : null;
+  return null;
+}
+
+/** Build hooks and variants against the exact snapshot that opens on click. */
+function* buildDiscoverStorySteps(
+  kind: DiscoverKind,
+  stats: ColumnInfo[],
+  sample: QueryResult,
+  candidates: ChartRecommendation[],
+  maxVariants = VARIANTS_PER_SOURCE,
+  snapshot: { capturedAt?: number; snapshotCached?: boolean } = {},
+): Generator<void, DiscoverStory[]> {
+  const windowHasRows = new Map<string, boolean>();
+  const hasRows = (chart: ChartRecommendation) => {
+    const key = `${chart.timeWindowField ?? ""}|${chart.timeWindow ?? "all"}`;
+    if (!windowHasRows.has(key)) windowHasRows.set(key, chartHasRowsInWindow(chart, sample));
+    return windowHasRows.get(key)!;
+  };
+  const charts = candidates.map((chart) => qualifyDiscoverChart(kind, chart)).filter((chart): chart is ChartRecommendation => !!chart).filter((chart) => {
+    const fields = [chart.xField, chart.yField, chart.colorField, chart.sizeField,
+      chart.rowField, chart.y2Field, chart.timeWindowField, chart.zField, chart.timeField,
+      chart.trailId, chart.shapeField, chart.emojiField, chart.opacityField, chart.glowField, chart.outlineField];
+    return fields.every((field) => !field || sample.columns.includes(field))
+      && hasRows(chart);
+  });
+  if (!sample.rows.length || !charts.length || maxVariants <= 0) return [];
+  const seed = discoverHookFor(kind, sample, charts[0]!);
+  const primaryChart = pickPreferredChart(charts, seed.preferKind)!;
+  const primary = discoverHookFor(kind, sampleForChart(primaryChart, sample), primaryChart);
+  const makeStory = (chart: ChartRecommendation, index: number): DiscoverStory => editorialDiscoverStory({
+    id: `discover-${kind}${index ? `-alt${index}` : ""}`,
+    kind,
+    streamPath: `stream://${kind}`,
+    fileName: FILE_NAMES[kind] ?? kind,
+    hook: index ? chart.title : primary.hook,
+    blurb: index ? chart.subtitle || primary.blurb : primary.blurb,
+    category: primary.category,
+    chartKind: chart.kind,
+    chart,
+    score: primary.score,
+    stats,
+    sample,
+    ...snapshot,
+  });
+  const assess = createDiscoverAssessor(stats, sample, kind);
+  const used = new Set<string>();
+  const all: DiscoverStory[] = [];
+  let considered = 0;
+  for (const chart of [primaryChart, ...charts.filter((c) => c !== primaryChart)]) {
+    if (considered++ % 24 === 0) yield;
+    const key = discoverRecipeKey(chart);
+    if (used.has(key)) continue;
+    used.add(key);
+    const evidence = assess(chart);
+    if (!evidence) continue;
+    const story = makeStory(chart, chart === primaryChart ? 0 : 1);
+    story.quality = evidence.quality;
+    story.insight = evidence.insight;
+    story.score = Math.round(primary.score * 0.3 + chart.score * 0.3
+      + evidence.quality * 0.25 + evidence.insight.strength * 15);
+    // IDs depend on the recipe, not a changing rank or completion order.
+    story.id = `discover-${kind}-${chart.id}-${discoverRecipeId(chart)}`;
+    all.push(story);
+  }
+  const ranked = [...all].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  const bestByKind = new Map<string, DiscoverStory>();
+  for (const story of ranked) if (!bestByKind.has(story.chartKind)) bestByKind.set(story.chartKind, story);
+  // Preserve every viable kind when it fits, before spending slots on settings.
+  const representatives = [...bestByKind.values()];
+  const represented = new Set(representatives.map((s) => s.id));
+  const out = representatives.length <= maxVariants
+    ? [...representatives, ...orderDiscoverStories(all.filter((s) => !represented.has(s.id)), (s) => s.score, maxVariants - representatives.length)]
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+    : orderDiscoverStories(all, (s) => s.score, maxVariants);
+  return out;
+}
+
+export function buildDiscoverStories(...args: Parameters<typeof buildDiscoverStorySteps>): DiscoverStory[] {
+  const work = buildDiscoverStorySteps(...args);
+  let step = work.next();
+  while (!step.done) step = work.next();
+  return step.value;
+}
+
+/** Feed probes yield during qualification so the broader search does not hold taps. */
+export async function buildDiscoverStoriesAsync(
+  args: Parameters<typeof buildDiscoverStorySteps>, signal?: AbortSignal,
+): Promise<DiscoverStory[]> {
+  const work = buildDiscoverStorySteps(...args);
+  let step = work.next();
+  while (!step.done) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    if (signal?.aborted) return [];
+    step = work.next();
+  }
+  return step.value;
 }
 
 async function probeKindWithStatus(
   kind: SourceKind,
+  signal: AbortSignal,
+  owner: symbol,
 ): Promise<{ stories: DiscoverStory[]; status: ProbeStatus }> {
   try {
+    if (signal?.aborted) return { stories: [], status: "empty" };
+    if (discoverStartedSources.has(kind)) discoverStartedSources.set(kind, owner);
     const status = await sourceStatus(kind);
-    if (!status.running) {
+    const startedAt = Date.now();
+    if (signal?.aborted) return { stories: [], status: "empty" };
+    // Load-once feeds keep a running flag but no timer. Recheck them daily,
+    // preserving their buffer and the user's connection after this probe.
+    const lastCapture = status.snapshot_captured_at ?? status.last_success_at ?? (status.last_ok_at != null ? status.last_ok_at * 1000 : undefined);
+    const restartOnce = status.running && SOURCE_BY_KIND[kind].pollMs === 0
+      && (lastCapture == null || startedAt - lastCapture >= 86_400_000);
+    if (restartOnce) await sourceStop(kind);
+    if (!status.running || restartOnce) {
+      if (!status.running && !retainedDiscoverFeeds.has(kind)) discoverStartedSources.set(kind, owner);
       await sourceStart(kind);
-      discoverStartedSources.add(kind);
     }
-    const snap = await waitForSourceRows(kind);
-    if (!snap) return { stories: [], status: "empty" };
+    if (signal.aborted) {
+      await stopDiscoverProbes(owner);
+      return { stories: [], status: "empty" };
+    }
+    const snap = await waitForSourceRows(kind, 6_000, signal, !status.running || restartOnce ? startedAt - 1000 : undefined);
+    if (!snap || signal?.aborted) return { stories: [], status: "empty" };
+    const currentStatus = await sourceStatus(kind);
     const story = recommendSourceStory(kind, snap.stats, snap.sample, {
       discoverProbe: true,
-      chartLimit: variantsPerSource(),
+      chartLimit: DISCOVER_STORY_LIMIT,
     });
-    if (!story.charts.length) return { stories: [], status: "empty" };
-
-    const charts = story.charts.filter((c) => chartHasRowsInWindow(c, snap.sample));
-    if (!charts.length) return { stories: [], status: "empty" };
-
-    const out: DiscoverStory[] = [];
-    const seed = discoverHookFor(kind, snap.sample, charts[0]!);
-    const chart0 = pickPreferredChart(charts, seed.preferKind) ?? charts[0]!;
-    const primary = discoverHookFor(kind, sampleForChart(chart0, snap.sample), chart0);
-    const usedKeys = new Set<string>([chartVariantKey(chart0)]);
-    out.push({
-      id: `discover-${kind}`,
-      kind,
-      streamPath: `stream://${kind}`,
-      fileName: FILE_NAMES[kind] ?? kind,
-      hook: primary.hook,
-      blurb: primary.blurb,
-      category: primary.category,
-      chartKind: chart0.kind,
-      chart: chart0,
-      score: primary.score,
-      stats: snap.stats,
-      sample: snap.sample,
-    });
-
-    const maxVariants = variantsPerSource();
-    let altIdx = 0;
-    for (const alt of charts) {
-      if (out.length >= maxVariants) break;
-      if (alt.id === chart0.id) continue;
-      const key = chartVariantKey(alt);
-      if (usedKeys.has(key)) continue;
-      usedKeys.add(key);
-      altIdx += 1;
-      out.push({
-        id: `discover-${kind}-alt${altIdx}`,
-        kind,
-        streamPath: `stream://${kind}`,
-        fileName: FILE_NAMES[kind] ?? kind,
-        hook: alt.title,
-        blurb: alt.subtitle || primary.blurb,
-        category: primary.category,
-        chartKind: alt.kind,
-        chart: alt,
-        score: altStoryScore(primary.score, altIdx),
-        stats: snap.stats,
-        sample: snap.sample,
-      });
-    }
-    return { stories: out, status: "ok" };
+    const stories = await buildDiscoverStoriesAsync([kind, snap.stats, snap.sample, story.charts, variantsPerSource(), {
+      capturedAt: currentStatus.snapshot_captured_at ?? currentStatus.last_success_at ?? (currentStatus.last_ok_at != null ? currentStatus.last_ok_at * 1000 : Date.now()),
+      snapshotCached: currentStatus.snapshot_stale === true || !!currentStatus.last_error,
+    }], signal);
+    return { stories, status: currentStatus.last_error ? "error" : stories.length ? "ok" : "empty" };
   } catch {
     return { stories: [], status: "error" };
   }
 }
 
-async function waitForWikiRows(maxWaitMs = 6_000): Promise<Awaited<ReturnType<typeof streamSnapshot>> | null> {
+async function waitForWikiRows(maxWaitMs = 6_000, signal?: AbortSignal, previous?: QueryResult): Promise<Awaited<ReturnType<typeof streamSnapshot>> | null> {
   const started = Date.now();
   let delay = 400;
-  while (Date.now() - started < maxWaitMs) {
-    const snap = await streamSnapshot(300);
-    if (snap.sample.rows.length) return snap;
+  while (Date.now() - started < maxWaitMs && !signal?.aborted) {
+    const snap = await streamSnapshot(SOURCE_EXPLORE_ROWS);
+    if (snap.sample.rows.length && (!previous || discoverSnapshotFingerprint(snap.sample) !== discoverSnapshotFingerprint(previous))) return snap;
     await new Promise((r) => setTimeout(r, delay));
     delay = Math.min(900, Math.round(delay * 1.35));
   }
-  const last = await streamSnapshot(300);
-  return last.sample.rows.length ? last : null;
+  return null;
 }
 
-async function probeWikiWithStatus(): Promise<{ stories: DiscoverStory[]; status: ProbeStatus }> {
+async function probeWikiWithStatus(signal: AbortSignal, owner: symbol): Promise<{ stories: DiscoverStory[]; status: ProbeStatus }> {
   try {
+    if (signal?.aborted) return { stories: [], status: "empty" };
+    if (discoverStartedWiki) discoverStartedWiki = owner;
     const status = await streamStatus();
+    if (signal?.aborted) return { stories: [], status: "empty" };
     if (!status.running) {
+      if (!retainedDiscoverFeeds.has("wiki")) discoverStartedWiki = owner;
       await streamStart();
-      discoverStartedWiki = true;
     }
-    const snap = await waitForWikiRows();
-    if (!snap) return { stories: [], status: "empty" };
-    const story = recommendStreamStory(snap.stats, snap.sample);
-    if (!story.charts.length) return { stories: [], status: "empty" };
-    const charts = story.charts.filter((c) => chartHasRowsInWindow(c, snap.sample));
-    if (!charts.length) return { stories: [], status: "empty" };
-    const out: DiscoverStory[] = [];
-    const seed = discoverHookFor("wiki", snap.sample, charts[0]!);
-    const chart0 = pickPreferredChart(charts, seed.preferKind) ?? charts[0]!;
-    const hooked = discoverHookFor("wiki", sampleForChart(chart0, snap.sample), chart0);
-    const usedKeys = new Set<string>([chartVariantKey(chart0)]);
-    out.push({
-      id: "discover-wiki",
-      kind: "wiki",
-      streamPath: "stream://wiki",
-      fileName: FILE_NAMES.wiki,
-      hook: hooked.hook,
-      blurb: hooked.blurb,
-      category: hooked.category,
-      chartKind: chart0.kind,
-      chart: chart0,
-      score: hooked.score,
-      stats: snap.stats,
-      sample: snap.sample,
-    });
-    const maxVariants = variantsPerSource();
-    let altIdx = 0;
-    for (const chart of charts) {
-      if (out.length >= maxVariants) break;
-      if (chart.id === chart0.id) continue;
-      const key = chartVariantKey(chart);
-      if (usedKeys.has(key)) continue;
-      usedKeys.add(key);
-      altIdx += 1;
-      out.push({
-        id: `discover-wiki-alt${altIdx}`,
-        kind: "wiki",
-        streamPath: "stream://wiki",
-        fileName: FILE_NAMES.wiki,
-        hook: chart.title,
-        blurb: chart.subtitle || hooked.blurb,
-        category: hooked.category,
-        chartKind: chart.kind,
-        chart,
-        score: altStoryScore(hooked.score, altIdx),
-        stats: snap.stats,
-        sample: snap.sample,
-      });
+    if (signal.aborted) {
+      await stopDiscoverProbes(owner);
+      return { stories: [], status: "empty" };
     }
-    return { stories: out, status: "ok" };
+    // A reconnected SSE stream may still contain yesterday's buffer. Wait for
+    // an inserted event rather than stopping the probe before the first event.
+    const previous = !status.running ? (await streamSnapshot(SOURCE_EXPLORE_ROWS)).sample : undefined;
+    const snap = await waitForWikiRows(6_000, signal, previous);
+    if (!snap || signal?.aborted) return { stories: [], status: "empty" };
+    const story = recommendStreamStory(snap.stats, snap.sample, { discoverProbe: true });
+    const stories = await buildDiscoverStoriesAsync(["wiki", snap.stats, snap.sample, story.charts, variantsPerSource(), { capturedAt: Date.now() }], signal);
+    return { stories, status: stories.length ? "ok" : "empty" };
   } catch {
     return { stories: [], status: "error" };
   }
@@ -468,19 +484,29 @@ export interface ScanDiscoverOptions {
   limit?: number;
   includeWiki?: boolean;
   signal?: AbortSignal;
+  /** Restrict upkeep to due feeds; a full daily sweep still uses every source. */
+  kinds?: readonly DiscoverKind[];
+  /** Partial refreshes merge with the gallery before committing. */
+  commitCache?: boolean;
   /** Called as each story arrives (progressive UI). */
   onStory?: (story: DiscoverStory, soFar: DiscoverStory[]) => void;
 }
 
-/** Scan every live feed in parallel; return top stories by score. */
+/** Scan feeds in bounded, yielding batches; return a diverse set of ideas. */
 export async function scanDiscoverStories(
-  limitOrOpts: number | ScanDiscoverOptions = DISCOVER_STORY_LIMIT,
+  limitOrOpts: number | ScanDiscoverOptions = {},
 ): Promise<DiscoverStory[]> {
   const opts: ScanDiscoverOptions =
     typeof limitOrOpts === "number" ? { limit: limitOrOpts } : limitOrOpts;
   const limit = opts.limit ?? discoverStoryLimit();
   const includeWiki = opts.includeWiki !== false;
-  const isAborted = () => opts.signal?.aborted === true;
+  const owner = Symbol("discover-scan");
+  activeDiscoverScans.add(owner);
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  opts.signal?.addEventListener("abort", abort, { once: true });
+  if (opts.signal?.aborted) controller.abort();
+  const isAborted = () => controller.signal.aborted;
   const collected: DiscoverStory[] = [];
   const summary: DiscoverScanSummary = {
     failedKinds: [],
@@ -490,6 +516,8 @@ export async function scanDiscoverStories(
     wikiTimedOut: false,
   };
 
+  // Loved feeds survive the mobile cap and are probed first; hidden ones go last.
+  const affinity = discoverAffinityMap([...SCAN_KINDS, "wiki"]);
   let pendingFlush: DiscoverStory[] = [];
   let flushScheduled = false;
   const flushPending = () => {
@@ -503,9 +531,8 @@ export async function scanDiscoverStories(
     pendingFlush = [];
     for (const story of batch) collected.push(story);
     collected.sort((a, b) => b.score - a.score);
-    if (collected.length > limit) collected.length = limit;
     const last = batch[batch.length - 1]!;
-    opts.onStory?.(last, collected.slice());
+    opts.onStory?.(last, applyDiversityFilters(collected, limit, affinity));
   };
   const pushMany = (batch: DiscoverStory[]) => {
     if (isAborted()) return;
@@ -513,16 +540,17 @@ export async function scanDiscoverStories(
     pendingFlush.push(...batch);
     if (flushScheduled) return;
     flushScheduled = true;
-    const schedule =
-      typeof requestAnimationFrame === "function"
-        ? requestAnimationFrame
-        : (fn: () => void) => setTimeout(fn, 16);
-    schedule(flushPending);
+    setTimeout(flushPending, collected.length ? 150 : 16);
   };
 
-  const jobs: Promise<void>[] = SCAN_KINDS.map(async (k) => {
+  const priority: readonly SourceKind[] = ["usgs", "hn", "meteo", "crypto", "spaceweather", "countries"];
+  const orderedKinds = [...SCAN_KINDS].filter((kind) => !opts.kinds || opts.kinds.includes(kind)).sort((a, b) => {
+    const order = (kind: SourceKind) => { const index = priority.indexOf(kind); return index < 0 ? priority.length : index; };
+    return (affinity[b] ?? 0) - (affinity[a] ?? 0) || order(a) - order(b);
+  });
+  const jobs: (() => Promise<void>)[] = orderedKinds.map((k) => async () => {
     if (isAborted()) return;
-    const result = await withTimeout(probeKindWithStatus(k), 10_000);
+    const result = await withTimeout(probeKindWithStatus(k, controller.signal, owner), 10_000);
     if (isAborted()) return;
     if (result === null) {
       summary.timedOutKinds.push(k);
@@ -532,11 +560,11 @@ export async function scanDiscoverStories(
     else if (result.status === "empty") summary.emptyKinds.push(k);
     pushMany(result.stories);
   });
-  if (includeWiki) {
+  if (includeWiki && (!opts.kinds || opts.kinds.includes("wiki"))) {
     jobs.push(
-      (async () => {
+      async () => {
         if (isAborted()) return;
-        const result = await withTimeout(probeWikiWithStatus(), 10_000);
+        const result = await withTimeout(probeWikiWithStatus(controller.signal, owner), 10_000);
         if (isAborted()) return;
         if (result === null) {
           summary.wikiTimedOut = true;
@@ -544,100 +572,79 @@ export async function scanDiscoverStories(
         }
         if (result.status === "error") summary.wikiFailed = true;
         pushMany(result.stories);
-      })(),
+      },
     );
   }
-  await Promise.all(jobs);
+  let nextJob = 0;
+  const worker = async () => {
+    while (!isAborted() && nextJob < jobs.length) {
+      const job = jobs[nextJob++]!;
+      await job();
+      // Let taps, search and canvas paints run between completed feed jobs.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  };
+  await Promise.all(Array.from({ length: isMobileOs() ? 3 : 6 }, worker));
+  opts.signal?.removeEventListener("abort", abort);
   if (isAborted()) {
     pendingFlush = [];
-    await stopDiscoverProbes();
+    await finishDiscoverProbes(owner);
     return [];
   }
   flushPending();
-  await stopDiscoverProbes();
+  controller.abort();
+  await finishDiscoverProbes(owner);
   lastDiscoverScanSummary = summary;
 
-  // Apply diversity filters before picking top stories
-  const top = applyDiversityFilters(collected, limit);
-  setDiscoverStoryCache(top);
+  // Apply diversity filters before picking top stories (scores stay preference-free for the cache)
+  const top = applyDiversityFilters(collected, limit, affinity);
+  if (opts.commitCache !== false) setDiscoverStoryCache(top);
+  if (top.length && opts.commitCache !== false) {
+    void import("./discoverDailyCache").then(({ writeDiscoverDailyCache }) => writeDiscoverDailyCache(top));
+  }
   return top;
+}
+
+/** Keep failed feeds and daily-sweep age; a partial check must not claim a full scan. */
+export async function refreshDiscoverStories(
+  stories: DiscoverStory[], kinds: readonly DiscoverKind[], signal?: AbortSignal,
+): Promise<DiscoverStory[]> {
+  if (!kinds.length) return stories;
+  const updates = await scanDiscoverStories({ kinds, signal, commitCache: false });
+  if (signal?.aborted || !updates.length) return stories;
+  const captured = new Map<DiscoverKind, number>();
+  for (const story of stories) captured.set(story.kind, Math.max(captured.get(story.kind) ?? 0, story.capturedAt ?? 0));
+  const newer = updates.filter((story) => (story.capturedAt ?? 0) > (captured.get(story.kind) ?? 0));
+  if (!newer.length) return stories;
+  const changed = new Set(newer.map((story) => story.kind));
+  const merged = [...stories.filter((story) => !changed.has(story.kind)), ...newer];
+  const stamped = stampDiscoverDataChanges(stories, merged).map((story, i) => changed.has(story.kind) ? story : merged[i]!);
+  return applyDiversityFilters(stamped, discoverStoryLimit(), discoverAffinityMap([...SCAN_KINDS, "wiki"]));
 }
 
 /**
  * Rank stories for Discover with soft diversity caps.
  * Quotas are relative to the *output* limit (not the huge candidate pool),
  * so one feed with dozens of chart variants can't flood the grid.
+ * `affinity` (per feed kind, from sourcePreferences) only decides *which*
+ * stories make the cut; returned stories keep their own scores and order.
  */
-export function applyDiversityFilters(stories: DiscoverStory[], limit: number): DiscoverStory[] {
+export function applyDiversityFilters(
+  stories: DiscoverStory[],
+  limit: number,
+  affinity: Partial<Record<DiscoverKind, number>> = {},
+): DiscoverStory[] {
   if (!stories.length || limit <= 0) return [];
-  const sorted = [...stories].sort((a, b) => b.score - a.score);
-  if (sorted.length <= limit) return sorted;
+  const byScore = (a: DiscoverStory, b: DiscoverStory) => b.score - a.score;
+  if (stories.length <= limit) return [...stories].sort(byScore);
+  const rank = (story: DiscoverStory) => story.score + (affinity[story.kind] ?? 0);
+  const sorted = [...stories].sort((a, b) => rank(b) - rank(a));
 
   const maxPerSource = Math.max(2, Math.ceil(limit * 0.2));
-  const maxPerCategory = Math.max(3, Math.ceil(limit * 0.35));
-  const maxPerChart = Math.max(3, Math.ceil(limit * 0.3));
-
-  const selected: DiscoverStory[] = [];
-  const used = new Set<string>();
-  const sourceCounts = new Map<string, number>();
-  const categoryCounts = new Map<string, number>();
-  const chartCounts = new Map<string, number>();
-
-  const tryAdd = (story: DiscoverStory, enforceCaps: boolean): boolean => {
-    if (used.has(story.id) || selected.length >= limit) return false;
-    if (enforceCaps) {
-      if ((sourceCounts.get(story.kind) ?? 0) >= maxPerSource) return false;
-      if ((categoryCounts.get(story.category) ?? 0) >= maxPerCategory) return false;
-      if ((chartCounts.get(story.chartKind) ?? 0) >= maxPerChart) return false;
-    }
-    selected.push(story);
-    used.add(story.id);
-    sourceCounts.set(story.kind, (sourceCounts.get(story.kind) ?? 0) + 1);
-    categoryCounts.set(story.category, (categoryCounts.get(story.category) ?? 0) + 1);
-    chartCounts.set(story.chartKind, (chartCounts.get(story.chartKind) ?? 0) + 1);
-    return true;
-  };
-
-  // Pass 1: one top story from each category (up to 5) so the grid isn't mono-topic.
-  const byCategory = new Map<string, DiscoverStory[]>();
-  for (const s of sorted) {
-    const list = byCategory.get(s.category);
-    if (list) list.push(s);
-    else byCategory.set(s.category, [s]);
-  }
-  const categories = [...byCategory.keys()].sort((a, b) => {
-    const maxA = byCategory.get(a)![0]!.score;
-    const maxB = byCategory.get(b)![0]!.score;
-    return maxB - maxA;
-  });
-  for (const cat of categories.slice(0, 5)) {
-    const top = byCategory.get(cat)![0]!;
-    tryAdd(top, false);
-  }
-
-  // Pass 2: fill by score with all caps.
-  for (const story of sorted) {
-    if (selected.length >= limit) break;
-    tryAdd(story, true);
-  }
-
-  // Pass 3: relax chart/category caps; keep per-source cap so one feed can't flood.
+  const selected = orderDiscoverStories(sorted, rank, limit, maxPerSource);
   if (selected.length < limit) {
-    for (const story of sorted) {
-      if (selected.length >= limit) break;
-      if (used.has(story.id)) continue;
-      if ((sourceCounts.get(story.kind) ?? 0) >= maxPerSource) continue;
-      tryAdd(story, false);
-    }
+    const used = new Set(selected.map((s) => s.id));
+    selected.push(...orderDiscoverStories(sorted.filter((s) => !used.has(s.id)), rank, limit - selected.length));
   }
-
-  // Pass 4: last resort fill (sparse candidate sets only).
-  if (selected.length < limit) {
-    for (const story of sorted) {
-      if (selected.length >= limit) break;
-      tryAdd(story, false);
-    }
-  }
-
-  return selected.sort((a, b) => b.score - a.score);
+  return selected.sort(byScore);
 }

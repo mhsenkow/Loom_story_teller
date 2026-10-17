@@ -305,7 +305,7 @@ describe("handlePublishStory", () => {
     expect(res.status).toBe(200);
     const body = await res.json() as { id: string; url: string };
     expect(body.id).toBeTruthy();
-    expect(body.url).toContain("/s/");
+    expect(body.url).toContain("/plot/chart/");
   });
 
   it("returns loom.ibm.io story URLs even when POSTed on workers.dev", async () => {
@@ -323,7 +323,7 @@ describe("handlePublishStory", () => {
     const res = await handlePublishStory(req, env);
     expect(res.status).toBe(200);
     const body = await res.json() as { url: string };
-    expect(body.url.startsWith("https://loom.ibm.io/s/")).toBe(true);
+    expect(body.url.startsWith("https://loom.ibm.io/plot/chart/")).toBe(true);
     expect(body.url).not.toContain("mhsenkow");
   });
 

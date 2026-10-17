@@ -426,16 +426,17 @@ export default function SmartTab() {
                 <thead>
                   <tr>
                     <th className="px-1 py-0.5" />
-                    {corr.columns.map((c) => <th key={c} className="px-1 py-0.5 text-loom-muted truncate max-w-[48px]">{c.slice(0, 6)}</th>)}
+                    {corr.columns.map((c) => <th key={c} scope="col" title={c} className="px-2 py-1 text-loom-label whitespace-normal break-words min-w-[6rem] max-w-[10rem]">{c}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {corr.columns.map((c, i) => (
                     <tr key={c}>
-                      <td className="px-1 py-0.5 text-loom-muted truncate max-w-[48px]">{c.slice(0, 6)}</td>
+                      <th scope="row" title={c} className="px-2 py-1 text-left font-medium text-loom-label whitespace-normal break-words min-w-[6rem] max-w-[10rem]">{c}</th>
                       {corr.matrix[i].map((v, j) => {
-                        const fill = sampleCorrDiverging(DEFAULT_CORR_DIVERGING, corrFillT(v));
-                        const ink = corrCellInk(v, fill, "var(--loom-surface)", "var(--loom-text)");
+                        const valid = Number.isFinite(v);
+                        const fill = valid ? sampleCorrDiverging(DEFAULT_CORR_DIVERGING, corrFillT(v)) : "var(--loom-elevated)";
+                        const ink = valid ? corrCellInk(v, fill, "var(--loom-surface)", "var(--loom-text)") : "var(--loom-label)";
                         return (
                           <td
                             key={j}

@@ -2,7 +2,8 @@
 // corrMatrixStyle — diverging fill + readable cell ink (LOOM-119, 120)
 // =================================================================
 
-import { inkOn, mixColor, parseColor, relativeLuminance } from "./chartInk";
+import { mixColor, parseColor } from "./chartInk";
+import { ensureContrast } from "./wcagColor";
 
 export const DEFAULT_CORR_DIVERGING = ["#2166ac", "#f7f7f7", "#b2182b"];
 
@@ -24,13 +25,9 @@ export function sampleCorrDiverging(stops: string[], t: number): string {
 }
 
 /** Text color for a correlation value on its cell fill. */
-export function corrCellInk(r: number, fill: string, bg: string, text: string): string {
-  const onFill = inkOn(fill);
+export function corrCellInk(_r: number, fill: string, bg: string, text: string, opacity = 1): string {
   const pFill = parseColor(fill);
   const pBg = parseColor(bg);
-  if (pFill && pBg && Math.abs(relativeLuminance(fill) - relativeLuminance(bg)) < 0.08) {
-    return text;
-  }
-  if (Math.abs(r) < 0.35) return text;
-  return onFill;
+  const painted = pFill && pBg && opacity < 1 ? mixColor(bg, fill, Math.max(0, opacity)) : fill;
+  return ensureContrast(text, painted);
 }

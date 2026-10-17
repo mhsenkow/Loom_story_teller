@@ -33,6 +33,8 @@ describe("chartTime", () => {
     expect(parseChartTime(1_700_000_000_000)).toBe(1_700_000_000_000);
     expect(parseChartTime(1_700_000_000)).toBe(1_700_000_000_000);
     expect(parseChartTime(2020)).toBe(Date.UTC(2020, 0, 1));
+    expect(parseChartTime(1880)).toBe(Date.UTC(1880, 0, 1));
+    expect(parseChartTime("1880")).toBe(Date.UTC(1880, 0, 1));
     expect(parseChartTime("n/a")).toBeNull();
   });
 

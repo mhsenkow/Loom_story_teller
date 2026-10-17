@@ -68,9 +68,9 @@ describe("discoverStories", () => {
     expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(ALL_SOURCE_KINDS.length * VARIANTS_PER_SOURCE);
   });
 
-  it("caps iPad / phone discover at 120 with fewer variants per feed", () => {
+  it("caps the mobile gallery at 120 after considering the full per-feed breadth", () => {
     expect(DISCOVER_STORY_LIMIT_MOBILE).toBe(120);
-    expect(VARIANTS_PER_SOURCE_MOBILE).toBeLessThanOrEqual(8);
+    expect(VARIANTS_PER_SOURCE_MOBILE).toBe(VARIANTS_PER_SOURCE);
     expect(VARIANTS_PER_SOURCE_MOBILE * ALL_SOURCE_KINDS.length).toBeGreaterThanOrEqual(
       DISCOVER_STORY_LIMIT_MOBILE,
     );
@@ -196,5 +196,21 @@ describe("discoverStories", () => {
     const usgs = top.filter((s) => s.kind === "usgs").length;
     expect(usgs).toBeLessThanOrEqual(Math.ceil(20 * 0.2));
     expect(new Set(top.map((s) => s.kind)).size).toBeGreaterThanOrEqual(4);
+
+    // Source affinity decides who makes a tight cap — loved feeds stay, hidden go — without rewriting scores.
+    const six = [
+      ...mk("usgs", "Earth", "geoPoints", 10, 95),
+      ...mk("crypto", "Markets", "scatter", 10, 90),
+      ...mk("steam", "Culture", "bar", 10, 85),
+      ...mk("iss", "Space", "globeTrail", 10, 80),
+      ...mk("hn", "Tech", "line", 10, 75),
+      ...mk("citibike", "Cities", "heatmap", 10, 70),
+    ];
+    expect(new Set(applyDiversityFilters(six, 10).map((s) => s.chartKind)).size).toBeGreaterThanOrEqual(4);
+    const prefd = applyDiversityFilters(six, 10, { citibike: 12, usgs: -100 });
+    expect(prefd.some((s) => s.kind === "citibike")).toBe(true);
+    expect(prefd.some((s) => s.kind === "usgs")).toBe(false);
+    expect(prefd.find((s) => s.kind === "citibike")!.score).toBe(70);
+    expect(prefd.map((s) => s.score)).toEqual([...prefd.map((s) => s.score)].sort((a, b) => b - a));
   });
 });

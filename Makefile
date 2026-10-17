@@ -109,6 +109,12 @@ weave: ## 📦 Production build → .app bundle
 	npm run tauri build
 	@echo "$(GREEN)✓ Bundle at src-tauri/target/release/bundle/$(RESET)"
 
+.PHONY: weave-mas
+weave-mas: ## 📦 Mac App Store .pkg (sandbox + user-selected folders)
+	@echo "$(PURPLE)🧵 Weaving the Mac App Store fabric...$(RESET)"
+	./scripts/mas-build.sh
+	@echo "$(GREEN)✓ MAS pkg at src-tauri/target/mas/Loom.pkg$(RESET)"
+
 .PHONY: tablet
 tablet: ## 🔧 iOS simulator / device dev (web-parity shell)
 	@echo "$(PURPLE)🧵 Threading the tablet loom...$(RESET)"

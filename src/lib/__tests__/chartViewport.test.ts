@@ -2,6 +2,19 @@ import { describe, expect, it } from "vitest";
 import { detectDevice, fitChartFrame, resolveDevice } from "../chartViewport";
 
 describe("chartViewport", () => {
+  it("uses the entire available width in Auto, including ultrawide and tablet windows", () => {
+    for (const hostW of [980, 1900, 2600]) {
+      const f = fitChartFrame({ hostW, hostH: 800, aspectId: "free", device: "auto", gutter: 8 });
+      expect(f.width).toBe(hostW - 16);
+      expect(f.height).toBe(784);
+    }
+    expect(fitChartFrame({ hostW: 1900, hostH: 800, aspectId: "free", device: "desktop" }).width).toBe(1440);
+  });
+  it("never exceeds a very small host", () => {
+    const f = fitChartFrame({ hostW: 100, hostH: 90, aspectId: "square", device: "auto", gutter: 8 });
+    expect(f.width).toBeLessThanOrEqual(84);
+    expect(f.height).toBeLessThanOrEqual(74);
+  });
   it("detects mobile / tablet / desktop breakpoints", () => {
     expect(detectDevice(390)).toBe("mobile");
     expect(detectDevice(900)).toBe("tablet");

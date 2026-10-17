@@ -74,13 +74,22 @@ export interface ActivatedDataset {
   active: ChartRecommendation | null;
 }
 
+/** Prefer a real total from the sample over a deferred mount probe of 0. */
+export function fileWithSampleRowCount(file: FileEntry, sample: QueryResult): FileEntry {
+  const fromSample = Math.max(sample.total_rows ?? 0, sample.rows.length);
+  if (fromSample <= 0 || fromSample <= file.row_count) return file;
+  return { ...file, row_count: fromSample };
+}
+
 /** Reset dataset-scoped state, recommend, and select the first (or given) chart in one store update. */
 export function activateDataset(input: ActivateDatasetInput): ActivatedDataset {
   const charts =
     input.charts ?? shortlistFor(input.shortlist ?? { type: "file" }, input.file, input.stats, input.sample);
   const active = input.active === undefined ? (charts[0] ?? null) : input.active;
-  useLoomStore.getState().openDataset({
-    file: input.file,
+  const file = fileWithSampleRowCount(input.file, input.sample);
+  const st = useLoomStore.getState();
+  st.openDataset({
+    file,
     stats: input.stats,
     sample: input.sample,
     chartRecs: charts,
@@ -89,7 +98,14 @@ export function activateDataset(input: ActivateDatasetInput): ActivatedDataset {
     extra: input.extra,
   });
   // Implicit "like" for source preferences (de-duped per ref within minutes).
-  useLoomStore.getState().noteSourceOpened(refForPath(input.file.path, input.file));
+  st.noteSourceOpened(refForPath(file.path, file));
+  // Keep the sidebar file list honest when mount deferred row_count to 0.
+  if (file.row_count !== input.file.row_count) {
+    const files = st.files;
+    if (files.some((f) => f.path === file.path && f.row_count !== file.row_count)) {
+      st.setFiles(files.map((f) => (f.path === file.path ? { ...f, row_count: file.row_count } : f)));
+    }
+  }
   return { charts, active };
 }
 

@@ -11,6 +11,7 @@ import { contrastingInk, fitTextEllipsis } from "../chartLayout";
 import { type PlotRect, drawAxisFrame, drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks, drawColorRamp } from "../chartLooks";
 import { sampleContinuous } from "../chartPalettes";
 import { type ChartRenderOpts } from "../chartRenderTypes";
+import { chartFont, chartTypeRamp } from "../chartType";
 import { resolveLayoutDirection } from "../chartSupport";
 import { formatTooltipNumber } from "../chartTooltip";
 import { DEFAULT_CORR_DIVERGING, corrCellInk, corrFillT, sampleCorrDiverging } from "../corrMatrixStyle";
@@ -19,6 +20,7 @@ import { type YAggregateOption } from "../recommendations";
 import { axisFont, barPath, densityStops, labelGutter } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
 import { drawAxisTicks, drawGridLines, numRange } from "./primitives";
+import { formatDeltaLabel } from "../deltaCompare";
 import { DEFAULT_COLORS } from "./shared";
 
 export function renderFullPareto(
@@ -207,11 +209,13 @@ export function renderFullCorrMatrix(
       ctx.fillRect(x + 0.5, y + 0.5, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
       if ((opts?.showDataLabels || cellW > 36) && cellW > 28 && cellH > 18) {
         ctx.globalAlpha = 1;
-        ctx.fillStyle = corrCellInk(corr, fill, ink.bg, ink.text);
-        ctx.font = axisFont(opts, Math.min(11, cellW * 0.28));
+        ctx.fillStyle = corrCellInk(corr, fill, ink.bg, ink.text, 0.35 + Math.abs(corr) * 0.65);
+        ctx.font = axisFont(opts, chartTypeRamp(opts?.axisFontSize).cell);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(corr.toFixed(2), x + cellW / 2, y + cellH / 2);
+        const label = corr.toFixed(2);
+        if (ctx.measureText(label).width <= cellW - 6 && chartTypeRamp(opts?.axisFontSize).cell + 4 <= cellH)
+          ctx.fillText(label, x + cellW / 2, y + cellH / 2);
       }
       pushHit(opts, {
         shape: "rect", x, y, w: cellW, h: cellH,
@@ -306,25 +310,44 @@ export function renderFullDumbbell(
   const bName = fieldLabel(opts, si, "end");
   const centers: number[] = [];
 
+  const deltaMode = opts?.deltaDisplay ?? "off";
   entries.forEach((e, i) => {
     const cy = rect.top + (i + 0.5) * bandH;
     centers.push(cy);
+    const x0 = X(e.start);
+    const x1 = X(e.end);
     ctx.strokeStyle = opts?.axisLabelColor ?? "#6b6b78";
     ctx.lineWidth = 2;
     ctx.globalAlpha = 0.5;
     ctx.beginPath();
-    ctx.moveTo(X(e.start), cy);
-    ctx.lineTo(X(e.end), cy);
+    ctx.moveTo(x0, cy);
+    ctx.lineTo(x1, cy);
     ctx.stroke();
     ctx.globalAlpha = alpha;
     ctx.fillStyle = startColor;
     ctx.beginPath();
-    ctx.arc(X(e.start), cy, dotR, 0, Math.PI * 2);
+    ctx.arc(x0, cy, dotR, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = endColor;
     ctx.beginPath();
-    ctx.arc(X(e.end), cy, dotR, 0, Math.PI * 2);
+    ctx.arc(x1, cy, dotR, 0, Math.PI * 2);
     ctx.fill();
+    const deltaLbl = formatDeltaLabel(e.start, e.end, deltaMode);
+    if (deltaLbl && bandH >= 12) {
+      ctx.globalAlpha = 1;
+      ctx.font = axisFont(opts, 9);
+      ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
+      ctx.textBaseline = "middle";
+      const midX = (x0 + x1) / 2;
+      const preferRight = x1 >= x0;
+      ctx.textAlign = preferRight ? "left" : "right";
+      const tipX = preferRight ? Math.max(x0, x1) + dotR + 4 : Math.min(x0, x1) - dotR - 4;
+      if (tipX > rect.left + 4 && tipX < rect.right - 4) ctx.fillText(deltaLbl, tipX, cy);
+      else {
+        ctx.textAlign = "center";
+        ctx.fillText(deltaLbl, midX, cy - dotR - 6);
+      }
+    }
     pushHit(opts, {
       shape: "rect", x: rect.left, y: cy - bandH / 2, w: rect.right - rect.left, h: bandH,
       match: [[xi, e.label]],
@@ -563,9 +586,9 @@ export function renderFullFunnel(
     ctx.fill();
 
     const pctOfFirst = (e.value / maxVal) * 100;
-    const fs = Math.max(10, Math.min(14, bandH * 0.32));
+    const fs = Math.max(chartTypeRamp(opts?.axisFontSize).mark, Math.min(14, bandH * 0.32));
     const text = `${e.label}  ·  ${formatDataValue(e.value)}${i > 0 ? `  (${pctOfFirst < 10 ? pctOfFirst.toFixed(1) : Math.round(pctOfFirst)}%)` : ""}`;
-    ctx.font = `600 ${fs}px '${fontFamily}', sans-serif`;
+    ctx.font = chartFont(fs, fontFamily, 600);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.globalAlpha = 1;
@@ -629,7 +652,7 @@ export function renderFullParallel(
     }
   }
 
-  const fontSize = Math.max(10, opts?.axisFontSize ?? 11);
+  const fontSize = chartTypeRamp(opts?.axisFontSize).tick;
   const edge = Math.min(40, (w - 2 * pad) / (axes.length * 2));
   const axisXs = axes.map((_, i) => pad + edge + (i / (axes.length - 1)) * (w - 2 * pad - 2 * edge));
   const spacing = (w - 2 * pad - 2 * edge) / (axes.length - 1);
@@ -679,12 +702,12 @@ export function renderFullParallel(
     ctx.lineTo(x, plotBot);
     ctx.stroke();
     ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
-    ctx.font = `600 ${fontSize}px '${fontFamily}', sans-serif`;
+    ctx.font = chartFont(fontSize, fontFamily, 600);
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillText(fitTextEllipsis(ctx, ax.name, spacing - 8), x, plotBot + 6);
     ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
-    ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+    ctx.font = chartFont(fontSize, fontFamily);
     ctx.textBaseline = "bottom";
     ctx.fillText(formatDataValue(ax.max), x, plotTop - 3);
     ctx.textBaseline = "top";

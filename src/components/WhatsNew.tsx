@@ -21,8 +21,8 @@ import {
 } from "@/lib/changelog";
 import { DISCOVER_SEEN_KEY } from "@/lib/discoverStories";
 
-/** Keys that prove this browser has used Loom before the changelog existed. */
-const HISTORY_KEYS = ["loom-discover-v1", "loom-last-session", "loom-app-settings", "loom-recent-files"];
+/** User activity only: hydration writes settings before this lazy module loads. */
+const HISTORY_KEYS = ["loom-discover-v1", "loom-last-session", "loom-recent-files"];
 
 function readStorage(key: string): string | null {
   try {

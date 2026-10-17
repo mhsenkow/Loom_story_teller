@@ -9,6 +9,7 @@ import { contrastingInk } from "../chartLayout";
 import { type PlotRect, drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks, drawColorRamp } from "../chartLooks";
 import { sampleContinuous } from "../chartPalettes";
 import { type ChartRenderOpts } from "../chartRenderTypes";
+import { chartTypeRamp } from "../chartType";
 import { formatTooltipNumber } from "../chartTooltip";
 import { type SeriesNormalize, type YScaleKind, anomalyRowIndices, normalizeSeriesValues, rollingMean, scaleDomain, scaleY } from "../dsTransforms";
 import { type YAggregateOption } from "../recommendations";
@@ -352,10 +353,12 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
       ctx.globalAlpha = 1;
       if (showValues && c > 0) {
         ctx.fillStyle = contrastingInk(fill);
-        ctx.font = axisFont(opts, Math.min(11, cellH * 0.55));
+        ctx.font = axisFont(opts, chartTypeRamp(opts?.axisFontSize).cell);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(formatDataValue(c), px + cellW / 2, py + cellH / 2);
+        const label = formatDataValue(c);
+        if (ctx.measureText(label).width <= cellW - 6)
+          ctx.fillText(label, px + cellW / 2, py + cellH / 2);
       }
       const binned = xAxis.binned || yAxis.binned;
       pushHit(opts, {

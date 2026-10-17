@@ -190,8 +190,20 @@ export function renderFullBar(
   if (entries.length === 0) return;
   const n = entries.length;
   const vals = entries.map((e) => e[1]);
-  let vMin = Math.min(0, ...vals);
-  let vMax = Math.max(0, ...vals);
+  // Ordered bars: ghost the earlier half onto the later half (same contract as line/area).
+  const ghostCompare =
+    !!opts?.comparePrevious && bm.ordered && n >= 4
+      ? (() => {
+          const mid = Math.floor(n / 2);
+          return entries.slice(0, mid).map((e, i) => ({
+            at: mid + i,
+            fromLabel: e[0],
+            val: e[1],
+          })).filter((g) => g.at < n);
+        })()
+      : [];
+  let vMin = Math.min(0, ...vals, ...ghostCompare.map((g) => g.val));
+  let vMax = Math.max(0, ...vals, ...ghostCompare.map((g) => g.val));
   if (opts?.sharedValueDomain) {
     vMin = opts.sharedValueDomain.min;
     vMax = opts.sharedValueDomain.max;
@@ -205,6 +217,12 @@ export function renderFullBar(
       : { columns: [xName, vTitle, "Rows"], row: [label, formatTooltipNumber(val), formatTooltipNumber(rowsIn)] };
   };
   if (colorByCategory) setLegend(opts, []);
+  if (ghostCompare.length) {
+    setLegend(opts, [
+      { label: vTitle, color: cols[0]! },
+      { label: "Earlier half", color: axisLabelColor },
+    ]);
+  }
 
   if (horizontal) {
     // Category names read left-to-right in a gutter; values sit at the bar ends.
@@ -220,6 +238,19 @@ export function renderFullBar(
     if (opts) opts.scales = { x: X, valueAxis: "x", rect: { left: x0, top: rect.top, right: x0 + plotW, bottom: rect.bottom } };
     const barT = Math.max(2, Math.min(band * 0.72, 30));
     const centers: number[] = [];
+    for (const g of ghostCompare) {
+      const yMid = rect.top + band * (g.at + 0.5);
+      const xa = X(0);
+      const xb = X(g.val);
+      const left = Math.min(xa, xb);
+      const len = Math.max(g.val === 0 ? 0 : 1, Math.abs(xb - xa));
+      ctx.fillStyle = axisLabelColor;
+      ctx.globalAlpha = 0.22;
+      ctx.beginPath();
+      if (g.val !== 0) barPath(ctx, left, yMid - barT / 2, len, barT, cornerR, hBarDir(g.val));
+      else ctx.rect(left, yMid - barT / 2, len, barT);
+      ctx.fill();
+    }
     entries.forEach(([label, val], i) => {
       const yMid = rect.top + band * (i + 0.5);
       centers.push(yMid);
@@ -263,6 +294,18 @@ export function renderFullBar(
   const band = chartW / n;
   const barW = Math.max(1, Math.min(band * (n > 24 ? 0.86 : 0.72), 96));
   const centers: number[] = [];
+  for (const g of ghostCompare) {
+    const cx = rect.left + band * (g.at + 0.5);
+    const y0 = Y(0);
+    const y1 = Y(g.val);
+    const top = Math.min(y0, y1);
+    const bh = Math.max(g.val === 0 ? 0 : 1, Math.abs(y1 - y0));
+    ctx.fillStyle = axisLabelColor;
+    ctx.globalAlpha = 0.22;
+    ctx.beginPath();
+    barPath(ctx, cx - barW / 2, top, barW, bh, cornerR, vBarDir(g.val));
+    ctx.fill();
+  }
   entries.forEach(([label, val], i) => {
     const cx = rect.left + band * (i + 0.5);
     centers.push(cx);

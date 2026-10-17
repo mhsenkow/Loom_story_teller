@@ -330,9 +330,44 @@ export interface ChartSharePageInput {
   } | null;
 }
 
-/** Stable tokens the Worker rewrites to hosted `/s/{id}.img` URLs. */
+/** Stable tokens the Worker rewrites to hosted plot URLs. */
 export const LOOM_SHARE_IMG_TOKEN = "__LOOM_SHARE_IMG__";
 export const LOOM_OG_IMG_TOKEN = "__LOOM_OG_IMG__";
+export const LOOM_PAGE_URL_TOKEN = "__LOOM_PAGE_URL__";
+export const LOOM_OEMBED_URL_TOKEN = "__LOOM_OEMBED_URL__";
+
+/**
+ * One line under the card title. Drops a repeated headline so Slack, iMessage,
+ * LinkedIn, and X show the interesting sentence, not the title twice.
+ */
+export function shareCardBlurb(title: string, caption?: string | null): string {
+  const headline = title.trim().toLowerCase();
+  const lines = (caption || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line && line.toLowerCase() !== headline);
+  const text = lines.join(" ").replace(/\s+/g, " ").trim();
+  const blurb = text || "Open the plot. The chart is the picture.";
+  return blurb.slice(0, 200);
+}
+
+function shareJsonLd(title: string, description: string): string {
+  const json = JSON.stringify({
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: title || "Loom chart",
+    description,
+    image: {
+      "@type": "ImageObject",
+      url: LOOM_OG_IMG_TOKEN,
+      width: 1200,
+      height: 627,
+    },
+    url: LOOM_PAGE_URL_TOKEN,
+    publisher: { "@type": "Organization", name: "Loom", url: "https://loom.ibm.io" },
+  }).replace(/</g, "\\u003c");
+  return json;
+}
 
 /**
  * Single-chart share page: one big image, headline, caption, source.
@@ -343,7 +378,7 @@ export function buildChartSharePageHtml(input: ChartSharePageInput): string {
   const LOOM = snapshotThemeTokens();
   const title = escapeHtml(input.title || "Loom chart");
   const captionText = (input.caption || "").trim();
-  const desc = escapeHtml((captionText || `${input.title} — made with Loom`).slice(0, 280));
+  const desc = escapeHtml(shareCardBlurb(input.title || "Loom chart", captionText));
   // Prefer tokens; fall back to escaped data URL for offline / non-Worker paths.
   const img = input.imageDataUrl?.startsWith("data:")
     ? LOOM_SHARE_IMG_TOKEN
@@ -388,16 +423,31 @@ export function buildChartSharePageHtml(input: ChartSharePageInput): string {
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>${title}</title>
   <meta name="description" content="${desc}" />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <meta name="theme-color" content="${LOOM.bg}" />
+  <link rel="canonical" href="${LOOM_PAGE_URL_TOKEN}" />
+  <link rel="image_src" href="${ogImg}" />
+  <link rel="alternate" type="application/json+oembed" href="${LOOM_OEMBED_URL_TOKEN}" title="${title}" />
+  <meta property="og:site_name" content="Loom" />
+  <meta property="og:locale" content="en_US" />
   <meta property="og:type" content="article" />
+  <meta property="og:url" content="${LOOM_PAGE_URL_TOKEN}" />
   <meta property="og:title" content="${title}" />
   <meta property="og:description" content="${desc}" />
   <meta property="og:image" content="${ogImg}" />
+  <meta property="og:image:secure_url" content="${ogImg}" />
+  <meta property="og:image:type" content="image/jpeg" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="627" />
+  <meta property="og:image:alt" content="${title}" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="${title}" />
   <meta name="twitter:description" content="${desc}" />
   <meta name="twitter:image" content="${ogImg}" />
+  <meta name="twitter:image:alt" content="${title}" />
+  <meta name="twitter:image:width" content="1200" />
+  <meta name="twitter:image:height" content="627" />
+  <script type="application/ld+json">${shareJsonLd(input.title || "Loom chart", shareCardBlurb(input.title || "Loom chart", captionText))}</script>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -410,30 +460,29 @@ export function buildChartSharePageHtml(input: ChartSharePageInput): string {
       justify-content: center;
       padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
     }
-    main { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 14px; }
-    h1 { font-size: clamp(1.15rem, 4.5vw, 1.6rem); line-height: 1.25; margin: 4px 0 0; letter-spacing: -0.01em; }
+    main { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 18px; }
+    h1 { font-size: clamp(1.25rem, 4.5vw, 1.75rem); font-weight: 600; line-height: 1.2; margin: 8px 0 0; letter-spacing: -0.02em; }
     .cs-figure {
       margin: 0;
       border: 1px solid ${LOOM.border};
-      border-radius: 14px;
+      border-radius: 18px;
       overflow: hidden;
       background: ${LOOM.surface};
+      box-shadow: 0 18px 50px color-mix(in srgb, ${LOOM.text} 8%, transparent);
     }
     .cs-figure img { display: block; width: 100%; height: auto; }
-    .cs-caption { margin: 0; font-size: 0.95rem; line-height: 1.55; color: ${LOOM.text}; opacity: 0.88; }
+    .cs-caption { margin: 0; font-size: 1rem; line-height: 1.5; color: ${LOOM.text}; opacity: 0.9; }
     .cs-meta { margin: 0; font-size: 0.75rem; color: ${LOOM.muted}; }
     .cs-cols { opacity: 0.85; word-break: break-word; }
     .cs-cta {
       align-self: flex-start;
-      margin-top: 6px;
-      font-size: 0.85rem;
-      font-weight: 600;
+      margin-top: 2px;
+      font-size: 0.95rem;
+      font-weight: 500;
       color: ${LOOM.accent};
       text-decoration: none;
-      padding: 10px 14px;
-      border: 1px solid ${LOOM.accent};
-      border-radius: 10px;
     }
+    a.cs-cta:hover { text-decoration: underline; text-underline-offset: 3px; }
   </style>
 </head>
 <body>

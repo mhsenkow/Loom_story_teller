@@ -31,9 +31,15 @@ import { isAtlasLoaded } from "@/lib/geoAtlas";
 import { partitionRowsByFacet, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 import { cancelScheduledIdleCallback, scheduleIdleCallback } from "@/lib/idleCallback";
 import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
-import { buildCorrMatrix, buildPareto, residualYs, rollingMean, normalizeSeriesValues } from "@/lib/dsTransforms";
-import { applyChartTimeWindow } from "@/lib/chartTime";
+import { buildCorrMatrix, buildPareto, rollingMean, normalizeSeriesValues, scaleY, scaleDomain, type YScaleKind } from "@/lib/dsTransforms";
 import { downsampledRowsForThumb } from "@/lib/chartThumbnailCache";
+import { screenDevicePixelRatio } from "@/lib/chartStagePixels";
+import { aggregateValues } from "@/lib/canvasCharts/plumbing";
+import { chartFont, resolveChartAxisFontSize } from "@/lib/chartType";
+import { ensureChartFontLoaded, resolveChartFontFamily } from "@/lib/fontCatalog";
+import { fitTextEllipsis } from "@/lib/chartLayout";
+import { aggregateThumbnailRows } from "@/lib/chartThumbnailAggregation";
+import { renderFullScatter } from "@/lib/canvasCharts/scatter";
 
 const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
 
@@ -80,6 +86,7 @@ export function ChartCard({
   hero = false,
   micro = false,
   nativeTitle = true,
+  previewOnly = false,
 }: {
   rec: ChartRecommendation;
   data: QueryResult | null;
@@ -93,9 +100,18 @@ export function ChartCard({
   micro?: boolean;
   /** Browser tooltip on hover — off when a sibling Data chip owns the TLDR. */
   nativeTitle?: boolean;
+  /** Non-interactive canvas for a story card that owns its own text and action. */
+  previewOnly?: boolean;
 }) {
   const theme = useLoomStore((s) => s.appSettings.theme);
   const colorblind = useLoomStore((s) => s.appSettings.colorblindCharts);
+  const appFont = useLoomStore((s) => s.appSettings.font);
+  const faces = useLoomStore((s) => s.appSettings.faces);
+  const fontOverride = useLoomStore((s) => s.chartVisualOverrides.fontFamily);
+  const textSize = useLoomStore((s) => s.chartVisualOverrides.axisFontSize);
+  const fontFamily = resolveChartFontFamily(fontOverride, appFont, faces);
+  const axisFontSize = resolveChartAxisFontSize(textSize);
+  useEffect(() => { ensureChartFontLoaded(fontFamily, faces); }, [fontFamily, faces]);
   const { COLORS, SEQ, ui } = useMemo(() => {
     const resolved = resolveChartColors({
       paletteId: "auto",
@@ -134,7 +150,7 @@ export function ChartCard({
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = screenDevicePixelRatio();
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
     canvas.style.width = `${width}px`;
@@ -161,7 +177,9 @@ export function ChartCard({
       rec.kind === "corrMatrix" || rec.kind === "radar" || rec.kind === "parallel";
     if (xIdx === -1 && !xOptional) return;
 
-    const rows = downsampledRowsForThumb(data, rec);
+    const pointPreview = ["scatter", "bubble", "hexbin", "strip"].includes(rec.kind)
+      || isGeoFamilyKind(rec.kind) || isGpuSceneKind(rec.kind);
+    const rows = downsampledRowsForThumb(data, rec, pointPreview ? 1500 : Infinity);
     if (!rows.length) return;
 
     const paintPanel = (
@@ -191,15 +209,20 @@ export function ChartCard({
         colors: COLORS,
         seq: SEQ,
         ui,
+        fontFamily,
+        axisFontSize,
         topN,
         comparePrevious: !!rec.comparePrevious,
         yAggregate: rec.yAggregate ?? null,
+        yScale: rec.yScale ?? "linear",
         barStackMode: rec.barStackMode ?? null,
         rollingWindow: rec.rollingWindow ?? null,
         seriesNormalize: rec.seriesNormalize ?? null,
         residualOverlay: !!rec.residualOverlay,
         anomalyHighlight: !!rec.anomalyHighlight,
         bumpMode: rec.bumpMode ?? null,
+        pyramidScaleMode: rec.pyramidScaleMode,
+        deltaDisplay: rec.deltaDisplay,
         // Terrain Height is Z; older recs may still carry it on sizeField.
         zField: rec.zField ?? (rec.kind === "quakeTerrain" ? rec.sizeField : null),
         timeField: rec.timeField,
@@ -209,6 +232,7 @@ export function ChartCard({
         yField: rec.yField,
         colorField: rec.colorField,
         layoutDirection: rec.layoutDirection,
+        pointEncoding: rec,
         hero,
       });
       ctx.restore();
@@ -222,7 +246,7 @@ export function ChartCard({
         const gap = micro ? 1 : 2;
         const cw = (w - gap * (cols - 1)) / cols;
         const ch = (h - gap * (rowsN - 1)) / rowsN;
-        const labelH = micro ? 0 : 10;
+        const labelH = micro ? 0 : (hero ? axisFontSize : 11) + 5;
         panels.forEach((p, i) => {
           const c = i % cols;
           const r = Math.floor(i / cols);
@@ -232,10 +256,10 @@ export function ChartCard({
             // Tiny facet label strip (full cards only — micro is shapes-only)
             ctx.fillStyle = ui.muted;
             ctx.globalAlpha = 0.85;
-            ctx.font = `600 ${Math.max(7, Math.min(9, ch * 0.12))}px Inter, sans-serif`;
+            ctx.font = chartFont(hero ? axisFontSize : 11, fontFamily, 600);
             ctx.textAlign = "left";
             ctx.textBaseline = "top";
-            const label = p.key.length > 14 ? `${p.key.slice(0, 13)}…` : p.key;
+            const label = fitTextEllipsis(ctx, p.key, cw - 4);
             ctx.fillText(label, x + 2, y + 1);
             ctx.globalAlpha = 1;
           }
@@ -246,7 +270,7 @@ export function ChartCard({
     }
 
     paintPanel(rows, 0, 0, w, h, pad);
-  }, [rec, data, theme, hero, micro, COLORS, SEQ, ui]);
+  }, [rec, data, hero, micro, COLORS, SEQ, ui, fontFamily, axisFontSize]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -280,13 +304,23 @@ export function ChartCard({
     io.observe(container);
     const ro = new ResizeObserver(() => scheduleDraw());
     ro.observe(container);
+    document.fonts?.addEventListener("loadingdone", scheduleDraw);
     return () => {
       cancelled = true;
       io.disconnect();
       ro.disconnect();
+      document.fonts?.removeEventListener("loadingdone", scheduleDraw);
       cancelScheduledIdleCallback(idle);
     };
   }, [draw, rec.kind]);
+
+  if (previewOnly) {
+    return (
+      <div ref={containerRef} aria-hidden="true" className={`relative w-full bg-loom-bg ${hero ? "h-28 sm:h-52" : "h-28 sm:h-36"}`}>
+        <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 w-full h-full" />
+      </div>
+    );
+  }
 
   return (
     <button
@@ -311,6 +345,19 @@ export function ChartCard({
         ${!hero && isActive ? "border-loom-accent ring-2 ring-loom-accent/40 shadow-loom" : !hero ? "border-loom-border hover:border-loom-accent/50" : ""}
         ${compact ? "w-[152px] shrink-0 snap-start rounded-md" : "w-full"}
       `}
+      style={
+        hero
+          ? undefined
+          : {
+              // Skip paint for off-screen idea thumbs (phone rail + dense grids).
+              contentVisibility: "auto",
+              containIntrinsicSize: compact
+                ? "152px 120px"
+                : micro
+                  ? "200px 120px"
+                  : "220px 160px",
+            }
+      }
     >
       <div
         ref={containerRef}
@@ -326,6 +373,7 @@ export function ChartCard({
       >
         <canvas
           ref={canvasRef}
+          aria-hidden="true"
           className="absolute inset-0 w-full h-full"
         />
         {micro && (
@@ -467,6 +515,7 @@ function kindColor(kind: string): string {
 // --- Mini renderers (simple, fast, no labels) ---
 
 type PaintArgs = {
+  pointEncoding: ChartRecommendation;
   kind: string;
   xIdx: number;
   yIdx: number;
@@ -480,15 +529,20 @@ type PaintArgs = {
   colors: string[];
   seq: string[];
   ui: ThemeUiColors;
+  fontFamily: string;
+  axisFontSize: number;
   topN: number | null;
   comparePrevious: boolean;
   yAggregate: YAggregateOption | null;
+  yScale: YScaleKind;
   barStackMode?: "grouped" | "stacked" | "percent" | null;
   rollingWindow?: 7 | 30 | null;
   seriesNormalize?: "index100" | "zscore" | null;
   residualOverlay?: boolean;
   anomalyHighlight?: boolean;
   bumpMode?: "rank" | "delta" | null;
+  pyramidScaleMode?: ChartRecommendation["pyramidScaleMode"];
+  deltaDisplay?: ChartRecommendation["deltaDisplay"];
   zField?: string | null;
   timeField?: string | null;
   trailId?: string | null;
@@ -501,31 +555,49 @@ type PaintArgs = {
 };
 
 function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArgs) {
-  const { kind, xIdx, yIdx, cIdx, y2Idx, sizeIdx, w, h, pad, colors: COLORS, seq: SEQ, ui } = a;
+  const { kind, xIdx, cIdx, y2Idx, sizeIdx, w, h, pad, colors: COLORS, seq: SEQ, ui } = a;
+  let yIdx = a.yIdx;
+  if (a.yAggregate && ["pareto", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "sankey", "network", "arcDiagram"].includes(kind)) {
+    const aggregated = aggregateThumbnailRows(rows, xIdx, yIdx, cIdx, a.yAggregate, ["sankey", "network", "arcDiagram"].includes(kind));
+    rows = aggregated.rows;
+    yIdx = aggregated.valueIndex;
+  }
   if (kind === "scatter" && yIdx >= 0) {
-    drawScatter(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.residualOverlay);
+    renderFullScatter(ctx, rows, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, {
+      colors: COLORS, opacity: 0.72, pointSize: a.pointEncoding.emojiField ? 12 : 6,
+      mini: true, fieldNames: a.columns, fontFamily: a.fontFamily,
+      themeText: ui.text, themeMuted: ui.muted, themeBorder: ui.border,
+      showGrid: false, legendPosition: "none", yScale: a.yScale,
+      residualOverlay: a.residualOverlay, anomalyHighlight: a.anomalyHighlight,
+      shapeField: a.pointEncoding.shapeField, emojiField: a.pointEncoding.emojiField,
+      emojiMap: a.pointEncoding.emojiMap, channelInvert: a.pointEncoding.channelInvert ?? undefined,
+    }, {
+      glowIdx: a.columns.indexOf(a.pointEncoding.glowField ?? ""),
+      outlineIdx: a.columns.indexOf(a.pointEncoding.outlineField ?? ""),
+      opacityIdx: a.columns.indexOf(a.pointEncoding.opacityField ?? ""),
+    });
   } else if (kind === "bar") {
-    drawBar(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN, a.barStackMode ?? "grouped");
+    drawBar(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN, a.barStackMode ?? "grouped", a.yAggregate, a.yScale);
   } else if (kind === "pareto") {
     drawPareto(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.topN);
   } else if (kind === "corrMatrix") {
     drawCorrMatrixThumb(ctx, rows, a.columns, w, h, pad, SEQ);
   } else if (kind === "histogram") {
     drawHistogram(ctx, rows, xIdx, w, h, pad, COLORS);
-  } else if (kind === "line" && yIdx >= 0) {
-    drawLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize);
+  } else if (kind === "line") {
+    drawLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize, a.yAggregate, a.yScale);
   } else if (kind === "heatmap" && yIdx >= 0) {
     drawHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
   } else if (kind === "strip" && yIdx >= 0) {
     drawStrip(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
   } else if (kind === "box" && yIdx >= 0) {
     drawBox(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, ui);
-  } else if (kind === "area" && yIdx >= 0) {
-    drawArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize);
+  } else if (kind === "area") {
+    drawArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize, a.yAggregate, a.yScale);
   } else if (kind === "pie") {
     drawPie(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
   } else if (kind === "bubble" && yIdx >= 0) {
-    drawBubble(ctx, rows, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, COLORS);
+    drawBubble(ctx, rows, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, COLORS, a.yScale);
   } else if (kind === "violin" && yIdx >= 0) {
     drawViolin(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
   } else if (kind === "radar") {
@@ -535,7 +607,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
   } else if (kind === "lollipop") {
     drawLollipop(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.topN);
   } else if (kind === "dumbbell" && yIdx >= 0) {
-    if (sizeIdx >= 0) drawDumbbell(ctx, rows, xIdx, yIdx, sizeIdx, w, h, pad, COLORS);
+    if (sizeIdx >= 0) drawDumbbell(ctx, rows, xIdx, yIdx, sizeIdx, w, h, pad, COLORS, a.yAggregate);
   } else if (kind === "ridgeline" && yIdx >= 0) {
     drawRidgeline(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
   } else if (kind === "hexbin" && yIdx >= 0) {
@@ -579,10 +651,16 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
           pointSize: 3.2,
           mini: true,
           themeBg: "rgba(0,0,0,0)",
+          fontFamily: a.fontFamily,
+          axisFontSize: a.hero ? a.axisFontSize : 11,
           themeText: ui.text,
           themeBorder: ui.border,
           themeMuted: ui.muted,
           continuousStops: SEQ,
+          shapeField: a.pointEncoding.shapeField,
+          emojiField: a.pointEncoding.emojiField,
+          emojiMap: a.pointEncoding.emojiMap,
+          channelInvert: a.pointEncoding.channelInvert ?? undefined,
         },
       );
     }
@@ -600,7 +678,9 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         opacity: 0.9,
         camera: { yaw: 0.62, pitch: 0.42, zoom: a.hero ? 1 : 1.12 },
         themeBg: "rgba(0,0,0,0)",
-        themeText: ui.text,
+        fontFamily: a.fontFamily,
+          axisFontSize: a.hero ? a.axisFontSize : 11,
+          themeText: ui.text,
         themeMuted: ui.muted,
         themeBorder: ui.border,
         mini: !a.hero,
@@ -625,7 +705,9 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         continuousStops: SEQ,
         layoutDirection: a.layoutDirection,
         themeBg: "rgba(0,0,0,0)",
-        themeText: ui.text,
+        fontFamily: a.fontFamily,
+          axisFontSize: a.hero ? a.axisFontSize : 11,
+          themeText: ui.text,
         themeMuted: ui.muted,
         themeBorder: ui.border,
       });
@@ -649,13 +731,17 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         pointSize: 2.5,
         continuousStops: SEQ,
         axisLabelColor: ui.muted,
-        themeText: ui.text,
+        fontFamily: a.fontFamily,
+          axisFontSize: a.hero ? a.axisFontSize : 11,
+          themeText: ui.text,
         themeMuted: ui.muted,
         themeBorder: ui.border,
         yAggregate: a.yAggregate,
         topN: a.topN,
         legendPosition: "none",
         bumpMode: a.bumpMode ?? undefined,
+        pyramidScaleMode: a.pyramidScaleMode ?? undefined,
+        deltaDisplay: a.deltaDisplay ?? undefined,
         layoutDirection: a.layoutDirection,
       },
       true,
@@ -681,20 +767,20 @@ function compareXKeys(a: string, b: string): number {
 }
 
 /** Mean of y per distinct x (or row count when there is no y), sorted along x — mirrors the full line/area renderers. */
-function seriesByX(rows: unknown[][], xi: number, yi: number): number[] {
-  const byX = new Map<string, { sum: number; n: number }>();
-  for (const r of rows) {
-    const k = String(r[xi]);
-    const v = yi >= 0 ? Number(r[yi]) : 1;
-    if (yi >= 0 && isNaN(v)) continue;
-    const g = byX.get(k) ?? { sum: 0, n: 0 };
-    g.sum += v;
-    g.n += 1;
-    byX.set(k, g);
+function seriesByX(rows: unknown[][], xi: number, yi: number, aggregate?: YAggregateOption | null): number[] {
+  const byX = new Map<string, number[]>();
+  for (const row of rows) {
+    const key = String(row[xi]);
+    if (yi >= 0 && (row[yi] == null || row[yi] === "")) continue;
+    const value = yi >= 0 ? Number(row[yi]) : 1;
+    if (!Number.isFinite(value)) continue;
+    const group = byX.get(key) ?? [];
+    group.push(value);
+    byX.set(key, group);
   }
   return [...byX.entries()]
     .sort((a, b) => compareXKeys(a[0], b[0]))
-    .map(([, g]) => (yi >= 0 ? g.sum / g.n : g.n));
+    .map(([, group]) => aggregateValues(group, yi < 0 ? "count" : aggregate ?? "mean"));
 }
 
 function groupRows(rows: unknown[][], ci: number, limit: number): unknown[][][] {
@@ -708,73 +794,14 @@ function groupRows(rows: unknown[][], ci: number, limit: number): unknown[][][] 
   return [...groups.values()].sort((a, b) => b.length - a.length).slice(0, limit);
 }
 
-function strokeSeries(ctx: CanvasRenderingContext2D, ys: number[], yMin: number, yMax: number, w: number, h: number, pad: number) {
-  const range = yMax - yMin || 1;
+function strokeSeries(ctx: CanvasRenderingContext2D, ys: number[], yMin: number, yMax: number, w: number, h: number, pad: number, yScale: YScaleKind = "linear") {
   ctx.beginPath();
   ys.forEach((y, i) => {
     const sx = pad + (i / Math.max(ys.length - 1, 1)) * (w - 2 * pad);
-    const sy = h - pad - ((y - yMin) / range) * (h - 2 * pad);
+    const sy = h - pad - scaleY(y, yMin, yMax, yScale) * (h - 2 * pad);
     if (i === 0) ctx.moveTo(sx, sy);
     else ctx.lineTo(sx, sy);
   });
-}
-
-function drawScatter(
-  ctx: CanvasRenderingContext2D,
-  rows: unknown[][],
-  xi: number,
-  yi: number,
-  ci: number,
-  w: number,
-  h: number,
-  pad: number,
-  colors: string[],
-  residualOverlay = false,
-) {
-  const [xMin, xMax] = numericRange(rows, xi);
-  const xs = rows.map((r) => Number(r[xi]));
-  const ysRaw = rows.map((r) => Number(r[yi]));
-  const fit = residualOverlay ? residualYs(xs, ysRaw) : null;
-  const plotYs = fit ? fit.residuals : ysRaw;
-  let yMin = Infinity;
-  let yMax = -Infinity;
-  for (const y of plotYs) {
-    if (!Number.isFinite(y)) continue;
-    yMin = Math.min(yMin, y);
-    yMax = Math.max(yMax, y);
-  }
-  if (!Number.isFinite(yMin) || !Number.isFinite(yMax)) {
-    [yMin, yMax] = numericRange(rows, yi);
-  }
-  if (yMin === yMax) {
-    yMin -= 1;
-    yMax += 1;
-  }
-  const catMap = new Map<string, number>();
-  let nextCat = 0;
-  const COL = colors.length ? colors : FALLBACK_COLORS;
-
-  for (let ri = 0; ri < rows.length; ri++) {
-    const r = rows[ri]!;
-    const x = Number(r[xi]);
-    const y = plotYs[ri]!;
-    if (isNaN(x) || !Number.isFinite(y)) continue;
-    let cat = 0;
-    if (ci >= 0) {
-      const k = String(r[ci]);
-      if (!catMap.has(k)) catMap.set(k, nextCat++);
-      cat = catMap.get(k)!;
-    }
-    const sx = pad + ((x - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
-    const sy = h - pad - ((y - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
-    ctx.beginPath();
-    // Slightly larger marks read better in 4:3 thumbs without blobbing
-    ctx.arc(sx, sy, Math.max(1.75, Math.min(w, h) * 0.012), 0, Math.PI * 2);
-    ctx.fillStyle = COL[cat % COL.length];
-    ctx.globalAlpha = 0.72;
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
 }
 
 function drawPareto(
@@ -872,12 +899,14 @@ function drawBar(
   colors: string[],
   topN: number | null = null,
   stackMode: "grouped" | "stacked" | "percent" = "grouped",
+  aggregate?: YAggregateOption | null,
+  yScale: YScaleKind = "linear",
 ) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const plotH = h - 2 * pad;
   const chartW = w - 2 * pad;
   const barColorIdx = ci >= 0 && ci !== xi ? ci : -1;
-  const agg: YAggregateOption = yi < 0 ? "count" : "sum";
+  const agg: YAggregateOption = yi < 0 ? "count" : aggregate ?? "sum";
   const limit = topN ?? DEFAULT_TOP_N;
   const facet = barColorIdx >= 0 ? buildBarFacetGrid(rows, xi, yi, barColorIdx, agg, stackMode, limit) : null;
 
@@ -933,29 +962,32 @@ function drawBar(
     return;
   }
 
-  const groups = new Map<string, number>();
-  const isCount = yi < 0;
-  for (const r of rows) {
-    const k = String(r[xi]);
-    if (isCount) {
-      groups.set(k, (groups.get(k) ?? 0) + 1);
-    } else {
-      const v = Number(r[yi]);
-      if (isNaN(v)) continue;
-      groups.set(k, (groups.get(k) ?? 0) + v);
-    }
+  const groups = new Map<string, number[]>();
+  for (const row of rows) {
+    const key = String(row[xi]);
+    if (yi >= 0 && (row[yi] == null || row[yi] === "")) continue;
+    const value = yi < 0 ? 1 : Number(row[yi]);
+    if (!Number.isFinite(value)) continue;
+    const group = groups.get(key) ?? [];
+    group.push(value);
+    groups.set(key, group);
   }
-  const entries = [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit);
+  const entries = [...groups.entries()]
+    .map(([key, values]) => [key, aggregateValues(values, agg)] as [string, number])
+    .sort((a, b) => b[1] - a[1]).slice(0, limit);
   if (entries.length === 0) return;
-  const maxVal = Math.max(...entries.map(e => e[1]), 1);
+  const values = entries.map((entry) => entry[1]);
+  const { min, max } = scaleDomain(yScale === "log" ? Math.min(...values) : Math.min(0, ...values), Math.max(0, ...values), yScale);
+  const baseline = yScale === "log" ? min : 0;
+  const zeroY = h - pad - scaleY(baseline, min, max, yScale) * plotH;
   const barW = Math.max(2, (w - 2 * pad) / entries.length - 2);
 
   entries.forEach(([, val], i) => {
-    const barH = (val / maxVal) * plotH;
+    const y = h - pad - scaleY(val, min, max, yScale) * plotH;
     const x = pad + i * ((w - 2 * pad) / entries.length);
     ctx.fillStyle = COL[0];
     ctx.globalAlpha = 0.8;
-    ctx.fillRect(x, h - pad - barH, barW, barH);
+    ctx.fillRect(x, Math.min(y, zeroY), barW, Math.max(1, Math.abs(zeroY - y)));
   });
   ctx.globalAlpha = 1;
 }
@@ -997,6 +1029,8 @@ function drawLine(
   comparePrevious = false,
   rollingWindow: 7 | 30 | null = null,
   seriesNormalize: "index100" | "zscore" | null = null,
+  aggregate?: YAggregateOption | null,
+  yScale: YScaleKind = "linear",
 ) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const transform = (ys: number[]) => {
@@ -1006,12 +1040,12 @@ function drawLine(
     return v;
   };
   const series = (ci >= 0 && ci !== xi
-    ? groupRows(rows, ci, 6).map((g) => seriesByX(g, xi, yi))
-    : [seriesByX(rows, xi, yi)]).map(transform);
+    ? groupRows(rows, ci, 6).map((g) => seriesByX(g, xi, yi, aggregate))
+    : [seriesByX(rows, xi, yi, aggregate)]).map(transform);
   const extras: { ys: number[]; dashed: boolean; color: string }[] = [];
   if (y2Idx >= 0 && y2Idx !== yi) {
     extras.push({
-      ys: transform(seriesByX(rows, xi, y2Idx)),
+      ys: transform(seriesByX(rows, xi, y2Idx, aggregate)),
       dashed: true,
       color: COL[Math.min(1, COL.length - 1)]!,
     });
@@ -1026,8 +1060,7 @@ function drawLine(
   }
   const all = [...series.flat(), ...extras.flatMap((e) => e.ys)].filter((v) => Number.isFinite(v));
   if (all.length === 0) return;
-  const yMin = Math.min(...all);
-  const yMax = Math.max(...all);
+  const { min: yMin, max: yMax } = scaleDomain(Math.min(...all), Math.max(...all), yScale);
   ctx.lineWidth = 1.5;
   ctx.lineJoin = "round";
   ctx.globalAlpha = 0.9;
@@ -1035,7 +1068,7 @@ function drawLine(
     if (ys.length === 0) return;
     ctx.strokeStyle = COL[i % COL.length];
     ctx.setLineDash([]);
-    strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
+    strokeSeries(ctx, ys, yMin, yMax, w, h, pad, yScale);
     ctx.stroke();
   });
   extras.forEach((e) => {
@@ -1044,7 +1077,7 @@ function drawLine(
     ctx.globalAlpha = 0.75;
     ctx.lineWidth = 1.25;
     ctx.setLineDash(e.dashed ? [3, 2] : []);
-    strokeSeries(ctx, e.ys, yMin, yMax, w, h, pad);
+    strokeSeries(ctx, e.ys, yMin, yMax, w, h, pad, yScale);
     ctx.stroke();
   });
   ctx.setLineDash([]);
@@ -1170,6 +1203,8 @@ function drawArea(
   comparePrevious = false,
   rollingWindow: 7 | 30 | null = null,
   seriesNormalize: "index100" | "zscore" | null = null,
+  aggregate?: YAggregateOption | null,
+  yScale: YScaleKind = "linear",
 ) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const transform = (ys: number[]) => {
@@ -1179,22 +1214,24 @@ function drawArea(
     return v;
   };
   const series = (ci >= 0 && ci !== xi
-    ? groupRows(rows, ci, 4).map((g) => seriesByX(g, xi, yi))
-    : [seriesByX(rows, xi, yi)]).map(transform);
+    ? groupRows(rows, ci, 4).map((g) => seriesByX(g, xi, yi, aggregate))
+    : [seriesByX(rows, xi, yi, aggregate)]).map(transform);
   const overlays: number[][] = [];
-  if (y2Idx >= 0 && y2Idx !== yi) overlays.push(transform(seriesByX(rows, xi, y2Idx)));
+  if (y2Idx >= 0 && y2Idx !== yi) overlays.push(transform(seriesByX(rows, xi, y2Idx, aggregate)));
   if (comparePrevious && series[0] && series[0].length >= 4) {
     overlays.push(series[0].slice(0, Math.floor(series[0].length / 2)));
   }
   const all = [...series.flat(), ...overlays.flat()].filter((v) => Number.isFinite(v));
   if (all.length === 0) return;
   // Area marks are anchored at zero like the full chart (or the min when all-negative).
-  const yMin = seriesNormalize ? Math.min(...all) : Math.min(0, ...all);
-  const yMax = seriesNormalize ? Math.max(...all) : Math.max(0, ...all);
+  const { min: yMin, max: yMax } = scaleDomain(
+    seriesNormalize || yScale === "log" ? Math.min(...all) : Math.min(0, ...all),
+    seriesNormalize ? Math.max(...all) : Math.max(0, ...all), yScale,
+  );
   series.forEach((ys, j) => {
     if (ys.length === 0) return;
     const color = COL[j % COL.length];
-    strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
+    strokeSeries(ctx, ys, yMin, yMax, w, h, pad, yScale);
     ctx.lineTo(w - pad, h - pad);
     ctx.lineTo(pad, h - pad);
     ctx.closePath();
@@ -1205,7 +1242,7 @@ function drawArea(
     ctx.globalAlpha = 0.95;
     ctx.lineWidth = 1.25;
     ctx.setLineDash([]);
-    strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
+    strokeSeries(ctx, ys, yMin, yMax, w, h, pad, yScale);
     ctx.stroke();
   });
   overlays.forEach((ys, oi) => {
@@ -1214,7 +1251,7 @@ function drawArea(
     ctx.globalAlpha = 0.8;
     ctx.lineWidth = 1.25;
     ctx.setLineDash([3, 2]);
-    strokeSeries(ctx, ys, yMin, yMax, w, h, pad);
+    strokeSeries(ctx, ys, yMin, yMax, w, h, pad, yScale);
     ctx.stroke();
   });
   ctx.setLineDash([]);
@@ -1249,14 +1286,14 @@ function drawPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, y
   ctx.globalAlpha = 1;
 }
 
-function drawBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, si: number, w: number, h: number, pad: number, colors: string[]) {
+function drawBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, si: number, w: number, h: number, pad: number, colors: string[], yScale: YScaleKind = "linear") {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const [xMin, xMax] = numericRange(rows, xi);
-  const [yMin, yMax] = numericRange(rows, yi);
+  const [rawMin, rawMax] = numericRange(rows, yi);
+  const { min: yMin, max: yMax } = scaleDomain(rawMin, rawMax, yScale);
   const [sMin, sMax] = si >= 0 ? numericRange(rows, si) : [0, 1];
   const sRange = sMax - sMin || 1;
   const xRange = xMax - xMin || 1;
-  const yRange = yMax - yMin || 1;
   const plotW = Math.max(1, w - 2 * pad);
   const plotH = Math.max(1, h - 2 * pad);
   let nValid = 0;
@@ -1291,7 +1328,7 @@ function drawBubble(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
       if (!isNaN(s)) radius = minR + Math.sqrt((s - sMin) / sRange) * (maxR - minR);
     }
     const sx = pad + ((x - xMin) / xRange) * plotW;
-    const sy = h - pad - ((y - yMin) / yRange) * plotH;
+    const sy = h - pad - scaleY(y, yMin, yMax, yScale) * plotH;
     bubbles.push({ sx, sy, r: radius, cat });
   }
   bubbles.sort((a, b) => b.r - a.r);
@@ -1681,7 +1718,7 @@ function drawArcDiagram(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: nu
   ctx.globalAlpha = 1;
 }
 
-function drawDumbbell(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, si: number, w: number, h: number, pad: number, colors: string[]) {
+function drawDumbbell(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, si: number, w: number, h: number, pad: number, colors: string[], aggregate?: YAggregateOption | null) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, { a: number[]; b: number[] }>();
   for (const r of rows) {
@@ -1695,9 +1732,9 @@ function drawDumbbell(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: numb
   }
   const entries = [...groups.entries()].map(([label, g]) => ({
     label,
-    a: g.a.reduce((s, v) => s + v, 0) / g.a.length,
-    b: g.b.reduce((s, v) => s + v, 0) / g.b.length,
-  })).slice(0, 10);
+    a: aggregateValues(g.a, aggregate ?? "mean"),
+    b: aggregateValues(g.b, aggregate ?? "mean"),
+  })).sort((a, b) => Math.abs(b.b - b.a) - Math.abs(a.b - a.a)).slice(0, 20);
   if (!entries.length) return;
   let minV = Infinity, maxV = -Infinity;
   for (const e of entries) { minV = Math.min(minV, e.a, e.b); maxV = Math.max(maxV, e.a, e.b); }

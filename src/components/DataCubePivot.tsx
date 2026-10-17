@@ -11,9 +11,13 @@
 //    linked to voxels in the cube.
 // =================================================================
 
-import { useState, type DragEvent } from "react";
+import { useId, useState, type DragEvent } from "react";
 import { sampleContinuous } from "@/lib/chartPalettes";
 import { formatCubeNumber, type DataCube, type PivotTable } from "@/lib/dataCube";
+import { chartFontStack } from "@/lib/fontCatalog";
+import { resolveChartAxisFontSize } from "@/lib/chartType";
+import { mixColor } from "@/lib/chartInk";
+import { ensureContrast } from "@/lib/wcagColor";
 
 export type CubeAxisSlot = "x" | "y" | "z";
 
@@ -47,6 +51,8 @@ export function DataCubePivotBar({
   onSwap,
   onRotate,
   onReplace,
+  fontFamily,
+  axisFontSize,
 }: {
   cube: DataCube;
   ramp: string[];
@@ -58,7 +64,11 @@ export function DataCubePivotBar({
   onSwap: (a: CubeAxisSlot, b: CubeAxisSlot) => void;
   onRotate: () => void;
   onReplace: (slot: CubeAxisSlot, column: string) => void;
+  fontFamily?: string;
+  axisFontSize?: number;
 }) {
+  const controlsId = useId();
+  const [expanded, setExpanded] = useState(false);
   const [picked, setPicked] = useState<CubeAxisSlot | null>(null);
   const [dropOn, setDropOn] = useState<CubeAxisSlot | null>(null);
   const axes: Record<CubeAxisSlot, DataCube["x"]> = { x: cube.x, y: cube.y, z: cube.z };
@@ -94,9 +104,17 @@ export function DataCubePivotBar({
 
   return (
     <div
-      className="absolute top-2 left-2 z-[7] flex flex-col gap-1.5 items-start max-w-[calc(100%-1rem)] pointer-events-none"
+      className="loom-cube-type absolute top-2 left-2 max-md:left-auto max-md:right-2 z-[7] flex flex-col gap-1.5 items-start max-w-[calc(100%-1rem)] pointer-events-none"
+      style={{ fontFamily: chartFontStack(fontFamily), fontSize: resolveChartAxisFontSize(axisFontSize), lineHeight: 1.45 }}
       {...shield}
     >
+      <div className="md:hidden flex items-center gap-1 self-end pointer-events-auto">
+        <button type="button" aria-label="Pivot controls" aria-expanded={expanded} aria-controls={controlsId} onClick={() => setExpanded((value) => !value)} className="min-h-10 px-2.5 rounded-md border border-loom-border bg-loom-surface text-loom-text">
+          Pivot {expanded ? "−" : "+"}
+        </button>
+        <button type="button" aria-label="Pivot table" aria-pressed={tableOpen} onClick={onToggleTable} className={`min-h-10 px-2.5 rounded-md border bg-loom-surface ${tableOpen ? "border-loom-accent text-loom-text" : "border-loom-border text-loom-label"}`}>▦ Table</button>
+      </div>
+      <div id={controlsId} className={`${expanded ? "flex" : "hidden md:flex"} flex-col gap-1.5 max-md:max-w-[20rem] max-md:max-h-[45dvh] max-md:overflow-auto max-md:overscroll-contain max-md:pointer-events-auto max-md:p-2 max-md:rounded-md max-md:border max-md:border-loom-border max-md:bg-loom-surface`}>
       {picked != null && (
         <p className="pointer-events-none text-2xs text-loom-accent px-1" role="status" aria-live="polite">
           Picked {SLOT_LABEL[picked]} — click another axis to swap
@@ -120,6 +138,7 @@ export function DataCubePivotBar({
             onDrop={onDrop(slot)}
             onClick={() => onChipClick(slot)}
             aria-pressed={picked === slot}
+            aria-label={`${SLOT_LABEL[slot]}: ${axes[slot].field}`}
             aria-keyshortcuts="BracketLeft BracketRight Escape"
             title={
               picked && picked !== slot
@@ -133,7 +152,7 @@ export function DataCubePivotBar({
             }`}
           >
             <span className="text-loom-muted shrink-0">{SLOT_LABEL[slot]}</span>
-            <span className="truncate font-medium">{axes[slot].field}</span>
+            <span className="min-w-0 [overflow-wrap:anywhere] text-left font-medium">{axes[slot].field}</span>
           </button>
         ))}
         <button
@@ -147,7 +166,7 @@ export function DataCubePivotBar({
         </button>
       </div>
 
-      <p className="md:hidden pointer-events-none px-1.5 py-0.5 rounded bg-loom-surface/70 backdrop-blur-sm text-2xs text-loom-muted" aria-live="polite">
+      <p className="md:hidden pointer-events-none px-1.5 py-0.5 rounded text-2xs text-loom-label" aria-live="polite">
         {picked ? `Now tap the axis to swap with ${SLOT_LABEL[picked]}` : "Tap two axes to swap them"}
       </p>
 
@@ -159,8 +178,8 @@ export function DataCubePivotBar({
           <button
             type="button"
             onClick={() => onSlice(null)}
-            className="px-1.5 py-1 max-md:min-h-10 min-w-[6.5rem] max-w-[12rem] truncate text-center text-loom-text"
-            title={slice == null ? `All ${cube.z.field} rolled up — step to slice` : "Show all layers (Esc)"}
+            className="px-1.5 py-1 max-md:min-h-10 min-w-[6.5rem] max-w-[12rem] [overflow-wrap:anywhere] text-center text-loom-text"
+            title={slice == null ? `All ${cube.z.field} rolled up — step to slice` : `${cube.z.field}: ${cube.z.labels[slice]} · Show all layers (Esc)`}
           >
             <span className="text-loom-muted">{cube.z.field}: </span>
             {slice == null ? "All" : cube.z.labels[slice]}
@@ -173,7 +192,7 @@ export function DataCubePivotBar({
           type="button"
           onClick={onToggleTable}
           aria-pressed={tableOpen}
-          className={`px-2 py-1 max-md:min-h-10 max-md:px-2.5 rounded-md border text-2xs backdrop-blur-sm ${
+          className={`hidden md:inline-flex px-2 py-1 rounded-md border text-2xs backdrop-blur-sm ${
             tableOpen
               ? "border-loom-accent bg-loom-accent/20 text-loom-text"
               : "border-loom-border bg-loom-surface/85 text-loom-muted hover:text-loom-text hover:border-loom-accent/60"
@@ -184,10 +203,10 @@ export function DataCubePivotBar({
         </button>
         {showLegend && (
           <div
-            className="flex items-center gap-1.5 px-2 py-1 rounded-md border border-loom-border bg-loom-surface/85 backdrop-blur-sm text-2xs font-mono text-loom-muted"
+            className="flex flex-wrap items-center gap-1.5 px-2 py-1 rounded-md border border-loom-border bg-loom-surface/85 backdrop-blur-sm text-2xs tabular-nums text-loom-label"
             title={`Voxel color + size = ${cube.valueLabel}`}
           >
-            <span className="font-sans text-loom-text truncate max-w-[9rem]">{cube.valueLabel}</span>
+            <span className="text-loom-text [overflow-wrap:anywhere] max-w-[12rem]">{cube.valueLabel}</span>
             <span>{formatCubeNumber(cube.vMin)}</span>
             <span
               className="w-14 h-1.5 rounded-sm"
@@ -202,6 +221,7 @@ export function DataCubePivotBar({
           </div>
         )}
       </div>
+      </div>
     </div>
   );
 }
@@ -211,60 +231,77 @@ export function DataCubePivotTable({
   ramp,
   hover,
   onHover,
+  fontFamily,
+  axisFontSize,
+  themeBg,
+  themeText,
+  fillStage = false,
 }: {
   table: PivotTable;
   ramp: string[];
   hover: CubeHoverCell | null;
   onHover: (cell: CubeHoverCell | null) => void;
+  fontFamily?: string;
+  axisFontSize?: number;
+  themeBg: string;
+  themeText: string;
+  /** A short phone preview shows the table in place of the cube, below its toggle. */
+  fillStage?: boolean;
 }) {
   const span = table.vMax - table.vMin;
   const tint = (v: number | null) => {
-    if (v == null) return undefined;
-    const t = span > 0 ? (v - table.vMin) / span : 1;
+    if (v == null || !Number.isFinite(v)) return undefined;
+    const t = span > 0 ? Math.max(0, Math.min(1, (v - table.vMin) / span)) : 1;
     const hex = sampleContinuous(ramp.length ? ramp : ["#c6dbef", "#08519c"], 0.15 + 0.85 * t);
-    return { background: `color-mix(in srgb, ${hex} ${Math.round(18 + 52 * t)}%, transparent)` };
+    const backgroundColor = mixColor(themeBg, hex, 0.18 + 0.52 * t);
+    return { backgroundColor, color: ensureContrast(themeText, backgroundColor) };
   };
   const hx = hover?.xi ?? -1;
   const hy = hover?.yi ?? -1;
 
   return (
     <div
-      className="absolute inset-x-0 bottom-0 z-[7] h-[44%] flex flex-col border-t border-loom-border bg-loom-surface/95 backdrop-blur-sm"
+      className="loom-cube-type absolute inset-x-0 bottom-0 z-[7] h-[44%] flex flex-col border-t border-loom-border bg-loom-surface/95 backdrop-blur-sm"
+      style={{ fontFamily: chartFontStack(fontFamily), fontSize: resolveChartAxisFontSize(axisFontSize), lineHeight: 1.45, height: fillStage ? "calc(100% - 3.5rem)" : undefined }}
       {...shield}
       onMouseLeave={() => onHover(null)}
     >
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 text-2xs text-loom-muted border-b border-loom-border">
-        <span className="truncate">
+        <span className="min-w-0 [overflow-wrap:anywhere]">
           <span className="text-loom-text font-medium">{table.valueLabel}</span> ·{" "}
           {table.sliceLabel != null ? `${table.depthField} = ${table.sliceLabel}` : `all ${table.depthField}`}
         </span>
-        <span className="shrink-0 font-mono">Σ {formatCubeNumber(table.grand ?? NaN)}</span>
+        <span className="shrink-0 tabular-nums text-loom-text">Σ {formatCubeNumber(table.grand ?? NaN)}</span>
       </div>
       <div className="flex-1 overflow-auto">
-        <table className="text-2xs font-mono border-collapse min-w-full">
+        <table className="text-2xs border-collapse min-w-full" aria-label={`${table.valueLabel} by ${table.rowField} and ${table.colField}`}>
           <thead className="sticky top-0 z-[1] bg-loom-surface">
             <tr>
-              <th className="sticky left-0 z-[2] bg-loom-surface px-2 py-1 text-left font-medium text-loom-muted whitespace-nowrap border-b border-r border-loom-border">
+              <th scope="col" className="sticky left-0 z-[2] bg-loom-surface px-2 py-1 text-left font-medium text-loom-label border-b border-r border-loom-border">
+                <span className="block min-w-[6rem] max-w-[12rem] [overflow-wrap:anywhere]">
                 {table.rowField} ╲ {table.colField}
+                </span>
               </th>
               {table.cols.map((c, j) => (
                 <th
                   key={c}
-                  className={`px-2 py-1 text-right font-medium whitespace-nowrap border-b border-loom-border ${j === hy ? "text-loom-text" : "text-loom-muted"}`}
+                  scope="col"
+                  className={`px-2 py-1 text-right font-medium border-b border-loom-border ${j === hy ? "text-loom-text" : "text-loom-label"}`}
                 >
-                  {c}
+                  <span className="block min-w-[5rem] max-w-[12rem] [overflow-wrap:anywhere]">{c}</span>
                 </th>
               ))}
-              <th className="px-2 py-1 text-right font-medium text-loom-text whitespace-nowrap border-b border-l border-loom-border">Total</th>
+              <th scope="col" className="px-2 py-1 text-right font-medium text-loom-text whitespace-nowrap border-b border-l border-loom-border">Total</th>
             </tr>
           </thead>
           <tbody>
             {table.rows.map((r, i) => (
               <tr key={r}>
                 <th
-                  className={`sticky left-0 z-[1] bg-loom-surface px-2 py-1 text-left font-medium whitespace-nowrap border-r border-loom-border ${i === hx ? "text-loom-text" : "text-loom-muted"}`}
+                  scope="row"
+                  className={`sticky left-0 z-[1] bg-loom-surface px-2 py-1 text-left font-medium border-r border-loom-border ${i === hx ? "text-loom-text" : "text-loom-label"}`}
                 >
-                  {r}
+                  <span className="block min-w-[6rem] max-w-[12rem] [overflow-wrap:anywhere]">{r}</span>
                 </th>
                 {table.cols.map((c, j) => {
                   const v = table.values[i]![j]!;
@@ -274,9 +311,10 @@ export function DataCubePivotTable({
                       key={c}
                       onMouseEnter={() => (v == null ? onHover(null) : onHover({ xi: i, yi: j, zi: null }))}
                       style={tint(v)}
-                      className={`px-2 py-1 text-right whitespace-nowrap tabular-nums ${v == null ? "text-loom-muted/50" : "text-loom-text"} ${on ? "outline outline-1 outline-[var(--loom-text)] -outline-offset-1" : ""}`}
+                      title={`${r} · ${c}: ${v == null ? "No value" : v}`}
+                      className={`px-2 py-1 text-right whitespace-nowrap tabular-nums ${v == null ? "text-loom-label" : "text-loom-text"} ${on ? "outline outline-1 outline-[var(--loom-text)] -outline-offset-1" : ""}`}
                     >
-                      {v == null ? "·" : formatCubeNumber(v)}
+                      {v == null ? "—" : formatCubeNumber(v)}
                     </td>
                   );
                 })}
@@ -288,7 +326,7 @@ export function DataCubePivotTable({
           </tbody>
           <tfoot>
             <tr>
-              <th className="sticky left-0 bg-loom-surface px-2 py-1 text-left font-medium text-loom-text border-t border-r border-loom-border">Total</th>
+              <th scope="row" className="sticky left-0 bg-loom-surface px-2 py-1 text-left font-medium text-loom-text border-t border-r border-loom-border">Total</th>
               {table.colTotals.map((v, j) => (
                 <td key={j} className="px-2 py-1 text-right whitespace-nowrap tabular-nums text-loom-text border-t border-loom-border">
                   {formatCubeNumber(v ?? NaN)}

@@ -9,6 +9,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { CommandPalette } from "@/components/CommandPalette";
+import { useLoomStore } from "@/lib/store";
+import { useIsMobile } from "@/lib/useMediaQuery";
 
 type SuiteTool = {
   id: string;
@@ -78,11 +80,18 @@ const GROUPS: SuiteGroup[] = [
 ];
 
 export function SuiteMenu() {
+  const panelOpen = useLoomStore((s) => s.panelOpen);
+  const isMobile = useIsMobile();
+  const editingOnPhone = isMobile && panelOpen;
   const [open, setOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const rootRef = useRef<HTMLElement | null>(null);
   const toggleRef = useRef<HTMLButtonElement | null>(null);
   const searchRef = useRef<HTMLButtonElement | null>(null);
+
+  useEffect(() => {
+    if (editingOnPhone) setOpen(false);
+  }, [editingOnPhone]);
 
   useEffect(() => {
     if (!open) return;
@@ -119,7 +128,9 @@ export function SuiteMenu() {
   }, []);
 
   return (
-    <nav
+    <>
+    <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+    {!editingOnPhone && <nav
       ref={rootRef}
       className={`suite-menu absolute right-[max(10px,var(--safe-right))] bottom-full mb-1 z-[55] flex flex-col-reverse items-end pointer-events-none text-loom-muted ${
         open ? "z-[80]" : ""
@@ -163,8 +174,6 @@ export function SuiteMenu() {
           </svg>
         </button>
       </div>
-
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       {open && (
         <div
@@ -217,6 +226,7 @@ export function SuiteMenu() {
           </a>
         </div>
       )}
-    </nav>
+    </nav>}
+    </>
   );
 }

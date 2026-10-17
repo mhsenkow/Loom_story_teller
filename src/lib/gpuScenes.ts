@@ -33,6 +33,7 @@ import {
   radiusFromPointSize,
   type ChartInk,
 } from "./chartInk";
+import { chartTypeRamp } from "./chartType";
 import { pickDataCubeEncoding, rankCubeDimensions } from "./dataCube";
 import { orientIsoCell, resolveIsoFloorOrient } from "./isoOrient";
 
@@ -115,7 +116,7 @@ export function renderGpuSceneCanvas(
     ctx.fillRect(0, 0, w, h);
   }
   if (!packed.points.length) {
-    drawEmptyMessage(ctx, w, h, "No numeric rows to place in the scene", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "No numeric rows to place in the scene", ink, font, mini, opts.axisFontSize);
     ctx.restore();
     return;
   }
@@ -123,9 +124,9 @@ export function renderGpuSceneCanvas(
   if (kind === "quakeTerrain") {
     drawQuakeTerrain(ctx, packed, w, h, pad, ink, font, mini, opts);
   } else if (kind === "loomWeave") {
-    drawLoomWeave(ctx, packed, w, h, pad, colors, ink, font, mini, opacity);
+    drawLoomWeave(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, opts.axisFontSize);
   } else if (kind === "trailRibbon") {
-    drawTrailRibbons(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, radiusFromPointSize(opts.pointSize, 2.6));
+    drawTrailRibbons(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, radiusFromPointSize(opts.pointSize, 2.6), opts.axisFontSize);
   } else {
     drawOrbitPoints(kind, ctx, packed, w, h, pad, colors, ink, font, mini, opts);
   }
@@ -271,7 +272,7 @@ function drawOrbitPoints(
   const zMid = projectUnit(f, zEdge[0][0], -1, 0);
   const zSide = Math.sign(zMid.sx - center.sx) || 1;
   const yEdge = pickEdge(yCands, (m) => -zSide * (m.sx - center.sx));
-  const look = { ink, font };
+  const look = { ink, font, axisFontSize: opts.axisFontSize };
   drawEdgeAxis(ctx, f, xEdge, xMin, xMax, fields?.x ?? "x", center, look, packed.xCategories);
   drawEdgeAxis(ctx, f, zEdge, zMin, zMax, fields?.z ?? "z", center, look);
   drawEdgeAxis(ctx, f, yEdge, yMin, yMax, fields?.y ?? "y", center, look);
@@ -286,7 +287,7 @@ function drawEdgeAxis(
   max: number,
   title: string,
   center: { sx: number; sy: number },
-  look: { ink: ChartInk; font: string },
+  look: { ink: ChartInk; font: string; axisFontSize?: number },
   categories?: string[],
 ): void {
   const a = projectUnit(f, ...edge[0]);
@@ -302,7 +303,7 @@ function drawEdgeAxis(
   ox /= ol;
   oy /= ol;
   ctx.save();
-  ctx.font = fontOf(10, look.font);
+  ctx.font = fontOf(chartTypeRamp(look.axisFontSize).tick, look.font);
   ctx.fillStyle = look.ink.muted;
   ctx.textAlign = ox > 0.35 ? "left" : ox < -0.35 ? "right" : "center";
   ctx.textBaseline = oy > 0.35 ? "top" : oy < -0.35 ? "bottom" : "middle";
@@ -321,15 +322,15 @@ function drawEdgeAxis(
     const label = labelOf(v);
     const tw = ctx.measureText(label).width;
     // Skip labels that would collide with the previous one along this edge.
-    if (Math.abs(px - lastX) < tw + 8 && Math.abs(py - lastY) < 13) continue;
+    if (Math.abs(px - lastX) < tw + 8 && Math.abs(py - lastY) < chartTypeRamp(look.axisFontSize).tick + 4) continue;
     ctx.fillText(label, px, py);
     lastX = px;
     lastY = py;
     widest = Math.max(widest, tw);
   }
-  ctx.font = fontOf(10, look.font, 600);
+  ctx.font = fontOf(chartTypeRamp(look.axisFontSize).tick, look.font, 600);
   ctx.fillStyle = look.ink.text;
-  const reach = 6 + (Math.abs(ox) > 0.35 ? widest + 8 : 16);
+  const reach = 6 + (Math.abs(ox) > 0.35 ? widest + 8 : chartTypeRamp(look.axisFontSize).tick + 6);
   ctx.fillText(fitTextEllipsis(ctx, title, Math.max(60, len)), (a.sx + b.sx) / 2 + ox * reach, (a.sy + b.sy) / 2 + oy * reach);
   ctx.restore();
 }
@@ -346,6 +347,7 @@ function drawTrailRibbons(
   mini: boolean,
   opacity: number,
   baseSize: number,
+  axisFontSize?: number,
 ): void {
   const { points, yMin, yMax } = packed;
   const byTrail = new Map<number, GpuScenePoint[]>();
@@ -380,7 +382,7 @@ function drawTrailRibbons(
     if (unwrapped.length) trails.push(unwrapped);
   }
   if (!Number.isFinite(xMin)) {
-    drawEmptyMessage(ctx, w, h, "No numeric rows to trace", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "No numeric rows to trace", ink, font, mini, axisFontSize);
     return;
   }
 
@@ -400,7 +402,7 @@ function drawTrailRibbons(
     themeMuted: ink.muted,
     themeBorder: ink.border,
     themeText: ink.text,
-    axisFontSize: 10,
+    axisFontSize,
   };
   if (!mini) {
     drawChartGrid(ctx, w, h, pad, { ...look, themeBorder: inkTint(ink, 0.14), gridOpacity: 1 }, { x: [xs.min, xs.max], y: [ys.min, ys.max] });
@@ -482,7 +484,7 @@ function drawQuakeTerrain(
     }
   }
   if (!cells.length) {
-    drawEmptyMessage(ctx, w, h, "No rows to build terrain", ink, font, mini);
+    drawEmptyMessage(ctx, w, h, "No rows to build terrain", ink, font, mini, opts.axisFontSize);
     return;
   }
   // Non-negative measures (magnitudes, counts) rise from zero so heights compare honestly.
@@ -490,7 +492,7 @@ function drawQuakeTerrain(
   const span = hi - base0 || 1;
   const floorOrient = resolveIsoFloorOrient(opts.layoutDirection);
 
-  const keyH = mini ? 0 : rampKeyHeight(true) + 8;
+  const keyH = mini ? 0 : rampKeyHeight(true, false, opts.axisFontSize) + 8;
   const side = mini ? 4 : Math.max(12, pad * 0.4);
   const top = pad;
   const bottom = (mini ? pad : Math.max(12, pad * 0.4)) + keyH;
@@ -573,7 +575,7 @@ function drawQuakeTerrain(
     colorAt,
     title: f?.z ? `Mean ${f.z} per cell` : "Height",
     ink,
-    fontFamily: font,
+    fontFamily: font, axisFontSize: opts.axisFontSize,
   });
 
   // Isometric floor edges + tick labels (aligned with the diamond, not screen axes).
@@ -595,7 +597,7 @@ function drawQuakeTerrain(
 
   const xTicks = niceTicks(xMin, xMax, 4, true);
   const yTicks = niceTicks(yMin, yMax, 4, true);
-  ctx.font = fontOf(10, font);
+  ctx.font = fontOf(chartTypeRamp(opts.axisFontSize).tick, font);
   ctx.fillStyle = ink.muted;
   ctx.textBaseline = "top";
   for (const v of xTicks.ticks) {
@@ -639,7 +641,7 @@ function drawQuakeTerrain(
     ctx.fillText(formatAxisValue(v, zTicks.step), p.x - 6, p.y);
   }
 
-  ctx.font = fontOf(10, font, 600);
+  ctx.font = fontOf(chartTypeRamp(opts.axisFontSize).tick, font, 600);
   ctx.fillStyle = ink.text;
   ctx.textBaseline = "top";
   const xm = projectFloor((cols - 1) * 0.55, 0);
@@ -675,13 +677,14 @@ function drawLoomWeave(
   font: string,
   mini: boolean,
   opacity: number,
+  axisFontSize?: number,
 ): void {
   const { points } = packed;
   const cats = [...new Set(points.map((p) => p.category))].sort((a, b) => a - b);
   const warps = Math.max(cats.length, 1);
   const wefts = mini ? 16 : 24;
-  const labelTop = mini ? 0 : 16;
-  const keyH = mini ? 0 : 18;
+  const labelTop = mini ? 0 : chartTypeRamp(axisFontSize).tick + 6;
+  const keyH = mini ? 0 : chartTypeRamp(axisFontSize).tick + 8;
   const leftGutter = mini ? 0 : 44;
   const x0 = pad + leftGutter;
   const plotW = Math.max(20, w - pad - x0);
@@ -739,7 +742,7 @@ function drawLoomWeave(
 
   if (mini) return;
   ctx.save();
-  ctx.font = fontOf(10, font);
+  ctx.font = fontOf(chartTypeRamp(axisFontSize).tick, font);
   ctx.fillStyle = ink.muted;
   // Warp labels (categories) across the top, thinned when crowded
   const labels = packed.categories ?? [];

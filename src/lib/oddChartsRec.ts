@@ -78,6 +78,7 @@ export interface OddRenderOpts {
   opacity?: number;
   fontFamily?: string;
   axisLabelColor?: string;
+  axisFontSize?: number;
   themeText?: string;
   themeMuted?: string;
   themeBorder?: string;
@@ -93,8 +94,13 @@ export interface OddRenderOpts {
   topN?: number | null;
   /** Bump: absolute rank or Δrank over time. */
   bumpMode?: "rank" | "delta" | null;
+  /** Pyramid: shared vs independent arm domains (auto picks by magnitude ratio). */
+  pyramidScaleMode?: "auto" | "shared" | "independent" | null;
+  /** Show signed Δ or % between Left/Right or Start/End. */
+  deltaDisplay?: "off" | "diff" | "pct" | null;
   /** Bar grow / iso floor orientation (Encoding → Direction). */
   layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
+  channelInvert?: import("./channelInvert").ChannelInvert;
   /** Registered hover targets (LOOM-020). */
   hits?: import("./chartTooltip").HitTarget[];
 }
@@ -491,7 +497,7 @@ export function buildOddChartRec(
           (num.find((c) => c.name !== yField && !/^(year|yr|month|day|week|hour)$/i.test(c.name)) ??
             num.find((c) => c.name !== yField))?.name ?? null
         : undefined),
-    yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic"].includes(kind)
+    yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid"].includes(kind)
       ? (!yField ? "count" : (yAggregate ?? "sum"))
       : undefined,
   };
@@ -505,7 +511,7 @@ export function oddRecommendationReason(kind: OddChartKind): string {
     glyphStar: "Star polygons — each axis is a different numeric feature",
     waffle: "Part-to-whole as a tidy 10×10 grid of cells",
     isotype: "Unit marks — count the icons, feel the magnitude",
-    pyramid: "Two opposing bars — classic population / A-vs-B mirror",
+    pyramid: "Two opposing bars — same or separate scales for A-vs-B mirrors",
     slope: "Two measures as a diagonal — rise or fall at a glance",
     bump: "Ranking over time — who climbs, who slips",
     stream: "Stacked organic ribbons over an ordered axis",

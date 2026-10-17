@@ -10,6 +10,7 @@ import { GEO_MAP_KINDS, renderGeoMapCanvas } from "../geoMaps";
 import { loadAtlas } from "../geoAtlas";
 import { GPU_SCENE_KINDS, extractGpuScenePoints, renderGpuSceneCanvas } from "../gpuScenes";
 import { sequentialStops, resolveChartInk, relativeLuminance } from "../chartInk";
+import { buildDataCube, renderDataCubeCanvas } from "../dataCube";
 
 type Rec = { fills: number; strokes: number; texts: string[]; fonts: Set<string> };
 
@@ -88,9 +89,10 @@ describe("odd chart renderers", () => {
     it(`${kind} paints marks + legible text`, () => {
       const [xi, yi, ci, si] = enc[kind] ?? [0, 2, 1, 3];
       const { ctx, rec } = mockCtx();
-      renderOddChart(kind, ctx, rows, columns, xi, yi, ci, si, 640, 420, 56, { colors: ["#3366cc", "#dc3912", "#ff9900"], ...theme }, false);
+      renderOddChart(kind, ctx, rows, columns, xi, yi, ci, si, 640, 420, 56, { colors: ["#3366cc", "#dc3912", "#ff9900"], fontFamily: "Lora", axisFontSize: 16, ...theme }, false);
       expect(rec.fills + rec.strokes).toBeGreaterThan(3);
-      expect(minFontPx(rec.fonts)).toBeGreaterThanOrEqual(9);
+      expect(minFontPx(rec.fonts)).toBeGreaterThanOrEqual(15);
+      for (const font of rec.fonts) expect(font).toContain('"Lora"');
       const { ctx: mctx, rec: mrec } = mockCtx();
       renderOddChart(kind, mctx, rows, columns, xi, yi, ci, si, 180, 120, 6, { colors: ["#3366cc"] }, true);
       expect(mrec.fills + mrec.strokes).toBeGreaterThan(0);
@@ -112,22 +114,33 @@ describe("geo map renderers", () => {
         yField: kind === "choropleth" ? "value" : "latitude",
         colorField: "group",
         sizeField: "value",
-      }, 640, 420, 56, { colors: ["#3366cc", "#dc3912"], opacity: 0.85, ...theme });
+      }, 640, 420, 56, { colors: ["#3366cc", "#dc3912"], opacity: 0.85, fontFamily: "Lora", axisFontSize: 16, ...theme });
       expect(rec.fills).toBeGreaterThan(5);
-      expect(minFontPx(rec.fonts)).toBeGreaterThanOrEqual(9);
+      expect(minFontPx(rec.fonts)).toBeGreaterThanOrEqual(15);
+      for (const font of rec.fonts) expect(font).toContain('"Lora"');
     });
   }
 });
 
 describe("gpu scene canvas fallbacks", () => {
+  it("data cube honors the same family and text size as the scene renderers", () => {
+    const cube = buildDataCube(rows, columns, { xField: "region", yField: "group", zField: "third", valueField: "value", aggregate: "sum" });
+    expect(cube).not.toBeNull();
+    const { ctx, rec } = mockCtx();
+    renderDataCubeCanvas(ctx, cube!, 640, 420, { ramp: ["#f7fbff", "#08306b"], opacity: 0.85, camera: { yaw: 0.6, pitch: 0.4, zoom: 1 }, fontFamily: "Lora", axisFontSize: 16, ...theme });
+    expect(rec.texts.length).toBeGreaterThan(0);
+    expect(minFontPx(rec.fonts)).toBeGreaterThanOrEqual(14);
+    for (const font of rec.fonts) expect(font).toContain('"Lora"');
+  });
   for (const kind of GPU_SCENE_KINDS.filter((k) => k !== "dataCube")) {
     it(`${kind} paints and labels`, () => {
       const packed = extractGpuScenePoints(rows, columns, { xField: "value", yField: "other", zField: "third", colorField: "group", sizeField: "third" });
       expect(packed).not.toBeNull();
       const { ctx, rec } = mockCtx();
-      renderGpuSceneCanvas(kind, ctx, packed!, 640, 420, 56, { colors: ["#3366cc", "#dc3912"], opacity: 0.85, ...theme });
+      renderGpuSceneCanvas(kind, ctx, packed!, 640, 420, 56, { colors: ["#3366cc", "#dc3912"], opacity: 0.85, fontFamily: "Lora", axisFontSize: 16, ...theme });
       expect(rec.fills + rec.strokes).toBeGreaterThan(5);
-      expect(minFontPx(rec.fonts)).toBeGreaterThanOrEqual(9);
+      expect(minFontPx(rec.fonts)).toBeGreaterThanOrEqual(15);
+      for (const font of rec.fonts) expect(font).toContain('"Lora"');
     });
   }
 });

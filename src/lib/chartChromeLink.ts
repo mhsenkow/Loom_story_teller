@@ -1,9 +1,9 @@
 // =================================================================
 // Chart ↔ Encoding / Visual chrome linking
 // =================================================================
-// Hover axis gutters, title, or legend on the canvas → jump the Detail
-// panel to the matching Encoding / Visual control. Hover those controls
-// → outline the related chart region. Pure geometry helpers + ids.
+// Hover axis gutters, title, or legend outlines that region on the chart.
+// A click (not hover) opens the Detail panel and scrolls to the matching
+// control. Hovering those controls outlines the related chart region.
 // =================================================================
 
 export type ChartChromeSection = "encoding" | "visual";

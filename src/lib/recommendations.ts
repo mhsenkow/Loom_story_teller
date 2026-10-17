@@ -24,5 +24,13 @@ export { createChartRec, createScatterRec, fitEncodingToKind, parseChartKind, PA
 export { type StorySequence, getBestSuggestion, getTopSuggestions, recommend, recommendStorySequence } from "./recs/recommend";
 export { type EncodingShuffleLocks, type RandomEncoding, applyEncodingLocks, chartKindDataSupport, getRandomChartAndEncoding, getRandomEncoding, randomEncodingToExtra, tryBuildRandomChartRec } from "./recs/random";
 export { expandRecommendationsWithExtras, getRecommendationReason } from "./recs/expand";
-export { type RecommendSourceStoryOptions, recommendSourceStory, recommendStreamStory } from "./recs/sourceStory";
+export {
+  type RecommendSourceStoryOptions,
+  recommendSourceStory,
+  recommendStreamStory,
+  COMPARE_KIND_PRIORITY,
+  CORE_COMPARE_KINDS,
+  ensureCompareKindsInWindow,
+  pickBestCompareEncoding,
+} from "./recs/sourceStory";
 export { SOURCE_SQL_SNIPPETS, STREAM_SQL_SNIPPETS } from "./recs/sqlSnippets";

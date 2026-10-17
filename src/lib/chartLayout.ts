@@ -44,7 +44,7 @@ export function isCartesianKind(kind: ChartKind): boolean {
 }
 
 /** Bottom band reserved for the source / time footnote (axis titles sit above it). */
-export const FOOTNOTE_BAND_PX = 40;
+export const FOOTNOTE_BAND_PX = 44;
 
 export type ChartMargins = { top: number; right: number; bottom: number; left: number };
 
@@ -81,7 +81,7 @@ export function resolveChartMargins(args: {
     chartFrame = "focus",
     isCompact = false,
     legendPosition,
-    axisFontSize = 11,
+    axisFontSize = 12,
     sourceFootnote = false,
     chromeInfoBand = "footer",
   } = args;
@@ -89,10 +89,10 @@ export function resolveChartMargins(args: {
   let base = basePad;
   if (chartFrame === "hero") base = Math.max(base, 56);
   if (chartFrame === "compact") base = Math.min(Math.max(base, 40), 46);
-  if (isCompact) base = Math.min(Math.max(base, 36), 40);
+  if (isCompact && basePad <= 40) base = Math.min(base, 40);
 
   const cartesian = isCartesianKind(kind);
-  const fs = Math.max(isCompact ? 10 : 11, axisFontSize);
+  const fs = Math.max(11, Number.isFinite(axisFontSize) ? axisFontSize : 12);
   const rot = Math.abs(tickRotation);
   // Tick stubs + label + axis field name below / beside the plot
   const tickBand = fs + 6;
@@ -110,8 +110,9 @@ export function resolveChartMargins(args: {
 
   // Credit + optional time / color lines — footer under the plot, or header under the title
   if (sourceFootnote) {
-    if (chromeInfoBand === "header") top += FOOTNOTE_BAND_PX;
-    else bottom += FOOTNOTE_BAND_PX;
+    const footnoteBand = FOOTNOTE_BAND_PX + Math.max(0, fs - 12) * 2;
+    if (chromeInfoBand === "header") top += footnoteBand;
+    else bottom += footnoteBand;
   }
 
   // Legend floats inside the plot; only nudge when it would crowd the edge
@@ -181,24 +182,7 @@ export function resolveChartPad(args: {
   return Math.round(Math.max(32, pad));
 }
 
-/** Ellipsize text to fit a max width (mutates nothing; needs a ctx with font set). */
-export function fitTextEllipsis(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-): string {
-  if (maxWidth <= 8 || !text) return text;
-  if (ctx.measureText(text).width <= maxWidth) return text;
-  const ell = "…";
-  let lo = 0;
-  let hi = text.length;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    if (ctx.measureText(text.slice(0, mid) + ell).width <= maxWidth) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo <= 0 ? ell : text.slice(0, lo) + ell;
-}
+export { fitTextEllipsis } from "./chartText";
 
 /**
  * Density-aware mark radii + opacity for scatter / bubble.
@@ -366,8 +350,8 @@ export function contrastingInk(hex: string): string {
     0.2126 * lin(parseInt(m[1], 16)) +
     0.7152 * lin(parseInt(m[2], 16)) +
     0.0722 * lin(parseInt(m[3], 16));
-  // Prefer near-black on mid/light fills so terracotta / amber cells stay readable
-  return L > 0.42 ? "#0a0a0c" : "#ffffff";
+  // Choose the higher-contrast endpoint, including mid-tone orange / blue fills.
+  return L > 0.179 ? "#000000" : "#ffffff";
 }
 
 /** Soften or deepen a theme bg for radial chart atmospheres. */

@@ -85,6 +85,14 @@ function opts(): ChartRenderOpts {
   };
 }
 
+it("renders mapped emoji in miniature scatter previews and keeps unknown codes geometric", () => {
+  const { ctx, calls } = fakeCtx();
+  const o = { ...opts(), mini: true, fieldNames: ["x", "y", "code"], emojiField: "code", emojiMap: { field: "code", values: { 0: "☀️", 95: "⛈️" } } };
+  renderFullScatter(ctx, [[1, 2, 0], [2, 3, 95], [3, 4, 999]], 0, 1, -1, -1, W, H, PAD, o);
+  expect(calls.labels.map((l) => l.text)).toEqual(["☀️", "⛈️"]);
+  expect(o.hits).toHaveLength(3);
+});
+
 type Draw = (ctx: CanvasRenderingContext2D, data: unknown[][], o: ChartRenderOpts) => void;
 
 const cols = ["region", "sales", "units", "other", "day", "a", "b"];

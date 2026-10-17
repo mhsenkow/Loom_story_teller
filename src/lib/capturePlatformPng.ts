@@ -57,24 +57,29 @@ async function captureNow(
   const prevViewMode = getState().viewMode;
   const prevDashboardsExpanded = getState().dashboardsExpanded;
 
-  try {
-    getState().setViewMode("chart");
-    getState().setDashboardsExpanded(false);
-    useLoomStore.setState({ sidebarOpen: false });
+  const sameFrame = !preset.width || !preset.height;
+  let nudged = false;
 
-    if (preset.width && preset.height) {
+  try {
+    if (sameFrame) {
+      if (prevTarget) {
+        getState().setSocialExportTarget(null);
+        nudged = true;
+      }
+    } else {
+      getState().setViewMode("chart");
+      getState().setDashboardsExpanded(false);
+      useLoomStore.setState({ sidebarOpen: false });
       if (preset.aspectId) {
         getState().setAppSettings((s) => ({ ...s, chartAspect: preset.aspectId! }));
       }
-      const layoutScale = Math.min(2.4, Math.max(1, preset.width / 450));
+      const layoutScale = Math.min(2.4, Math.max(1, preset.width! / 450));
       getState().setSocialExportTarget({
-        width: Math.round(preset.width / layoutScale),
-        height: Math.round(preset.height / layoutScale),
+        width: Math.round(preset.width! / layoutScale),
+        height: Math.round(preset.height! / layoutScale),
         pixelRatio: layoutScale * supersample,
         presetId,
       });
-    } else {
-      getState().setSocialExportTarget(null);
     }
 
     await afterPaint();
@@ -108,12 +113,14 @@ async function captureNow(
     }
     return null;
   } finally {
-    getState().setSocialExportTarget(prevTarget);
-    getState().setAppSettings((s) => ({ ...s, chartAspect: prevAspect }));
-    useLoomStore.setState({ sidebarOpen: prevSidebar });
-    getState().setViewMode(prevViewMode);
-    getState().setDashboardsExpanded(prevDashboardsExpanded);
-    await sleep(100);
+    if (!sameFrame || nudged) {
+      getState().setSocialExportTarget(prevTarget);
+      getState().setAppSettings((s) => ({ ...s, chartAspect: prevAspect }));
+      useLoomStore.setState({ sidebarOpen: prevSidebar });
+      getState().setViewMode(prevViewMode);
+      getState().setDashboardsExpanded(prevDashboardsExpanded);
+      if (!sameFrame) await sleep(100);
+    }
   }
 }
 

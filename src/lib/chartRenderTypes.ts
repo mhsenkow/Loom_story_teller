@@ -9,6 +9,8 @@ import type { HitTarget } from "./chartTooltip";
 import type { YAggregateOption } from "./recommendations";
 
 export interface ChartRenderOpts {
+  /** Thumbnail paint uses the same marks without axis/grid chrome. */
+  mini?: boolean;
   plotBounds?: PlotRect;
   plotX?: number;
   plotY?: number;
@@ -37,6 +39,7 @@ export interface ChartRenderOpts {
   markEmoji?: string;
   shapeField?: string | null;
   emojiField?: string | null;
+  emojiMap?: import("./chartEmoji").ChartEmojiMap | null;
   markStroke?: boolean;
   markStrokeWidth?: number;
   markStrokeColor?: string;

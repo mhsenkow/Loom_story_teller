@@ -62,6 +62,7 @@ describe("source registry", () => {
     for (const d of SOURCE_DEFS) {
       expect(d.columns.length, d.kind).toBe(d.types.length);
       expect(new Set(d.columns).size, `${d.kind} duplicate column`).toBe(d.columns.length);
+      for (const field of Object.keys(d.units ?? {})) expect(d.columns, `${d.kind} unit field`).toContain(field);
       expect(tables.has(d.table), `${d.table} reused`).toBe(false);
       tables.add(d.table);
       // ORDER BY only names real columns

@@ -23,6 +23,7 @@ import {
 import { sampleContinuous } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
 import { drawEmptyMessage, drawRampKey, mixColor, resolveChartInk, withAlpha, type ChartInk } from "./chartInk";
+import { chartFont, chartTypeRamp } from "./chartType";
 
 export type CubeAxisKind = "category" | "numeric" | "time";
 
@@ -65,6 +66,8 @@ export interface CubeEncoding {
   zField?: string | null;
   valueField?: string | null;
   aggregate?: YAggregateOption | null;
+  /** High cell values draw small. Color direction follows the ramp passed to the renderer. */
+  invertSize?: boolean;
 }
 
 export { CUBE_MAX_BINS, pickDataCubeEncoding, rankCubeDimensions } from "./dataCubeSchema";
@@ -327,7 +330,10 @@ export function buildDataCube(
   const cells: CubeCell[] = raw.map((c) => ({
     ...c,
     t: span > 0 ? (c.value - vMin) / span : 1,
-    s: zeroBased ? (vMax > 0 ? c.value / vMax : 1) : span > 0 ? (c.value - vMin) / span : 1,
+    s: (() => {
+      const raw = zeroBased ? (vMax > 0 ? c.value / vMax : 1) : span > 0 ? (c.value - vMin) / span : 1;
+      return enc.invertSize ? 1 - Math.max(0, Math.min(1, raw)) : raw;
+    })(),
   }));
 
   return {
@@ -609,6 +615,8 @@ export interface DataCubeRenderOpts extends CubeCellStyle {
   opacity: number;
   camera: CubeCamera;
   fontFamily?: string;
+  axisFontSize?: number;
+  spaceUse?: "auto" | "fill" | "roomy";
   themeText?: string;
   themeMuted?: string;
   themeBorder?: string;
@@ -623,6 +631,31 @@ export interface DataCubeRenderOpts extends CubeCellStyle {
    * Interaction hint draws above this so lines don’t stack on each other.
    */
   footerReserve?: number;
+  /** Live DOM controls/table occupy these bands; captures omit them. */
+  contentInsets?: { top: number; bottom: number };
+}
+
+/** Fit the geometry around readable axis text, live controls, and source notes. */
+export function dataCubeChartView(cube: DataCube, w: number, h: number, opts: DataCubeRenderOpts): CubeView {
+  if (opts.mini) return cubeView(opts.camera, w, h);
+  const type = chartTypeRamp(opts.axisFontSize);
+  const optional = opts.spaceUse === "roomy" ? 20 : 0;
+  const side = Math.min(w * 0.32, (opts.spaceUse === "fill" ? 80 : 104) + type.tick + optional);
+  const top = Math.max(opts.contentInsets?.top ?? 0, opts.showLegend !== false ? type.tick * 5 : 0) + type.tick * 2 + 12 + optional;
+  // Slanted floor labels and their field titles need more depth than a single tick row.
+  const bottom = Math.max(opts.contentInsets?.bottom ?? 0, opts.footerReserve ?? 0) + Math.max(64, type.tick * (opts.spaceUse === "fill" ? 4 : 5.5)) + (h >= 400 && !opts.contentInsets?.bottom ? type.footnote * 2 + 12 : 12) + optional;
+  const availableHeight = Math.max(24, h - top - bottom);
+  const base = cubeView({ ...opts.camera, zoom: 1, offsetY: 0 }, w, h);
+  const { ex, ey, ez } = cubeExtents(cube);
+  const corners = boxCorners(ex, ey, ez).map((p) => projectCube(base, ...p));
+  const yMin = Math.min(...corners.map((p) => p.sy));
+  const yMax = Math.max(...corners.map((p) => p.sy));
+  const xRadius = Math.max(...corners.map((p) => Math.abs(p.sx - w / 2)), 1);
+  const scale = Math.min(Math.max(24, w - side * 2) / (xRadius * 2), availableHeight / Math.max(1, yMax - yMin));
+  const zoom = opts.camera.zoom * scale;
+  const center = Math.min(h - bottom - availableHeight / 2, top + availableHeight / 2);
+  const offsetY = (h / 2 + ((yMin + yMax) / 2 - h / 2) * zoom - center) * 2 / Math.max(1, h);
+  return cubeView({ ...opts.camera, zoom, offsetY: offsetY + (opts.camera.offsetY ?? 0) }, w, h);
 }
 
 /** Face definitions: outward normal + 4 corner sign triples (CCW seen from outside). */
@@ -799,6 +832,7 @@ export function drawDataCubeFrontLayer(
   const text = ink.text;
   const muted = ink.muted;
   const font = opts.fontFamily ?? "Inter";
+  const type = chartTypeRamp(opts.axisFontSize);
 
   ctx.save();
   ctx.strokeStyle = ink.edge;
@@ -858,6 +892,23 @@ export function drawDataCubeFrontLayer(
   }
 
   const center = projectCube(v, 0, 0, 0);
+  const occupiedLabels: { x: number; y: number; w: number; h: number }[] = [];
+  const paintLabel = (label: string, x: number, y: number, color: string, halo = false) => {
+    const width = ctx.measureText(label).width;
+    const height = type.tick * 1.2;
+    const box = {
+      x: x - (ctx.textAlign === "right" ? width : ctx.textAlign === "center" ? width / 2 : 0),
+      y: y - (ctx.textBaseline === "bottom" ? height : ctx.textBaseline === "middle" ? height / 2 : 0),
+      w: width,
+      h: height,
+    };
+    if (!label || box.x < 4 || box.x + box.w > v.w - 4 || box.y < 4 || box.y + box.h > v.h - Math.max(opts.footerReserve ?? 0, opts.contentInsets?.bottom ?? 0) - 4) return;
+    if (occupiedLabels.some((other) => box.x < other.x + other.w + 3 && box.x + box.w + 3 > other.x && box.y < other.y + other.h + 3 && box.y + box.h + 3 > other.y)) return;
+    occupiedLabels.push(box);
+    if (halo) ctx.strokeText(label, x, y);
+    ctx.fillStyle = color;
+    ctx.fillText(label, x, y);
+  };
   const sidePick = (cands: [Vec3, Vec3][], score: (mid: { sx: number; sy: number }) => number) => {
     let best = cands[0]!;
     let bestScore = -Infinity;
@@ -917,32 +968,30 @@ export function drawDataCubeFrontLayer(
     const align: CanvasTextAlign = ox > 0.35 ? "left" : ox < -0.35 ? "right" : "center";
     ctx.textAlign = align;
     ctx.textBaseline = oy > 0.35 ? "top" : oy < -0.35 ? "bottom" : "middle";
-    ctx.font = `400 10px ${font}, sans-serif`;
+    ctx.font = chartFont(type.tick, font);
     const labels = axis.labels.map((l) => fitTextEllipsis(ctx, l, 96));
     // Thin labels so neighbours don't overlap: centered labels need their width, side labels a line height.
     const dx0 = n > 1 ? Math.abs(pts[1]!.sx - pts[0]!.sx) : 999;
     const dy0 = n > 1 ? Math.abs(pts[1]!.sy - pts[0]!.sy) : 999;
     const maxW = Math.max(...labels.map((l) => ctx.measureText(l).width));
-    const need = align === "center" ? maxW + 6 : 12;
+    const need = align === "center" ? maxW + 6 : type.tick + 4;
     const step = Math.max(1, Math.ceil(need / Math.max(1, align === "center" ? dx0 : dy0)));
     for (let i = 0; i < n; i++) {
       const isHover = hoverIdx === i;
       if (i % step !== 0 && !isHover) continue;
       const p = pts[i]!;
-      ctx.font = `${isHover ? 600 : 400} 10px ${font}, sans-serif`;
+      ctx.font = chartFont(type.tick, font, isHover ? 600 : 400);
       ctx.strokeStyle = withAlpha(ink.bg, 0.85);
       ctx.lineWidth = 3;
       ctx.lineJoin = "round";
-      ctx.strokeText(labels[i]!, p.sx + ox * 8, p.sy + oy * 8);
-      ctx.fillStyle = isHover ? text : muted;
-      ctx.fillText(labels[i]!, p.sx + ox * 8, p.sy + oy * 8);
+      paintLabel(labels[i]!, p.sx + ox * 8, p.sy + oy * 8, isHover ? text : muted, true);
     }
-    ctx.font = `600 10.5px ${font}, sans-serif`;
+    ctx.font = chartFont(type.axisField, font, 600);
     ctx.fillStyle = text;
     if (titleAt === "mid") {
       // Beyond the tick labels, away from the box.
-      const reach = 8 + (align === "center" ? 13 : maxW) + 8;
-      ctx.fillText(fitTextEllipsis(ctx, title, 160), (a.sx + b.sx) / 2 + ox * reach, (a.sy + b.sy) / 2 + oy * reach);
+      const reach = 8 + (align === "center" ? type.tick + 4 : maxW) + 8;
+      paintLabel(fitTextEllipsis(ctx, title, 160), (a.sx + b.sx) / 2 + ox * reach, (a.sy + b.sy) / 2 + oy * reach, text);
       return;
     }
     // Past the first or last tick, continuing along the edge.
@@ -955,7 +1004,7 @@ export function drawDataCubeFrontLayer(
     dy /= dl;
     ctx.textAlign = dx > 0.35 ? "left" : dx < -0.35 ? "right" : "center";
     ctx.textBaseline = dy > 0.35 ? "top" : dy < -0.35 ? "bottom" : "middle";
-    ctx.fillText(fitTextEllipsis(ctx, title, 140), tip.sx + dx * 16 + ox * 6, tip.sy + dy * 16 + oy * 6);
+    paintLabel(fitTextEllipsis(ctx, title, 140), tip.sx + dx * 16 + ox * 6, tip.sy + dy * 16 + oy * 6, text);
   };
 
   const half = pitch / 2;
@@ -991,11 +1040,11 @@ export function drawDataCubeFrontLayer(
   const hint =
     opts.slice != null ? "Slice on · Esc all · [ ] step" : "Drag · click voxel to slice";
   ctx.fillStyle = muted;
-  ctx.font = `500 9px ${font}, sans-serif`;
+  ctx.font = chartFont(type.footnote, font, 500);
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.globalAlpha = 0.85;
-  ctx.fillText(fitTextEllipsis(ctx, hint, v.w - 24), 12, v.h - 10 - reserve);
+  ctx.globalAlpha = 1;
+  if (v.h >= 400 && !opts.contentInsets?.bottom) ctx.fillText(fitTextEllipsis(ctx, hint, v.w - 24), 12, v.h - 10 - reserve);
   ctx.globalAlpha = 1;
   ctx.restore();
 }
@@ -1013,7 +1062,7 @@ function drawCubeLegend(ctx: CanvasRenderingContext2D, cube: DataCube, v: CubeVi
     colorAt: (t) => sampleContinuous(ramp, 0.15 + 0.85 * t),
     title: cube.valueLabel,
     ink: resolveChartInk(opts),
-    fontFamily: opts.fontFamily ?? "Inter",
+    fontFamily: opts.fontFamily ?? "Inter", axisFontSize: opts.axisFontSize,
     panel: true,
   });
 }
@@ -1026,7 +1075,7 @@ export function renderDataCubeCanvas(
   h: number,
   opts: DataCubeRenderOpts,
 ): void {
-  const v = cubeView(opts.camera, w, h);
+  const v = dataCubeChartView(cube, w, h, opts);
   ctx.save();
   const ink = resolveChartInk(opts);
   if (ink.paintBg) {
@@ -1034,7 +1083,7 @@ export function renderDataCubeCanvas(
     ctx.fillRect(0, 0, w, h);
   }
   if (!cube.cells.length) {
-    drawEmptyMessage(ctx, w, h, "No rows land in the cube — try other fields", ink, opts.fontFamily ?? "Inter", opts.mini);
+    drawEmptyMessage(ctx, w, h, "No rows land in the cube — try other fields", ink, opts.fontFamily ?? "Inter", opts.mini, opts.axisFontSize);
     ctx.restore();
     return;
   }

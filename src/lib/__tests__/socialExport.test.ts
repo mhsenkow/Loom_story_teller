@@ -7,11 +7,17 @@ import {
   SOCIAL_PRESETS,
   getSocialPreset,
   buildSocialCaption,
+  linkedInShareHref,
+  emailShareHref,
+  facebookShareHref,
   slugifyFilename,
+  threadsPostText,
+  threadsShareHref,
+  THREADS_TEXT_MAX,
   LINK_PREVIEW_SIZE,
 } from "../socialExport";
 import { buildZip, ZIP_UTF8_FLAG, zipDosDateTime } from "../zipStore";
-import { LOOM_OG_IMG_TOKEN, LOOM_SHARE_IMG_TOKEN, buildChartSharePageHtml } from "../dashboardMicrosite";
+import { LOOM_OG_IMG_TOKEN, LOOM_PAGE_URL_TOKEN, LOOM_SHARE_IMG_TOKEN, buildChartSharePageHtml } from "../dashboardMicrosite";
 
 describe("socialExport", () => {
   it("includes platform presets with pixel targets", () => {
@@ -30,13 +36,22 @@ describe("socialExport", () => {
   it("share page HTML uses stable image tokens for Worker rewrite", () => {
     const html = buildChartSharePageHtml({
       title: "Test",
-      caption: "Hello",
+      caption: "Test\nHow these series move together\nSource: quakes.csv",
       imageDataUrl: "data:image/jpeg;base64,abc",
       openUrl: "https://loom.ibm.io/#story=abc",
     });
     expect(html).toContain(LOOM_SHARE_IMG_TOKEN);
     expect(html).toContain(LOOM_OG_IMG_TOKEN);
-    expect(html).toContain('og:image:width" content="1200"');
+    expect(html).toContain(LOOM_PAGE_URL_TOKEN);
+    expect(html).toContain('og:image:type" content="image/jpeg"');
+    expect(html).toContain('og:site_name" content="Loom"');
+    expect(html).toContain("max-image-preview:large");
+    expect(html).toContain('twitter:card" content="summary_large_image"');
+    expect(html).toContain('twitter:image:alt"');
+    expect(html).toContain("__LOOM_OEMBED_URL__");
+    expect(html).toContain("How these series move together");
+    expect(html).not.toContain("og:description\" content=\"Test");
+    expect(html).toContain('og:url" content="__LOOM_PAGE_URL__"');
     expect(html).not.toContain("data:image/jpeg;base64,abc");
   });
 
@@ -52,6 +67,30 @@ describe("socialExport", () => {
     expect(text).toContain("Northeast leads");
     expect(text).toContain("Source: sales.csv");
     expect(text).toContain("@loom");
+  });
+
+  it("builds LinkedIn and Threads share URLs that fit each network", () => {
+    const page = "https://loom.ibm.io/s/abc";
+    expect(linkedInShareHref(page)).toBe(
+      "https://www.linkedin.com/sharing/share-offsite/?url=https%3A%2F%2Floom.ibm.io%2Fs%2Fabc",
+    );
+    const threads = threadsShareHref("Quakes today", page);
+    expect(threads.startsWith("https://www.threads.net/intent/post?text=")).toBe(true);
+    const text = threadsPostText("Quakes today", page);
+    expect(text).toContain("Quakes today");
+    expect(text.endsWith(page)).toBe(true);
+    expect(text.length).toBeLessThanOrEqual(THREADS_TEXT_MAX);
+    const long = threadsPostText("x".repeat(800), page);
+    expect(long.length).toBeLessThanOrEqual(THREADS_TEXT_MAX);
+    expect(long.endsWith(page)).toBe(true);
+    expect(facebookShareHref(page)).toBe(
+      "https://www.facebook.com/sharer/sharer.php?u=https%3A%2F%2Floom.ibm.io%2Fs%2Fabc",
+    );
+    const mail = emailShareHref("Quakes today", `Quakes today\n\n${page}`);
+    expect(mail.startsWith("mailto:?")).toBe(true);
+    const mailParams = new URLSearchParams(mail.slice("mailto:?".length));
+    expect(mailParams.get("subject")).toBe("Quakes today");
+    expect(mailParams.get("body")).toContain(page);
   });
 
   it("slugifies filenames safely", () => {

@@ -2,13 +2,13 @@
 // chartCanvasHelpers — shared canvas helpers extracted from ChartView (LOOM-143)
 // =================================================================
 
+import { chartFont, chartTypeRamp } from "./chartType";
+
 type AxisFontOpts = { axisFontSize?: number; fontFamily?: string };
 
 export function axisFontCss(opts: AxisFontOpts | undefined, size?: number): string {
-  const floor = Math.max(10, opts?.axisFontSize ?? 11);
-  const px = size ?? floor;
-  const family = opts?.fontFamily ?? "system-ui, sans-serif";
-  return `${px}px ${family}`;
+  const type = chartTypeRamp(opts?.axisFontSize);
+  return chartFont(size == null ? type.tick : Math.max(type.mark, size), opts?.fontFamily);
 }
 
 export function widestText(

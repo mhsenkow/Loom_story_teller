@@ -4,6 +4,7 @@ import {
   buildDashboardMicrositeHtml,
   formatMicrositeTimestamp,
   LOOM_OG_IMG_TOKEN,
+  shareCardBlurb,
 } from "../dashboardMicrosite";
 
 describe("dashboardMicrosite HTML escaping", () => {
@@ -60,6 +61,13 @@ describe("dashboardMicrosite HTML escaping", () => {
     expect(html).toContain("&lt;b&gt;");
     expect(html).toContain("&quot;&gt;&lt;img");
     expect(html).toContain("&lt;svg");
+  });
+
+  it("writes a card blurb that does not repeat the title", () => {
+    expect(shareCardBlurb("Correlation matrix", "Correlation matrix\nSeries that move together")).toBe(
+      "Series that move together",
+    );
+    expect(shareCardBlurb("Bare", "")).toBe("Open the plot. The chart is the picture.");
   });
 
   it("escapes share page title and openUrl", () => {

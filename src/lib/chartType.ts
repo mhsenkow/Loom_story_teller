@@ -7,11 +7,22 @@
 // store via stage pixelRatio — do not shrink type to fit dense charts.
 // =================================================================
 
+import { chartFontStack } from "./fontCatalog";
+
 /** Fallback axis/label ink when theme tokens weren’t passed (mid-gray that works on dark + light better than #6b6b78). */
 export const CHART_LABEL_FALLBACK = "#8a8a96";
 
 /** Fallback primary text (near-white; themes should override). */
 export const CHART_TEXT_FALLBACK = "#ececf1";
+
+export const MIN_CHART_LABEL_SIZE = 11;
+export const DEFAULT_CHART_AXIS_SIZE = 12;
+
+/** Compact layouts keep a smaller default, but must honor an explicit larger size. */
+export function resolveChartAxisFontSize(size?: number | null, compact = false): number {
+  const requested = size != null && Number.isFinite(size) ? size : compact ? 11 : DEFAULT_CHART_AXIS_SIZE;
+  return Math.max(MIN_CHART_LABEL_SIZE, Math.min(16, requested));
+}
 
 export type ChartTypeRamp = {
   /** Resolved base (tick) size after compact floor. */
@@ -34,33 +45,29 @@ export type ChartTypeRamp = {
 
 /**
  * Build a type ramp from the Visual → Axis font size control.
- * Compact frames drop one step so gutters still fit.
+ * Crowded charts thin labels rather than shrinking their type.
  */
 export function chartTypeRamp(
   axisFontSize?: number | null,
   opts?: { compact?: boolean },
 ): ChartTypeRamp {
-  const compact = !!opts?.compact;
-  const requested = axisFontSize ?? 11;
-  const base = compact
-    ? Math.max(10, Math.min(14, requested - (requested >= 12 ? 1 : 0)))
-    : Math.max(11, Math.min(16, requested));
+  const base = resolveChartAxisFontSize(axisFontSize, opts?.compact);
 
   return {
     base,
-    title: Math.round(base * 1.3), // ~14 at 11
-    titleSlab: Math.round(base * 1.55), // ~17
-    titleCompact: Math.max(11, Math.round(base * 1.05)),
-    subtitle: Math.max(10, base - (compact ? 1 : 0)),
+    title: Math.round(base * 1.4),
+    titleSlab: Math.round(base * 1.7),
+    titleCompact: Math.max(12, Math.round(base * 1.15)),
+    subtitle: Math.max(11, base - 1),
     tick: base,
     axisField: base,
-    legend: Math.max(10, base - (compact ? 1 : 0)),
-    legendTitle: Math.max(10, base),
-    footnote: Math.max(10, base),
-    footnoteMeta: Math.max(10, base - 2),
-    mark: Math.max(10, base - 1),
-    cell: Math.max(10, Math.min(13, base)),
-    layoutFloor: Math.max(10, base),
+    legend: base,
+    legendTitle: base,
+    footnote: Math.max(11, base - 1),
+    footnoteMeta: Math.max(11, base - 2),
+    mark: Math.max(11, base - 1),
+    cell: base,
+    layoutFloor: base,
   };
 }
 
@@ -73,67 +80,8 @@ export function chartFont(
 ): string {
   const fam = fontFamily?.trim() || "Inter";
   const st = style === "italic" ? "italic " : "";
-  return `${st}${weight} ${size}px '${fam}', system-ui, sans-serif`;
+  const readableSize = Number.isFinite(size) ? Math.max(MIN_CHART_LABEL_SIZE, size) : MIN_CHART_LABEL_SIZE;
+  return `${st}${weight} ${readableSize}px ${chartFontStack(fam)}`;
 }
 
-/**
- * Wrap text into up to `maxLines` lines within maxWidth, ellipsizing the last
- * line if needed. Prefer this for titles/subtitles before hard truncation.
- */
-export function fitTextWrap(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number,
-  maxLines: number,
-): string[] {
-  const cleaned = text.replace(/\s+/g, " ").trim();
-  if (!cleaned || maxLines < 1) return [];
-  if (maxWidth <= 8 || maxLines === 1 || ctx.measureText(cleaned).width <= maxWidth) {
-    return [fitLine(ctx, cleaned, maxWidth)];
-  }
-
-  const words = cleaned.split(" ");
-  const lines: string[] = [];
-  let cur = "";
-  let i = 0;
-
-  while (i < words.length) {
-    const word = words[i]!;
-    const trial = cur ? `${cur} ${word}` : word;
-    if (ctx.measureText(trial).width <= maxWidth) {
-      cur = trial;
-      i++;
-      continue;
-    }
-    if (!cur) {
-      lines.push(fitLine(ctx, word, maxWidth));
-      i++;
-    } else {
-      lines.push(cur);
-      cur = "";
-    }
-    if (lines.length >= maxLines) {
-      // Overflow: rewrite last line with remaining words
-      const rest = words.slice(i).join(" ");
-      const last = lines[maxLines - 1]!;
-      lines[maxLines - 1] = fitLine(ctx, rest ? `${last} ${rest}` : last, maxWidth);
-      return lines.slice(0, maxLines);
-    }
-  }
-  if (cur) lines.push(cur);
-  return lines.slice(0, maxLines);
-}
-
-function fitLine(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
-  if (!text) return text;
-  if (maxWidth <= 8 || ctx.measureText(text).width <= maxWidth) return text;
-  const ell = "…";
-  let lo = 0;
-  let hi = text.length;
-  while (lo < hi) {
-    const mid = Math.ceil((lo + hi) / 2);
-    if (ctx.measureText(text.slice(0, mid) + ell).width <= maxWidth) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo <= 0 ? ell : text.slice(0, lo) + ell;
-}
+export { fitTextWrap } from "./chartText";

@@ -3,6 +3,7 @@ import {
   wrapAnnotationLines,
   type CanvasAnnotation,
 } from "./canvasArrangement";
+import { chartFont, chartTypeRamp } from "./chartType";
 
 export function drawCanvasAnnotations(
   ctx: CanvasRenderingContext2D,
@@ -11,15 +12,16 @@ export function drawCanvasAnnotations(
   notes: CanvasAnnotation[],
   theme: { bg: string; border: string; text: string },
   frame: { width: number; height: number },
+  typography?: { fontFamily?: string; axisFontSize?: number },
 ) {
   const cssW = frame.width;
   const cssH = frame.height;
   ctx.save();
   ctx.scale(w / cssW, h / cssH);
   for (const a of notes) {
-    const fs = a.fontSize ?? 11;
+    const fs = Math.max(11, a.fontSize ?? chartTypeRamp(typography?.axisFontSize).mark);
     const width = (a.width ?? 0.25) * cssW;
-    ctx.font = `${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
+    ctx.font = chartFont(fs, typography?.fontFamily);
     const lines = wrapAnnotationLines(
       a.text,
       Math.max(1, width - 14),

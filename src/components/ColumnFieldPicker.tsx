@@ -263,9 +263,9 @@ export function ColumnFieldPicker({
         onClick={() => (open ? close() : openPicker())}
         onKeyDown={onTriggerKey}
         className="loom-input w-full border-0 rounded-none bg-transparent text-xs py-2 px-2 font-mono text-left flex items-center gap-1 min-h-9 focus:ring-2 focus:ring-inset focus:ring-loom-accent/40"
-        title="Type to search columns"
+        title={`${displayLabel || "None"} · Type to search columns`}
       >
-        <span className="flex-1 min-w-0 truncate text-loom-text">
+        <span className="flex-1 min-w-0 whitespace-normal break-words leading-snug text-loom-text">
           {displayLabel || "—"}
         </span>
         {typeBadge ? (
@@ -414,7 +414,7 @@ export function ColumnFieldPicker({
                     >
                       ✓
                     </span>
-                    <span className="flex-1 min-w-0 truncate">
+                    <span className="flex-1 min-w-0 whitespace-normal break-words leading-snug">
                       {cleanLabel}
                     </span>
                     {entry.type ? (

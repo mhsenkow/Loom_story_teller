@@ -22,15 +22,16 @@ export function meetsWcagAa(fg: string, bg: string, largeText = false): boolean 
 export function ensureContrast(fg: string, bg: string, largeText = false): string {
   if (meetsWcagAa(fg, bg, largeText)) return fg;
   const target = largeText ? 3 : 4.5;
-  const lift = relativeLuminance(bg) > 0.4;
+  const bgLuminance = relativeLuminance(bg);
+  const towardBlack = (bgLuminance + 0.05) / 0.05 > 1.05 / (bgLuminance + 0.05);
   for (let i = 1; i <= 24; i++) {
     const t = i / 24;
-    const candidate = lift
+    const candidate = towardBlack
       ? mixRgb(fg, "#000000", t)
       : mixRgb(fg, "#ffffff", t);
     if (contrastRatio(candidate, bg) >= target) return candidate;
   }
-  return lift ? "#141414" : "#ffffff";
+  return towardBlack ? "#000000" : "#ffffff";
 }
 
 function mixRgb(a: string, b: string, t: number): string {

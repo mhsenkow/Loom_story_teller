@@ -14,6 +14,7 @@ import { DEFAULT_COLORS } from "./shared";
 import { directedUnit } from "../channelInvert";
 import { categoryShape } from "../chartMarks";
 import { firstGrapheme } from "../chartText";
+import { chartEmoji, chartEmojiLabel } from "../chartEmoji";
 
 export function renderFullScatter(
   ctx: CanvasRenderingContext2D,
@@ -110,7 +111,7 @@ export function renderFullScatter(
     return rect.bottom - ((v - yMin) / (yMax - yMin || 1)) * plotH;
   };
   if (opts) opts.scales = { x: toSX, y: toSY, valueAxis: "y", rect: plotOf(w, h, pad, opts) };
-  drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
+  if (!opts?.mini) drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
   if (opts?.showMarginals && !fit) drawScatterMarginals(ctx, rows, xi, yi, xMin, xMax, yMin, yMax, w, h, pad, opts);
   if (opts?.connectTrail && !fit) drawScatterTrail(ctx, rows, xi, yi, ci, toSX, toSY, opts);
 
@@ -190,7 +191,7 @@ export function renderFullScatter(
     const glyph =
       nValid <= 1200
         ? emojiIdx >= 0
-          ? firstGrapheme(r[emojiIdx])
+          ? chartEmoji(r[emojiIdx], opts?.emojiField, opts?.emojiMap)
           : opts?.markerMode === "emoji"
             ? firstGrapheme(opts.markEmoji)
             : null
@@ -224,11 +225,11 @@ export function renderFullScatter(
   }
   ctx.globalAlpha = 1;
   if (emojiIdx >= 0 && emojiMap.size > 1) {
-    setLegend(opts, [...emojiMap.entries()].map(([label, glyph]) => ({ label, glyph, color: cols[0]! })));
+    setLegend(opts, [...emojiMap.entries()].map(([label, glyph]) => ({ label: chartEmojiLabel(label, opts?.emojiField, opts?.emojiMap), glyph, color: cols[(catMap.get(label) ?? 0) % cols.length]! })));
   } else if (shapeIdx >= 0 && shapeMap.size > 1) {
     setLegend(opts, [...shapeMap.entries()].map(([label, i]) => ({ label, shape: categoryShape(i), color: cols[i % cols.length]! })));
   } else if (ci >= 0 && !clusterByRow) {
     setLegend(opts, [...catMap.entries()].map(([label, i]) => ({ label, color: cols[i % cols.length]! })));
   }
-  drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
+  if (!opts?.mini) drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
 }

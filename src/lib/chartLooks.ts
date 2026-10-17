@@ -446,7 +446,7 @@ export function drawChartTicks(
   ctx.fillStyle = axisLabelColor;
   ctx.strokeStyle = opts?.axisLineColor ?? opts?.themeBorder ?? axisLabelColor;
   ctx.lineWidth = Math.max(1, (opts?.axisLineWidth ?? 1) * 0.7);
-  ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+  ctx.font = chartFont(fontSize, fontFamily);
   ctx.textBaseline = "alphabetic";
 
   const xMap = opts?.scales?.x;
@@ -489,9 +489,10 @@ export function drawChartTicks(
 
   // Y ticks
   if (show.y !== false && Number.isFinite(yMin) && Number.isFinite(yMax)) {
-    const ys = niceTicks(yMin, yMax, n, false);
+    const ys = niceTicks(yMin, yMax, Math.min(n, Math.max(2, Math.floor((bottom - top) / (fontSize + 8)))), false);
     const span = yMax - yMin || 1;
     ctx.textAlign = "right";
+    let lastLabelY = Infinity;
     for (const v of ys.ticks) {
       const y = yMap ? yMap(v) : bottom - ((v - yMin) / span) * (bottom - top);
       if (y < top - 0.5 || y > bottom + 0.5) continue;
@@ -504,7 +505,9 @@ export function drawChartTicks(
       const label = show.yFormat ? show.yFormat(v, ys.step) : formatAxisValue(v, ys.step);
       const lx = Math.max(4, left - stub - 4);
       const ly = Math.max(fontSize, Math.min(h - 4, y + fontSize * 0.35));
+      if (lastLabelY - ly < fontSize + 4) continue;
       ctx.fillText(label, lx, ly);
+      lastLabelY = ly;
     }
   }
   ctx.restore();
@@ -539,7 +542,7 @@ export function drawBandAxisX(
   ctx.textBaseline = "top";
 
   if (mode === "ordered") {
-    ctx.font = `${baseFont}px '${fontFamily}', sans-serif`;
+    ctx.font = chartFont(baseFont, fontFamily);
     const widest = Math.max(...labels.map((l) => ctx.measureText(l).width));
     const slot = Math.max(1, widest + 14);
     const span = Math.max(1, (centers[centers.length - 1] ?? 0) - (centers[0] ?? 0));
@@ -560,7 +563,7 @@ export function drawBandAxisX(
   }
 
   const lay = layoutBandLabels(ctx, labels, bandWidth, room, fontFamily, baseFont);
-  ctx.font = `${lay.fontSize}px '${fontFamily}', sans-serif`;
+  ctx.font = chartFont(lay.fontSize, fontFamily);
   labels.forEach((label, i) => {
     if (i % lay.every !== 0) return;
     const text = fitTextEllipsis(ctx, label, lay.maxWidth);
@@ -594,11 +597,11 @@ export function drawBandAxisY(
   if (labels.length === 0) return;
   const fontFamily = opts?.fontFamily ?? "Inter";
   const color = opts?.axisLabelColor ?? opts?.themeMuted ?? CHART_LABEL_FALLBACK;
-  const fontSize = Math.max(10, Math.min(chartTypeRamp(opts?.axisFontSize).tick, bandHeight * 0.65));
-  const every = Math.max(1, Math.ceil((fontSize + 2) / Math.max(1, bandHeight)));
+  const fontSize = chartTypeRamp(opts?.axisFontSize).tick;
+  const every = Math.max(1, Math.ceil((fontSize + 4) / Math.max(1, bandHeight)));
   ctx.save();
   ctx.fillStyle = color;
-  ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+  ctx.font = chartFont(fontSize, fontFamily);
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
   labels.forEach((label, i) => {
@@ -627,7 +630,7 @@ export function drawPositionedLabelsX(
   ctx.fillStyle = opts?.axisLabelColor ?? CHART_LABEL_FALLBACK;
   ctx.strokeStyle = opts?.axisLineColor ?? opts?.themeBorder ?? CHART_LABEL_FALLBACK;
   ctx.lineWidth = Math.max(1, (opts?.axisLineWidth ?? 1) * 0.7);
-  ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+  ctx.font = chartFont(fontSize, fontFamily);
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
   let lastRight = -Infinity;
@@ -747,13 +750,16 @@ export function chartTitleWrapPx(
     layout === "stack" || layout === "spine" ? Math.max(12, ramp.title - 1)
       : layout === "caption" ? Math.max(12, ramp.title - 2)
         : ramp.title;
-  const maxW = Math.max(48, w - pad * 2 - (titlePreferCenter(layout) ? 0 : 8));
+  const sidePad = w < 480 ? Math.min(pad, 16) : pad;
+  const maxW = Math.max(0, w - sidePad * 2 - (titlePreferCenter(layout) ? 0 : 8));
   ctx.save();
   ctx.font = chartFont(size, opts.fontFamily ?? "Inter", opts.titleFontWeight ?? 600, opts.titleItalic ? "italic" : "normal");
   const wraps = ctx.measureText(title.replace(/\s+/g, " ").trim()).width > maxW;
   ctx.restore();
   return wraps ? Math.round(ramp.title * 1.15) : 0;
 }
+
+export const MIN_WRAPPED_TITLE_HEIGHT = 320;
 
 /** Title / subtitle block — wraps up to 2 lines before ellipsis; sizes from type ramp. */
 export function drawChartTitleBlock(
@@ -768,6 +774,8 @@ export function drawChartTitleBlock(
     titleY?: number;
     titleWidth?: number;
     titleScale?: number;
+    /** Internal recursive draw: preserve the exact width of an arranged title. */
+    titleInset?: number;
     titleLayout?: string;
     fontFamily?: string;
     titleFontWeight?: number;
@@ -785,7 +793,7 @@ export function drawChartTitleBlock(
     ctx.save();
     ctx.translate(r.x - pad * scale, r.y - 4 * scale);
     ctx.scale(scale, scale);
-    drawChartTitleBlock(ctx, r.w / scale + 2 * pad, h / scale, pad, title, subtitle, { ...opts, titleX: undefined, titleY: undefined, titleWidth: undefined, titleScale: undefined });
+    drawChartTitleBlock(ctx, r.w / scale + 2 * pad, h / scale, pad, title, subtitle, { ...opts, titleInset: pad, titleX: undefined, titleY: undefined, titleWidth: undefined, titleScale: undefined });
     ctx.restore();
     return;
   }
@@ -797,9 +805,12 @@ export function drawChartTitleBlock(
   const text = opts.themeText ?? CHART_TEXT_FALLBACK;
   const muted = opts.axisLabelColor ?? opts.themeMuted ?? CHART_LABEL_FALLBACK;
   const center = titlePreferCenter(layout);
-  const maxW = Math.max(48, w - pad * 2 - (center ? 0 : 8));
+  // Narrow charts need the full heading band, rather than the axis gutters.
+  const sidePad = opts.titleInset ?? (w < 480 ? Math.min(pad, 16) : pad);
+  const maxW = Math.max(0, layout === "ticket" ? Math.min(280, w - sidePad * 2) - 16 : w - sidePad * 2 - (center ? 0 : 8));
   const ramp = chartTypeRamp(opts.axisFontSize);
   const lineGap = Math.round(ramp.title * 1.15);
+  const titleLines = h < MIN_WRAPPED_TITLE_HEIGHT ? 1 : 2;
 
   const paintWrapped = (
     value: string,
@@ -834,8 +845,8 @@ export function drawChartTitleBlock(
   ) => {
     let titleY = pos.titleY;
     let subY = pos.subtitleY;
-    let maxLines = 2;
-    if (subtitle) {
+    let maxLines = titleLines;
+    if (subtitle && titleLines > 1) {
       ctx.font = chartFont(size, fontFamily, titleWeight, titleStyle);
       if (fitTextWrap(ctx, title, maxW, 2).length > 1) {
         const gap = lineGap * (size / ramp.title);
@@ -854,31 +865,31 @@ export function drawChartTitleBlock(
 
   ctx.save();
   ctx.textBaseline = "alphabetic";
-  const tx = center ? w / 2 : pad;
+  const tx = center ? w / 2 : sidePad;
   const align: CanvasTextAlign = center ? "center" : "left";
 
   if (layout === "slab") {
-    paintWrapped(title, tx, pos.titleY, ramp.titleSlab, titleWeight, titleStyle, text, align, 2);
+    paintWrapped(title, tx, pos.titleY, ramp.titleSlab, titleWeight, titleStyle, text, align, titleLines);
   } else if (layout === "ticket") {
     ctx.fillStyle = opts.themeBorder ?? "#2a2a30";
-    const tw = Math.min(280, w - pad * 2);
-    ctx.strokeRect(pad, Math.max(6, pos.titleY - 12), tw, pos.ticketH || 34);
-    paintWrapped(title, pad + 8, pos.titleY, ramp.titleCompact, titleWeight, titleStyle, text, "left", 1);
+    const tw = Math.min(280, w - sidePad * 2);
+    ctx.strokeRect(sidePad, Math.max(6, pos.titleY - 12), tw, pos.ticketH || 34);
+    paintWrapped(title, sidePad + 8, pos.titleY, ramp.titleCompact, titleWeight, titleStyle, text, "left", 1);
     if (subtitle) {
-      paintWrapped(subtitle, pad + 8, pos.subtitleY, Math.max(10, ramp.subtitle - 1), 400, "normal", muted, "left", 1);
+      paintWrapped(subtitle, sidePad + 8, pos.subtitleY, Math.max(10, ramp.subtitle - 1), 400, "normal", muted, "left", 1);
     }
   } else if (layout === "stack" || layout === "spine") {
     let ruleY = pos.subtitleY;
-    paintTitlePair(pad, Math.max(12, ramp.title - 1), "left", (y) => {
+    paintTitlePair(sidePad, Math.max(12, ramp.title - 1), "left", (y) => {
       ruleY = y;
-      paintWrapped(subtitle!, pad, y, ramp.subtitle, 400, "normal", muted, "left", 1);
+      paintWrapped(subtitle!, sidePad, y, ramp.subtitle, 400, "normal", muted, "left", 1);
     });
     if (layout === "spine") {
       ctx.strokeStyle = text;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(pad, Math.min(pad - 4, ruleY + 8));
-      ctx.lineTo(pad + 48, Math.min(pad - 4, ruleY + 8));
+      ctx.moveTo(sidePad, Math.min(pad - 4, ruleY + 8));
+      ctx.lineTo(sidePad + 48, Math.min(pad - 4, ruleY + 8));
       ctx.stroke();
     }
   } else if (layout === "caption") {
@@ -900,7 +911,7 @@ export function drawChartTitleBlock(
  */
 export function chartFootnoteReservePx(
   text: string | null | undefined,
-  opts?: { hasColorRamp?: boolean; pad?: number },
+  opts?: { hasColorRamp?: boolean; pad?: number; axisFontSize?: number },
 ): number {
   const lines = (text ?? "")
     .split("\n")
@@ -909,7 +920,7 @@ export function chartFootnoteReservePx(
   const hasRamp = !!opts?.hasColorRamp;
   if (!lines && !hasRamp) return 0;
   const pad = opts?.pad ?? 24;
-  const type = chartTypeRamp(11);
+  const type = chartTypeRamp(opts?.axisFontSize);
   const lineH = type.footnote + 3;
   const n = Math.max(lines, hasRamp ? 1 : 0);
   // rule (~13) + lines + bottom inset (matches drawChartSourceFootnote)
@@ -931,6 +942,7 @@ export function drawChartSourceFootnote(
   opts: {
     align?: "left" | "center" | "right";
     fontFamily?: string;
+    axisFontSize?: number;
     themeMuted?: string;
     themeBorder?: string;
     /** Palette stops — continuous blends, categorical draws discrete chips. */
@@ -950,12 +962,14 @@ export function drawChartSourceFootnote(
     .map((s) => s.trim())
     .filter(Boolean)
     .slice(0, 3);
-  const ramp = opts.colorRamp?.filter((c) => typeof c === "string" && c.length > 0) ?? [];
+  // Credits can use the full band on a phone; axis gutters only constrain marks.
+  if (w < 480) pad = Math.min(pad, 16);
+  const ramp = lines.length && w - pad * 2 < 280 ? [] : opts.colorRamp?.filter((c) => typeof c === "string" && c.length > 0) ?? [];
   if (!lines.length && !ramp.length) return;
 
   const align = opts.align ?? "left";
   const fontFamily = opts.fontFamily ?? "Inter";
-  const type = chartTypeRamp(11);
+  const type = chartTypeRamp(opts.axisFontSize);
   const muted = opts.themeMuted ?? CHART_LABEL_FALLBACK;
   const lineH = type.footnote + 3;
   const rampH = 8;

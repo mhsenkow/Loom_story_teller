@@ -88,7 +88,14 @@ function normalizePath(p: string): string {
 export async function pickFolder(): Promise<string | null> {
   if (isDesktop()) {
     const { open } = await import("@tauri-apps/plugin-dialog");
-    const selected = await open({ directory: true, multiple: false });
+    // Scoped keeps the real folder path under App Sandbox (Mac App Store)
+    // via user-selected + security-scoped access — same model as iPad Files.
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      recursive: true,
+      fileAccessMode: "scoped",
+    });
     if (selected == null) return null;
     return normalizePath(selected as string);
   }
@@ -287,6 +294,8 @@ export interface SourceStatus {
   last_error?: string | null;
   /** Web: wall-clock ms when the buffer last accepted a successful poll. */
   last_success_at?: number | null;
+  /** Desktop poll success, Unix seconds (normalized by discovery at its boundary). */
+  last_ok_at?: number | null;
   /** Web: rows are from a cached snapshot — not a current live measurement. */
   snapshot_stale?: boolean;
   /** Web: ms when the cached snapshot was captured (if snapshot_stale). */

@@ -43,6 +43,7 @@ export type RandomEncoding = {
   residualOverlay?: boolean | null;
   anomalyHighlight?: boolean | null;
   bumpMode?: "rank" | "delta" | null;
+  pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   barStackMode?: "grouped" | "stacked" | "percent" | null;
   timeWindowField?: string | null;
   timeWindow?: ChartTimeRange | null;
@@ -62,7 +63,7 @@ const DIRECTION_RANDOM_KINDS = new Set<ChartKind>([
 const DIRECTION_RANDOM_PICKS = ["up", "down", "right", "left"] as const;
 
 export const FACET_RANDOM_KINDS = new Set<ChartKind>(["bar", "line", "area", "scatter", "bubble"]);
-export const TOP_N_RANDOM_KINDS = new Set<ChartKind>(["bar", "pareto", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "waffle", "isotype", "radialBar", "isoBars"]);
+export const TOP_N_RANDOM_KINDS = new Set<ChartKind>(["bar", "pareto", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "waffle", "isotype", "radialBar", "isoBars", "pyramid"]);
 export const COMPARE_RANDOM_KINDS = new Set<ChartKind>(["line", "area"]);
 export const TOP_N_RANDOM_PICKS = [10, 15, 20, 30] as const;
 
@@ -90,6 +91,7 @@ export function applyEncodingLocks(
     residualOverlay: drawn.residualOverlay,
     anomalyHighlight: drawn.anomalyHighlight,
     bumpMode: drawn.bumpMode,
+    pyramidScaleMode: drawn.pyramidScaleMode,
     barStackMode: drawn.barStackMode,
     timeWindowField: keep.timeWindowField ?? drawn.timeWindowField ?? null,
     timeWindow: keep.timeWindow ?? drawn.timeWindow ?? null,
@@ -119,6 +121,7 @@ export function withRandomEncodingExtras(
   let residualOverlay: boolean | null = null;
   let anomalyHighlight: boolean | null = null;
   let bumpMode: "rank" | "delta" | null = null;
+  let pyramidScaleMode: "auto" | "shared" | "independent" | null = null;
   let timeWindowField: string | null = null;
   let timeWindow: ChartTimeRange | null = null;
   let layoutDirection: "auto" | "up" | "down" | "right" | "left" | null = null;
@@ -173,6 +176,9 @@ export function withRandomEncodingExtras(
   if (yScale === "log" && !yFieldSupportsLogScale(base.yField, columns)) yScale = null;
 
   if (kind === "bump" && Math.random() < 0.4) bumpMode = "delta";
+  if (kind === "pyramid" && Math.random() < 0.55) {
+    pyramidScaleMode = pick(["shared", "independent", "auto"] as const) ?? "auto";
+  }
 
   if (DIRECTION_RANDOM_KINDS.has(kind) && Math.random() < 0.38) {
     layoutDirection = pick([...DIRECTION_RANDOM_PICKS]) ?? "up";
@@ -199,6 +205,7 @@ export function withRandomEncodingExtras(
     residualOverlay,
     anomalyHighlight,
     bumpMode,
+    pyramidScaleMode,
     timeWindowField,
     timeWindow,
     layoutDirection,
@@ -584,6 +591,7 @@ export function getRandomChartAndEncoding(
     residualOverlay: rec.residualOverlay ?? undefined,
     anomalyHighlight: rec.anomalyHighlight ?? undefined,
     bumpMode: rec.bumpMode ?? undefined,
+    pyramidScaleMode: rec.pyramidScaleMode ?? undefined,
     barStackMode: rec.barStackMode ?? undefined,
   };
 }
@@ -603,6 +611,7 @@ export function randomEncodingToExtra(enc: RandomEncoding): NonNullable<Paramete
     residualOverlay: enc.residualOverlay ?? null,
     anomalyHighlight: enc.anomalyHighlight ?? null,
     bumpMode: enc.bumpMode ?? null,
+    pyramidScaleMode: enc.pyramidScaleMode ?? null,
     barStackMode: enc.barStackMode ?? undefined,
     timeWindowField: enc.timeWindowField ?? null,
     timeWindow: enc.timeWindow && enc.timeWindow !== "all" ? enc.timeWindow : null,

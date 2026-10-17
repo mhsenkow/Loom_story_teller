@@ -49,6 +49,7 @@ import type { GeoMapKind } from "./geoMapsRec";
 import { formatTooltipNumber, type HitTarget } from "./chartTooltip";
 import { categoryShape, drawMarkerPath } from "./chartMarks";
 import { firstGrapheme } from "./chartText";
+import { chartEmoji } from "./chartEmoji";
 
 export interface GeoRenderOpts {
   colors: string[];
@@ -77,6 +78,7 @@ export interface GeoRenderOpts {
   markEmoji?: string;
   shapeField?: string | null;
   emojiField?: string | null;
+  emojiMap?: import("./chartEmoji").ChartEmojiMap | null;
 }
 
 function num(v: unknown): number {
@@ -677,7 +679,7 @@ function renderProjectedPoints(
     const glyph =
       n <= 1200
         ? emojiI >= 0
-          ? firstGrapheme(p.row[emojiI])
+          ? chartEmoji(p.row[emojiI], opts.emojiField, opts.emojiMap)
           : opts.markerMode === "emoji"
             ? firstGrapheme(opts.markEmoji)
             : null
@@ -849,7 +851,7 @@ function renderGlobeLike(
       glyph:
         pts.length <= 1200
           ? emojiI >= 0
-            ? firstGrapheme(p.row[emojiI])
+            ? chartEmoji(p.row[emojiI], opts.emojiField, opts.emojiMap)
             : opts.markerMode === "emoji"
               ? firstGrapheme(opts.markEmoji)
               : null

@@ -4,7 +4,7 @@
 // =================================================================
 
 import { type ChartTimeRange } from "../chartTime";
-import { stableLiveChartId, yFieldSupportsLogScale } from "./columns";
+import { inferType, measureColumns, nominalQualityBoost, stableLiveChartId, yFieldSupportsLogScale } from "./columns";
 import { createChartRec, fitEncodingToKind } from "./createChartRec";
 import { expandRecommendationsWithExtras } from "./expand";
 import { type ColumnInfo, type QueryResult } from "../queryTypes";
@@ -12,6 +12,49 @@ import { chartKindDataSupport, getRandomEncoding } from "./random";
 import { type StorySequence, recommend } from "./recommend";
 import { type SourceKind } from "../sourceRegistry";
 import { CHART_KIND_OPTIONS, type ChartKind, type ChartRecommendation, type YAggregateOption } from "./types";
+import { enumerateDiscoverCharts } from "../discoverCandidates";
+
+/** Dual-measure compares — always try to keep these in short discover windows. */
+export const CORE_COMPARE_KINDS: readonly ChartKind[] = ["pyramid", "dumbbell", "slope"];
+
+/** Broader “interesting compare” set for discover prioritization. */
+export const COMPARE_KIND_PRIORITY = new Set<ChartKind>([
+  ...CORE_COMPARE_KINDS,
+  "bump",
+  "waterfall",
+  "pareto",
+  "corrMatrix",
+  "scatter",
+]);
+
+/**
+ * Deterministic category + two measures for pyramid / slope / dumbbell fills.
+ * Avoids Math.random so What’s interesting stays stable across reopen.
+ */
+export function pickBestCompareEncoding(
+  columns: ColumnInfo[],
+  kind: "pyramid" | "dumbbell" | "slope",
+): { xField: string; yField: string; sizeField: string } | null {
+  const nums = measureColumns(columns);
+  if (nums.length < 2) return null;
+  const hi = kind === "dumbbell" ? 24 : 20;
+  const cats = columns
+    .filter((c) => {
+      const t = inferType(c.data_type, c.name, c.min_value, c.max_value);
+      return t === "nominal" && c.distinct_count >= 2 && c.distinct_count <= hi;
+    })
+    .sort(
+      (a, b) =>
+        nominalQualityBoost(b.name) - nominalQualityBoost(a.name) ||
+        a.distinct_count - b.distinct_count ||
+        a.name.localeCompare(b.name),
+    );
+  const cat = cats[0];
+  if (!cat) return null;
+  const [left, right] = [...nums].sort((a, b) => a.name.localeCompare(b.name));
+  if (!left || !right) return null;
+  return { xField: cat.name, yField: left.name, sizeField: right.name };
+}
 
 // =================================================================
 // Wikipedia Stream — curated chart recommendations
@@ -24,6 +67,7 @@ import { CHART_KIND_OPTIONS, type ChartKind, type ChartRecommendation, type YAgg
 export function recommendStreamStory(
   columns: ColumnInfo[],
   data: QueryResult | null,
+  opts?: { discoverProbe?: boolean },
 ): StorySequence {
   const colNames = new Set(columns.map((c) => c.name));
   const hasTs = colNames.has("ts");
@@ -120,10 +164,10 @@ export function recommendStreamStory(
     charts.push(mkRec("line", "Bot activity trend", "Are bots more active at certain times?", 75, "ts", null, "bot", "count"));
   }
 
-  const auto = recommend(columns, data, "Wikipedia Live");
+  const auto = opts?.discoverProbe ? [] : recommend(columns, data, "Wikipedia Live");
   return {
     title: "Wikipedia Live: Real-time edit analytics",
-    charts: mergeStoryCharts(charts, auto, columns, "wiki", 96),
+    charts: opts?.discoverProbe ? enumerateDiscoverCharts(columns, charts, "wiki", data) : mergeStoryCharts(charts, auto, columns, "wiki", 96),
   };
 }
 
@@ -158,6 +202,8 @@ export function mergeStoryCharts(
       r.residualOverlay ? "1" : "",
       r.anomalyHighlight ? "1" : "",
       r.bumpMode ?? "",
+      r.pyramidScaleMode ?? "",
+      r.deltaDisplay ?? "",
       r.comparePrevious ? "1" : "",
       r.timeWindowField ?? "",
       r.timeWindow ?? "",
@@ -179,26 +225,126 @@ export function mergeStoryCharts(
   for (const r of kindBoost) presentKinds.add(r.kind);
   const kindRest = autoDeduped.filter((r) => !kindBoost.includes(r));
 
+  // Dual-measure / compare kinds first so What’s interesting isn’t all bars + maps
+  // when the chartLimit is small (discover probe / phone).
+  const kindOrder = [
+    ...CORE_COMPARE_KINDS.map((value) => ({ value })),
+    ...CHART_KIND_OPTIONS.filter(
+      (o) => COMPARE_KIND_PRIORITY.has(o.value) && !CORE_COMPARE_KINDS.includes(o.value),
+    ),
+    ...CHART_KIND_OPTIONS.filter((o) => !COMPARE_KIND_PRIORITY.has(o.value)),
+  ];
+
   // Fill any remaining supported kinds the auto rail still missed
-  const missing: ChartRecommendation[] = [];
-  for (const { value: kind } of CHART_KIND_OPTIONS) {
+  const missingCompare: ChartRecommendation[] = [];
+  const missingOther: ChartRecommendation[] = [];
+  for (const { value: kind } of kindOrder) {
     if (presentKinds.has(kind)) continue;
     if (!chartKindDataSupport(columns, kind).ok) continue;
-    const enc = getRandomEncoding(columns, kind);
+    const dual =
+      kind === "pyramid" || kind === "dumbbell" || kind === "slope"
+        ? pickBestCompareEncoding(columns, kind)
+        : null;
+    const enc = dual
+      ? {
+          xField: dual.xField,
+          yField: dual.yField,
+          colorField: null as string | null,
+          sizeField: dual.sizeField,
+          topN: 14 as number | null,
+          pyramidScaleMode: "auto" as const,
+          bumpMode: null,
+          comparePrevious: null,
+          y2Field: null,
+        }
+      : getRandomEncoding(columns, kind);
     if (!enc) continue;
     const rec = createChartRec(kind, columns, enc.xField, enc.yField, enc.colorField, tableName, {
-      sizeField: enc.sizeField,
+      sizeField: enc.sizeField ?? null,
+      topN: enc.topN ?? (kind === "pyramid" || kind === "dumbbell" ? 14 : null),
+      yAggregate: kind === "dumbbell" || kind === "pyramid" || kind === "slope" ? "sum" : null,
+      pyramidScaleMode: kind === "pyramid" ? (enc.pyramidScaleMode ?? "auto") : null,
+      deltaDisplay:
+        kind === "pyramid" || kind === "slope" || kind === "dumbbell"
+          ? "diff"
+          : null,
+      bumpMode: kind === "bump" ? (enc.bumpMode ?? "rank") : null,
+      comparePrevious: enc.comparePrevious ?? null,
+      y2Field: enc.y2Field ?? null,
     });
     if (!rec) continue;
-    missing.push({
+    const filled = {
       ...rec,
-      score: Math.min(rec.score, 66),
+      score: Math.min(rec.score, COMPARE_KIND_PRIORITY.has(kind) ? 68 : 66),
       id: `${tableName}-kind-${kind}`,
-    });
+    };
+    if (COMPARE_KIND_PRIORITY.has(kind)) missingCompare.push(filled);
+    else missingOther.push(filled);
     presentKinds.add(kind);
   }
 
-  return [...curated, ...extras, ...kindBoost, ...missing, ...kindRest].slice(0, limit);
+  // Curated → compare-kind fills → expand variants → other fills → auto.
+  // Keeps mirror/dumbbell/slope/Δ visible even when discover caps variants per source.
+  const merged = [
+    ...curated,
+    ...missingCompare,
+    ...extras,
+    ...kindBoost,
+    ...missingOther,
+    ...kindRest,
+  ];
+  return ensureCompareKindsInWindow(merged, limit, COMPARE_KIND_PRIORITY);
+}
+
+/**
+ * When discover/mobile truncates the rail, pull one chart per priority kind
+ * forward so pyramid / dumbbell / slope / etc. aren't buried past the cap.
+ * Core dual-measure kinds are promoted before Pareto / scatter.
+ */
+export function ensureCompareKindsInWindow(
+  charts: ChartRecommendation[],
+  limit: number,
+  priority: Set<ChartKind> = COMPARE_KIND_PRIORITY,
+): ChartRecommendation[] {
+  if (charts.length <= limit) return charts;
+
+  const selected: ChartRecommendation[] = [];
+  const selectedIds = new Set<string>();
+  const kindsIn = new Set<ChartKind>();
+
+  // Half the window for compares — enough for pyramid + dumbbell + slope + a couple extras.
+  const reserve = Math.min(priority.size, Math.max(3, Math.ceil(limit / 2)));
+  const primaryBudget = Math.max(1, limit - reserve);
+
+  for (const c of charts) {
+    if (selected.length >= primaryBudget) break;
+    selected.push(c);
+    selectedIds.add(c.id);
+    kindsIn.add(c.kind);
+  }
+
+  const promoteOrder = [
+    ...CORE_COMPARE_KINDS,
+    ...[...priority].filter((k) => !CORE_COMPARE_KINDS.includes(k)),
+  ];
+  for (const kind of promoteOrder) {
+    if (selected.length >= limit) break;
+    if (kindsIn.has(kind)) continue;
+    const hit = charts.find((c) => c.kind === kind && !selectedIds.has(c.id));
+    if (!hit) continue;
+    selected.push(hit);
+    selectedIds.add(hit.id);
+    kindsIn.add(kind);
+  }
+
+  for (const c of charts) {
+    if (selected.length >= limit) break;
+    if (selectedIds.has(c.id)) continue;
+    selected.push(c);
+    selectedIds.add(c.id);
+  }
+
+  return selected;
 }
 
 export function guardCuratedChart(rec: ChartRecommendation, columns: ColumnInfo[]): ChartRecommendation {
@@ -222,7 +368,7 @@ export function guardCuratedChart(rec: ChartRecommendation, columns: ColumnInfo[
 }
 
 export interface RecommendSourceStoryOptions {
-  /** Lighter path for discover probes (curated + extras only). */
+  /** Full catalog consideration; the discovery ranker caps qualified results. */
   discoverProbe?: boolean;
   chartLimit?: number;
 }
@@ -256,6 +402,8 @@ export function recommendSourceStory(
       residualOverlay?: boolean | null;
       anomalyHighlight?: boolean | null;
       bumpMode?: "rank" | "delta" | null;
+      pyramidScaleMode?: "auto" | "shared" | "independent" | null;
+      deltaDisplay?: "off" | "diff" | "pct" | null;
       timeWindowField?: string | null;
       timeWindow?: ChartTimeRange | null;
     },
@@ -305,6 +453,13 @@ export function recommendSourceStory(
     residualOverlay: extraEnc?.residualOverlay || undefined,
     anomalyHighlight: extraEnc?.anomalyHighlight || undefined,
     bumpMode: k === "bump" && extraEnc?.bumpMode ? extraEnc.bumpMode : undefined,
+    pyramidScaleMode: k === "pyramid" ? (extraEnc?.pyramidScaleMode ?? "auto") : undefined,
+    deltaDisplay:
+      (k === "pyramid" || k === "slope" || k === "dumbbell") &&
+      extraEnc?.deltaDisplay &&
+      extraEnc.deltaDisplay !== "off"
+        ? extraEnc.deltaDisplay
+        : undefined,
     timeWindowField:
       extraEnc?.timeWindow && extraEnc.timeWindow !== "all"
         ? (extraEnc.timeWindowField ?? undefined)
@@ -315,6 +470,7 @@ export function recommendSourceStory(
   /** Curated first, then Facet/TopN/Compare, then full-schema recommend() (network, odd, …). */
   const finish = (title: string, charts: ChartRecommendation[]): StorySequence => {
     const guarded = charts.map((c) => guardCuratedChart(c, columns));
+    if (opts?.discoverProbe) return { title, charts: ensureCompareKindsInWindow(enumerateDiscoverCharts(columns, guarded, kind, data), opts.chartLimit ?? 10_000) };
     const limit = opts?.discoverProbe ? opts.chartLimit ?? 8 : 96;
     const auto = opts?.discoverProbe ? [] : recommend(columns, data, kind);
     return {
@@ -341,14 +497,24 @@ export function recommendSourceStory(
   if (kind === "meteo") {
     return finish("World Weather Comparison", [
         mk("geoBubbles", "City climate map", "Twelve cities sized by temperature", 96, "longitude", "latitude", "city", null, "temperature"),
-        mk("line", "Temperature over time", "How does temperature vary across cities?", 95, "ts", "temperature", "city"),
-        mk("line", "Temp · 7-pt rolling", "Smoothing the noise across cities", 94, "ts", "temperature", "city", "mean", null, { rollingWindow: 7 }),
-        mk("line", "Temp indexed to 100", "Fair compare — every city starts at 100", 93, "ts", "temperature", "city", "mean", null, { seriesNormalize: "index100" }),
-        mk("line", "Temp facets by city", "One panel per city", 92, "ts", "temperature", null, "mean", null, { rowField: "city" }),
-        mk("line", "Temp vs humidity", "Compare two measures over time", 90, "ts", "temperature", "city", "mean", null, { y2Field: "humidity" }),
-        mk("corrMatrix", "Climate correlations", "Temp · humidity · wind · pressure", 88, "temperature", "humidity", null),
-        mk("stream", "Temp streams by city", "Organic stacked climate flow", 86, "ts", "temperature", "city"),
-        mk("beeswarm", "Temp swarm by city", "Every reading as a dot", 84, "city", "temperature", null),
+        mk("pyramid", "Temp ↔ humidity", "Mirror climate by city · same-scale lengths", 95, "city", "temperature", null, "mean", "humidity", {
+          pyramidScaleMode: "shared",
+          deltaDisplay: "diff",
+        }),
+        mk("dumbbell", "Temp → humidity", "Start/end climate pair · Δ labeled", 94, "city", "temperature", null, "mean", "humidity", {
+          deltaDisplay: "diff",
+        }),
+        mk("slope", "Temp → humidity", "Lean diagonal of comfort · Δ labeled", 93, "city", "temperature", null, null, "humidity", {
+          deltaDisplay: "diff",
+        }),
+        mk("line", "Temperature over time", "How does temperature vary across cities?", 91, "ts", "temperature", "city"),
+        mk("line", "Temp · 7-pt rolling", "Smoothing the noise across cities", 90, "ts", "temperature", "city", "mean", null, { rollingWindow: 7 }),
+        mk("line", "Temp indexed to 100", "Fair compare — every city starts at 100", 88, "ts", "temperature", "city", "mean", null, { seriesNormalize: "index100" }),
+        mk("line", "Temp facets by city", "One panel per city", 86, "ts", "temperature", null, "mean", null, { rowField: "city" }),
+        mk("line", "Temp vs humidity", "Compare two measures over time", 84, "ts", "temperature", "city", "mean", null, { y2Field: "humidity" }),
+        mk("corrMatrix", "Climate correlations", "Temp · humidity · wind · pressure", 82, "temperature", "humidity", null),
+        mk("stream", "Temp streams by city", "Organic stacked climate flow", 80, "ts", "temperature", "city"),
+        mk("beeswarm", "Temp swarm by city", "Every reading as a dot", 78, "city", "temperature", null),
       ]);
   }
 
@@ -368,15 +534,27 @@ export function recommendSourceStory(
   if (kind === "world_bank") {
     return finish("Global development", [
         mk("choropleth", "Life expectancy map", "Average years of life by country", 96, "country_code", "life_expectancy", null, "mean"),
-        mk("bubble", "Wealth vs health", "GDP per person against life expectancy, sized by population", 98, "gdp_per_capita", "life_expectancy", null, null, "population"),
-        mk("line", "Life expectancy over time", "Average across countries, 2000–2023", 92, "yr", "life_expectancy", null, "mean"),
-        mk("line", "Life · 7-yr rolling", "Smoothed global average", 91, "yr", "life_expectancy", null, "mean", null, { rollingWindow: 7 }),
-        mk("line", "Life vs GDP over time", "Two development measures compared", 90, "yr", "life_expectancy", null, "mean", null, { y2Field: "gdp_per_capita" }),
-        mk("pareto", "Population Pareto", "Bars + cumulative share of people", 89, "country_name", "population", null, "max", null, { topN: 20 }),
-        mk("corrMatrix", "Development correlations", "GDP · life · CO₂ · population", 87, "gdp_per_capita", "life_expectancy", null),
-        mk("bar", "Most populous countries", "Peak population, 2000–2023", 86, "country_name", "population", null, "max", null, { topN: 15 }),
-        mk("scatter", "CO₂ vs wealth", "Emissions per person against GDP per person", 84, "gdp_per_capita", "co2_per_capita", null),
-        mk("scatter", "Wealth vs health · residuals", "Distance from the linear fit", 82, "gdp_per_capita", "life_expectancy", null, null, null, { residualOverlay: true }),
+        mk("pyramid", "GDP ↔ life expectancy", "Mirror wealth and health by country · Δ labeled", 95, "country_name", "gdp_per_capita", null, "mean", "life_expectancy", {
+          topN: 14,
+          pyramidScaleMode: "auto",
+          deltaDisplay: "diff",
+        }),
+        mk("dumbbell", "Wealth → health", "GDP per person to life expectancy · Δ labeled", 94, "country_name", "gdp_per_capita", null, "mean", "life_expectancy", {
+          topN: 20,
+          deltaDisplay: "diff",
+        }),
+        mk("slope", "GDP → life", "Lean diagonal of development · Δ labeled", 93, "country_name", "gdp_per_capita", null, null, "life_expectancy", {
+          deltaDisplay: "diff",
+        }),
+        mk("bubble", "Wealth vs health", "GDP per person against life expectancy, sized by population", 92, "gdp_per_capita", "life_expectancy", null, null, "population"),
+        mk("line", "Life expectancy over time", "Average across countries, 2000–2023", 90, "yr", "life_expectancy", null, "mean"),
+        mk("line", "Life · 7-yr rolling", "Smoothed global average", 88, "yr", "life_expectancy", null, "mean", null, { rollingWindow: 7 }),
+        mk("line", "Life vs GDP over time", "Two development measures compared", 86, "yr", "life_expectancy", null, "mean", null, { y2Field: "gdp_per_capita" }),
+        mk("pareto", "Population Pareto", "Bars + cumulative share of people", 85, "country_name", "population", null, "max", null, { topN: 20 }),
+        mk("corrMatrix", "Development correlations", "GDP · life · CO₂ · population", 84, "gdp_per_capita", "life_expectancy", null),
+        mk("bar", "Most populous countries", "Peak population, 2000–2023", 82, "country_name", "population", null, "max", null, { topN: 15 }),
+        mk("scatter", "CO₂ vs wealth", "Emissions per person against GDP per person", 80, "gdp_per_capita", "co2_per_capita", null),
+        mk("scatter", "Wealth vs health · residuals", "Distance from the linear fit", 78, "gdp_per_capita", "life_expectancy", null, null, null, { residualOverlay: true }),
       ]);
   }
 
@@ -393,38 +571,68 @@ export function recommendSourceStory(
   if (kind === "hn") {
     return finish("Hacker News front page", [
         mk("bar", "Top stories by points", "What's hottest right now?", 95, "title", "points", null, "max", null, { topN: 15 }),
-        mk("pareto", "Points Pareto", "Which stories carry most of the points?", 93, "title", "points", null, "max", null, { topN: 20 }),
-        mk("scatter", "Points vs comments", "Discussion intensity", 90, "points", "num_comments", "author"),
-        mk("scatter", "Points vs comments · residuals", "Stories off the linear fit", 88, "points", "num_comments", null, null, null, { residualOverlay: true }),
-        mk("scatter", "Points vs comments · facets", "One panel per author (top posters)", 86, "points", "num_comments", null, null, null, { rowField: "author" }),
-        mk("histogram", "Score distribution", "How viral is the front page?", 82, "points", null, null),
-        mk("bar", "Active authors", "Who is posting?", 78, "author", null, null, "count", null, { topN: 12 }),
+        mk("dumbbell", "Points → comments", "Engagement range per story · Δ labeled", 94, "title", "points", null, "mean", "num_comments", {
+          topN: 20,
+          deltaDisplay: "diff",
+        }),
+        mk("slope", "Points → comments", "Lean diagonal of discussion · Δ labeled", 93, "title", "points", null, null, "num_comments", {
+          deltaDisplay: "diff",
+        }),
+        mk("pareto", "Points Pareto", "Which stories carry most of the points?", 91, "title", "points", null, "max", null, { topN: 20 }),
+        mk("scatter", "Points vs comments", "Discussion intensity", 88, "points", "num_comments", "author"),
+        mk("scatter", "Points vs comments · residuals", "Stories off the linear fit", 86, "points", "num_comments", null, null, null, { residualOverlay: true }),
+        mk("scatter", "Points vs comments · facets", "One panel per author (top posters)", 84, "points", "num_comments", null, null, null, { rowField: "author" }),
+        mk("histogram", "Score distribution", "How viral is the front page?", 80, "points", null, null),
+        mk("bar", "Active authors", "Who is posting?", 76, "author", null, null, "count", null, { topN: 12 }),
       ]);
   }
 
   if (kind === "crypto") {
     return finish("Crypto markets", [
         mk("bar", "Market cap leaders", "The biggest coins by value", 95, "symbol", "market_cap", null, "max", null, { topN: 15 }),
-        mk("pareto", "Market-cap Pareto", "Cumulative share of total value", 94, "symbol", "market_cap", null, "max", null, { topN: 20 }),
-        mk("bar", "24h movers", "Who gained and lost the most today", 92, "symbol", "change_24h_pct", null, "max", null, { topN: 15 }),
-        mk("scatter", "Cap vs change · log Y", "Magnitude on a log scale", 90, "market_cap", "change_24h_pct", null, null, null, { yScale: "log" }),
-        mk("corrMatrix", "Market correlations", "Price · cap · volume · change", 88, "price_usd", "market_cap", null),
-        mk("treemap", "Market share", "Each coin's slice of the top 50", 86, "symbol", "market_cap", null, "max", null, { topN: 20 }),
-        mk("beeswarm", "Daily moves", "Every coin's 24h % change as a dot", 84, "symbol", "change_24h_pct", null),
-        mk("isoScatter", "Price · change · volume", "Pseudo-3D market space", 80, "price_usd", "change_24h_pct", "symbol", null, "volume_24h"),
+        mk("pyramid", "Cap ↔ volume", "Mirror size and activity · Δ labeled", 94, "symbol", "market_cap", null, "sum", "volume_24h", {
+          topN: 14,
+          pyramidScaleMode: "auto",
+          deltaDisplay: "pct",
+        }),
+        mk("dumbbell", "Cap → volume", "Start/end of liquidity · Δ labeled", 93, "symbol", "market_cap", null, "mean", "volume_24h", {
+          topN: 20,
+          deltaDisplay: "diff",
+        }),
+        mk("slope", "Cap → volume", "Lean diagonal of trading heat · Δ labeled", 92, "symbol", "market_cap", null, null, "volume_24h", {
+          deltaDisplay: "diff",
+        }),
+        mk("pareto", "Market-cap Pareto", "Cumulative share of total value", 90, "symbol", "market_cap", null, "max", null, { topN: 20 }),
+        mk("bar", "24h movers", "Who gained and lost the most today", 88, "symbol", "change_24h_pct", null, "max", null, { topN: 15 }),
+        mk("scatter", "Cap vs change · log Y", "Magnitude on a log scale", 86, "market_cap", "change_24h_pct", null, null, null, { yScale: "log" }),
+        mk("corrMatrix", "Market correlations", "Price · cap · volume · change", 84, "price_usd", "market_cap", null),
+        mk("treemap", "Market share", "Each coin's slice of the top 50", 82, "symbol", "market_cap", null, "max", null, { topN: 20 }),
+        mk("beeswarm", "Daily moves", "Every coin's 24h % change as a dot", 80, "symbol", "change_24h_pct", null),
+        mk("isoScatter", "Price · change · volume", "Pseudo-3D market space", 78, "price_usd", "change_24h_pct", "symbol", null, "volume_24h"),
       ]);
   }
 
   if (kind === "aq") {
     return finish("City air quality", [
         mk("geoBubbles", "AQI on the map", "Cities as pollution bubbles", 96, "longitude", "latitude", "city", null, "pm2_5"),
-        mk("bar", "PM2.5 by city", "Who is breathing the most fine particulate?", 95, "city", "pm2_5", null, "max", null, { topN: 12 }),
-        mk("pareto", "PM2.5 Pareto", "Which cities drive most of the load?", 93, "city", "pm2_5", null, "max", null, { topN: 15 }),
-        mk("bar", "European AQI", "Compare air quality index across cities", 90, "city", "european_aqi", null, "max", null, { topN: 12 }),
-        mk("scatter", "PM2.5 vs ozone", "Do pollutants move together?", 87, "pm2_5", "ozone", "city"),
-        mk("scatter", "PM2.5 vs ozone · residuals", "Cities off the linear fit", 85, "pm2_5", "ozone", "city", null, null, { residualOverlay: true }),
-        mk("corrMatrix", "Pollutant correlations", "PM2.5 · ozone · NO₂ · AQI", 83, "pm2_5", "ozone", null),
-        mk("bar", "NO₂ by city", "Traffic and combustion signal", 80, "city", "nitrogen_dioxide", null, "max", null, { topN: 12 }),
+        mk("pyramid", "PM2.5 ↔ ozone", "Mirror two pollutants by city · Δ labeled", 95, "city", "pm2_5", null, "sum", "ozone", {
+          pyramidScaleMode: "auto",
+          deltaDisplay: "diff",
+        }),
+        mk("dumbbell", "PM2.5 → AQI", "Particulate to European AQI · Δ labeled", 94, "city", "pm2_5", null, "mean", "european_aqi", {
+          topN: 12,
+          deltaDisplay: "diff",
+        }),
+        mk("slope", "PM2.5 → ozone", "Lean diagonal of co-pollutants · Δ labeled", 93, "city", "pm2_5", null, null, "ozone", {
+          deltaDisplay: "diff",
+        }),
+        mk("bar", "PM2.5 by city", "Who is breathing the most fine particulate?", 91, "city", "pm2_5", null, "max", null, { topN: 12 }),
+        mk("pareto", "PM2.5 Pareto", "Which cities drive most of the load?", 89, "city", "pm2_5", null, "max", null, { topN: 15 }),
+        mk("bar", "European AQI", "Compare air quality index across cities", 86, "city", "european_aqi", null, "max", null, { topN: 12 }),
+        mk("scatter", "PM2.5 vs ozone", "Do pollutants move together?", 84, "pm2_5", "ozone", "city"),
+        mk("scatter", "PM2.5 vs ozone · residuals", "Cities off the linear fit", 82, "pm2_5", "ozone", "city", null, null, { residualOverlay: true }),
+        mk("corrMatrix", "Pollutant correlations", "PM2.5 · ozone · NO₂ · AQI", 80, "pm2_5", "ozone", null),
+        mk("bar", "NO₂ by city", "Traffic and combustion signal", 78, "city", "nitrogen_dioxide", null, "max", null, { topN: 12 }),
       ]);
   }
 
@@ -471,11 +679,23 @@ export function recommendSourceStory(
   if (kind === "countries") {
     return finish("World countries", [
         mk("choropleth", "Population map", "Countries filled by population", 98, "cca3", "population", "region", "max"),
-        mk("bar", "Population leaders", "Most populous countries", 95, "name", "population", "region", "max", null, { topN: 15 }),
-        mk("bucketField", "Regions as fields", "Countries as dots in regional paddocks", 90, "region", "population", "region", null, "area"),
-        mk("glyphStar", "Country stars", "Multivariate star glyphs", 86, "name", "population", "area", null, "density"),
-        mk("isoBars", "Isometric population", "Fake-3D country blocks", 82, "name", "population", "region", "max", null, { topN: 15 }),
-        mk("waffle", "Region waffle", "Share of countries by region", 78, "region", null, null, "count"),
+        mk("pyramid", "Population ↔ area", "Mirror size by country · Auto scale · Δ labeled", 96, "name", "population", null, "sum", "area", {
+          topN: 14,
+          pyramidScaleMode: "auto",
+          deltaDisplay: "diff",
+        }),
+        mk("dumbbell", "Population → density", "People to crowding · Δ labeled", 95, "name", "population", null, "mean", "density", {
+          topN: 20,
+          deltaDisplay: "diff",
+        }),
+        mk("slope", "Population → area", "Lean diagonal of land vs people · Δ labeled", 94, "name", "population", null, null, "area", {
+          deltaDisplay: "diff",
+        }),
+        mk("bar", "Population leaders", "Most populous countries", 90, "name", "population", "region", "max", null, { topN: 15 }),
+        mk("bucketField", "Regions as fields", "Countries as dots in regional paddocks", 86, "region", "population", "region", null, "area"),
+        mk("glyphStar", "Country stars", "Multivariate star glyphs", 82, "name", "population", "area", null, "density"),
+        mk("isoBars", "Isometric population", "Fake-3D country blocks", 80, "name", "population", "region", "max", null, { topN: 15 }),
+        mk("waffle", "Region waffle", "Share of countries by region", 76, "region", null, null, "count"),
       ]);
   }
 
@@ -509,14 +729,28 @@ export function recommendSourceStory(
   if (kind === "covid") {
     return finish("COVID-19 by country", [
         mk("choropleth", "Cases world map", "Countries filled by cumulative cases", 98, "country", "cases", "continent", "max"),
-        mk("bar", "Cases leaders", "Highest cumulative cases", 95, "country", "cases", "continent", "max", null, { topN: 15, barStackMode: "grouped" }),
-        mk("pareto", "Cases Pareto", "Cumulative share of global cases", 94, "country", "cases", null, "max", null, { topN: 20 }),
-        mk("bar", "Continent totals", "Stacked cases by continent · top countries", 92, "continent", "cases", "country", "max", null, { topN: 8, barStackMode: "stacked" }),
-        mk("corrMatrix", "COVID correlations", "Cases · deaths · per-million rates", 90, "cases", "deaths", null),
-        mk("scatter", "Cases vs deaths · log Y", "Severity on a log scale", 88, "cases", "deaths", "continent", null, null, { yScale: "log" }),
-        mk("bucketField", "Continent paddocks", "Countries as dots in continental fields", 86, "continent", "cases", "continent", null, "deaths"),
-        mk("pyramid", "Cases ↔ deaths", "Mirror comparison by country", 84, "country", "cases", null, null, "deaths"),
-        mk("slope", "Cases → deaths", "Lean diagonal of severity", 82, "country", "cases_per_million", null, null, "deaths_per_million"),
+        mk("pyramid", "Cases ↔ deaths", "Mirror by country · Auto scale (separate when magnitudes diverge)", 96, "country", "cases", null, "sum", "deaths", {
+          topN: 14,
+          pyramidScaleMode: "auto",
+          deltaDisplay: "diff",
+        }),
+        mk("dumbbell", "Cases → deaths range", "Start/end dots per country · Δ labeled", 95, "country", "cases", null, "mean", "deaths", {
+          topN: 20,
+          deltaDisplay: "diff",
+        }),
+        mk("slope", "Cases → deaths", "Lean diagonal of severity · Δ labeled", 94, "country", "cases_per_million", null, null, "deaths_per_million", {
+          deltaDisplay: "diff",
+        }),
+        mk("pareto", "Cases Pareto", "Cumulative share of global cases", 93, "country", "cases", null, "max", null, { topN: 20 }),
+        mk("corrMatrix", "COVID correlations", "Cases · deaths · per-million rates", 92, "cases", "deaths", null),
+        mk("scatter", "Cases vs deaths · log Y", "Severity on a log scale", 90, "cases", "deaths", "continent", null, null, { yScale: "log" }),
+        mk("bar", "Cases leaders", "Highest cumulative cases", 88, "country", "cases", "continent", "max", null, { topN: 15, barStackMode: "grouped" }),
+        mk("pyramid", "Continent cases ↔ deaths", "Same-scale mirror so bar lengths compare", 86, "continent", "cases", null, "sum", "deaths", {
+          pyramidScaleMode: "shared",
+          deltaDisplay: "pct",
+        }),
+        mk("bar", "Continent totals", "Stacked cases by continent · top countries", 84, "continent", "cases", "country", "max", null, { topN: 8, barStackMode: "stacked" }),
+        mk("bucketField", "Continent paddocks", "Countries as dots in continental fields", 82, "continent", "cases", "continent", null, "deaths"),
         mk("mosaic", "Continent × country share", "Joint composition", 80, "continent", "cases", "country", "sum"),
       ]);
   }

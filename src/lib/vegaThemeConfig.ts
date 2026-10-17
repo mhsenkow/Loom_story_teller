@@ -3,32 +3,46 @@
 // =================================================================
 
 import { getThemeUiColors, type ThemeUiColors } from "./chartPalettes";
+import { chartFontStack } from "./fontCatalog";
+import { chartTypeRamp } from "./chartType";
+import { ensureContrast } from "./wcagColor";
 
-export function vegaConfigFromUi(ui: ThemeUiColors) {
+type Typography = { fontFamily?: string; axisFontSize?: number; titleFontWeight?: number; titleItalic?: boolean };
+
+export function vegaConfigFromUi(ui: ThemeUiColors, typography: Typography = {}) {
+  const type = chartTypeRamp(typography.axisFontSize);
+  const font = chartFontStack(typography.fontFamily);
   return {
+    font,
     background: "transparent",
     axis: {
-      labelColor: ui.label,
+      labelColor: ensureContrast(ui.label, ui.bg),
       titleColor: ui.text,
       gridColor: ui.border,
       domainColor: ui.border,
       tickColor: ui.border,
       labelLimit: 180,
-      labelFont: "Inter, system-ui, sans-serif",
-      labelFontSize: 11,
-      titleFontSize: 12,
+      labelFont: font,
+      titleFont: font,
+      labelFontSize: type.tick,
+      titleFontSize: type.axisField,
     },
     title: {
       color: ui.text,
-      fontSize: 14,
-      fontWeight: 600,
-      font: "Inter, system-ui, sans-serif",
+      fontSize: type.title,
+      subtitleFontSize: type.subtitle,
+      fontWeight: typography.titleFontWeight ?? 600,
+      fontStyle: typography.titleItalic ? "italic" : "normal",
+      font,
+      subtitleFont: font,
     },
     legend: {
       labelColor: ui.label,
       titleColor: ui.text,
-      labelFont: "Inter, system-ui, sans-serif",
-      labelFontSize: 11,
+      labelFont: font,
+      titleFont: font,
+      labelFontSize: type.legend,
+      titleFontSize: type.legendTitle,
     },
     view: { stroke: null },
   };
@@ -40,13 +54,13 @@ export function vegaBaseConfigForTheme(theme?: string | null) {
 }
 
 /** Opaque background + merged axis/title for SVG/file export. */
-export function vegaExportConfigForTheme(theme?: string | null) {
+export function vegaExportConfigForTheme(theme?: string | null, typography?: Typography) {
   const ui = getThemeUiColors(theme ?? "dark");
-  const base = vegaConfigFromUi(ui);
+  const base = vegaConfigFromUi(ui, typography);
   return {
     ...base,
     background: ui.bg,
-    axis: { ...base.axis, labelColor: ui.muted, titleColor: ui.text },
+    axis: { ...base.axis, titleColor: ui.text },
     title: { ...base.title, subtitleColor: ui.muted },
     legend: { ...base.legend, labelColor: ui.text, titleColor: ui.text, labelLimit: 180 },
   };

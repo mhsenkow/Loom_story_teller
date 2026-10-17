@@ -57,6 +57,40 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Visual inspector", () => {
+  it("changes space use and restores automatic sizing as one undoable edit", () => {
+    useLoomStore.setState({ chartVisualOverrides: { canvasWidth: .6, plotX: .2, plotY: .2, plotWidth: .5, plotHeight: .5, titleItalic: true } });
+    render(<ChartPanelTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Layout" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Space use" }), { target: { value: "fill" } });
+    expect(useLoomStore.getState().chartVisualOverrides.spaceUse).toBe("fill");
+    expect(useLoomStore.getState().chartVisualOverrides.canvasWidth).toBe(.6);
+    fireEvent.click(screen.getByRole("button", { name: "Restore automatic sizing" }));
+    expect(useLoomStore.getState().chartVisualOverrides.canvasWidth).toBeUndefined();
+    expect(useLoomStore.getState().chartVisualOverrides.plotWidth).toBeUndefined();
+    expect(useLoomStore.getState().chartVisualOverrides.titleItalic).toBe(true);
+    act(() => useLoomStore.getState().undoChartEdit());
+    expect(useLoomStore.getState().chartVisualOverrides.canvasWidth).toBe(.6);
+    expect(useLoomStore.getState().chartVisualOverrides.spaceUse).toBe("fill");
+  });
+
+  it("previews the current title, weight, italic, size, and effective device font", () => {
+    render(<ChartPanelTab />);
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Typography" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Font family" }), { target: { value: "Lora" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Chart text size" }), { target: { value: "16" } });
+    fireEvent.click(screen.getByRole("radio", { name: "Bold" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Title italic" }));
+    act(() => useLoomStore.setState({ chartTitleOverrides: { bar: "Revenue by region" } }));
+    const sample = screen.getByRole("group", { name: "Chart typography sample" });
+    expect(sample).toHaveStyle({ fontFamily: 'Georgia, "Times New Roman", serif', fontSize: "16px" });
+    expect(screen.getByTitle("Revenue by region")).toHaveStyle({ fontWeight: "700", fontStyle: "italic", fontSize: "22px" });
+    expect(screen.getByText(/Device typeface: Georgia/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Font settings" }));
+    expect(useLoomStore.getState().panelTab).toBe("settings");
+  });
+
   it("collapses and expands all sections and applies a palette as one undoable edit", () => {
     render(<ChartPanelTab />);
     fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));

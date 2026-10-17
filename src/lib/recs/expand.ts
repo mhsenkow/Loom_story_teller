@@ -20,6 +20,7 @@ import { type ChartRecommendation } from "./types";
 export function expandRecommendationsWithExtras(
   recs: ChartRecommendation[],
   columns: ColumnInfo[],
+  options?: { exhaustive?: boolean },
 ): ChartRecommendation[] {
   const nomCols = columns.filter((c) => inferType(c.data_type, c.name, c.min_value, c.max_value) === "nominal");
   const numCols = measureColumns(columns);
@@ -39,8 +40,13 @@ export function expandRecommendationsWithExtras(
     out.push(rec);
   };
 
-  for (const rec of recs.slice(0, 40)) {
-    let variantBudget = 3;
+  for (const rec of options?.exhaustive ? recs : recs.slice(0, 40)) {
+    // Dual-measure + mirror/slope/dumbbell need room for scale and Δ variants
+    // without starving Top N / facet on simpler charts.
+    let variantBudget = options?.exhaustive ? Infinity :
+      rec.kind === "pyramid" || rec.kind === "slope" || rec.kind === "dumbbell" || numCols.length >= 2
+        ? 5
+        : 3;
     const spendVariant = () => {
       if (variantBudget <= 0) return false;
       variantBudget -= 1;
@@ -363,11 +369,127 @@ export function expandRecommendationsWithExtras(
       });
     }
 
+    // Mirror pyramid — same vs separate scales + Δ labels
+    if (rec.kind === "pyramid" && rec.yField && rec.sizeField) {
+      if (!rec.pyramidScaleMode || rec.pyramidScaleMode === "auto") {
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-scale-shared`,
+          pyramidScaleMode: "shared",
+          subtitle: rec.subtitle ? `${rec.subtitle} · same scale` : "same scale (comparable lengths)",
+          score: Math.max(52, rec.score - 1),
+        });
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-scale-indep`,
+          pyramidScaleMode: "independent",
+          subtitle: rec.subtitle ? `${rec.subtitle} · separate scales` : "separate scales",
+          score: Math.max(51, rec.score - 2),
+        });
+      }
+      if (!rec.deltaDisplay || rec.deltaDisplay === "off") {
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-delta-diff`,
+          deltaDisplay: "diff",
+          subtitle: rec.subtitle ? `${rec.subtitle} · Δ labeled` : "Δ Right − Left",
+          score: Math.max(53, rec.score - 1),
+        });
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-delta-pct`,
+          deltaDisplay: "pct",
+          subtitle: rec.subtitle ? `${rec.subtitle} · % change` : "% change labeled",
+          score: Math.max(52, rec.score - 2),
+        });
+      }
+    }
+
+    // Slope / dumbbell — Δ and % labels
+    if ((rec.kind === "slope" || rec.kind === "dumbbell") && rec.yField && rec.sizeField) {
+      if (!rec.deltaDisplay || rec.deltaDisplay === "off") {
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-delta-diff`,
+          deltaDisplay: "diff",
+          subtitle: rec.subtitle ? `${rec.subtitle} · Δ labeled` : "Δ End − Start",
+          score: Math.max(53, rec.score - 1),
+        });
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-delta-pct`,
+          deltaDisplay: "pct",
+          subtitle: rec.subtitle ? `${rec.subtitle} · % change` : "% change labeled",
+          score: Math.max(51, rec.score - 2),
+        });
+      }
+    }
+
+    // Promote dual numerics → dumbbell / slope / pyramid when schema fits
+    if (
+      (rec.kind === "bar" || rec.kind === "scatter" || rec.kind === "lollipop") &&
+      rec.yField &&
+      numCols.length >= 2
+    ) {
+      const nomOk =
+        (columns.find((c) => c.name === rec.xField)?.distinct_count ?? 0) >= 2 &&
+        (columns.find((c) => c.name === rec.xField)?.distinct_count ?? 99) <= 40;
+      const other = numCols.find((c) => c.name !== rec.yField)?.name;
+      if (nomOk && other) {
+        if (oddChartDataSupport(columns, "pyramid").ok) {
+          const pyr = buildOddChartRec("pyramid", columns, rec.xField, rec.yField, null, "data", {
+            sizeField: other,
+            yAggregate: "sum",
+          });
+          if (pyr) {
+            pushVariant({
+              ...pyr,
+              id: `${rec.id}-as-pyramid`,
+              pyramidScaleMode: "auto",
+              deltaDisplay: "diff",
+              topN: rec.topN ?? 14,
+              subtitle: `mirror ${rec.yField} ↔ ${other}`,
+              score: Math.max(56, rec.score - 4),
+            });
+          }
+        }
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-as-dumbbell`,
+          kind: "dumbbell",
+          sizeField: other,
+          colorField: null,
+          rowField: null,
+          barStackMode: null,
+          yAggregate: "mean",
+          deltaDisplay: "diff",
+          title: `${rec.yField} → ${other} by ${rec.xField}`,
+          subtitle: "dumbbell — start to end · Δ labeled",
+          score: Math.max(55, rec.score - 5),
+        });
+        if (oddChartDataSupport(columns, "slope").ok) {
+          const sl = buildOddChartRec("slope", columns, rec.xField, rec.yField, null, "data", {
+            sizeField: other,
+          });
+          if (sl) {
+            pushVariant({
+              ...sl,
+              id: `${rec.id}-as-slope`,
+              deltaDisplay: "diff",
+              subtitle: `slope ${rec.yField} → ${other}`,
+              score: Math.max(54, rec.score - 5),
+            });
+          }
+        }
+      }
+    }
+
     // Time windows — slice recent rows independent of the X axis
     if (!rec.timeWindow || rec.timeWindow === "all") {
       const twField = pickDefaultTimeField(columns, rec);
       if (twField) {
-        const windows = suggestedChartTimeWindows(twField).slice(0, 2);
+        const suggested = suggestedChartTimeWindows(twField);
+        const windows = options?.exhaustive ? suggested : suggested.slice(0, 2);
         windows.forEach((range, i) => {
           const label = chartTimeWindowLabel(
             range,

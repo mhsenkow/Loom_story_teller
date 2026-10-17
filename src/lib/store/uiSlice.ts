@@ -49,6 +49,7 @@ export function uiInitialState() {
     socialPresetId: "ig-square" as SocialPresetId,
     shareSheetOpen: false,
     whatsNewOpen: false,
+    discoverReturnPath: null as string | null,
     // Live stream
     streamRunning: false,
     streamTotalEvents: 0,
@@ -111,6 +112,7 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
     setExportSupersample: (v: 1 | 2) => set({ exportSupersample: v }),
     setSocialPresetId: (id: SocialPresetId) => set({ socialPresetId: id }),
     setShareSheetOpen: (v: boolean) => set({ shareSheetOpen: v }),
+    setDiscoverReturnPath: (path: string | null) => set({ discoverReturnPath: path }),
     setWhatsNewOpen: (v: boolean) => set({ whatsNewOpen: v }),
     setStreamStatus: (status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; wikis_seen: number; started_at: number | null }) =>
       set({ streamRunning: status.running, streamTotalEvents: status.total_events, streamEventsPerSec: status.events_per_sec, streamBufferRows: status.buffer_rows, streamWikisSeen: status.wikis_seen, streamStartedAt: status.started_at }),

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chartFootnoteReservePx, drawChartTicks } from "../chartLooks";
+import { chartFootnoteReservePx, drawChartTicks, drawChartTitleBlock } from "../chartLooks";
 
 function mockCtx() {
   const texts: { x: number; y: number; label: string }[] = [];
@@ -63,6 +63,14 @@ function mockCtx() {
 }
 
 describe("drawChartTicks (LOOM-675)", () => {
+  it("keeps a short phone preview title on one line without narrowing it to the axis gutters", () => {
+    const { ctx, texts } = mockCtx();
+    drawChartTitleBlock(ctx, 344, 250, 70, "A long but readable chart title", "Source perspective", { axisFontSize: 16 });
+    // This title measures 210px: it fits a phone heading, but not a 204px plot.
+    expect(texts).toHaveLength(2);
+    expect(texts[0].label).toBe("A long but readable chart title");
+    expect(texts[0].y).toBeLessThan(texts[1].y);
+  });
   it("skips overlapping x labels when rotation is 0", () => {
     const { ctx, texts } = mockCtx();
     drawChartTicks(ctx, 0, 100, 0, 1, 400, 200, 40, { tickCount: 12 }, { y: false });

@@ -19,6 +19,7 @@ export const CHART_KIND_VERNACULAR: Partial<Record<string, string>> = {
   bar: "column compare categories categorical ranking ranking bars grouped bar chart",
   lollipop: "dot plot stem ranking sparse categories",
   dumbbell: "before after gap pair compare two points range",
+  pyramid: "mirror tornado population pyramid opposing bars same scale separate scales age sex cases deaths",
   area: "filled trend cumulative volume stacked area stream",
   pie: "donut share part whole composition percentage breakdown pie chart",
   funnel: "conversion stages dropoff pipeline drop-off",

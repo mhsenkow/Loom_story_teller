@@ -6,11 +6,11 @@ import type { QueryResult } from "./store";
 import { applyChartTimeWindow } from "./chartTime";
 import type { ChartRecommendation } from "./recommendations";
 
-const rowCache = new Map<string, unknown[][]>();
+const rowCache = new WeakMap<QueryResult, Map<string, unknown[][]>>();
 const bitmapCache = new Map<string, ImageBitmap | null>();
 
-function datasetKey(data: QueryResult, rec: ChartRecommendation): string {
-  return `${data.columns.join("\0")}|${data.rows.length}|${rec.timeWindow ?? ""}|${rec.xField}`;
+function datasetKey(rec: ChartRecommendation): string {
+  return `${rec.timeWindow ?? ""}|${rec.timeWindowField ?? ""}`;
 }
 
 export function downsampledRowsForThumb(
@@ -18,16 +18,18 @@ export function downsampledRowsForThumb(
   rec: ChartRecommendation,
   maxPoints = 1500,
 ): unknown[][] {
-  const key = datasetKey(data, rec);
-  const hit = rowCache.get(key);
+  const key = `${datasetKey(rec)}|${maxPoints}`;
+  const datasetCache = rowCache.get(data) ?? new Map<string, unknown[][]>();
+  const hit = datasetCache.get(key);
   if (hit) return hit;
   const timed = applyChartTimeWindow(data.rows, data.columns, rec).rows;
-  const stride = Math.max(1, Math.ceil(timed.length / maxPoints));
+  const stride = Math.max(1, Math.ceil(timed.length / Math.max(1, maxPoints)));
   const rows = stride === 1 ? timed : timed.filter((_, i) => i % stride === 0);
-  rowCache.set(key, rows);
-  if (rowCache.size > 24) {
-    const first = rowCache.keys().next().value;
-    if (first) rowCache.delete(first);
+  datasetCache.set(key, rows);
+  rowCache.set(data, datasetCache);
+  if (datasetCache.size > 24) {
+    const first = datasetCache.keys().next().value;
+    if (first) datasetCache.delete(first);
   }
   return rows;
 }

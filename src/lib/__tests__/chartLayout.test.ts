@@ -74,7 +74,7 @@ describe("chartLayout", () => {
   });
 
   it("contrastingInk picks dark ink on light fills", () => {
-    expect(contrastingInk("#f5f5f0")).toBe("#0a0a0c");
+    expect(contrastingInk("#f5f5f0")).toBe("#000000");
     expect(contrastingInk("#1a1030")).toBe("#ffffff");
     expect(isLightHex("#f2f2f0")).toBe(true);
     expect(isLightHex("#0a0a0c")).toBe(false);

@@ -9,97 +9,170 @@
 
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Dialog } from "@/components/ui/Dialog";
 import { useLoomStore } from "@/lib/store";
 import { openDataSources } from "@/components/StartHere";
-import { ChartCard } from "@/components/ChartCard";
-import { DiscoverSourceLink } from "@/components/DiscoverSourceLink";
+import { DiscoverStoryCard } from "@/components/DiscoverStoryCard";
+import {
+  DISCOVER_PAGE_SIZE,
+  DISCOVER_SETTING_FILTERS,
+  discoverChartLabel,
+  matchesDiscoverSearch,
+  matchesDiscoverSetting,
+  rankDiscoverStories,
+  groupDiscoverStories,
+  type DiscoverSettingFilter,
+} from "@/lib/discoverPresentation";
 import {
   scanDiscoverStories,
+  refreshDiscoverStories,
+  requestDiscoverScan,
   getDiscoverScanSummary,
+  applyDiversityFilters,
   DISCOVER_SEEN_KEY,
   discoverStoryLimit,
   getDiscoverStoryCache,
+  getDiscoverCacheSavedAt,
+  consumeDiscoverRefreshRequest,
   setDiscoverStoryCache,
-  clearDiscoverStoryCache,
   retainDiscoverFeed,
-  stopDiscoverProbes,
   consumeDiscoverForceRequest,
   type DiscoverStory,
+  type DiscoverKind,
 } from "@/lib/discoverStories";
-import { activateDataset, shortlistFor, type DatasetShortlist } from "@/lib/datasetPipeline";
-import { ALL_SOURCE_KINDS, sourceSnapshot, sourceStart, sourceStatus, streamStart, streamStatus } from "@/lib/tauri";
-import { SOURCE_BY_KIND, SOURCE_EXPLORE_ROWS } from "@/lib/sourceRegistry";
-import { ODD_CHART_KIND_OPTIONS } from "@/lib/oddCharts";
-import { GEO_MAP_KIND_OPTIONS, isGeoFamilyKind } from "@/lib/geoMaps";
-import { resolveStartupIntent, shouldOpenOnboarding } from "@/lib/startupIntent";
+import { activateDataset } from "@/lib/datasetPipeline";
+import {
+  isDiscoverCacheFresh,
+  readDiscoverDailyCache,
+  writeDiscoverDailyCache,
+} from "@/lib/discoverDailyCache";
+import {
+  ALL_SOURCE_KINDS,
+  sourceStart,
+  sourceStatus,
+  streamStart,
+  streamStatus,
+} from "@/lib/tauri";
+import { SOURCE_BY_KIND } from "@/lib/sourceRegistry";
+import {
+  discoverAffinityMap,
+  HIDDEN_RANK_PENALTY,
+} from "@/lib/sourcePreferences";
+import { isGeoFamilyKind } from "@/lib/geoMaps";
+import { DISCOVER_FAMILIES, discoverFamily } from "@/lib/discoverChartCatalog";
+import { discoverSpotlights } from "@/lib/discoverRanking";
+import {
+  resolveStartupIntent,
+  shouldOpenOnboarding,
+} from "@/lib/startupIntent";
 import { getLastSession } from "@/lib/persist";
+import { editorialDiscoverStory } from "@/lib/discoverEditorial";
+import {
+  planDiscoverRefresh,
+  discoverFreshness,
+} from "@/lib/discoverFreshness";
+import {
+  changedDiscoverKinds,
+  withDiscoverCheckTimes,
+  stampDiscoverDataChanges,
+} from "@/lib/discoverUpdates";
+import {
+  readDiscoverBrowseState,
+  saveDiscoverBrowseState,
+  type DiscoverBrowseState,
+  type DiscoverLayout,
+  type DiscoverSort,
+} from "@/lib/discoverBrowseState";
 
-type SortMode = "score" | "category" | "chart" | "source" | "name";
+type SortMode = DiscoverSort;
+type GalleryLayout = DiscoverLayout;
+const GALLERY_LAYOUTS: {
+  value: GalleryLayout;
+  label: string;
+  icon: string;
+  description: string;
+}[] = [
+  {
+    value: "flow",
+    label: "Flow",
+    icon: "▦",
+    description: "A mix of large and small stories",
+  },
+  {
+    value: "tiles",
+    label: "Tiles",
+    icon: "⊞",
+    description: "An even grid with square chart previews",
+  },
+  {
+    value: "masonry",
+    label: "Masonry",
+    icon: "▥",
+    description: "A compact wall of stories",
+  },
+  {
+    value: "list",
+    label: "List",
+    icon: "☰",
+    description: "Quickly scan stories in rows",
+  },
+];
 const SORT_LABELS: Record<SortMode, string> = {
-  score: "Best match",
+  score: "Recommended",
   category: "Category",
   source: "Source",
   chart: "Chart type",
   name: "Name A–Z",
 };
 
-const CHART_KIND_LABELS: Record<string, string> = Object.fromEntries([
-  ...ODD_CHART_KIND_OPTIONS.map((o) => [o.value, o.label] as const),
-  ...GEO_MAP_KIND_OPTIONS.map((o) => [o.value, o.label] as const),
-  ["bar", "Bar"],
-  ["line", "Line"],
-  ["area", "Area"],
-  ["scatter", "Scatter"],
-  ["bubble", "Bubble"],
-  ["histogram", "Histogram"],
-  ["heatmap", "Heatmap"],
-  ["pie", "Pie"],
-  ["box", "Box"],
-  ["strip", "Strip"],
-  ["violin", "Violin"],
-  ["hexbin", "Hexbin"],
-  ["lollipop", "Lollipop"],
-  ["dumbbell", "Dumbbell"],
-  ["treemap", "Treemap"],
-  ["sunburst", "Sunburst"],
-  ["sankey", "Sankey"],
-  ["network", "Network"],
-  ["arcDiagram", "Arc diagram"],
-  ["radar", "Radar"],
-  ["choropleth", "Choropleth"],
-  ["forceBubble", "Force bubble"],
-  ["bucketField", "Bucket field"],
-  ["waterfall", "Waterfall"],
-  ["ridgeline", "Ridgeline"],
-  ["funnel", "Funnel"],
-  ["parallel", "Parallel"],
-  ["scatter3d", "Orbit 3D"],
-  ["trailRibbon", "Trail ribbons"],
-  ["quakeTerrain", "Quake terrain"],
-  ["firefly", "Firefly"],
-  ["loomWeave", "Loom weave"],
-  ["dataCube", "Data cube"],
-]);
-
-function chartKindLabel(kind: string): string {
-  if (kind === "maps") return "Maps";
-  return CHART_KIND_LABELS[kind] ?? kind;
-}
-
 export function Onboarding() {
+  const [initialBrowse] = useState(readDiscoverBrowseState);
   const [show, setShow] = useState<boolean | null>(null);
   const [phase, setPhase] = useState<"scan" | "ready" | "error">("scan");
   const [stories, setStories] = useState<DiscoverStory[]>([]);
+  const storiesRef = useRef(stories);
+  storiesRef.current = stories;
+  const [search, setSearch] = useState(initialBrowse.search);
+  const deferredSearch = useDeferredValue(search);
+  const [settingFilter, setSettingFilter] = useState<DiscoverSettingFilter>(
+    initialBrowse.settingFilter,
+  );
+  const [shownCount, setShownCount] = useState(initialBrowse.shownCount);
+  const [scanning, setScanning] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(initialBrowse.filtersOpen);
+  const [layout, setLayout] = useState<GalleryLayout>(initialBrowse.layout);
+  const [pendingStories, setPendingStories] = useState<DiscoverStory[] | null>(
+    null,
+  );
+  const [now, setNow] = useState(Date.now);
+  // Check labels tick independently; freshness ranking changes only when picks are accepted.
+  const [rankedAt, setRankedAt] = useState(Date.now);
+  const [chosenVariants, setChosenVariants] = useState<Record<string, string>>(
+    {},
+  );
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+  const openingRef = useRef(false);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [scannedHint, setScannedHint] = useState(
     `Scanning ${ALL_SOURCE_KINDS.length + 1} live feeds…`,
   );
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [chartFilter, setChartFilter] = useState<string>("all");
-  const [sourceFilter, setSourceFilter] = useState<string>("all");
-  const [sortMode, setSortMode] = useState<SortMode>("score");
+  const [categoryFilter, setCategoryFilter] = useState(
+    initialBrowse.categoryFilter,
+  );
+  const [chartFilter, setChartFilter] = useState(initialBrowse.chartFilter);
+  const [sourceFilter, setSourceFilter] = useState(initialBrowse.sourceFilter);
+  const [sortMode, setSortMode] = useState<SortMode>(initialBrowse.sortMode);
+  const [showHiddenSources, setShowHiddenSources] = useState(false);
+  const sourcePrefs = useLoomStore((s) => s.sourcePrefs);
   const whatsNewOpen = useLoomStore((s) => s.whatsNewOpen);
   const setViewMode = useLoomStore((s) => s.setViewMode);
   const setPanelTab = useLoomStore((s) => s.setPanelTab);
@@ -108,110 +181,197 @@ export function Onboarding() {
   const setDataSourcesExpanded = useLoomStore((s) => s.setDataSourcesExpanded);
   const setToast = useLoomStore((s) => s.setToast);
   const scanAbortRef = useRef<AbortController | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const galleryRef = useRef<HTMLUListElement>(null);
+  const scrollPositionRef = useRef(initialBrowse.scrollTop);
+  const browseRef = useRef<DiscoverBrowseState>(initialBrowse);
+  const showRef = useRef(show);
+  useEffect(() => {
+    showRef.current = show;
+  }, [show]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    let cancelled = false;
-    /** Bumps on each scan so a slow prior scan can’t wipe a newer one (or clear progressive cards). */
-    let scanGen = 0;
+    browseRef.current = {
+      search,
+      categoryFilter,
+      chartFilter,
+      sourceFilter,
+      settingFilter,
+      sortMode,
+      layout,
+      filtersOpen,
+      shownCount,
+      scrollTop: scrollPositionRef.current,
+    };
+    saveDiscoverBrowseState(browseRef.current);
+  }, [
+    search,
+    categoryFilter,
+    chartFilter,
+    sourceFilter,
+    settingFilter,
+    sortMode,
+    layout,
+    filtersOpen,
+    shownCount,
+  ]);
+  useEffect(() => {
+    const save = () =>
+      saveDiscoverBrowseState({
+        ...browseRef.current,
+        scrollTop: scrollPositionRef.current,
+      });
+    window.addEventListener("pagehide", save);
+    return () => {
+      save();
+      window.removeEventListener("pagehide", save);
+    };
+  }, []);
 
-    const applyStories = (list: DiscoverStory[], scanning: boolean) => {
-      setStories(list);
-      setPhase(list.length ? "ready" : scanning ? "scan" : "error");
-      if (!list.length) return;
-      const sources = new Set(list.map((s) => s.kind)).size;
+  useEffect(() => {
+    let cancelled = false;
+    let generation = 0;
+    let lastAttempt = 0;
+    let warmup: number | undefined;
+    let hydration: ReturnType<typeof readDiscoverDailyCache> | null = null;
+
+    const applyStories = (list: DiscoverStory[]) => {
+      setStories(list.map(editorialDiscoverStory));
+      setRankedAt(Date.now());
+      setPendingStories(null);
+      setSavedAt(getDiscoverCacheSavedAt());
+      setPhase(list.length ? "ready" : "scan");
       setScannedHint(
-        `${list.length} stories · ${sources}/${ALL_SOURCE_KINDS.length + 1} feeds`,
+        `${new Set(list.map((story) => story.kind)).size} sources · ${list.length} chart ideas`,
       );
     };
-
-    const runScan = (opts?: { force?: boolean }) => {
-      const gen = ++scanGen;
-      scanAbortRef.current?.abort();
-      const scanAbort = new AbortController();
-      scanAbortRef.current = scanAbort;
-      setShow(true);
-      setCategoryFilter("all");
-      setChartFilter("all");
-      setSourceFilter("all");
-      setSortMode("score");
-
-      // Reopen: show the last scan from memory instead of clearing and waiting again.
-      // Explicit “What’s interesting” taps pass force so a partial cache can’t stick.
-      if (opts?.force) clearDiscoverStoryCache();
-      const cached = !opts?.force ? getDiscoverStoryCache() : null;
-      if (cached?.length) {
-        applyStories(cached, false);
+    const hydrate = async () => {
+      if (getDiscoverStoryCache()?.length) return;
+      hydration ??= readDiscoverDailyCache();
+      const stored = await hydration;
+      if (stored && !getDiscoverStoryCache()?.length)
+        setDiscoverStoryCache(stored.stories, stored.savedAt);
+    };
+    const runScan = async (
+      opts: { refresh?: boolean; background?: boolean } = {},
+    ) => {
+      if (!opts.background) {
+        setShow(true);
+      }
+      if (scanAbortRef.current) return;
+      const warm = getDiscoverStoryCache();
+      const mayReplace =
+        !opts.background || !showRef.current || !storiesRef.current.length;
+      if (warm?.length && mayReplace) applyStories(warm);
+      await hydrate();
+      if (cancelled) return;
+      const cached = getDiscoverStoryCache();
+      if (cached?.length && mayReplace) applyStories(cached);
+      if (scanAbortRef.current) return;
+      if (!opts.refresh && isDiscoverCacheFresh(getDiscoverCacheSavedAt())) {
+        setScanning(false);
         return;
       }
-
-      setPhase("scan");
-      setStories([]);
-      setScannedHint(`Scanning ${ALL_SOURCE_KINDS.length + 1} live feeds…`);
-      void (async () => {
-        try {
-          const found = await scanDiscoverStories({
-            limit: discoverStoryLimit(),
-            includeWiki: true,
-            signal: scanAbort.signal,
-            onStory: (_story, soFar) => {
-              if (cancelled || scanAbort.signal.aborted || gen !== scanGen) return;
-              setDiscoverStoryCache(soFar);
-              applyStories(soFar, true);
-            },
-          });
-          if (cancelled || scanAbort.signal.aborted || gen !== scanGen) return;
-          if (found.length) {
-            setDiscoverStoryCache(found);
-            applyStories(found, false);
-            const summary = getDiscoverScanSummary();
-            const sources = new Set(found.map((s) => s.kind)).size;
-            const totalFeeds = ALL_SOURCE_KINDS.length + 1;
-            const unavailable =
-              summary.failedKinds.length +
-              summary.timedOutKinds.length +
-              summary.emptyKinds.length +
-              (summary.wikiFailed || summary.wikiTimedOut ? 1 : 0);
-            if (unavailable > 0 || sources < Math.min(8, totalFeeds)) {
-              setScannedHint(
-                `${found.length} stories · ${sources}/${totalFeeds} feeds` +
-                  (unavailable > 0 ? ` · ${unavailable} unavailable` : ""),
-              );
-            }
-            return;
-          }
-          // Don’t wipe cards that already streamed in if the final pass is empty.
-          setStories((prev) => {
-            if (prev.length) {
-              setDiscoverStoryCache(prev);
-              setPhase("ready");
-              return prev;
-            }
-            setPhase("error");
-            return prev;
-          });
-        } catch {
-          if (!cancelled && !scanAbort.signal.aborted && gen === scanGen) {
-            setPhase((p) => (p === "ready" ? p : "error"));
-          }
-        } finally {
-          if (scanAbortRef.current === scanAbort) scanAbortRef.current = null;
+      if (!opts.refresh && lastAttempt && Date.now() - lastAttempt < 300_000)
+        return;
+      lastAttempt = Date.now();
+      const gen = ++generation;
+      const abort = new AbortController();
+      scanAbortRef.current = abort;
+      setScanning(true);
+      if (!cached?.length) setPhase("scan");
+      try {
+        const found = await scanDiscoverStories({
+          limit: discoverStoryLimit(),
+          includeWiki: true,
+          signal: abort.signal,
+          commitCache: false,
+          onStory: (_story, soFar) => {
+            if (
+              cancelled ||
+              abort.signal.aborted ||
+              gen !== generation ||
+              cached?.length
+            )
+              return;
+            setDiscoverStoryCache(soFar, null);
+            applyStories(soFar);
+          },
+        });
+        if (cancelled || abort.signal.aborted || gen !== generation) return;
+        if (found.length) {
+          const supplied = new Set(found.map((story) => story.kind));
+          const merged = applyDiversityFilters(
+            stampDiscoverDataChanges(cached ?? [], [
+              ...found,
+              ...(cached ?? [])
+                .filter((story) => !supplied.has(story.kind))
+                .map((story) => ({ ...story, snapshotCached: true })),
+            ]),
+            discoverStoryLimit(),
+          );
+          setDiscoverStoryCache(merged);
+          void writeDiscoverDailyCache(
+            merged,
+            getDiscoverCacheSavedAt() ?? Date.now(),
+          );
+          if (
+            cached?.length &&
+            showRef.current &&
+            changedDiscoverKinds(storiesRef.current, merged).size
+          )
+            setPendingStories(merged);
+          else if (cached?.length && showRef.current) {
+            setStories(withDiscoverCheckTimes(storiesRef.current, merged));
+            setPendingStories(null);
+          } else applyStories(merged);
+          const summary = getDiscoverScanSummary();
+          const unavailable =
+            summary.failedKinds.length +
+            summary.timedOutKinds.length +
+            summary.emptyKinds.length +
+            (summary.wikiFailed || summary.wikiTimedOut ? 1 : 0);
+          if (unavailable && !(cached?.length && showRef.current))
+            setScannedHint(
+              `${new Set(found.map((story) => story.kind)).size} sources · ${found.length} chart ideas · ${unavailable} unavailable`,
+            );
+        } else if (cached?.length) {
+          setScannedHint("Couldn’t refresh · showing saved picks");
+        } else setPhase("error");
+      } catch {
+        if (!cancelled && !abort.signal.aborted) {
+          if (cached?.length)
+            setScannedHint("Couldn’t refresh · showing saved picks");
+          else setPhase("error");
         }
-      })();
+      } finally {
+        if (scanAbortRef.current === abort) {
+          scanAbortRef.current = null;
+          if (!cancelled) setScanning(false);
+        }
+      }
     };
-
-    const id = window.setTimeout(() => {
-      // Explicit tap often mounts us after the event already fired — honor that.
+    const onRequest = () => {
+      consumeDiscoverForceRequest();
+      void runScan({ refresh: consumeDiscoverRefreshRequest() });
+    };
+    const onDailyCheck = () => {
+      if (
+        document.visibilityState === "visible" &&
+        !isDiscoverCacheFresh(getDiscoverCacheSavedAt())
+      )
+        void runScan({ background: true });
+    };
+    const initial = window.setTimeout(() => {
       if (consumeDiscoverForceRequest()) {
-        runScan({ force: true });
+        void runScan({ refresh: consumeDiscoverRefreshRequest() });
         return;
       }
       let hasDiscoverSeen = false;
       try {
         hasDiscoverSeen = !!window.localStorage.getItem(DISCOVER_SEEN_KEY);
       } catch {
-        setShow(false);
-        return;
+        /* private mode still supports discovery */
       }
       const intent = resolveStartupIntent({
         hash: window.location.hash,
@@ -219,31 +379,32 @@ export function Onboarding() {
         hasLastSession: !!getLastSession()?.filePath,
         neospaceHandoff: window.location.search.includes("neospace=1"),
       });
-      if (!shouldOpenOnboarding(intent)) {
-        setShow(false);
-        return;
+      const open = shouldOpenOnboarding(intent);
+      setShow(open);
+      if (open) void runScan();
+      else {
+        void hydrate().then(() => {
+          if (cancelled) return;
+          const cached = getDiscoverStoryCache();
+          if (cached?.length) applyStories(cached);
+        });
+        // Give a resumed/shared chart the first paint and network slots.
+        warmup = window.setTimeout(onDailyCheck, 5_000);
       }
-      runScan();
     }, 0);
-
-    const onForce = () => {
-      try {
-        window.localStorage.removeItem(DISCOVER_SEEN_KEY);
-      } catch {
-        /* ignore */
-      }
-      // Listener path already received the event; drop the pending flag.
-      consumeDiscoverForceRequest();
-      runScan({ force: true });
-    };
-    window.addEventListener("loom-discover", onForce);
-
+    const daily = window.setInterval(onDailyCheck, 60_000);
+    window.addEventListener("loom-discover", onRequest);
+    document.addEventListener("visibilitychange", onDailyCheck);
     return () => {
       cancelled = true;
-      scanGen += 1;
+      generation += 1;
       scanAbortRef.current?.abort();
-      window.clearTimeout(id);
-      window.removeEventListener("loom-discover", onForce);
+      scanAbortRef.current = null;
+      window.clearTimeout(initial);
+      window.clearTimeout(warmup);
+      window.clearInterval(daily);
+      window.removeEventListener("loom-discover", onRequest);
+      document.removeEventListener("visibilitychange", onDailyCheck);
     };
   }, []);
 
@@ -266,19 +427,48 @@ export function Onboarding() {
   const chartKinds = useMemo(() => {
     const set = new Set<string>();
     for (const s of stories) set.add(s.chartKind);
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    return Array.from(set).sort((a, b) =>
+      discoverChartLabel(a).localeCompare(discoverChartLabel(b)),
+    );
   }, [stories]);
 
+  // ♥ / Less / Hide per feed — display-only; story.score (and the daily cache) stay untouched.
+  const sourceAffinity = useMemo(
+    () =>
+      discoverAffinityMap(
+        [...new Set(stories.map((s) => s.kind))],
+        sourcePrefs,
+      ),
+    [stories, sourcePrefs],
+  );
+  const hiddenSourceCount = useMemo(
+    () =>
+      Object.values(sourceAffinity).filter((v) => v === HIDDEN_RANK_PENALTY)
+        .length,
+    [sourceAffinity],
+  );
+
   const visible = useMemo(() => {
-    let list = stories;
+    if (show !== true) return [];
+    let list = stories.filter(
+      (story) =>
+        matchesDiscoverSearch(story, deferredSearch) &&
+        matchesDiscoverSetting(story.chart, settingFilter),
+    );
     if (categoryFilter !== "all") {
       list = list.filter((s) => s.category === categoryFilter);
     }
     if (sourceFilter !== "all") {
       list = list.filter((s) => s.kind === sourceFilter);
+    } else if (!showHiddenSources && hiddenSourceCount) {
+      list = list.filter((s) => sourceAffinity[s.kind] !== HIDDEN_RANK_PENALTY);
     }
     if (chartFilter === "maps") {
       list = list.filter((s) => isGeoFamilyKind(s.chartKind));
+    } else if (chartFilter.startsWith("family:")) {
+      list = list.filter(
+        (s) => discoverFamily(s.chartKind) === chartFilter.slice(7),
+      );
     } else if (chartFilter !== "all") {
       list = list.filter((s) => s.chartKind === chartFilter);
     }
@@ -305,118 +495,188 @@ export function Onboarding() {
       }
     });
     return sorted;
-  }, [stories, categoryFilter, sourceFilter, chartFilter, sortMode]);
+  }, [
+    stories,
+    sourceAffinity,
+    hiddenSourceCount,
+    showHiddenSources,
+    categoryFilter,
+    sourceFilter,
+    chartFilter,
+    sortMode,
+    deferredSearch,
+    settingFilter,
+    show,
+  ]);
 
-  const dismiss = () => {
+  const groups = useMemo(() => {
+    const questions = groupDiscoverStories(visible);
+    if (sortMode !== "score") return questions;
+    const byStory = new Map(
+      questions.map((group) => [group.stories[0]!, group]),
+    );
+    return rankDiscoverStories([...byStory.keys()], (story) => {
+      const affinity = sourceAffinity[story.kind] ?? 0;
+      const fresh = story.dataChangedAt
+        ? Math.max(
+            0,
+            Math.min(1, 1 - (rankedAt - story.dataChangedAt) / 900_000),
+          ) * 4
+        : 0;
+      return (
+        story.score + (affinity === HIDDEN_RANK_PENALTY ? 0 : affinity) + fresh
+      );
+    }).map((story) => byStory.get(story)!);
+  }, [visible, sortMode, sourceAffinity, rankedAt]);
+  const spotlights = useMemo(
+    () => discoverSpotlights(groups.map((g) => g.stories[0]!)),
+    [groups],
+  );
+  const familyCounts = useMemo(() => {
+    const counts = new Map<string, Set<string>>();
+    for (const story of stories) {
+      if (
+        !showHiddenSources &&
+        sourceAffinity[story.kind] === HIDDEN_RANK_PENALTY
+      )
+        continue;
+      const family = discoverFamily(story.chartKind);
+      const sources = counts.get(family) ?? new Set<string>();
+      sources.add(story.kind);
+      counts.set(family, sources);
+    }
+    return counts;
+  }, [stories, sourceAffinity, showHiddenSources]);
+  const chooseVariant = useCallback((groupId: string, storyId: string) => {
+    setChosenVariants((previous) => ({ ...previous, [groupId]: storyId }));
+  }, []);
+
+  const dismiss = useCallback(() => {
+    scrollPositionRef.current =
+      scrollRef.current?.scrollTop ?? scrollPositionRef.current;
+    saveDiscoverBrowseState({
+      ...browseRef.current,
+      scrollTop: scrollPositionRef.current,
+    });
     try {
       window.localStorage.setItem(DISCOVER_SEEN_KEY, "1");
     } catch {
       /* ignore */
     }
-    scanAbortRef.current?.abort();
-    void stopDiscoverProbes();
     setShow(false);
-  };
+  }, []);
 
-  const openStory = async (
-    story: DiscoverStory,
-    opts?: { dest?: "chart" | "inspect" },
-  ) => {
-    const dest = opts?.dest ?? "chart";
-    scanAbortRef.current?.abort();
-    retainDiscoverFeed(story.kind);
-    setOpeningId(story.id);
-    try {
+  const openStory = useCallback(
+    (story: DiscoverStory, opts?: { dest?: "chart" | "inspect" }) => {
+      if (openingRef.current) return;
+      openingRef.current = true;
+      const dest = opts?.dest ?? "chart";
+      retainDiscoverFeed(story.kind);
+      setOpeningId(story.id);
       try {
-        if (story.kind === "wiki") {
-          const s0 = await streamStatus();
-          if (!s0.running) await streamStart();
-          const s = await streamStatus();
-          useLoomStore.getState().setStreamStatus(s);
+        // Keep the evidence people selected stable while its feed reconnects.
+        const { stats, sample } = story;
+        const file = {
+          path: story.streamPath,
+          name: story.fileName,
+          extension: "stream",
+          row_count: sample.total_rows,
+          size_bytes: 0,
+          ...(story.capturedAt
+            ? { capturedAt: new Date(story.capturedAt).toISOString() }
+            : {}),
+          ...(story.kind === "wiki"
+            ? {
+                sourceHome: "https://www.wikimedia.org/",
+                sourceCredit: "Wikimedia recent changes · CC BY-SA",
+              }
+            : {
+                sourceHome: SOURCE_BY_KIND[story.kind]?.homepage,
+                sourceCredit: SOURCE_BY_KIND[story.kind]?.attribution,
+              }),
+        };
+        const charts = stories
+          .filter((candidate) => candidate.kind === story.kind)
+          .map((candidate) => candidate.chart);
+        const openChart = story.chart;
+        activateDataset({
+          file,
+          stats,
+          sample,
+          charts: [openChart, ...charts.filter((c) => c.id !== openChart.id)],
+          active: openChart,
+        });
+        useLoomStore.getState().setDiscoverReturnPath(file.path);
+        // The hook ("M5.8 quake — …") is the headline people came for; keep it on the chart.
+        if (story.hook && story.hook !== openChart.title) {
+          useLoomStore
+            .getState()
+            .setChartTitleOverride(openChart.id, story.hook);
+        }
+        if (dest === "inspect") {
+          setViewMode("chart");
+          setPanelTab("stats");
+          // Keep the detail panel open so provenance + columns are visible.
+          const st = useLoomStore.getState();
+          if (!st.panelOpen) st.togglePanel();
+          setToast(`Inspect · ${file.name}`);
         } else {
-          const s0 = await sourceStatus(story.kind);
-          if (!s0.running) await sourceStart(story.kind);
-          const s = await sourceStatus(story.kind);
-          setSourceStatus(story.kind, s);
+          setViewMode("chart");
+          setPanelTab("chart");
+          setToast(`Opened · ${story.hook}`);
         }
-      } catch {
-        /* status optional */
-      }
-      // Discover probes with a small snapshot for thumbnails; open the story on
-      // the same full buffer the sidebar uses so lines cover the whole window.
-      let { stats, sample } = story;
-      if (story.kind !== "wiki") {
-        try {
-          const full = await sourceSnapshot(story.kind, SOURCE_EXPLORE_ROWS);
-          if (full.sample.rows.length >= story.sample.rows.length) ({ stats, sample } = full);
-        } catch {
-          /* keep the probe sample */
+        setDataRegionOpen(false);
+        setDataSourcesExpanded(false);
+        if (
+          typeof window !== "undefined" &&
+          window.matchMedia("(max-width: 767px)").matches
+        ) {
+          const st = useLoomStore.getState();
+          if (st.sidebarOpen) st.toggleSidebar();
+          // Inspect needs the panel; chart-open still collapses chrome on phones.
+          if (dest !== "inspect" && st.panelOpen) st.togglePanel();
         }
-      }
-      const file = {
-        path: story.streamPath,
-        name: story.fileName,
-        extension: "stream",
-        row_count: sample.total_rows,
-        size_bytes: 0,
-        ...(story.kind === "wiki"
-          ? {
-              sourceHome: "https://www.wikimedia.org/",
-              sourceCredit: "Wikimedia recent changes · CC BY-SA",
+        dismiss();
+        // Cached charts open immediately. Reconnect without holding the tap hostage to a poll.
+        void (async () => {
+          try {
+            if (story.kind === "wiki") {
+              const s0 = await streamStatus();
+              if (!s0.running) await streamStart();
+              const s = await streamStatus();
+              useLoomStore.getState().setStreamStatus(s);
+            } else {
+              const s0 = await sourceStatus(story.kind);
+              if (!s0.running) await sourceStart(story.kind);
+              const s = await sourceStatus(story.kind);
+              setSourceStatus(story.kind, s);
             }
-          : {
-              sourceHome: SOURCE_BY_KIND[story.kind]?.homepage,
-              sourceCredit: SOURCE_BY_KIND[story.kind]?.attribution,
-            }),
-      };
-      const shortlist: DatasetShortlist =
-        story.kind === "wiki" ? { type: "stream" } : { type: "source", kind: story.kind };
-      const seqCharts = shortlistFor(shortlist, file, stats, sample);
-      const charts = seqCharts.length ? seqCharts : [story.chart];
-      const preferred =
-        charts.find((c) => c.kind === story.chart.kind && c.title === story.chart.title) ??
-        charts.find((c) => c.kind === story.chart.kind) ??
-        charts[0]!;
-      // Open the exact Discover chart that was previewed (stack mode, encodings).
-      const openChart = { ...preferred, ...story.chart, id: story.chart.id || preferred.id };
-      activateDataset({
-        file,
-        stats,
-        sample,
-        charts: [openChart, ...charts.filter((c) => c.id !== openChart.id)],
-        active: openChart,
-      });
-      // The hook ("M5.8 quake — …") is the headline people came for; keep it on the chart.
-      if (story.hook && story.hook !== openChart.title) {
-        useLoomStore.getState().setChartTitleOverride(openChart.id, story.hook);
+          } catch {
+            /* status optional */
+          }
+        })();
+      } catch (e) {
+        setToast(`Couldn’t open: ${e instanceof Error ? e.message : e}`);
+      } finally {
+        openingRef.current = false;
+        setOpeningId(null);
       }
-      if (dest === "inspect") {
-        setViewMode("chart");
-        setPanelTab("stats");
-        // Keep the detail panel open so provenance + columns are visible.
-        const st = useLoomStore.getState();
-        if (!st.panelOpen) st.togglePanel();
-        setToast(`Inspect · ${file.name}`);
-      } else {
-        setViewMode("chart");
-        setPanelTab("chart");
-        setToast(`Opened · ${story.hook}`);
-      }
-      setDataRegionOpen(false);
-      setDataSourcesExpanded(false);
-      if (typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches) {
-        const st = useLoomStore.getState();
-        if (st.sidebarOpen) st.toggleSidebar();
-        // Inspect needs the panel; chart-open still collapses chrome on phones.
-        if (dest !== "inspect" && st.panelOpen) st.togglePanel();
-      }
-      dismiss();
-    } catch (e) {
-      setToast(`Couldn’t open: ${e instanceof Error ? e.message : e}`);
-    } finally {
-      setOpeningId(null);
-    }
-  };
+    },
+    [
+      stories,
+      setViewMode,
+      setPanelTab,
+      setSourceStatus,
+      setDataRegionOpen,
+      setDataSourcesExpanded,
+      setToast,
+      dismiss,
+    ],
+  );
+  const inspectStory = useCallback(
+    (story: DiscoverStory) => openStory(story, { dest: "inspect" }),
+    [openStory],
+  );
 
   const browseSources = () => {
     openDataSources();
@@ -428,200 +688,221 @@ export function Onboarding() {
     setChartFilter("all");
     setSourceFilter("all");
     setSortMode("score");
+    setSearch("");
+    setSettingFilter("all");
   };
 
-  const topicFade = useEdgeFade<HTMLDivElement>();
-  const sourceFade = useEdgeFade<HTMLDivElement>();
-  const kindFade = useEdgeFade<HTMLDivElement>();
-
   const filtersActive =
-    categoryFilter !== "all" || chartFilter !== "all" || sourceFilter !== "all" || sortMode !== "score";
-
-  const exploreSummary = useMemo(() => {
-    const parts: string[] = [];
-    if (categoryFilter !== "all") parts.push(categoryFilter);
-    if (sourceFilter !== "all") {
-      parts.push(sources.find((s) => s.kind === sourceFilter)?.fileName ?? sourceFilter);
-    }
-    if (chartFilter !== "all") parts.push(chartKindLabel(chartFilter));
-    if (phase === "scan" && stories.length > 0) return scannedHint;
-    // Keep sparse-scan diagnostics visible (e.g. one warm feed → “38” space cards).
-    if (parts.length === 0 && scannedHint.includes("feeds")) {
-      return scannedHint;
-    }
-    if (parts.length === 0) {
-      return `${visible.length} live ${visible.length === 1 ? "story" : "stories"} across open data`;
-    }
-    return `${visible.length} ${visible.length === 1 ? "story" : "stories"} · ${parts.join(" · ")}`;
-  }, [
-    categoryFilter,
-    sourceFilter,
-    chartFilter,
-    phase,
-    stories.length,
-    scannedHint,
-    visible.length,
-    sources,
-  ]);
-
-  // The scan keeps streaming in the background while What's new is up, so
-  // stories are ready the moment it closes.
+    categoryFilter !== "all" ||
+    chartFilter !== "all" ||
+    sourceFilter !== "all" ||
+    settingFilter !== "all" ||
+    search.trim() !== "" ||
+    sortMode !== "score";
   const closeRef = useRef<HTMLButtonElement>(null);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const displayed = groups.slice(0, shownCount);
+  const loadMore = useCallback(() => {
+    setShownCount((count) =>
+      Math.min(count + DISCOVER_PAGE_SIZE, groups.length),
+    );
+  }, [groups.length]);
 
   useEffect(() => {
-    if (show !== true) return;
-    const t = window.requestAnimationFrame(() => {
-      const btn =
-        document.querySelector<HTMLElement>("#onboarding-stories button") ??
-        closeRef.current;
-      btn?.focus();
+    const target = moreRef.current;
+    const root = scrollRef.current;
+    if (!target || !root || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((entry) => entry.isIntersecting)) return;
+        observer.disconnect();
+        loadMore();
+      },
+      { root, rootMargin: "0px 0px 240px 0px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [show, whatsNewOpen, shownCount, groups.length, loadMore]);
+
+  // Measure the natural card height, keeping DOM order and existing cards stable
+  // as more stories arrive. CSS columns would rebalance the whole feed on append.
+  useLayoutEffect(() => {
+    const gallery = galleryRef.current;
+    if (
+      layout !== "masonry" ||
+      !gallery ||
+      typeof ResizeObserver === "undefined"
+    )
+      return;
+    const measure = (card: HTMLElement) => {
+      const gridStyle = getComputedStyle(gallery);
+      const row = parseFloat(gridStyle.gridAutoRows);
+      const gap = parseFloat(gridStyle.rowGap);
+      if (!row || !Number.isFinite(gap)) return;
+      const span = Math.ceil(
+        (card.getBoundingClientRect().height + gap) / (row + gap),
+      );
+      card.parentElement?.style.setProperty("--discover-span", String(span));
+    };
+    const cards = gallery.querySelectorAll<HTMLElement>(".discover-story");
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) measure(entry.target as HTMLElement);
     });
-    return () => window.cancelAnimationFrame(t);
-  }, [show, visible.length, phase]);
+    gallery.dataset.masonry = "true";
+    for (const card of cards) {
+      measure(card);
+      observer.observe(card);
+    }
+    return () => {
+      observer.disconnect();
+      delete gallery.dataset.masonry;
+      for (const card of cards)
+        card.parentElement?.style.removeProperty("--discover-span");
+    };
+  }, [layout, show, whatsNewOpen, shownCount, visible, chosenVariants]);
+
+  const filterKey = JSON.stringify([
+    categoryFilter,
+    chartFilter,
+    sourceFilter,
+    settingFilter,
+    deferredSearch,
+    sortMode,
+  ]);
+  const previousBrowseKey = useRef({ filterKey, layout });
+  useEffect(() => {
+    if (
+      previousBrowseKey.current.filterKey !== filterKey ||
+      previousBrowseKey.current.layout !== layout
+    ) {
+      if (previousBrowseKey.current.filterKey !== filterKey)
+        setShownCount(DISCOVER_PAGE_SIZE);
+      scrollPositionRef.current = 0;
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    }
+    previousBrowseKey.current = { filterKey, layout };
+  }, [filterKey, layout]);
+  const hasStories = stories.length > 0;
+  useLayoutEffect(() => {
+    if (show && !whatsNewOpen && hasStories && scrollRef.current)
+      scrollRef.current.scrollTop = scrollPositionRef.current;
+  }, [show, whatsNewOpen, hasStories]);
+
+  const refreshAttempts = useRef(new Map<DiscoverKind, number>());
+  useEffect(() => {
+    if (!hasStories) return;
+    const check = async () => {
+      if (document.visibilityState !== "visible" || scanAbortRef.current)
+        return;
+      const cached = getDiscoverStoryCache();
+      if (!cached?.length) return;
+      const viewport = scrollRef.current?.getBoundingClientRect();
+      const candidates = Array.from(
+        galleryRef.current?.querySelectorAll<HTMLElement>("li[data-source]") ??
+          [],
+      )
+        .filter((item) => {
+          const box = item.getBoundingClientRect();
+          return (
+            !!viewport &&
+            box.bottom >= viewport.top &&
+            box.top <= viewport.bottom
+          );
+        })
+        .map((item) => item.dataset.source as DiscoverKind);
+      const timestamp = Date.now();
+      setNow(timestamp);
+      const kinds = planDiscoverRefresh(
+        cached,
+        candidates,
+        [...ALL_SOURCE_KINDS, "wiki"],
+        refreshAttempts.current,
+        timestamp,
+      );
+      if (!kinds.length) return;
+      for (const kind of kinds) refreshAttempts.current.set(kind, timestamp);
+      const abort = new AbortController();
+      scanAbortRef.current = abort;
+      setScanning(true);
+      try {
+        const updated = await refreshDiscoverStories(
+          cached,
+          kinds,
+          abort.signal,
+        );
+        if (abort.signal.aborted || updated === cached) return;
+        for (const kind of kinds) {
+          const fresh = updated.find((story) => story.kind === kind);
+          if (fresh && !discoverFreshness(fresh).due)
+            refreshAttempts.current.delete(kind);
+        }
+        const dailySavedAt = getDiscoverCacheSavedAt();
+        setDiscoverStoryCache(updated, dailySavedAt);
+        if (dailySavedAt != null)
+          void writeDiscoverDailyCache(updated, dailySavedAt);
+        if (
+          showRef.current &&
+          changedDiscoverKinds(storiesRef.current, updated).size
+        )
+          setPendingStories(updated);
+        else {
+          setStories(
+            showRef.current
+              ? withDiscoverCheckTimes(storiesRef.current, updated)
+              : updated.map(editorialDiscoverStory),
+          );
+          if (!showRef.current) setRankedAt(timestamp);
+          setPendingStories(null);
+        }
+      } catch {
+        /* Keep saved picks; due feeds retry after the backoff. */
+      } finally {
+        if (scanAbortRef.current === abort) {
+          scanAbortRef.current = null;
+          setScanning(false);
+        }
+      }
+    };
+    const first = window.setTimeout(
+      () => {
+        void check();
+      },
+      showRef.current ? 1000 : 5000,
+    );
+    const timer = window.setInterval(() => {
+      void check();
+    }, 60_000);
+    const onVisibility = () => {
+      void check();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("online", onVisibility);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("online", onVisibility);
+    };
+  }, [show, whatsNewOpen, hasStories, shownCount, filterKey]);
+
+  const acceptUpdates = () => {
+    if (!pendingStories) return;
+    setStories(pendingStories.map(editorialDiscoverStory));
+    setRankedAt(Date.now());
+    setSavedAt(getDiscoverCacheSavedAt());
+    setScannedHint(
+      `${new Set(pendingStories.map((story) => story.kind)).size} sources · ${pendingStories.length} chart ideas`,
+    );
+    setPendingStories(null);
+  };
+  const pendingSourceCount = useMemo(
+    () =>
+      pendingStories ? changedDiscoverKinds(stories, pendingStories).size : 0,
+    [stories, pendingStories],
+  );
 
   if (show !== true || whatsNewOpen) return null;
-
-  const showFilters = phase === "ready" || stories.length > 0;
-
-  const filterRows = showFilters ? (
-    <div className="space-y-1.5 sm:space-y-2 min-w-0 overflow-hidden">
-      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-        <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
-          Explore
-        </span>
-        <div
-          className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-          ref={topicFade.ref}
-          style={topicFade.style}
-          role="group"
-          aria-label="Topic"
-        >
-          <div className="flex items-center gap-1 sm:gap-0.5 w-max pr-1">
-            <FilterChip
-              label="All"
-              pressed={categoryFilter === "all"}
-              onClick={() => setCategoryFilter("all")}
-            />
-            {categories.map((cat) => (
-              <FilterChip
-                key={cat}
-                label={cat}
-                pressed={categoryFilter === cat}
-                onClick={() => setCategoryFilter(cat)}
-              />
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-1 shrink-0 pl-1 border-l border-loom-border/60">
-          <label htmlFor="discover-sort" className="sr-only">
-            Sort stories
-          </label>
-          <span className="relative inline-flex items-center gap-1 min-h-9 sm:min-h-0 px-1 sm:px-0.5 text-xs sm:text-2xs text-loom-muted hover:text-loom-text focus-within:text-loom-text focus-within:ring-1 focus-within:ring-loom-accent/50 rounded">
-            {SORT_LABELS[sortMode]}
-            <svg width="8" height="5" viewBox="0 0 10 6" aria-hidden className="fill-current opacity-70">
-              <path d="M0 0l5 6 5-6z" />
-            </svg>
-            <select
-              id="discover-sort"
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value as SortMode)}
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer appearance-none text-base"
-              title="Sort"
-            >
-              {(Object.keys(SORT_LABELS) as SortMode[]).map((m) => (
-                <option key={m} value={m}>
-                  {SORT_LABELS[m]}
-                </option>
-              ))}
-            </select>
-          </span>
-          {filtersActive && (
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="min-h-9 sm:min-h-0 px-1.5 text-xs sm:text-[10px] text-loom-muted hover:text-loom-accent transition-colors"
-            >
-              Clear
-            </button>
-          )}
-        </div>
-      </div>
-
-      {sources.length > 1 && (
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-          <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
-            From
-          </span>
-          <div
-            className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            ref={sourceFade.ref}
-            style={sourceFade.style}
-            role="group"
-            aria-label="Source"
-          >
-            <div className="flex items-center gap-1 sm:gap-0.5 w-max pr-1">
-              <FilterChip
-                label="All"
-                pressed={sourceFilter === "all"}
-                onClick={() => setSourceFilter("all")}
-              />
-              {sources.map((src) => (
-                <FilterChip
-                  key={src.kind}
-                  label={src.fileName}
-                  pressed={sourceFilter === src.kind}
-                  onClick={() => setSourceFilter(src.kind)}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {chartKinds.length > 1 && (
-        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0" role="group" aria-label="Chart type">
-          <span className="text-[10px] uppercase tracking-[0.12em] text-loom-muted/80 shrink-0 hidden sm:inline">
-            As
-          </span>
-          <div
-            className="flex-1 min-w-0 overflow-x-auto overscroll-x-contain touch-pan-x [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-            ref={kindFade.ref}
-            style={kindFade.style}
-          >
-            <div className="flex items-center gap-x-1.5 sm:gap-x-1.5 w-max pr-1 text-xs sm:text-2xs text-loom-muted">
-              <ChartLink
-                label="Any"
-                pressed={chartFilter === "all"}
-                onClick={() => setChartFilter("all")}
-              />
-              <span className="inline-flex items-center gap-x-1.5">
-                <span className="text-loom-border select-none" aria-hidden>
-                  ·
-                </span>
-                <ChartLink
-                  label="Maps"
-                  pressed={chartFilter === "maps"}
-                  onClick={() => setChartFilter("maps")}
-                />
-              </span>
-              {chartKinds.map((kind) => (
-                <span key={kind} className="inline-flex items-center gap-x-1.5">
-                  <span className="text-loom-border select-none" aria-hidden>
-                    ·
-                  </span>
-                  <ChartLink
-                    label={chartKindLabel(kind)}
-                    pressed={chartFilter === kind}
-                    onClick={() => setChartFilter(kind)}
-                  />
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  ) : null;
+  const showFilters = stories.length > 0;
 
   return (
     <Dialog
@@ -632,205 +913,411 @@ export function Onboarding() {
       initialFocusRef={closeRef}
       zIndex={200}
       stage
-      panelClassName="p-3 sm:p-4 space-y-0 flex flex-col h-full"
+      panelClassName="discover-landing"
     >
-      <div className="flex flex-col min-w-0 min-h-0 h-full max-h-full space-y-0">
-        {/* order: phone = title → stories → filters → footer; desktop = title → filters → stories → footer */}
-        <header className="order-1 shrink-0 pb-1.5 sm:pb-3 mb-1 sm:mb-3 border-b border-loom-border/50">
-          <div className="flex items-start gap-2 sm:gap-3">
-            <div className="min-w-0 flex-1 space-y-0.5 sm:space-y-1">
-              <div className="flex items-baseline gap-2 flex-wrap">
-                <h2
-                  id="onboarding-title"
-                  className="text-base sm:text-lg font-semibold text-loom-text tracking-tight leading-tight"
-                >
-                  What’s interesting right now
-                </h2>
-                {showFilters && (
-                  <span className="text-2xs font-mono text-loom-muted tabular-nums" aria-live="polite">
-                    {visible.length}
-                    {visible.length !== stories.length ? `/${stories.length}` : ""}
-                  </span>
-                )}
-              </div>
-              {/* Keep scan/error copy; once cards show, reclaim vertical space on phones */}
-              <p
-                id="onboarding-desc"
-                className={`text-2xs text-loom-muted leading-relaxed ${
-                  showFilters ? "hidden sm:block" : ""
-                }`}
-              >
-                {phase === "scan" && stories.length === 0
-                  ? scannedHint
-                  : exploreSummary}
-              </p>
-            </div>
+      <header className="discover-header">
+        <div className="min-w-0 flex-1">
+          <p className="discover-kicker">Loom / Discover</p>
+          <h2 id="onboarding-title">What’s interesting right now</h2>
+          <p id="onboarding-desc">
+            Fresh perspectives on open data. Pick a chart. Make it yours.
+          </p>
+        </div>
+        <div className="discover-header-actions">
+          {showFilters && (
             <button
-              ref={closeRef}
               type="button"
-              onClick={dismiss}
-              className="loom-btn-ghost min-h-9 min-w-9 sm:min-h-8 sm:min-w-8 flex items-center justify-center text-loom-muted text-lg leading-none rounded-md -mt-0.5"
-              aria-label="Close"
+              onClick={() => requestDiscoverScan({ refresh: true })}
+              disabled={scanning || !!openingId}
+              className="discover-icon-button"
+              aria-label={scanning ? "Refreshing stories" : "Refresh"}
+              title={
+                scanning
+                  ? "Updating picks in background"
+                  : "Refresh stories from all sources"
+              }
             >
-              ×
+              <span aria-hidden>↻</span>
             </button>
-          </div>
-        </header>
-
-        {filterRows ? (
-          <div className="order-3 sm:order-2 shrink-0 pt-1.5 sm:pt-0 sm:pb-3 sm:mb-3 border-t sm:border-t-0 sm:border-b border-loom-border/50">
-            {filterRows}
-          </div>
-        ) : null}
-
-        <div className="order-2 sm:order-3 flex-1 min-h-0 overflow-y-auto overscroll-y-contain -mx-0.5 px-0.5 sm:-mx-1 sm:px-1 flex flex-col">
-          {phase === "scan" && stories.length === 0 && (
-            <div className="my-auto py-10 text-center space-y-2">
-              <p className="text-sm text-loom-text">Scanning open data…</p>
-              <p className="text-2xs text-loom-muted">{scannedHint}</p>
-              <div className="mx-auto mt-3 h-1 w-32 rounded-full bg-loom-elevated overflow-hidden">
-                <div className="h-full w-1/2 bg-loom-accent animate-pulse rounded-full" />
-              </div>
-            </div>
           )}
+          <button
+            ref={closeRef}
+            type="button"
+            onClick={dismiss}
+            className="discover-icon-button"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+      </header>
 
-          {phase === "error" && stories.length === 0 && (
-            <div className="my-auto py-8 text-center space-y-3">
-              <p className="text-sm text-loom-text">Couldn’t reach live feeds just now.</p>
-              <p className="text-2xs text-loom-muted">Open Data &amp; sources to browse catalogs and connect manually.</p>
-              <button type="button" onClick={browseSources} className="loom-btn-primary text-xs px-3 py-1.5">
-                Browse data sources
+      {showFilters && (
+        <div className="discover-controls">
+          <div className="discover-search-row">
+            <label className="discover-search">
+              <span aria-hidden>⌕</span>
+              <span className="sr-only">
+                Search stories, sources, charts, and settings
+              </span>
+              <input
+                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Find a story, chart, or setting…"
+              />
+            </label>
+            <div
+              className="discover-layout-picker"
+              role="group"
+              aria-label="Story layout"
+            >
+              {GALLERY_LAYOUTS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  aria-label={`${option.label} view`}
+                  aria-pressed={layout === option.value}
+                  title={`${option.label}: ${option.description}`}
+                  onClick={() => setLayout(option.value)}
+                >
+                  <span aria-hidden>{option.icon}</span>
+                  <span className="discover-layout-label">{option.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+          <button
+            type="button"
+            className="discover-filter-toggle"
+            aria-controls="discover-filters"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            {filtersOpen
+              ? "Hide filters"
+              : filtersActive
+                ? "Filters active"
+                : "Filters"}{" "}
+            <span aria-hidden>{filtersOpen ? "−" : "+"}</span>
+          </button>
+          <div
+            id="discover-filters"
+            className="discover-filter-row"
+            data-expanded={filtersOpen}
+          >
+            <label>
+              <span className="sr-only">Topic</span>
+              <select
+                value={categoryFilter}
+                onChange={(event) => setCategoryFilter(event.target.value)}
+              >
+                <option value="all">All topics</option>
+                {categories.map((category) => (
+                  <option key={category}>{category}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">Chart</span>
+              <select
+                value={chartFilter}
+                onChange={(event) => setChartFilter(event.target.value)}
+              >
+                <option value="all">All charts</option>
+                <option value="maps">Maps & globes</option>
+                <optgroup label="Ways to explore">
+                  {Object.entries(DISCOVER_FAMILIES).map(([key, family]) => (
+                    <option key={key} value={`family:${key}`}>
+                      {family.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Chart types">
+                  {chartKinds.map((kind) => (
+                    <option key={kind} value={kind}>
+                      {discoverChartLabel(kind)}
+                    </option>
+                  ))}
+                </optgroup>
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">Settings</span>
+              <select
+                value={settingFilter}
+                onChange={(event) =>
+                  setSettingFilter(event.target.value as DiscoverSettingFilter)
+                }
+              >
+                {DISCOVER_SETTING_FILTERS.map((setting) => (
+                  <option key={setting.value} value={setting.value}>
+                    {setting.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">Source</span>
+              <select
+                value={sourceFilter}
+                onChange={(event) => setSourceFilter(event.target.value)}
+              >
+                <option value="all">All sources</option>
+                {sources.map((source) => (
+                  <option key={source.kind} value={source.kind}>
+                    {source.fileName}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span className="sr-only">Sort</span>
+              <select
+                value={sortMode}
+                onChange={(event) =>
+                  setSortMode(event.target.value as SortMode)
+                }
+              >
+                {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+                  <option key={mode} value={mode}>
+                    {SORT_LABELS[mode]}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="discover-results-summary">
+            <p role="status">
+              {scanning
+                ? stories.length
+                  ? "Updating picks in background…"
+                  : `${sources.length} sources found · scanning…`
+                : scannedHint.replace("chart ideas", "chart views")}
+              {filtersActive
+                ? ` · ${groups.length} matching stories`
+                : ` · ${groups.length} stories · ${chartKinds.length} chart types`}
+            </p>
+            {pendingStories && (
+              <button
+                type="button"
+                onClick={acceptUpdates}
+                className="discover-updates-ready"
+              >
+                New data ready · {pendingSourceCount}{" "}
+                {pendingSourceCount === 1 ? "source" : "sources"} · Show updates
               </button>
-            </div>
-          )}
-
-          {showFilters && visible.length === 0 && (
-            <div className="my-auto py-10 text-center space-y-2">
-              <p className="text-sm text-loom-text">No stories match these filters.</p>
-              <button type="button" onClick={clearFilters} className="text-2xs text-loom-accent hover:underline">
+            )}
+            {savedAt != null && (
+              <p
+                className="discover-cache-time"
+                title={`Picks checked ${new Date(savedAt).toLocaleString()}. Refreshes daily while Loom is open.`}
+              >
+                Daily scan{" "}
+                {new Date(savedAt).toLocaleString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                })}{" "}
+                · daily picks
+              </p>
+            )}
+            {(hiddenSourceCount > 0 || showHiddenSources) && (
+              <button
+                type="button"
+                onClick={() => setShowHiddenSources((v) => !v)}
+                aria-pressed={showHiddenSources}
+                data-testid="discover-hidden-toggle"
+              >
+                {showHiddenSources
+                  ? "Hide hidden sources"
+                  : `${hiddenSourceCount} hidden · Show`}
+              </button>
+            )}
+            {filtersActive && (
+              <button type="button" onClick={clearFilters}>
                 Clear filters
               </button>
-            </div>
-          )}
+            )}
+          </div>
+        </div>
+      )}
 
-          {showFilters && visible.length > 0 && (
-            <ul id="onboarding-stories" className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 content-start gap-2 sm:gap-2.5 list-none m-0 p-0 pb-2 min-w-0 w-full">
-              {visible.map((s) => (
-                <li key={s.id} className="min-w-0 max-w-full animate-fade-in">
-                  <div className="relative">
-                    <span className="absolute top-1.5 left-1.5 z-10 text-[9px] uppercase tracking-wider font-medium text-loom-muted bg-loom-bg/85 border border-loom-border/70 rounded px-1 py-px max-w-[52%] truncate pointer-events-none">
-                      {s.category}
-                    </span>
-                    <DiscoverSourceLink
-                      kind={s.kind}
-                      onInspect={() => void openStory(s, { dest: "inspect" })}
-                    />
-                    <ChartCard
-                      rec={{
-                        ...s.chart,
-                        title: s.hook,
-                        subtitle: s.blurb,
-                      }}
-                      data={s.sample}
-                      isActive={openingId === s.id}
-                      onClick={() => void openStory(s)}
-                      micro
-                      nativeTitle={false}
-                    />
-                  </div>
-                </li>
+      <div
+        ref={scrollRef}
+        className="discover-scroll"
+        onScroll={(event) => {
+          scrollPositionRef.current = event.currentTarget.scrollTop;
+        }}
+        aria-busy={scanning && !stories.length}
+      >
+        {showFilters && (
+          <nav
+            className="discover-perspectives"
+            aria-label="Explore a perspective"
+          >
+            <button
+              type="button"
+              aria-pressed={chartFilter === "all"}
+              onClick={() => setChartFilter("all")}
+            >
+              All perspectives
+            </button>
+            {Object.entries(DISCOVER_FAMILIES)
+              .filter(([key]) => familyCounts.has(key))
+              .map(([key, family]) => (
+                <button
+                  key={key}
+                  type="button"
+                  aria-pressed={chartFilter === `family:${key}`}
+                  title={`${family.prompt} ${familyCounts.get(key)!.size} sources available`}
+                  onClick={() =>
+                    setChartFilter(
+                      chartFilter === `family:${key}` ? "all" : `family:${key}`,
+                    )
+                  }
+                >
+                  {family.label}
+                  <span aria-hidden>{familyCounts.get(key)!.size}</span>
+                </button>
               ))}
+          </nav>
+        )}
+        {showFilters && !filtersActive && (
+          <div className="discover-editorial-intro">
+            <div>
+              <p className="discover-kicker">Follow your curiosity</p>
+              <h3>Different questions. New ways to see.</h3>
+            </div>
+            <details className="discover-method">
+              <summary>How picks are chosen</summary>
+              <p>
+                We consider every chart type against each source, check the
+                observed data, then balance useful signals with a mix of topics,
+                sources, and perspectives. Related views stay together. Your
+                source preferences help shape the order.
+              </p>
+            </details>
+          </div>
+        )}
+        {!stories.length && phase === "scan" && (
+          <div className="discover-loading" role="status">
+            <p className="discover-kicker">Finding your next story</p>
+            <h3>A world of data. A fresh perspective.</h3>
+            <p>
+              Checking {ALL_SOURCE_KINDS.length + 1} sources for chart ideas.
+              Stories appear as each source responds.
+            </p>
+            <div className="discover-skeletons" aria-hidden="true">
+              {[0, 1, 2].map((key) => (
+                <div key={key} />
+              ))}
+            </div>
+          </div>
+        )}
+        {!stories.length && phase === "error" && (
+          <div className="discover-empty" role="status">
+            <h3>The feeds are taking a moment.</h3>
+            <p>
+              Try again, or explore the sample datasets and open data catalogs.
+            </p>
+            <div className="flex gap-3 justify-center mt-4">
+              <button
+                type="button"
+                onClick={() => requestDiscoverScan({ refresh: true })}
+                className="loom-btn-primary px-4 min-h-11 rounded-lg"
+              >
+                Try again
+              </button>
+              <button
+                type="button"
+                onClick={browseSources}
+                className="loom-btn-ghost px-4 min-h-11"
+              >
+                Browse datasets
+              </button>
+            </div>
+          </div>
+        )}
+        {showFilters && !visible.length && (
+          <div className="discover-empty">
+            <h3>No stories match yet.</h3>
+            <p>
+              Try a broader search or clear a filter to see more perspectives.
+            </p>
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="loom-btn-primary mt-4 px-4 min-h-11 rounded-lg"
+            >
+              Clear filters
+            </button>
+          </div>
+        )}
+        {displayed.length > 0 && (
+          <>
+            <ul
+              ref={galleryRef}
+              id="onboarding-stories"
+              className={`discover-grid discover-layout-${layout}`}
+            >
+              {displayed.map((group) => {
+                const story =
+                  group.stories.find(
+                    (candidate) => candidate.id === chosenVariants[group.id],
+                  ) ?? group.stories[0]!;
+                const featured =
+                  !filtersActive &&
+                  spotlights.has(group.stories[0]!.id) &&
+                  (layout === "flow" || layout === "masonry");
+                return (
+                  <li
+                    key={group.id}
+                    data-source={story.kind}
+                    className={
+                      featured && layout === "flow" ? "discover-grid-lead" : ""
+                    }
+                  >
+                    <DiscoverStoryCard
+                      story={story}
+                      featured={featured}
+                      opening={openingId === story.id}
+                      disabled={!!openingId}
+                      onOpen={openStory}
+                      onInspect={inspectStory}
+                      now={now}
+                      variants={group.stories}
+                      groupId={group.id}
+                      onChooseVariant={chooseVariant}
+                    />
+                  </li>
+                );
+              })}
             </ul>
-          )}
-        </div>
-
-        <div className="order-4 flex items-center justify-between gap-2 shrink-0 pt-1 sm:pt-1 border-t border-loom-border/60">
-          <button type="button" onClick={browseSources} className="text-xs sm:text-2xs text-loom-muted hover:text-loom-accent min-h-9 sm:min-h-0 px-1">
-            Browse all sources
-          </button>
-          <button type="button" onClick={dismiss} className="loom-btn-ghost text-xs px-2 py-1 min-h-9 sm:min-h-0">
-            Skip for now
-          </button>
-        </div>
+            {groups.length > displayed.length && (
+              <button
+                ref={moreRef}
+                type="button"
+                className="discover-more"
+                onClick={loadMore}
+              >
+                More chart ideas{" "}
+                <span className="text-loom-muted">
+                  ({groups.length - displayed.length} more)
+                </span>{" "}
+                ↓
+              </button>
+            )}
+          </>
+        )}
       </div>
+      <footer className="discover-footer">
+        <button type="button" onClick={browseSources}>
+          Bring your own data or browse sources <span aria-hidden>↗</span>
+        </button>
+        <span>Real datasets. Editable charts.</span>
+      </footer>
     </Dialog>
-  );
-}
-
-/** Fades whichever edge of a horizontal scroller still has content past it, so a cut-off row reads as scrollable. */
-function useEdgeFade<T extends HTMLElement>() {
-  const [el, setEl] = useState<T | null>(null);
-  const [edges, setEdges] = useState({ left: false, right: false });
-  useEffect(() => {
-    if (!el) return;
-    const update = () => {
-      const left = el.scrollLeft > 2;
-      const right = el.scrollLeft + el.clientWidth < el.scrollWidth - 2;
-      setEdges((e) => (e.left === left && e.right === right ? e : { left, right }));
-    };
-    update();
-    el.addEventListener("scroll", update, { passive: true });
-    const ro = new ResizeObserver(update);
-    ro.observe(el);
-    if (el.firstElementChild) ro.observe(el.firstElementChild);
-    return () => {
-      el.removeEventListener("scroll", update);
-      ro.disconnect();
-    };
-  }, [el]);
-  const mask = `linear-gradient(to right, ${edges.left ? "transparent, black 1.5rem" : "black"}, ${edges.right ? "black calc(100% - 2rem), transparent" : "black"})`;
-  const style: CSSProperties = edges.left || edges.right ? { maskImage: mask, WebkitMaskImage: mask } : {};
-  return { ref: setEl, style };
-}
-
-function FilterChip({
-  label,
-  pressed,
-  onClick,
-}: {
-  label: string;
-  pressed: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={`
-        min-h-10 sm:min-h-7 px-3 sm:px-2.5 text-xs sm:text-[11px] rounded-full border transition-colors whitespace-nowrap
-        ${pressed
-          ? "bg-loom-text text-loom-bg border-loom-text font-medium"
-          : "bg-transparent text-loom-muted border-transparent hover:text-loom-text hover:bg-loom-elevated/80"}
-      `}
-    >
-      {label}
-    </button>
-  );
-}
-
-function ChartLink({
-  label,
-  pressed,
-  onClick,
-}: {
-  label: string;
-  pressed: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={`
-        whitespace-nowrap transition-colors underline-offset-4 min-h-9 sm:min-h-0 inline-flex items-center py-1.5 sm:py-0
-        ${pressed
-          ? "text-loom-text font-medium underline decoration-loom-accent/70"
-          : "text-loom-muted hover:text-loom-text"}
-      `}
-    >
-      {label}
-    </button>
   );
 }

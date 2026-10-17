@@ -44,6 +44,14 @@ describe("activateDataset", () => {
     expect(charts.length).toBe(recommend(stats, sample, fileA.name).length);
   });
 
+  it("patches a deferred zero row_count from the sample and updates the file list", () => {
+    const zeroed: FileEntry = { ...fileA, row_count: 0 };
+    get().setFiles([zeroed]);
+    activateDataset({ file: zeroed, stats, sample });
+    expect(get().selectedFile?.row_count).toBe(4);
+    expect(get().files.find((f) => f.path === fileA.path)?.row_count).toBe(4);
+  });
+
   it("clears per-dataset state left by the previous dataset", () => {
     activateDataset({ file: fileA, stats, sample });
     get().setSelectedRowIndices([1, 2]);

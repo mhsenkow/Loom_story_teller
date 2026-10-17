@@ -10,6 +10,8 @@ import {
   cubeCellKey,
   cubeCellTooltip,
   cubeView,
+  cubeExtents,
+  dataCubeChartView,
   pickDataCubeCell,
   pickDataCubeEncoding,
   projectCube,
@@ -136,6 +138,24 @@ describe("buildDataCube", () => {
 
 describe("cube camera", () => {
   const cube = buildDataCube(rows, columns, { xField: "region", yField: "product", zField: "year" })!;
+
+  it("fits around phone controls, readable labels, and a pivot table without breaking voxel picking", () => {
+    for (const [w, h, tableHeight] of [[344, 296, 0], [344, 500, 220], [588, 858, 377]]) {
+      const opts = { ramp: ["#000000", "#ffffff"], opacity: 1, camera: { yaw: 0.55, pitch: 0.35, zoom: 1 }, axisFontSize: 16, showLegend: false, footerReserve: 48, contentInsets: { top: 56, bottom: tableHeight } };
+      const v = dataCubeChartView(cube, w, h, opts);
+      const { ex, ey, ez } = cubeExtents(cube);
+      for (const x of [-ex, ex]) for (const y of [-ey, ey]) for (const z of [-ez, ez]) {
+        const p = projectCube(v, x, y, z);
+        expect(p.sx).toBeGreaterThan(80);
+        expect(p.sx).toBeLessThan(w - 80);
+        expect(p.sy).toBeGreaterThanOrEqual(56 + 32 + 11.99);
+        expect(p.sy).toBeLessThan(h - Math.max(tableHeight, 48) - 32);
+      }
+      const target = sortCellsBackToFront(cube, v).at(-1)!.cell;
+      const p = projectCube(v, ...cubeCellCenter(cube, target.xi, target.yi, target.zi));
+      expect(pickDataCubeCell(cube, v, p.sx, p.sy)).toBe(target);
+    }
+  });
 
   it("projects the cube center to the middle of the viewport", () => {
     const v = cubeView({ yaw: 0.6, pitch: 0.4, zoom: 1 }, 800, 600);

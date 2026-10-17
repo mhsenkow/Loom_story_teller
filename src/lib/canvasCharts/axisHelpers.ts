@@ -9,6 +9,7 @@ import { type PlotRect, drawBandAxisX, drawChartTicks, drawPositionedLabelsX } f
 import { type ChartRenderOpts } from "../chartRenderTypes";
 import { roundedRect } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
+import { chartFont, chartTypeRamp } from "../chartType";
 
 export function widestText(ctx: CanvasRenderingContext2D, labels: string[], font: string): number {
   ctx.save();
@@ -20,8 +21,8 @@ export function widestText(ctx: CanvasRenderingContext2D, labels: string[], font
 }
 
 export function axisFont(opts: ChartRenderOpts | undefined, size?: number): string {
-  const floor = Math.max(10, opts?.axisFontSize ?? 11);
-  return `${size ?? floor}px '${opts?.fontFamily ?? "Inter"}', system-ui, sans-serif`;
+  const type = chartTypeRamp(opts?.axisFontSize);
+  return chartFont(size == null ? type.tick : Math.max(type.mark, size), opts?.fontFamily);
 }
 
 /** Category label gutter for horizontal-band charts: room for the widest label, capped. */
@@ -88,6 +89,7 @@ export function drawReferenceLines(
 ) {
   const { rect } = scales;
   const font = axisFont(opts, 10);
+  const pillH = chartTypeRamp(opts?.axisFontSize).mark + 6;
   ctx.save();
   for (const line of lines) {
     // "y" means the measure axis — which is X on horizontal bars / lollipops / strips
@@ -116,17 +118,17 @@ export function drawReferenceLines(
     ctx.font = font;
     const tw = ctx.measureText(text).width + 10;
     const bx = axis === "x" ? Math.min(rect.right - tw, p + 4) : rect.right - tw;
-    const by = axis === "x" ? rect.top + 2 : p - 18;
+    const by = axis === "x" ? rect.top + 2 : p - pillH - 2;
     ctx.globalAlpha = 0.92;
     ctx.fillStyle = opts?.themeBg ?? "#111114";
     ctx.beginPath();
-    roundedBox(ctx, bx, by, tw, 16, 4);
+    roundedBox(ctx, bx, by, tw, pillH, 4);
     ctx.fill();
     ctx.globalAlpha = 1;
     ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText(text, bx + 5, by + 8);
+    ctx.fillText(text, bx + 5, by + pillH / 2);
   }
   ctx.restore();
 }

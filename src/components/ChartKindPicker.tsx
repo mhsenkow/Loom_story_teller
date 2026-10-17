@@ -107,7 +107,7 @@ export function ChartKindPicker({
   useLayoutEffect(() => {
     if (!open) return;
     const place = () => {
-      const row = rootRef.current?.parentElement?.parentElement ?? rootRef.current;
+      const row = rootRef.current;
       if (!row) return;
       const r = row.getBoundingClientRect();
       const vv = window.visualViewport;
@@ -197,8 +197,8 @@ export function ChartKindPicker({
         className="loom-input w-full text-xs py-2 min-h-9 flex items-center gap-2 text-left"
         title="Search chart types — type to filter"
       >
-        <span className="flex-1 min-w-0 truncate text-loom-text">{current?.label ?? value}</span>
-        {current && <span className="shrink-0 text-2xs text-loom-muted">{current.group}</span>}
+        <span className="min-w-0 flex-1 truncate text-loom-text">{current?.label ?? value}</span>
+        {current && <span className="min-w-0 max-w-[42%] truncate text-2xs text-loom-muted">{current.group}</span>}
         <span className="shrink-0 text-loom-muted" aria-hidden>▾</span>
       </button>
 

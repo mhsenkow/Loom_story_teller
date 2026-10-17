@@ -43,7 +43,7 @@ export function temporalColumnNames(columns: ColumnInfo[]): string[] {
   return columns.filter((c) => columnLooksTemporal(c.data_type, c.name)).map((c) => c.name);
 }
 
-/** Parse a cell into epoch ms. Years 1900–2100 become Jan 1 UTC of that year. */
+/** Parse a cell into epoch ms. Four-digit years become Jan 1 UTC of that year. */
 export function parseChartTime(value: unknown): number | null {
   if (value == null || value === "") return null;
   if (value instanceof Date) {
@@ -51,7 +51,7 @@ export function parseChartTime(value: unknown): number | null {
     return Number.isFinite(t) ? t : null;
   }
   if (typeof value === "number" && Number.isFinite(value)) {
-    if (value >= 1900 && value <= 2100 && Number.isInteger(value)) return Date.UTC(value, 0, 1);
+    if (value >= 1000 && value <= 2999 && Number.isInteger(value)) return Date.UTC(value, 0, 1);
     if (value > 1e12) return value; // ms
     if (value > 1e9) return value * 1000; // seconds
     return null;
@@ -60,7 +60,7 @@ export function parseChartTime(value: unknown): number | null {
   if (!s) return null;
   if (/^\d{4}$/.test(s)) {
     const y = Number(s);
-    if (y >= 1900 && y <= 2100) return Date.UTC(y, 0, 1);
+    if (y >= 1000 && y <= 2999) return Date.UTC(y, 0, 1);
   }
   const n = Number(s);
   if (Number.isFinite(n) && s !== "" && !/[^\d.eE+-]/.test(s)) {

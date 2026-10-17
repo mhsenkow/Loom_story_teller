@@ -381,7 +381,7 @@ describe("stories", () => {
     expect(res.status).toBe(200);
     const out = (await res.json()) as { id: string; url: string; hasData: boolean };
     expect(out.id).toMatch(/^[0-9a-f]{32}$/);
-    expect(out.url).toBe(`${ORIGIN}/s/${out.id}`);
+    expect(out.url).toBe(`${ORIGIN}/plot/my-chart/${out.id}`);
     expect(out.hasData).toBe(false);
     expect(kv.data.get(`s:${out.id}:html`)?.metadata?.title).toBe("My chart");
   });
@@ -428,12 +428,30 @@ describe("stories", () => {
 
   it("hosts a valid og image beside the page and rewrites tokens", async () => {
     const png = btoa(String.fromCharCode(0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0));
-    const html = `<html><meta property="og:image" content="__LOOM_OG_IMG__"></html>`;
+    const html = `<html><meta property="og:url" content="__LOOM_PAGE_URL__"><meta property="og:image" content="__LOOM_OG_IMG__"></html>`;
     const res = await publish({ html, ogImage: `data:image/png;base64,${png}` });
     expect(res.status).toBe(200);
     const out = (await res.json()) as { id: string };
     expect(kv.data.get(`s:${out.id}:img`)?.metadata?.contentType).toBe("image/png");
-    expect(kv.data.get(`s:${out.id}:html`)?.value).toContain(`${ORIGIN}/s/${out.id}.img`);
+    expect(kv.data.get(`s:${out.id}:html`)?.value).toContain(`${ORIGIN}/plot/chart/${out.id}.png`);
+    expect(kv.data.get(`s:${out.id}:html`)?.value).toContain(`og:url" content="${ORIGIN}/plot/chart/${out.id}"`);
+  });
+
+  it("serves an oEmbed photo for the plot URL", async () => {
+    const jpeg = btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xd9));
+    const html = `<html><head><link rel="alternate" type="application/json+oembed" href="__LOOM_OEMBED_URL__" /></head></html>`;
+    const res = await publish({ html, title: "Correlation matrix", ogImage: `data:image/jpeg;base64,${jpeg}` });
+    expect(res.status).toBe(200);
+    const out = (await res.json()) as { id: string; url: string };
+    expect(kv.data.get(`s:${out.id}:html`)?.value).toContain(`/oembed?url=`);
+    const card = await call(`/oembed?url=${encodeURIComponent(out.url)}`, {}, env);
+    expect(card.status).toBe(200);
+    const body = (await card.json()) as { type: string; title: string; url: string; width: number; height: number };
+    expect(body.type).toBe("photo");
+    expect(body.title).toBe("Correlation matrix");
+    expect(body.url).toBe(`${out.url}.jpg`);
+    expect(body.width).toBe(1200);
+    expect(body.height).toBe(627);
   });
 
   it("GET validates ids, 404s misses with no-store, serves html with sandbox CSP", async () => {
@@ -445,10 +463,12 @@ describe("stories", () => {
     expect(miss.headers.get("Cache-Control")).toBe("no-store");
 
     const pub = (await (await publish({ html: HTML, title: "T" })).json()) as { id: string };
-    const res = await call(`/s/${pub.id}`, {}, env);
+    const res = await call(`/plot/t/${pub.id}`, {}, env);
     expect(res.status).toBe(200);
+    expect((await call(`/s/${pub.id}`, {}, env)).status).toBe(200);
     expect(res.headers.get("Content-Security-Policy")).toContain("sandbox");
     expect(res.headers.get("X-Loom-Story-Title")).toBe("T");
+    expect(res.headers.get("X-Robots-Tag")).toContain("max-image-preview:large");
     expect(await res.text()).toBe(HTML);
   });
 
@@ -458,6 +478,8 @@ describe("stories", () => {
     kv.data.set(`s:${id}:data`, { value: '{"rows":[]}' });
     const img = await call(`/s/${id}.img`, {}, env);
     expect(img.headers.get("Content-Type")).toBe("image/jpeg");
+    expect(img.headers.get("Content-Disposition")).toBe("inline");
+    expect(img.headers.get("X-Robots-Tag")).toContain("max-image-preview:large");
     const data = await call(`/s/${id}.data`, {}, env);
     expect(data.headers.get("Content-Type")).toContain("application/json");
     expect(await data.text()).toBe('{"rows":[]}');

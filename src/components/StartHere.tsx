@@ -20,7 +20,7 @@ export function openDataSources(): void {
 }
 
 export function StartHere({
-  title = "Find something fun to chart",
+  title = "Your next story starts with a chart",
   detail,
   icon,
 }: {
@@ -46,7 +46,7 @@ export function StartHere({
       <div className="text-center max-w-sm space-y-2">
         <p className="text-base font-semibold text-loom-text tracking-tight">{title}</p>
         <p className="text-sm text-loom-muted leading-relaxed">
-          Live earthquakes, flights, Wikipedia edits, crypto, weather — pick one and it opens as a chart you can share.
+          Explore earthquakes, space, cities, markets, and more. Find a real story in open data, then shape it into a chart of your own.
         </p>
         {detail && <p className="text-xs text-loom-muted/80 leading-relaxed">{detail}</p>}
       </div>

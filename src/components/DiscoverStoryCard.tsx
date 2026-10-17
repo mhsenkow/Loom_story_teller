@@ -1,0 +1,183 @@
+// =================================================================
+// DiscoverStoryCard — an evidence-led story with an editable chart.
+// =================================================================
+
+"use client";
+
+import { memo, useMemo } from "react";
+import { ChartCard } from "./ChartCard";
+import { discoverSourceBrief, type DiscoverStory } from "@/lib/discoverStories";
+import {
+  discoverChartLabel,
+  discoverChartSettings,
+  discoverEvidence,
+} from "@/lib/discoverPresentation";
+import { discoverFreshness } from "@/lib/discoverFreshness";
+import { readableDiscoverText, discoverFieldLabel } from "@/lib/discoverEditorial";
+import { DISCOVER_FAMILIES, discoverFamily } from "@/lib/discoverChartCatalog";
+import { feedRef } from "@/lib/sourceRef";
+import { SourcePrefMenu, useSourcePref } from "./SourcePrefControls";
+
+export const DiscoverStoryCard = memo(function DiscoverStoryCard({
+  story,
+  featured = false,
+  opening = false,
+  disabled = false,
+  onOpen,
+  onInspect,
+  groupId,
+  variants,
+  onChooseVariant,
+  now,
+}: {
+  story: DiscoverStory;
+  featured?: boolean;
+  opening?: boolean;
+  disabled?: boolean;
+  onOpen: (story: DiscoverStory) => void;
+  onInspect: (story: DiscoverStory) => void;
+  groupId?: string;
+  variants?: DiscoverStory[];
+  onChooseVariant?: (groupId: string, storyId: string) => void;
+  now?: number;
+}) {
+  const brief = discoverSourceBrief(story.kind);
+  const evidence = useMemo(() => discoverEvidence(story), [story]);
+  const settings = useMemo(
+    () => discoverChartSettings(story.chart),
+    [story.chart],
+  );
+  const freshness = discoverFreshness(story, now);
+  const sourceRef = feedRef(story.kind);
+  const pref = useSourcePref(sourceRef);
+  return (
+    <article
+      className={`discover-story relative ${featured ? "discover-story-featured" : ""} ${pref.reaction === "hide" ? "opacity-60" : ""}`}
+      data-source-ref={sourceRef}
+    >
+      <button
+        type="button"
+        className="discover-story-open"
+        onClick={() => onOpen(story)}
+        disabled={disabled}
+        aria-label={`Open chart: ${story.hook}`}
+        aria-busy={opening}
+      >
+        <div className="discover-story-preview">
+          <ChartCard
+            rec={story.chart}
+            data={story.sample}
+            isActive={false}
+            onClick={() => onOpen(story)}
+            previewOnly
+            hero={featured}
+          />
+          <span className="discover-story-kind">
+            {discoverChartLabel(story.chartKind)}
+          </span>
+          {featured && <span className="discover-story-spotlight">Worth a closer look</span>}
+        </div>
+        <div className="discover-story-copy">
+          <p className="discover-story-eyebrow">
+            {pref.reaction === "love" && (
+              <span className="text-loom-accent" title="You love this source">
+                ♥{" "}
+              </span>
+            )}
+            {story.category}{" "}
+            <span aria-hidden> / </span> {story.fileName}
+          </p>
+          <h3>{story.hook}</h3>
+          <p className="discover-story-blurb">{story.blurb}</p>
+          {story.insight && (
+            <div className="discover-story-insight">
+              <strong>{story.insight.label}</strong>
+              <span>{story.insight.detail}</span>
+            </div>
+          )}
+          <p
+            className="discover-story-fields"
+            title={[
+              story.chart.xField,
+              story.chart.yField,
+              story.chart.sizeField,
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          >
+            {discoverFieldLabel(story.chart.xField)}
+            {story.chart.yField ? ` × ${discoverFieldLabel(story.chart.yField)}` : " · count"}
+            {story.chart.sizeField ? ` · ${discoverFieldLabel(story.chart.sizeField)}` : ""}
+          </p>
+          {settings.length > 0 && (
+            <ul className="discover-story-settings" aria-label="Chart settings">
+              {settings.map((setting) => (
+                <li key={setting}>{setting}</li>
+              ))}
+            </ul>
+          )}
+          <span className="discover-story-cta">
+            {opening ? "Opening…" : "Explore this chart"}{" "}
+            <span aria-hidden>↗</span>
+          </span>
+        </div>
+      </button>
+      {variants && variants.length > 1 && groupId && (
+        <label className="discover-story-views">
+          <span>{variants.length} views</span>
+          <select
+            aria-label={`Chart perspective for ${story.hook}`}
+            value={story.id}
+            disabled={disabled}
+            onChange={(event) => onChooseVariant?.(groupId, event.target.value)}
+          >
+            {variants.map((variant) => (
+              <option key={variant.id} value={variant.id}>
+                {[
+                  discoverChartLabel(variant.chartKind),
+                  readableDiscoverText(
+                    variant.chart.title,
+                    variant.sample.columns,
+                  ),
+                  ...discoverChartSettings(variant.chart),
+                ].join(" · ")}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <div className="discover-story-proof">
+        {story.dataChangedAt != null && story.dataChangedAt <= (now ?? Date.now()) + 60_000 && (now ?? Date.now()) - story.dataChangedAt < 900_000 && <p className="text-loom-accent">Updated data</p>}
+        <p className="discover-story-question">{DISCOVER_FAMILIES[discoverFamily(story.chartKind)].prompt}</p>
+        <p
+          className={freshness.due ? "discover-freshness-due" : ""}
+          title={freshness.title}
+        >
+          {freshness.label}
+          {freshness.due ? " · update due" : ""}
+        </p>
+        <p>
+          {evidence.cached ? "Saved snapshot · " : ""}
+          {evidence.coverage}
+        </p>
+        {evidence.period && <p>{evidence.period}</p>}
+        <div className="discover-story-source">
+          <button
+            type="button"
+            onClick={() => onInspect(story)}
+            disabled={disabled}
+            title={`${brief.tldr}\n${brief.credit}`}
+          >
+            Source &amp; data <span aria-hidden>↗</span>
+          </button>
+          <SourcePrefMenu
+            sourceRef={sourceRef}
+            label={brief.label}
+            actions={["love", "less", "hide", "save"]}
+            triggerClassName="discover-story-more"
+          />
+        </div>
+      </div>
+    </article>
+  );
+});

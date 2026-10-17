@@ -9,6 +9,7 @@ import type { YAggregateOption } from "../recommendations";
 import { clampTopN } from "../chartFacets";
 import type { ChartRenderOpts } from "../chartRenderTypes";
 import { aggregateValues, fieldLabel, pushHit, setLegend, valueTitle } from "./plumbing";
+import { chartFont, chartTypeRamp } from "../chartType";
 
 const DEFAULT_COLORS = [
   "#6c5ce7", "#00d68f", "#ff6b6b", "#ffd93d", "#00b4d8", "#e67e5a", "#a29bfe", "#74b9ff",
@@ -82,9 +83,9 @@ export function renderFullSunburst(
     const rm = (r0 + r1) / 2;
     const arcLen = sweep * rm;
     const depth = r1 - r0;
-    const fs = Math.max(10, Math.min(13, depth * 0.34));
+    const fs = Math.max(chartTypeRamp(opts?.axisFontSize).mark, Math.min(13, depth * 0.34));
     if (arcLen < fs * 2.2 || depth < fs + 6) return;
-    ctx.font = `${fs}px '${fontFamily}', sans-serif`;
+    ctx.font = chartFont(fs, fontFamily);
     const maxW = Math.min(depth - 6, arcLen * 1.2);
     const t = fitTextEllipsis(ctx, text, Math.max(maxW, arcLen - 6));
     if (t === "…") return;
@@ -177,10 +178,10 @@ export function renderFullSunburst(
   ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `600 ${Math.max(11, Math.min(20, innerR * 0.36))}px '${fontFamily}', sans-serif`;
+  ctx.font = chartFont(Math.max(chartTypeRamp(opts?.axisFontSize).titleCompact, Math.min(20, innerR * 0.36)), fontFamily, 600);
   ctx.fillText(formatDataValue(grandTotal), cx, cy - innerR * 0.08);
   ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
-  ctx.font = `${Math.max(10, Math.min(12, innerR * 0.22))}px '${fontFamily}', sans-serif`;
+  ctx.font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily);
   ctx.fillText("total", cx, cy + innerR * 0.3);
   ctx.textBaseline = "alphabetic";
   setLegend(opts, []);

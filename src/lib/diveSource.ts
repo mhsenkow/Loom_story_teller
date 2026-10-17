@@ -7,7 +7,16 @@
 // the in-store sample. Always reports how much of the data it holds.
 // =================================================================
 
-import { isDesktop, queryFile, sourceQuery, sourceSnapshot, streamQuery, streamSnapshot, type SourceKind } from "./tauri";
+import {
+  getSampleRows,
+  isDesktop,
+  queryFile,
+  sourceQuery,
+  sourceSnapshot,
+  streamQuery,
+  streamSnapshot,
+  type SourceKind,
+} from "./tauri";
 import type { QueryResult } from "./store";
 import type { DiveData } from "./dive";
 import { SOURCE_DEFS } from "./sourceRegistry";
@@ -78,8 +87,8 @@ export async function loadDiveDataset(path: string, fallback: QueryResult | null
     return { data: fromQuery(r), totalRows: total, sampled: r.rows.length < total, live: false, table: "loom_active" };
   }
   if (path.startsWith("mock://")) {
-    // Demo files: the browser mock serves the full generated table.
-    const r = await queryFile(path, "", 100_000);
+    // Demo pack is served in-process on web (queryFile is desktop DuckDB only).
+    const r = await getSampleRows(path, 100_000);
     return { data: fromQuery(r), totalRows: r.rows.length, sampled: false, live: false, table: "loom_active" };
   }
   if (!fallback) throw new Error("Open a file first");

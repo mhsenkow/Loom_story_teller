@@ -319,8 +319,9 @@ export class LoomRenderer {
     const sizeScale = this.config.sizeScale ?? 1;
     const padX = Math.max(0, padPx);
     const padY = Math.max(0, padYPx ?? padPx);
-    const dpr =
-      typeof window !== "undefined" && window.devicePixelRatio > 0 ? window.devicePixelRatio : 1;
+    // Derive from the sized buffer so screen DPR caps and export pixelRatio stay aligned.
+    const cssW = canvas.clientWidth || canvas.width;
+    const dpr = cssW > 0 ? canvas.width / cssW : 1;
     const uniforms = new Float32Array([
       canvas.width,
       canvas.height,

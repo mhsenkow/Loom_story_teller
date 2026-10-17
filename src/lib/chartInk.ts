@@ -12,6 +12,7 @@ import { getThemeUiColors } from "./chartPalettes";
 import { ensureContrast } from "./wcagColor";
 import { fitTextEllipsis } from "./chartLayout";
 import { formatAxisValue, formatDataValue, niceTicks } from "./chartAxes";
+import { chartFont, chartTypeRamp } from "./chartType";
 
 export type ChartInk = {
   /** Background used for contrast math (never transparent). */
@@ -112,8 +113,8 @@ export function resolveChartInk(o: InkSource): ChartInk {
   const bgParsed = parseColor(o.themeBg);
   const paintBg = !!o.themeBg && (!bgParsed || bgParsed[3] > 0.01);
   const bg = paintBg && bgParsed && bgParsed[3] >= 0.99 ? o.themeBg! : ui.bg;
-  const text = o.themeText ?? ui.text;
-  const muted = o.axisLabelColor ?? o.themeMuted ?? ui.muted;
+  const text = ensureContrast(o.themeText ?? ui.text, bg);
+  const muted = ensureContrast(o.axisLabelColor ?? o.themeMuted ?? ui.label, bg);
   const border = o.themeBorder ?? ui.border;
   return { bg, text, muted, border, paintBg, light: relativeLuminance(bg) > 0.4 };
 }
@@ -124,7 +125,7 @@ export function inkTint(ink: ChartInk, amount: number): string {
 }
 
 export function fontOf(size: number, family = "Inter", weight: number | string = 400): string {
-  return `${weight} ${size}px '${family}', sans-serif`;
+  return chartFont(size, family, weight);
 }
 
 // ---------------------------------------------------------------
@@ -196,11 +197,12 @@ export function drawEmptyMessage(
   ink: ChartInk,
   fontFamily = "Inter",
   mini = false,
+  axisFontSize?: number,
 ): void {
   ctx.save();
   ctx.globalAlpha = 1;
   ctx.fillStyle = ink.muted;
-  ctx.font = fontOf(mini ? 10 : 12, fontFamily);
+  ctx.font = fontOf(chartTypeRamp(axisFontSize, { compact: mini }).tick, fontFamily);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(fitTextEllipsis(ctx, message, Math.max(40, w - 24)), w / 2, h / 2);
@@ -225,7 +227,7 @@ function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: n
 /** Translucent theme panel behind a key so it reads over marks. */
 export function drawKeyPanel(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, ink: ChartInk): void {
   ctx.save();
-  ctx.globalAlpha = 0.86;
+  ctx.globalAlpha = 0.96;
   ctx.fillStyle = ink.bg;
   roundRectPath(ctx, x, y, w, h, 4);
   ctx.fill();
@@ -247,6 +249,7 @@ export type RampKeyArgs = {
   title?: string;
   ink: ChartInk;
   fontFamily?: string;
+  axisFontSize?: number;
   /** Panel behind the key (for keys floating over marks). */
   panel?: boolean;
   /** Override tick labels (e.g. ["low", "high"]). */
@@ -256,8 +259,9 @@ export type RampKeyArgs = {
 };
 
 /** Height a ramp key occupies (for layout before drawing). */
-export function rampKeyHeight(hasTitle: boolean, panel = false): number {
-  return (hasTitle ? 14 : 0) + 8 + 14 + (panel ? 12 : 0);
+export function rampKeyHeight(hasTitle: boolean, panel = false, axisFontSize?: number): number {
+  const type = chartTypeRamp(axisFontSize);
+  return (hasTitle ? type.legendTitle + 5 : 0) + 8 + type.legend + 5 + (panel ? 12 : 0);
 }
 
 /**
@@ -266,8 +270,9 @@ export function rampKeyHeight(hasTitle: boolean, panel = false): number {
  */
 export function drawRampKey(ctx: CanvasRenderingContext2D, a: RampKeyArgs): { x: number; y: number; w: number; h: number } {
   const font = a.fontFamily ?? "Inter";
+  const type = chartTypeRamp(a.axisFontSize);
   const padIn = a.panel ? 6 : 0;
-  const boxH = rampKeyHeight(!!a.title, a.panel);
+  const boxH = rampKeyHeight(!!a.title, a.panel, a.axisFontSize);
   const barW = Math.max(40, a.width - padIn * 2);
   const bx = a.x + padIn;
   let cy = a.y + padIn;
@@ -275,11 +280,11 @@ export function drawRampKey(ctx: CanvasRenderingContext2D, a: RampKeyArgs): { x:
   if (a.panel) drawKeyPanel(ctx, a.x, a.y, a.width, boxH, a.ink);
   ctx.textBaseline = "alphabetic";
   if (a.title) {
-    ctx.font = fontOf(10, font, 600);
+    ctx.font = fontOf(type.legendTitle, font, 600);
     ctx.fillStyle = a.ink.text;
     ctx.textAlign = "left";
-    ctx.fillText(fitTextEllipsis(ctx, a.title, barW), bx, cy + 10);
-    cy += 14;
+    ctx.fillText(fitTextEllipsis(ctx, a.title, barW), bx, cy + type.legendTitle);
+    cy += type.legendTitle + 5;
   }
   const steps = 32;
   for (let i = 0; i < steps; i++) {
@@ -291,7 +296,7 @@ export function drawRampKey(ctx: CanvasRenderingContext2D, a: RampKeyArgs): { x:
   ctx.strokeRect(bx + 0.5, cy + 0.5, barW - 1, 7);
   cy += 8;
 
-  ctx.font = fontOf(10, font);
+  ctx.font = fontOf(type.legend, font);
   ctx.fillStyle = a.ink.muted;
   ctx.textBaseline = "top";
   const ly = cy + 3;
@@ -363,15 +368,16 @@ export function drawSwatchRow(
   maxWidth: number,
   ink: ChartInk,
   fontFamily = "Inter",
-  opts: { maxRows?: number; measureOnly?: boolean; align?: "left" | "center" } = {},
+  opts: { maxRows?: number; measureOnly?: boolean; align?: "left" | "center"; axisFontSize?: number } = {},
 ): number {
   if (entries.length === 0) return 0;
-  const lineH = 15;
+  const type = chartTypeRamp(opts.axisFontSize);
+  const lineH = type.legend + 5;
   const maxRows = opts.maxRows ?? 2;
   const box = 9;
   const gap = 12;
   ctx.save();
-  ctx.font = fontOf(10, fontFamily);
+  ctx.font = fontOf(type.legend, fontFamily);
   const maxLabel = Math.max(40, Math.min(160, maxWidth - box - 6));
   const items = entries.map((e) => {
     const label = fitTextEllipsis(ctx, e.label, maxLabel);
@@ -438,6 +444,7 @@ export function drawSizeKey(
     title?: string;
     ink: ChartInk;
     fontFamily?: string;
+    axisFontSize?: number;
     fill?: string;
     panel?: boolean;
     maxWidth?: number;
@@ -448,16 +455,17 @@ export function drawSizeKey(
   const { min, max, ink } = args;
   if (!(max > min) || !Number.isFinite(min) || !Number.isFinite(max)) return null;
   const font = args.fontFamily ?? "Inter";
+  const type = chartTypeRamp(args.axisFontSize);
   const nt = niceTicks(min, max, 3, false);
   let vals = nt.ticks.filter((v) => v > 0 || min <= 0);
   if (vals.length > 3) vals = [vals[0]!, vals[Math.floor(vals.length / 2)]!, vals[vals.length - 1]!];
   if (vals.length < 2) vals = [min, max];
   const labels = vals.map((v) => (nt.ticks.includes(v) ? formatAxisValue(v, nt.step) : formatDataValue(v)));
   ctx.save();
-  ctx.font = fontOf(10, font);
+  ctx.font = fontOf(type.legend, font);
   const radii = vals.map((v) => Math.max(1.5, args.radiusOf(v)));
   const rMax = Math.max(...radii);
-  const titleH = args.title ? 14 : 0;
+  const titleH = args.title ? type.legendTitle + 5 : 0;
   const padIn = 6;
   let wSum = padIn;
   const cols = vals.map((_, i) => {
@@ -467,19 +475,19 @@ export function drawSizeKey(
     return cx;
   });
   const boxW = Math.min(args.maxWidth ?? Infinity, Math.max(wSum - 10 + padIn, args.title ? ctx.measureText(args.title).width + padIn * 2 : 0));
-  const boxH = padIn + titleH + rMax * 2 + 4 + 12 + padIn - 2;
+  const boxH = padIn + titleH + rMax * 2 + 4 + type.legend + padIn;
   const x = args.anchor === "right" ? args.x - boxW : args.x;
   const y = args.bottom - boxH;
   if (args.panel !== false) drawKeyPanel(ctx, x, y, boxW, boxH, ink);
   if (args.title) {
-    ctx.font = fontOf(10, font, 600);
+    ctx.font = fontOf(type.legendTitle, font, 600);
     ctx.fillStyle = ink.text;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
-    ctx.fillText(fitTextEllipsis(ctx, args.title, boxW - padIn * 2), x + padIn, y + padIn + 9);
+    ctx.fillText(fitTextEllipsis(ctx, args.title, boxW - padIn * 2), x + padIn, y + padIn + type.legendTitle);
   }
   const baseY = y + padIn + titleH + rMax * 2;
-  ctx.font = fontOf(10, font);
+  ctx.font = fontOf(type.legend, font);
   vals.forEach((_, i) => {
     const r = radii[i]!;
     const cx = x + cols[i]!;

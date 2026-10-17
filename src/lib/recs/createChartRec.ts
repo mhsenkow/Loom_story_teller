@@ -4,6 +4,7 @@
 // =================================================================
 
 import { chartTimeWindowLabel, fieldLooksFutureDated } from "../chartTime";
+import { parseChartEmojiMap, type ChartEmojiMap } from "../chartEmoji";
 import { COLORS, defaultLineAreaAggregate, inferType, measureColumns } from "./columns";
 import { isGeoRegionField } from "../geoFields";
 import { buildGeoMapRec, isGeoMapKind } from "../geoMapsRec";
@@ -45,6 +46,7 @@ export function createScatterRec(
     opacityField?: string | null;
     shapeField?: string | null;
     emojiField?: string | null;
+    emojiMap?: ChartEmojiMap | null;
     rowField?: string | null;
     tooltipFields?: string[] | null;
     tooltipKeyField?: string | null;
@@ -288,6 +290,7 @@ export function createChartRec(
     opacityField?: string | null;
     shapeField?: string | null;
     emojiField?: string | null;
+    emojiMap?: ChartEmojiMap | null;
     yAggregate?: YAggregateOption | null;
     topN?: number | null;
     y2Field?: string | null;
@@ -320,6 +323,7 @@ export function createChartRec(
   const opacityField = extra?.opacityField ?? null;
   const shapeField = extra?.shapeField ?? null;
   const emojiField = extra?.emojiField ?? null;
+  const emojiMap = extra?.emojiMap?.field === emojiField ? parseChartEmojiMap(extra.emojiMap) : undefined;
   const yAggregate = extra?.yAggregate ?? null;
   const topN = extra?.topN ?? null;
   const y2Field = extra?.y2Field && numCols.some((c) => c.name === extra.y2Field) ? extra.y2Field : null;
@@ -367,6 +371,7 @@ export function createChartRec(
       ...scatter,
       shapeField: shapeField || undefined,
       emojiField: emojiField || undefined,
+      emojiMap,
       residualOverlay: residualOverlay || undefined,
       anomalyHighlight: anomalyHighlight || undefined,
       yScale: yScale || undefined,
@@ -771,6 +776,7 @@ export function createChartRec(
           ...geo,
           shapeField: shapeField || undefined,
           emojiField: emojiField || undefined,
+      emojiMap,
           tooltipFields: extra?.tooltipFields,
           tooltipKeyField: extra?.tooltipKeyField,
           timeWindowField: timeWindowField || undefined,
@@ -892,6 +898,7 @@ export function createChartRec(
     opacityField: opacityField ?? undefined,
     shapeField: shapeField ?? undefined,
     emojiField: emojiField ?? undefined,
+    emojiMap,
     yAggregate: effectiveYAggregate ?? undefined,
     topN: topN ?? undefined,
     y2Field: y2Field ?? undefined,

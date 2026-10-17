@@ -65,18 +65,18 @@ export function fitChartFrame(args: {
   hostW: number;
   hostH: number;
   aspectId: ChartAspectId;
-  device: DetectedDevice;
+  device: DetectedDevice | "auto";
   /** Outer padding around the framed stage */
   gutter?: number;
 }): { width: number; height: number; aspectLocked: boolean } {
   const gutter = args.gutter ?? 12;
-  const hostW = Math.max(120, args.hostW - gutter * 2);
-  const hostH = Math.max(120, args.hostH - gutter * 2);
-  const maxW = Math.min(hostW, DEVICE_MAX_WIDTH[args.device]);
+  const hostW = Math.max(1, args.hostW - gutter * 2);
+  const hostH = Math.max(1, args.hostH - gutter * 2);
+  const maxW = args.device === "auto" ? hostW : Math.min(hostW, DEVICE_MAX_WIDTH[args.device]);
   const aspect = CHART_ASPECTS.find((a) => a.id === args.aspectId)?.ratio ?? null;
 
   if (aspect == null || !Number.isFinite(aspect) || aspect <= 0) {
-    // Free: fill host, capped by device width (centered when narrower)
+    // Auto fills the host. Only an intentional device preview caps its width.
     return {
       width: Math.round(maxW),
       height: Math.round(hostH),

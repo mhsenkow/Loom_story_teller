@@ -81,6 +81,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
     activeChart,
     setShareSheetOpen,
     setToast,
+    discoverReturnPath,
   } = useLoomStore();
   const viewportW = useViewportWidth();
   const aspect = appSettings.chartAspect ?? "free";
@@ -118,7 +119,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       return;
     }
     // Start PNG capture immediately so the sheet often opens with the image ready.
-    void import("@/lib/sharePreviewCache").then((m) => m.warmSharePreview());
+    void import("@/lib/sharePreviewCache").then((m) => m.warmSharePreview("current"));
     setShareSheetOpen(true);
   };
 
@@ -147,6 +148,13 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         </svg>
       </button>
 
+      {discoverReturnPath && discoverReturnPath === selectedFile?.path && (
+        <button type="button" onClick={() => { void import("@/lib/discoverStories").then(({ requestDiscoverScan }) => requestDiscoverScan()); }}
+          className="loom-btn-ghost flex-shrink-0 min-h-9 px-2 rounded-md text-loom-accent"
+          aria-label="Back to stories" title="Back to stories — keep your filters and place">
+          <span aria-hidden>←</span><span className="hidden 2xl:inline ml-1 text-xs">Stories</span>
+        </button>
+      )}
       <nav className="loom-seg shrink-0" aria-label="View mode">
         {VIEW_MODES.map((mode) => (
           <button
@@ -221,7 +229,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
                   type="button"
                   title={
                     d.id === "auto"
-                      ? `Auto · currently ${effectiveDevice}`
+                      ? "Auto · fill the available chart area"
                       : `${d.label} preview width`
                   }
                   onClick={() => setDevice(d.id)}
@@ -280,7 +288,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         <button
           type="button"
           onClick={onOpenShortcuts}
-          className="loom-btn-ghost flex min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md"
+          className={`loom-btn-ghost ${discoverReturnPath === selectedFile?.path ? "hidden md:flex" : "flex"} min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md`}
           title="Keyboard shortcuts (?)"
           aria-label="Keyboard shortcuts"
         >

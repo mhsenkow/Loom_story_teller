@@ -7,6 +7,8 @@
 // thinned) instead of being chopped to a fixed character count.
 // =================================================================
 
+import { chartFont } from "./chartType";
+
 export type NiceScale = {
   /** Domain after rounding outward to whole steps (when `extend`). */
   min: number;
@@ -113,12 +115,12 @@ export function layoutBandLabels(
   bandWidth: number,
   room: number,
   fontFamily: string,
-  baseFont = 10,
+  baseFont = 12,
 ): BandLabelLayout {
   const n = labels.length;
-  const fontSize = Math.max(10, Math.min(baseFont, bandWidth * 0.55 + 2));
+  const fontSize = Math.max(11, Number.isFinite(baseFont) ? baseFont : 12);
   ctx.save();
-  ctx.font = `${fontSize}px '${fontFamily}', sans-serif`;
+  ctx.font = chartFont(fontSize, fontFamily);
   const widths = labels.map((l) => ctx.measureText(l).width);
   ctx.restore();
   const widest = widths.length ? Math.max(...widths) : 0;

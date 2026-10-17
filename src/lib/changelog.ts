@@ -31,6 +31,14 @@ export const CHANGELOG: ChangelogRelease[] = [
     summary: "Scatterplots and point maps can speak with silhouettes, category shapes, and emoji.",
     items: [
       {
+        title: "Fresh discoveries, expressive charts",
+        detail: "Discover now considers category shapes and meaningful emoji for weather, disasters, transit, and fire observations. Previews, legends, and shared links keep the same symbols. While Loom is open, a rotating scan checks the whole source catalog on each feed’s cadence. Real changes wait behind New data ready; unchanged checks stay quiet, and recently updated data gets a highlight.",
+      },
+      {
+        title: "More ways to find something interesting",
+        detail: "Discover considers all 59 chart types, then balances useful signals with a broader mix of sources and questions. Browse eight perspectives, see measured evidence on each pick, and explore related views together. Trends need real history; stronger charts get more room, and phones consider the same breadth before choosing their picks.",
+      },
+      {
         title: "A broader marker palette",
         detail: "Choose circles, pills, dashes, polygons, rings, pins, and more from a visual grid — or use a curated emoji for every point.",
       },

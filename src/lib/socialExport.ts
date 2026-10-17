@@ -134,6 +134,50 @@ export interface CaptionInput {
   handle?: string | null;
 }
 
+/** Threads rejects posts longer than 500 characters. */
+export const THREADS_TEXT_MAX = 500;
+
+/** Caption plus the public URL, clipped so a Threads intent stays valid. */
+export function threadsPostText(caption: string, pageUrl: string): string {
+  const link = pageUrl.trim();
+  const body = caption.trim();
+  if (!link) return body.slice(0, THREADS_TEXT_MAX);
+  const joiner = body ? "\n\n" : "";
+  const room = THREADS_TEXT_MAX - link.length - joiner.length;
+  if (room < 1) return link.slice(0, THREADS_TEXT_MAX);
+  const clipped = body.length <= room ? body : `${body.slice(0, room - 1).trimEnd()}…`;
+  return clipped ? `${clipped}${joiner}${link}` : link;
+}
+
+/**
+ * LinkedIn's share-offsite composer only accepts the URL. The chart card
+ * comes from og:image on that page; prefilled summary text is ignored.
+ */
+export function linkedInShareHref(pageUrl: string): string {
+  return `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(pageUrl.trim())}`;
+}
+
+/** Threads web intent. Text carries the caption and the reopen link. */
+export function threadsShareHref(caption: string, pageUrl: string): string {
+  return `https://www.threads.net/intent/post?text=${encodeURIComponent(threadsPostText(caption, pageUrl))}`;
+}
+
+/** Facebook's sharer only takes the page URL; the card comes from Open Graph. */
+export function facebookShareHref(pageUrl: string): string {
+  return `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(pageUrl.trim())}`;
+}
+
+/** Mail app compose with the caption and the public chart link. */
+export function emailShareHref(subject: string, body: string): string {
+  const params = new URLSearchParams();
+  const title = subject.trim();
+  const text = body.trim();
+  if (title) params.set("subject", title);
+  if (text) params.set("body", text);
+  const q = params.toString();
+  return q ? `mailto:?${q}` : "mailto:";
+}
+
 /** Short post caption ready to paste under a social image. */
 export function buildSocialCaption(input: CaptionInput): string {
   const lines: string[] = [];
@@ -398,14 +442,15 @@ export async function recordCanvasVideo(
 export const LINK_PREVIEW_SIZE = { width: 1200, height: 627 } as const;
 
 /**
- * Letterbox any image into a 1200×627 JPEG for Slack / iMessage / LinkedIn unfurls.
- * Keeps the designed chart intact with theme padding instead of hard-cropping.
+ * Place the real chart on a 1200×627 JPEG for link unfurls.
+ * Landscape charts fill the card. A square or tall chart keeps its pixels
+ * and gains a title band so the wide card does not look empty.
  */
 export async function toLinkPreviewJpeg(
   blob: Blob,
-  opts?: { quality?: number; fill?: string },
+  opts?: { quality?: number; fill?: string; title?: string; source?: string },
 ): Promise<string> {
-  const quality = opts?.quality ?? 0.9;
+  const quality = opts?.quality ?? 0.92;
   const fill = opts?.fill ?? "#0a0a0c";
   const { width: W, height: H } = LINK_PREVIEW_SIZE;
   try {
@@ -415,18 +460,122 @@ export async function toLinkPreviewJpeg(
     c.height = H;
     const ctx = c.getContext("2d");
     if (!ctx) throw new Error("no 2d");
-    ctx.fillStyle = fill;
+    const matte = sampleEdgeColor(bmp) ?? fill;
+    ctx.fillStyle = matte;
     ctx.fillRect(0, 0, W, H);
-    const scale = Math.min(W / bmp.width, H / bmp.height);
-    const dw = bmp.width * scale;
-    const dh = bmp.height * scale;
+    const contain = Math.min(W / bmp.width, H / bmp.height);
+    const dw0 = bmp.width * contain;
+    const dh0 = bmp.height * contain;
+    const coverage = (dw0 * dh0) / (W * H);
+    const title = (opts?.title || "").trim();
+    const source = (opts?.source || "").trim();
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(bmp, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    if (coverage < 0.78 && (title || source)) {
+      paintLinkPlate(ctx, bmp, W, H, matte, title, source);
+    } else {
+      ctx.drawImage(bmp, (W - dw0) / 2, (H - dh0) / 2, dw0, dh0);
+    }
     bmp.close();
     return c.toDataURL("image/jpeg", quality);
   } catch {
     return blobToDataUrl(blob);
+  }
+}
+
+function sampleEdgeColor(bmp: ImageBitmap): string | null {
+  try {
+    const n = 4;
+    const c = document.createElement("canvas");
+    c.width = n;
+    c.height = n;
+    const ctx = c.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let count = 0;
+    const corners: Array<[number, number]> = [
+      [0, 0],
+      [Math.max(0, bmp.width - n), 0],
+      [0, Math.max(0, bmp.height - n)],
+      [Math.max(0, bmp.width - n), Math.max(0, bmp.height - n)],
+    ];
+    for (const [sx, sy] of corners) {
+      ctx.clearRect(0, 0, n, n);
+      ctx.drawImage(bmp, sx, sy, n, n, 0, 0, n, n);
+      const data = ctx.getImageData(0, 0, n, n).data;
+      for (let i = 0; i < data.length; i += 4) {
+        r += data[i]!;
+        g += data[i + 1]!;
+        b += data[i + 2]!;
+        count += 1;
+      }
+    }
+    if (!count) return null;
+    return `rgb(${Math.round(r / count)}, ${Math.round(g / count)}, ${Math.round(b / count)})`;
+  } catch {
+    return null;
+  }
+}
+
+function parseRgb(input: string): [number, number, number] | null {
+  const hex = input.trim().match(/^#([0-9a-f]{6})$/i);
+  if (hex) {
+    const n = Number.parseInt(hex[1]!, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const rgb = input.match(/rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+  if (!rgb) return null;
+  return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+}
+
+function paintLinkPlate(
+  ctx: CanvasRenderingContext2D,
+  bmp: ImageBitmap,
+  W: number,
+  H: number,
+  matte: string,
+  title: string,
+  source: string,
+): void {
+  const rgb = parseRgb(matte) ?? [10, 10, 12];
+  const luma = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+  const ink = luma > 0.62 ? "#16161a" : "#f5f5f7";
+  const quiet = luma > 0.62 ? "rgba(22, 22, 26, 0.55)" : "rgba(245, 245, 247, 0.62)";
+  const hair = luma > 0.62 ? "rgba(22, 22, 26, 0.12)" : "rgba(245, 245, 247, 0.16)";
+  const side = 32;
+  const header = title ? 72 : 20;
+  const footer = source ? 40 : 20;
+  const availW = W - side * 2;
+  const availH = H - header - footer;
+  const scale = Math.min(availW / bmp.width, availH / bmp.height);
+  const dw = bmp.width * scale;
+  const dh = bmp.height * scale;
+  const x = (W - dw) / 2;
+  const y = header + (availH - dh) / 2;
+  ctx.drawImage(bmp, x, y, dw, dh);
+  ctx.strokeStyle = hair;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, Math.max(0, dw - 1), Math.max(0, dh - 1));
+
+  ctx.textBaseline = "middle";
+  ctx.font = "600 13px ui-sans-serif, system-ui, sans-serif";
+  const mark = "LOOM";
+  const markW = ctx.measureText(mark).width;
+  if (title) {
+    ctx.fillStyle = ink;
+    ctx.font = "600 30px ui-sans-serif, system-ui, sans-serif";
+    const label = truncateTextToWidth(ctx, title, availW - markW - 24);
+    ctx.fillText(label, side, 38);
+    ctx.fillStyle = quiet;
+    ctx.font = "600 13px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText(mark, W - side - markW, 38);
+  }
+  if (source) {
+    ctx.fillStyle = quiet;
+    ctx.font = "500 15px ui-sans-serif, system-ui, sans-serif";
+    ctx.fillText(truncateTextToWidth(ctx, source, availW), side, H - 22);
   }
 }
 

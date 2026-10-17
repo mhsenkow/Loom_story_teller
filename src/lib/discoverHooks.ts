@@ -26,6 +26,7 @@ function numAt(sample: QueryResult, row: number, col: string): number {
   const i = colIndex(sample, col);
   if (i < 0) return NaN;
   const v = sample.rows[row]?.[i];
+  if (v == null || typeof v === "boolean" || (typeof v === "string" && !v.trim())) return NaN;
   return typeof v === "number" ? v : Number(v);
 }
 
@@ -1495,7 +1496,7 @@ export function discoverHookFor(
   sample: QueryResult,
   chart: ChartRecommendation,
 ): DiscoverHookResult {
-  const n = sample.total_rows || sample.rows.length;
+  const n = sample.rows.length;
   const fn = DISCOVER_HOOKS[kind] ?? hookDefault;
   const result = fn(n, sample, chart);
   return {

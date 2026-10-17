@@ -106,7 +106,7 @@ export function useSidebarOverlays(): boolean {
 }
 
 /** Phone sheet height while editing a chart live (chart re-fits above it). */
-export const MOBILE_LIVE_EDIT_SHEET = "56dvh";
+export const MOBILE_LIVE_EDIT_SHEET = "clamp(14rem, calc(100dvh - 25rem), 48dvh)";
 
 /**
  * Phone + Chart view + Chart/Smart panel open: the panel becomes a shorter,

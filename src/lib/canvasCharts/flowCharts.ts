@@ -14,6 +14,7 @@ import { buildFlowGraph, layoutArcDiagram, layoutForceNetwork, strokeArcLink } f
 import { type YAggregateOption } from "../recommendations";
 import { axisFont, widestText } from "./axisHelpers";
 import { DEFAULT_COLORS } from "./shared";
+import { chartFont, chartTypeRamp } from "../chartType";
 
 export type TreemapItem = { label: string; value: number; cat: string };
 export type TreemapRect = TreemapItem & { x: number; y: number; w: number; h: number };
@@ -115,15 +116,15 @@ export function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[]
 
     if (rect.w > 34 && rect.h > 18) {
       const ink = contrastingInk(fill);
-      const fontSize = Math.max(10, Math.min(14, Math.min(rect.w / 5.5, rect.h / 2.2)));
+      const fontSize = Math.max(chartTypeRamp(opts?.axisFontSize).mark, Math.min(14, Math.min(rect.w / 5.5, rect.h / 2.2)));
       ctx.fillStyle = ink;
-      ctx.font = `600 ${fontSize}px '${fontFamily}', sans-serif`;
+      ctx.font = chartFont(fontSize, fontFamily, 600);
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
       ctx.fillText(fitTextEllipsis(ctx, rect.label, rect.w - 10), rect.x + 5, rect.y + 5);
       if (rect.h > fontSize * 2 + 14) {
         ctx.globalAlpha = 0.85;
-        ctx.font = `${Math.max(10, fontSize - 2)}px '${fontFamily}', sans-serif`;
+        ctx.font = chartFont(Math.max(chartTypeRamp(opts?.axisFontSize).mark, fontSize - 2), fontFamily);
         ctx.fillText(fitTextEllipsis(ctx, formatDataValue(rect.value), rect.w - 10), rect.x + 5, rect.y + 8 + fontSize);
         ctx.globalAlpha = 1;
       }
@@ -221,16 +222,16 @@ export function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unkno
     ctx.stroke();
 
     if (c.r > 16) {
-      const fs = Math.max(10, Math.min(14, c.r * 0.36));
+      const fs = Math.max(chartTypeRamp(opts?.axisFontSize).mark, Math.min(14, c.r * 0.36));
       ctx.fillStyle = contrastingInk(fill);
-      ctx.font = `600 ${fs}px '${fontFamily}', sans-serif`;
+      ctx.font = chartFont(fs, fontFamily, 600);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       const showValue = c.r > fs * 2.4;
       ctx.fillText(fitTextEllipsis(ctx, c.label, c.r * 1.7), c.x, showValue ? c.y - fs * 0.55 : c.y);
       if (showValue) {
         ctx.globalAlpha = 0.85;
-        ctx.font = `${Math.max(10, fs - 2)}px '${fontFamily}', sans-serif`;
+        ctx.font = chartFont(Math.max(chartTypeRamp(opts?.axisFontSize).mark, fs - 2), fontFamily);
         ctx.fillText(formatDataValue(c.value), c.x, c.y + fs * 0.65);
         ctx.globalAlpha = 1;
       }
@@ -427,15 +428,15 @@ export function renderFullNetwork(ctx: CanvasRenderingContext2D, rows: unknown[]
     ctx.stroke();
 
     if (n.r > 10) {
-      const fs = Math.max(8, Math.min(12, n.r * 0.45));
+      const fs = Math.max(chartTypeRamp(opts?.axisFontSize).mark, Math.min(12, n.r * 0.45));
       ctx.fillStyle = contrastingInk(fill);
-      ctx.font = `600 ${fs}px '${fontFamily}', sans-serif`;
+      ctx.font = chartFont(fs, fontFamily, 600);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(fitTextEllipsis(ctx, n.id, n.r * 1.8), n.x, n.y);
     } else {
       ctx.fillStyle = opts?.themeMuted ?? "#8b8b98";
-      ctx.font = `500 10px '${fontFamily}', sans-serif`;
+      ctx.font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily, 500);
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       ctx.fillText(fitTextEllipsis(ctx, n.id, 72), n.x + n.r + 4, n.y);
@@ -500,7 +501,7 @@ export function renderFullArcDiagram(ctx: CanvasRenderingContext2D, rows: unknow
     ctx.translate(n.x, n.y + n.r + 3);
     ctx.rotate(-Math.PI / 4);
     ctx.fillStyle = opts?.themeMuted ?? "#8b8b98";
-    ctx.font = `500 9px '${fontFamily}', sans-serif`;
+    ctx.font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily, 500);
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     ctx.fillText(fitTextEllipsis(ctx, n.id, 56), 0, 0);

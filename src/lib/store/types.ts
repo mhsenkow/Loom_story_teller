@@ -297,6 +297,7 @@ export interface LoomState {
   socialPresetId: SocialPresetId;
   shareSheetOpen: boolean;
   whatsNewOpen: boolean;
+  discoverReturnPath: string | null;
 
   promptDialog: PromptDialogConfig | null;
 
@@ -499,6 +500,7 @@ export interface LoomState {
   setExportSupersample: (v: 1 | 2) => void;
   setSocialPresetId: (v: SocialPresetId) => void;
   setShareSheetOpen: (v: boolean) => void;
+  setDiscoverReturnPath: (path: string | null) => void;
   setWhatsNewOpen: (v: boolean) => void;
   applyQuerySnapshot: (id: string) => void;
   setPromptDialog: (config: PromptDialogConfig | null) => void;

@@ -38,7 +38,6 @@ import {
   drawRampKey,
   drawSizeKey,
   drawSwatchRow,
-  fontOf,
   inkOn,
   inkTint,
   mixColor,
@@ -57,6 +56,9 @@ import type { OddChartKind, OddRenderOpts } from "./oddChartsRec";
 import { toNum, groupSum, agg, numColsOf, nomColsOf, timeColsOf, inferType, jitter } from "./oddChartsRec";
 import { resolveLayoutDirection } from "./chartSupport";
 import { resolveIsoFloorOrient } from "./isoOrient";
+import { resolvePyramidScaleMode } from "./pyramidScale";
+import { formatDeltaLabel } from "./deltaCompare";
+import { chartFont, chartTypeRamp } from "./chartType";
 
 
 // ---------------------------------------------------------------------------
@@ -83,6 +85,10 @@ interface OddEnv {
   pad: number;
   columns: string[];
   opts: OddRenderOpts;
+}
+
+function oddFont(env: OddEnv, size: number, weight: number | string = 400): string {
+  return chartFont(Math.max(size, chartTypeRamp(env.opts.axisFontSize).mark), env.font, weight);
 }
 
 type Renderer = (
@@ -134,7 +140,7 @@ export function renderOddChart(
       themeText: ink.text,
       themeBorder: ink.border,
       axisLineColor: inkTint(ink, 0.38),
-      axisFontSize: 10,
+      axisFontSize: chartTypeRamp(opts.axisFontSize).tick,
     },
   };
   ctx.save();
@@ -144,8 +150,9 @@ export function renderOddChart(
   } finally {
     ctx.restore();
   }
-  if (message) drawEmptyMessage(ctx, w, h, message, ink, font, mini);
-  if (opts.hits && xi >= 0 && yi >= 0 && rows.length) {
+  if (message) drawEmptyMessage(ctx, w, h, message, ink, font, mini, opts.axisFontSize);
+  // Pyramid registers its own bar hits; generic X/Y scatter hits are wrong here.
+  if (opts.hits && xi >= 0 && yi >= 0 && rows.length && kind !== "pyramid") {
     appendOddChartPointHits(rows, xi, yi, ci, w, h, pad, opts);
   }
 }
@@ -328,13 +335,13 @@ function drawPanelLegend(
   const maxRows = 8;
   const shown = entries.slice(0, maxRows);
   const extra = entries.length - shown.length;
-  const lineH = 15;
+  const lineH = chartTypeRamp(env.opts.axisFontSize).legend + 6;
   ctx.save();
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   const maxText = Math.min(150, Math.max(60, (plot.right - plot.left) * 0.32));
   let textW = Math.max(...shown.map((e) => ctx.measureText(e.label).width), extra > 0 ? ctx.measureText(`+${extra} more`).width : 0);
   if (title) {
-    ctx.font = fontOf(10, env.font, 600);
+    ctx.font = oddFont(env, 10, 600);
     textW = Math.max(textW, ctx.measureText(title).width);
   }
   textW = Math.min(maxText, textW);
@@ -347,12 +354,12 @@ function drawPanelLegend(
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
   if (title) {
-    ctx.font = fontOf(10, env.font, 600);
+    ctx.font = oddFont(env, 10, 600);
     ctx.fillStyle = env.ink.text;
     ctx.fillText(fitTextEllipsis(ctx, title, bw - 16), x + 8, cy);
     cy += lineH;
   }
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   for (const e of shown) {
     ctx.fillStyle = e.color;
     if (e.shape === "line") ctx.fillRect(x + 8, cy - 1.5, 9, 3);
@@ -386,13 +393,13 @@ function layoutFooter(ctx: CanvasRenderingContext2D, env: OddEnv, spec: FooterSp
   const maxW = env.w - 2 * left;
   const sizeH = spec.size ? 6 + (spec.size.title ? 14 : 0) + Math.max(3, spec.size.radiusOf(spec.size.max)) * 2 + 4 + 12 + 4 : 0;
   const rampW = spec.ramp ? Math.max(90, Math.min(180, maxW * 0.36)) : 0;
-  const rampH = spec.ramp ? rampKeyHeight(!!spec.ramp.title) : 0;
+  const rampH = spec.ramp ? rampKeyHeight(!!spec.ramp.title, false, env.opts.axisFontSize) : 0;
   const swW = Math.max(60, maxW - (spec.size ? 130 : 0) - (rampW ? rampW + 16 : 0));
-  const swH = spec.swatches?.length ? drawSwatchRow(ctx, spec.swatches, 0, 0, swW, env.ink, env.font, { measureOnly: true, maxRows: 2 }) : 0;
+  const swH = spec.swatches?.length ? drawSwatchRow(ctx, spec.swatches, 0, 0, swW, env.ink, env.font, { axisFontSize: env.opts.axisFontSize, measureOnly: true, maxRows: 2 }) : 0;
   let capLines: string[] = [];
   if (spec.caption) {
     ctx.save();
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     capLines = wrapText(ctx, spec.caption, maxW, 2);
     ctx.restore();
   }
@@ -409,7 +416,7 @@ function layoutFooter(ctx: CanvasRenderingContext2D, env: OddEnv, spec: FooterSp
         radiusOf: spec.size.radiusOf,
         title: spec.size.title,
         ink: env.ink,
-        fontFamily: env.font,
+        axisFontSize: env.opts.axisFontSize, fontFamily: env.font,
         fill: spec.size.fill,
         panel: false,
         maxWidth: 160,
@@ -417,15 +424,15 @@ function layoutFooter(ctx: CanvasRenderingContext2D, env: OddEnv, spec: FooterSp
       if (box) x += box.w + 16;
     }
     if (spec.ramp) {
-      drawRampKey(ctx, { x, y: top, width: rampW, min: spec.ramp.min, max: spec.ramp.max, colorAt: spec.ramp.colorAt, title: spec.ramp.title, endLabels: spec.ramp.endLabels, ink: env.ink, fontFamily: env.font });
+      drawRampKey(ctx, { x, y: top, width: rampW, min: spec.ramp.min, max: spec.ramp.max, colorAt: spec.ramp.colorAt, title: spec.ramp.title, endLabels: spec.ramp.endLabels, ink: env.ink, axisFontSize: env.opts.axisFontSize, fontFamily: env.font });
       x += rampW + 16;
     }
     if (spec.swatches?.length) {
-      drawSwatchRow(ctx, spec.swatches, x, top, Math.max(60, env.w - left - x), env.ink, env.font, { maxRows: 2 });
+      drawSwatchRow(ctx, spec.swatches, x, top, Math.max(60, env.w - left - x), env.ink, env.font, { axisFontSize: env.opts.axisFontSize, maxRows: 2 });
     }
     if (capLines.length) {
       ctx.save();
-      ctx.font = fontOf(10, env.font);
+      ctx.font = oddFont(env, 10);
       ctx.fillStyle = env.ink.muted;
       ctx.textAlign = "left";
       ctx.textBaseline = "top";
@@ -465,7 +472,7 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxW: number, max
 }
 
 /** Area-true radius scale for a size column (null when missing / constant). */
-function sizeScaleOf(rows: unknown[][], si: number, rMin: number, rMax: number) {
+function sizeScaleOf(rows: unknown[][], si: number, rMin: number, rMax: number, invert = false) {
   if (si < 0) return null;
   let lo = Infinity;
   let hi = -Infinity;
@@ -479,8 +486,9 @@ function sizeScaleOf(rows: unknown[][], si: number, rMin: number, rMax: number) 
   const zeroBased = lo >= 0;
   const radiusOf = (v: number) => {
     if (!Number.isFinite(v)) return rMin;
-    const t = zeroBased ? Math.max(0, v) / hi : (v - lo) / (hi - lo);
-    return Math.max(rMin, rMax * Math.sqrt(Math.max(0, Math.min(1, t))));
+    const raw = zeroBased ? Math.max(0, v) / hi : (v - lo) / (hi - lo);
+    const t = invert ? 1 - Math.max(0, Math.min(1, raw)) : Math.max(0, Math.min(1, raw));
+    return Math.max(rMin, rMax * Math.sqrt(t));
   };
   return { min: lo, max: hi, radiusOf };
 }
@@ -608,7 +616,7 @@ function drawBucketField(ctx: CanvasRenderingContext2D, rows: unknown[][], env: 
   const yVals = yi >= 0 ? rows.map((r) => toNum(r[yi])).filter(Number.isFinite) : [];
   const ys = yVals.length ? niceTicks(Math.min(...yVals), Math.max(...yVals), 3, true) : null;
   const base = mini ? 2 : radiusFromPointSize(env.opts.pointSize, 3);
-  const sScale = sizeScaleOf(rows, si, mini ? 1.2 : 1.8, mini ? 5 : 9);
+  const sScale = sizeScaleOf(rows, si, mini ? 1.2 : 1.8, mini ? 5 : 9, !!env.opts.channelInvert?.size);
 
   const footer = layoutFooter(ctx, env, {
     size: sScale ? { ...sScale, title: fieldName(env, si), fill: ci >= 0 ? ink.muted : env.single } : undefined,
@@ -635,14 +643,14 @@ function drawBucketField(ctx: CanvasRenderingContext2D, rows: unknown[][], env: 
     ctx.lineWidth = 1;
     ctx.strokeRect(x0 + 0.5, y0 + 0.5, cw - 1, ch - 1);
     if (!mini) {
-      ctx.font = fontOf(10, env.font);
+      ctx.font = oddFont(env, 10);
       const n = formatDataValue(counts.get(b) ?? 0);
       const nW = ctx.measureText(n).width;
       ctx.textBaseline = "middle";
       ctx.fillStyle = ink.muted;
       ctx.textAlign = "right";
       ctx.fillText(n, x0 + cw - 6, y0 + headerH / 2 + 1);
-      ctx.font = fontOf(10, env.font, 600);
+      ctx.font = oddFont(env, 10, 600);
       ctx.fillStyle = ink.text;
       ctx.textAlign = "left";
       ctx.fillText(fitTextEllipsis(ctx, b, Math.max(10, cw - 18 - nW)), x0 + 6, y0 + headerH / 2 + 1);
@@ -663,7 +671,7 @@ function drawBucketField(ctx: CanvasRenderingContext2D, rows: unknown[][], env: 
     });
     // Shared value scale: round min / max ticks beside the first column of regions.
     if (ys && !mini && col === 0 && env.pad >= 28 && ih >= 36) {
-      ctx.font = fontOf(9, env.font);
+      ctx.font = oddFont(env, 9);
       ctx.fillStyle = ink.muted;
       ctx.textAlign = "right";
       ctx.textBaseline = "middle";
@@ -709,7 +717,7 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
   // Shrink dots when a band is crowded so the swarm still fits its column.
   const fit = Math.sqrt((bandW * 0.8 * ph) / (maxN * Math.PI * 1.6));
   const base = Math.max(1.4, Math.min(mini ? 2.2 : radiusFromPointSize(env.opts.pointSize, 3.2), fit));
-  const sScale = sizeScaleOf(rows, si, base * 0.6, base * 2.4);
+  const sScale = sizeScaleOf(rows, si, base * 0.6, base * 2.4, !!env.opts.channelInvert?.size);
   const total = rows.length;
   cats.forEach((cat, k) => {
     const cx = plot.left + (k + 0.5) * bandW;
@@ -744,7 +752,7 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
       radiusOf: sScale.radiusOf,
       title: fieldName(env, si),
       ink,
-      fontFamily: env.font,
+      axisFontSize: env.opts.axisFontSize, fontFamily: env.font,
       fill: ci >= 0 ? ink.muted : env.single,
       maxWidth: pw * 0.4,
     });
@@ -796,7 +804,7 @@ function drawChernoff(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
     ctx.quadraticCurveTo(cx, cy + R * 0.38 + smile, cx + mouthW, cy + R * 0.38);
     ctx.stroke();
     if (!mini) {
-      ctx.font = fontOf(10, env.font);
+      ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -859,7 +867,7 @@ function drawGlyphStar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     ctx.lineWidth = 1.5;
     ctx.stroke();
     if (!mini) {
-      ctx.font = fontOf(10, env.font);
+      ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -916,7 +924,7 @@ function drawFlower(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.arc(cx, cy, Math.max(1.5, R * 0.1), 0, Math.PI * 2);
     ctx.fill();
     if (!mini) {
-      ctx.font = fontOf(10, env.font);
+      ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -979,7 +987,7 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     gy = base.top + (availH - size) / 2;
     legendBox = { x: gx + size + 20, y: gy, w: legW, vertical: true };
   } else {
-    const legH = drawSwatchRow(ctx, legend, 0, 0, availW, ink, env.font, { measureOnly: true, maxRows: 3 });
+    const legH = drawSwatchRow(ctx, legend, 0, 0, availW, ink, env.font, { axisFontSize: env.opts.axisFontSize, measureOnly: true, maxRows: 3 });
     size = Math.max(40, Math.min(availW, availH - legH - 10));
     gx = base.left + (availW - size) / 2;
     gy = base.top + Math.max(0, (availH - size - legH - 10) / 2);
@@ -1000,7 +1008,7 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   ctx.globalAlpha = 1;
   if (legendBox) {
     if (legendBox.vertical) {
-      ctx.font = fontOf(10, env.font);
+      ctx.font = oddFont(env, 10);
       ctx.textBaseline = "middle";
       ctx.textAlign = "left";
       const lineH = Math.min(18, size / Math.max(1, legend.length));
@@ -1012,7 +1020,7 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
         ctx.fillText(fitTextEllipsis(ctx, e.label, legendBox!.w - 15), legendBox!.x + 15, y);
       });
     } else {
-      drawSwatchRow(ctx, legend, legendBox.x, legendBox.y, legendBox.w, ink, env.font, { maxRows: 3, align: "center" });
+      drawSwatchRow(ctx, legend, legendBox.x, legendBox.y, legendBox.w, ink, env.font, { axisFontSize: env.opts.axisFontSize, maxRows: 3, align: "center" });
     }
   }
 }
@@ -1028,7 +1036,7 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   const { mini, ink } = env;
   const maxV = Math.max(...entries.map(([, v]) => v));
   const { plot, footerTop } = plotAboveFooter(env, mini ? 0 : 14);
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   const pw = plot.right - plot.left;
   const labelW = mini ? 0 : Math.max(40, Math.min(pw * 0.3, Math.max(...entries.map(([l]) => ctx.measureText(l).width)) + 10));
   const valueW = mini ? 0 : 44;
@@ -1061,7 +1069,7 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     }
     ctx.globalAlpha = 1;
     if (!mini) {
-      ctx.font = fontOf(10, env.font);
+      ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
       ctx.textBaseline = "middle";
       ctx.textAlign = "right";
@@ -1077,7 +1085,7 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     ctx.beginPath();
     ctx.arc(env.pad * 0.5 + 4 + 5, top + 6, 5, 0, Math.PI * 2);
     ctx.fill();
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
@@ -1090,43 +1098,75 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 
 function drawPyramid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, _ci: number, si: number) {
   if (xi < 0 || yi < 0 || si < 0) return "Pyramid needs a category and two numeric columns";
-  const byCat = new Map<string, { left: number; right: number }>();
-  for (const r of rows) {
+  const howRaw = env.opts.yAggregate ?? "sum";
+  const how = howRaw === "count" ? "sum" : howRaw;
+  const byCat = new Map<string, { left: number[]; right: number[]; rowIndex: number }>();
+  for (let ri = 0; ri < rows.length; ri++) {
+    const r = rows[ri]!;
     const c = String(r[xi] ?? "");
     if (!c) continue;
-    const cur = byCat.get(c) ?? { left: 0, right: 0 };
+    let cur = byCat.get(c);
+    if (!cur) {
+      cur = { left: [], right: [], rowIndex: ri };
+      byCat.set(c, cur);
+    }
     const lv = toNum(r[yi]);
     const rv = toNum(r[si]);
-    if (Number.isFinite(lv)) cur.left += lv;
-    if (Number.isFinite(rv)) cur.right += rv;
-    byCat.set(c, cur);
+    if (Number.isFinite(lv)) cur.left.push(lv);
+    if (Number.isFinite(rv)) cur.right.push(rv);
   }
+  const catLimit =
+    env.opts.topN != null
+      ? Math.max(3, Math.min(40, Math.round(env.opts.topN)))
+      : env.mini
+        ? 8
+        : 14;
   const ranked = [...byCat.entries()]
-    .map(([c, v]) => ({ c, left: Math.max(0, v.left), right: Math.max(0, v.right), score: Math.max(v.left, v.right) }))
+    .map(([c, v]) => {
+      const left = Math.max(0, agg(v.left, how));
+      const right = Math.max(0, agg(v.right, how));
+      return { c, left, right, score: Math.max(left, right), rowIndex: v.rowIndex };
+    })
     .filter((p) => p.score > 0)
     .sort((a, b) => b.score - a.score)
-    .slice(0, env.mini ? 8 : 14);
+    .slice(0, catLimit);
   if (!ranked.length) return "No positive values to mirror";
   const { mini, ink } = env;
   const leftColor = env.colors[0]!;
   const rightColor = env.colors[1 % env.colors.length]!;
-  const headerH = mini ? 0 : 18;
+  const headerRowH = chartTypeRamp(env.opts.axisFontSize).tick + 7;
+  const headerH = mini ? 0 : headerRowH * 2;
   const base = basePlot(env);
   const plot = { ...base, top: base.top + headerH };
   const pw = plot.right - plot.left;
-  ctx.font = fontOf(10, env.font);
-  const labelW = mini ? 6 : Math.max(50, Math.min(pw * 0.26, Math.max(...ranked.map((p) => ctx.measureText(p.c).width)) + 14));
+  ctx.font = oddFont(env, 10);
+  const labelW = mini
+    ? 6
+    : Math.max(50, Math.min(pw * 0.26, Math.max(...ranked.map((p) => ctx.measureText(p.c).width)) + 14));
   const mid = plot.left + pw / 2;
   const arm = Math.max(8, (pw - labelW) / 2);
-  // Independent round scales per side (cases vs deaths often differ by orders of magnitude).
+  const leftMax = Math.max(...ranked.map((p) => p.left), 1e-9);
+  const rightMax = Math.max(...ranked.map((p) => p.right), 1e-9);
+  const scaleKind = resolvePyramidScaleMode(env.opts.pyramidScaleMode, leftMax, rightMax);
   const nT = Math.max(2, Math.min(4, Math.floor(arm / 60)));
-  const lt = niceTicks(0, Math.max(...ranked.map((p) => p.left), 1e-9), nT, true);
-  const rt = niceTicks(0, Math.max(...ranked.map((p) => p.right), 1e-9), nT, true);
-  const shared = lt.max === rt.max && lt.step === rt.step;
+  const sharedDomain = Math.max(leftMax, rightMax);
+  const lt =
+    scaleKind === "shared"
+      ? niceTicks(0, sharedDomain, nT, true)
+      : niceTicks(0, leftMax, nT, true);
+  const rt =
+    scaleKind === "shared"
+      ? niceTicks(0, sharedDomain, nT, true)
+      : niceTicks(0, rightMax, nT, true);
+  const independent = scaleKind === "independent";
   const bandH = (plot.bottom - plot.top) / ranked.length;
   const barH = Math.max(3, bandH * 0.68);
   const lx = (v: number) => mid - labelW / 2 - (v / (lt.max || 1)) * arm;
   const rx = (v: number) => mid + labelW / 2 + (v / (rt.max || 1)) * arm;
+  const leftEdge = mid - labelW / 2;
+  const rightEdge = mid + labelW / 2;
+  const lField = fieldName(env, yi);
+  const rField = fieldName(env, si);
 
   if (!mini) {
     ctx.strokeStyle = inkTint(ink, ink.light ? 0.12 : 0.14);
@@ -1145,6 +1185,15 @@ function drawPyramid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       ctx.lineTo(x, plot.bottom);
       ctx.stroke();
     }
+    // Shared zero spine through the category gutter.
+    ctx.strokeStyle = inkTint(ink, ink.light ? 0.28 : 0.35);
+    ctx.lineWidth = 1.25;
+    ctx.beginPath();
+    ctx.moveTo(Math.round(leftEdge) + 0.5, plot.top);
+    ctx.lineTo(Math.round(leftEdge) + 0.5, plot.bottom);
+    ctx.moveTo(Math.round(rightEdge) + 0.5, plot.top);
+    ctx.lineTo(Math.round(rightEdge) + 0.5, plot.bottom);
+    ctx.stroke();
     const items = [
       ...lt.ticks.map((v) => ({ x: lx(v), label: formatAxisValue(v, lt.step) })),
       ...rt.ticks.map((v) => ({ x: rx(v), label: formatAxisValue(v, rt.step) })),
@@ -1152,59 +1201,108 @@ function drawPyramid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     drawPositionedLabelsX(ctx, items, env.w, env.h, plot, env.look);
   }
 
-  const fs = Math.max(9, Math.min(10, bandH * 0.8));
+  const fs = chartTypeRamp(env.opts.axisFontSize).tick;
   const every = Math.max(1, Math.ceil((fs + 2) / bandH));
+  const hits = env.opts.hits;
   ranked.forEach((p, i) => {
     const cy = plot.top + (i + 0.5) * bandH;
+    const y0 = cy - barH / 2;
+    const leftX = lx(p.left);
+    const rightX = rx(p.right);
+    const leftW = leftEdge - leftX;
+    const rightW = rightX - rightEdge;
     ctx.globalAlpha = Math.max(0.75, env.alpha);
     ctx.fillStyle = leftColor;
-    ctx.fillRect(lx(p.left), cy - barH / 2, mid - labelW / 2 - lx(p.left), barH);
+    ctx.fillRect(leftX, y0, leftW, barH);
     ctx.fillStyle = rightColor;
-    ctx.fillRect(mid + labelW / 2, cy - barH / 2, rx(p.right) - (mid + labelW / 2), barH);
+    ctx.fillRect(rightEdge, y0, rightW, barH);
     ctx.globalAlpha = 1;
+    if (hits) {
+      const matchBase: [number, string][] = [[xi, p.c]];
+      if (leftW > 0.5) {
+        hits.push({
+          shape: "rect",
+          x: leftX,
+          y: y0,
+          w: leftW,
+          h: barH,
+          match: [...matchBase, [yi, String(p.left)]],
+          rowIndex: p.rowIndex,
+          summary: {
+            columns: [env.columns[xi]!, lField, rField],
+            row: [p.c, p.left, p.right],
+          },
+        });
+      }
+      if (rightW > 0.5) {
+        hits.push({
+          shape: "rect",
+          x: rightEdge,
+          y: y0,
+          w: rightW,
+          h: barH,
+          match: [...matchBase, [si, String(p.right)]],
+          rowIndex: p.rowIndex,
+          summary: {
+            columns: [env.columns[xi]!, lField, rField],
+            row: [p.c, p.left, p.right],
+          },
+        });
+      }
+    }
     if (mini) return;
     ctx.textBaseline = "middle";
     if (i % every === 0) {
-      ctx.font = fontOf(fs, env.font);
+      ctx.font = oddFont(env, fs);
       ctx.fillStyle = ink.text;
       ctx.textAlign = "center";
       ctx.fillText(fitTextEllipsis(ctx, p.c, labelW - 10), mid, cy);
     }
     if (env.opts.showDataLabels && barH >= 10) {
-      ctx.font = fontOf(9, env.font);
+      ctx.font = oddFont(env, 9);
       ctx.fillStyle = ink.muted;
       const lt0 = formatDataValue(p.left);
       const rt0 = formatDataValue(p.right);
       ctx.textAlign = "right";
-      if (lx(p.left) - ctx.measureText(lt0).width - 4 > plot.left - env.pad * 0.4) ctx.fillText(lt0, lx(p.left) - 4, cy);
+      if (leftX - ctx.measureText(lt0).width - 4 > plot.left - env.pad * 0.4) {
+        ctx.fillText(lt0, leftX - 4, cy);
+      }
       ctx.textAlign = "left";
-      if (rx(p.right) + ctx.measureText(rt0).width + 4 < env.w - 4) ctx.fillText(rt0, rx(p.right) + 4, cy);
+      if (rightX + ctx.measureText(rt0).width + 4 < env.w - 4) {
+        ctx.fillText(rt0, rightX + 4, cy);
+      }
+    }
+    const deltaLbl = formatDeltaLabel(p.left, p.right, env.opts.deltaDisplay);
+    if (!mini && deltaLbl && bandH >= fs * 2 + 6) {
+      ctx.font = oddFont(env, 9, 600);
+      ctx.fillStyle = ink.muted;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(fitTextEllipsis(ctx, deltaLbl, labelW - 8), mid, cy + (i % every === 0 ? fs * 0.85 : 0));
     }
   });
 
   if (!mini) {
-    // Header doubles as the key: swatch + measure name over each arm.
-    const hy = base.top + headerH / 2 - 2;
-    ctx.font = fontOf(10, env.font, 600);
+    const hy = base.top + headerRowH / 2;
+    ctx.font = oddFont(env, 10, 600);
     ctx.textBaseline = "middle";
-    const lName = fitTextEllipsis(ctx, fieldName(env, yi), arm - 20);
-    const rName = fitTextEllipsis(ctx, fieldName(env, si), arm - 20);
+    const lName = fitTextEllipsis(ctx, lField, arm - 20);
+    const rName = fitTextEllipsis(ctx, rField, arm - 20);
     ctx.textAlign = "right";
     ctx.fillStyle = ink.text;
-    ctx.fillText(lName, mid - labelW / 2 - 4, hy);
+    ctx.fillText(lName, leftEdge - 4, hy);
     ctx.fillStyle = leftColor;
-    ctx.fillRect(mid - labelW / 2 - 4 - ctx.measureText(lName).width - 14, hy - 4.5, 9, 9);
+    ctx.fillRect(leftEdge - 4 - ctx.measureText(lName).width - 14, hy - 4.5, 9, 9);
     ctx.textAlign = "left";
     ctx.fillStyle = rightColor;
-    ctx.fillRect(mid + labelW / 2 + 4, hy - 4.5, 9, 9);
+    ctx.fillRect(rightEdge + 4, hy - 4.5, 9, 9);
     ctx.fillStyle = ink.text;
-    ctx.fillText(rName, mid + labelW / 2 + 18, hy);
-    if (!shared) {
-      ctx.font = fontOf(9, env.font);
-      ctx.fillStyle = ink.muted;
-      ctx.textAlign = "center";
-      ctx.fillText(fitTextEllipsis(ctx, "separate scales", labelW - 4), mid, hy);
-    }
+    ctx.fillText(rName, rightEdge + 18, hy);
+    ctx.font = oddFont(env, 9);
+    ctx.fillStyle = ink.muted;
+    ctx.textAlign = "center";
+    const scaleHint = independent ? "separate scales" : "same scale";
+    ctx.fillText(fitTextEllipsis(ctx, scaleHint, pw), mid, hy + headerRowH);
   }
 }
 
@@ -1236,8 +1334,13 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
   const top = base.top + headerH;
   const ph = base.bottom - top;
   const sy = (v: number) => base.bottom - ((v - ys.min) / (ys.max - ys.min || 1)) * ph;
-  ctx.font = fontOf(10, env.font);
-  const labelOf = (p: (typeof pairs)[number]) => `${p.c}  ${formatDataValue(p.b)}`;
+  ctx.font = oddFont(env, 10);
+  const deltaMode = env.opts.deltaDisplay;
+  const labelOf = (p: (typeof pairs)[number]) => {
+    const delta = formatDeltaLabel(p.a, p.b, deltaMode);
+    const baseLbl = `${p.c}  ${formatDataValue(p.b)}`;
+    return delta ? `${baseLbl}  ${delta}` : baseLbl;
+  };
   const labelW = mini ? 0 : Math.max(60, Math.min((base.right - base.left) * 0.38, Math.max(...pairs.map((p) => ctx.measureText(labelOf(p)).width)) + 10));
   const x0 = base.left + (mini ? 6 : 8);
   const x1 = Math.max(x0 + 40, base.right + env.pad * 0.5 - labelW - 8);
@@ -1245,7 +1348,7 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
   if (!mini) {
     ctx.strokeStyle = inkTint(ink, ink.light ? 0.12 : 0.14);
     ctx.lineWidth = 1;
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -1264,7 +1367,7 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     ctx.moveTo(x1 + 0.5, top);
     ctx.lineTo(x1 + 0.5, base.bottom);
     ctx.stroke();
-    ctx.font = fontOf(10, env.font, 600);
+    ctx.font = oddFont(env, 10, 600);
     ctx.fillStyle = ink.text;
     ctx.textBaseline = "middle";
     ctx.textAlign = "left";
@@ -1288,8 +1391,8 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
   }
   if (mini) return;
   const targets = pairs.map((p) => sy(p.b));
-  const placed = dodgeLabels(targets, 12, top + 5, base.bottom - 5);
-  ctx.font = fontOf(10, env.font);
+  const placed = dodgeLabels(targets, chartTypeRamp(env.opts.axisFontSize).tick + 4, top + 5, base.bottom - 5);
+  ctx.font = oddFont(env, 10);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   pairs.forEach((p, i) => {
@@ -1357,7 +1460,7 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
   const deltaSpan = deltaMode
     ? Math.max(1, ...values.flatMap((m) => [...m.values()].map((v) => Math.abs(v))))
     : 0;
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   const labelW = mini ? 0 : Math.min(130, Math.max(...series.map((s) => ctx.measureText(s).width)) + 18);
   const base = basePlot(env);
   const plot = mini ? base : { ...base, left: base.left + 6, right: Math.min(base.right, env.w - labelW - 10) };
@@ -1437,8 +1540,8 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
     if (last) ends.push({ s, y: (last as { y: number }).y, color });
   });
   if (mini) return;
-  const placed = dodgeLabels(ends.map((e) => e.y), 12, plot.top - 4, plot.bottom + 4);
-  ctx.font = fontOf(10, env.font);
+  const placed = dodgeLabels(ends.map((e) => e.y), chartTypeRamp(env.opts.axisFontSize).tick + 4, plot.top - 4, plot.bottom + 4);
+  ctx.font = oddFont(env, 10);
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ends.forEach((e, i) => {
@@ -1533,7 +1636,7 @@ function drawStream(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.save();
     ctx.translate(bx - 6, midY);
     ctx.rotate(-Math.PI / 2);
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
@@ -1547,7 +1650,7 @@ function drawStream(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     return L.bot.some((b, i) => b - L.top[i]! >= 14);
   });
   if (canLabelAll) {
-    ctx.font = fontOf(10, env.font, 600);
+    ctx.font = oddFont(env, 10, 600);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     series.forEach((s, si0) => {
@@ -1690,7 +1793,7 @@ function drawSpiral(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   }
   ctx.globalAlpha = 1;
   if (!mini && xi >= 0) {
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
     ctx.textBaseline = "middle";
     const s = posOf(0);
@@ -1719,7 +1822,7 @@ function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
   const plot = basePlot(env);
   const cx = (plot.left + plot.right) / 2;
   const cy = (plot.top + plot.bottom) / 2;
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   const labelRoom = mini ? 0 : Math.min(70, Math.max(30, Math.max(...entries.map(([l]) => ctx.measureText(l).width)) * 0.6 + 12));
   const maxR = Math.max(16, Math.min(plot.right - plot.left, plot.bottom - plot.top) / 2 - labelRoom + (mini ? 0 : env.pad * 0.4));
   const inner = maxR * 0.22;
@@ -1756,7 +1859,7 @@ function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     const lx = cx + Math.cos(am) * (r + 6);
     const ly = cy + Math.sin(am) * (r + 6);
     const right = Math.cos(am) >= 0;
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.text;
     ctx.textAlign = Math.abs(Math.cos(am)) < 0.2 ? "center" : right ? "left" : "right";
     ctx.textBaseline = Math.sin(am) > 0.6 ? "top" : Math.sin(am) < -0.6 ? "bottom" : "middle";
@@ -1766,7 +1869,7 @@ function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
   });
   if (!mini) {
     // Ring values sit in the 12 o'clock gap, haloed so they read over bar ends.
-    ctx.font = fontOf(9, env.font);
+    ctx.font = oddFont(env, 9);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.lineJoin = "round";
@@ -1779,7 +1882,7 @@ function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
       ctx.fillStyle = ink.muted;
       ctx.fillText(label, cx, cy - rOf(v));
     }
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
     ctx.fillText(fitTextEllipsis(ctx, aggregateAxisTitle(how, fieldName(env, yi) || null), inner * 1.8), cx, cy);
   }
@@ -1821,7 +1924,7 @@ function drawChord(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
   const { plot, footerTop } = plotAboveFooter(env, footer.height);
   const cx = (plot.left + plot.right) / 2;
   const cy = (plot.top + plot.bottom) / 2;
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   const labelRoom = mini ? 4 : Math.min(80, Math.max(...nodes.map((n) => ctx.measureText(n).width)) + 12);
   const R = Math.max(14, Math.min(plot.right - plot.left - 2 * labelRoom, plot.bottom - plot.top - 28) / 2);
   const angOf = (i: number) => -Math.PI / 2 + (i / nodes.length) * Math.PI * 2;
@@ -1844,7 +1947,7 @@ function drawChord(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     const right = Math.cos(ang) >= 0;
     const lx = cx + Math.cos(ang) * (R + 12);
     const ly = cy + Math.sin(ang) * (R + 12);
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.text;
     ctx.textAlign = Math.abs(Math.cos(ang)) < 0.2 ? "center" : right ? "left" : "right";
     ctx.textBaseline = Math.sin(ang) > 0.6 ? "top" : Math.sin(ang) < -0.6 ? "bottom" : "middle";
@@ -2000,7 +2103,7 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   ctx.stroke();
   // Height ticks along the left riser, parallel to bar extrusion.
   const yTicks = niceTicks(0, scale.max, 4, true);
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   ctx.fillStyle = ink.muted;
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
@@ -2015,7 +2118,7 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   }
   drawBandAxisX(ctx, entries.map(([l]) => l), centers, step, env.w, env.h, plot, env.look);
   drawAxisFieldLabels(ctx, env.w, env.h, env.pad, fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null), env.look);
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   ctx.fillStyle = ink.text;
   ctx.textAlign = "center";
   ctx.textBaseline = layout.reverse ? "top" : "bottom";
@@ -2147,7 +2250,7 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
   ctx.lineTo(proj(0, 1, 0).sx, proj(0, 1, 0).sy);
   ctx.stroke();
 
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   ctx.fillStyle = ink.muted;
   ctx.textBaseline = "top";
   for (const v of xs.ticks) {
@@ -2170,7 +2273,7 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     ctx.textAlign = "left";
     ctx.fillText(formatAxisValue(v, ys.step), p.sx + 6, p.sy + 6);
   }
-  ctx.font = fontOf(10, env.font, 600);
+  ctx.font = oddFont(env, 10, 600);
   ctx.fillStyle = ink.text;
   const xm = proj(0.55, 0, 0);
   const ym = proj(0, 0.55, 0);
@@ -2187,7 +2290,7 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     ctx.moveTo(p0.sx, p0.sy);
     ctx.lineTo(p1.sx, p1.sy);
     ctx.stroke();
-    ctx.font = fontOf(10, env.font);
+    ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -2195,7 +2298,7 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
       const p = proj(0, 0, nZ(v));
       ctx.fillText(formatAxisValue(v, zs.step), p.sx - 6, p.sy);
     }
-    ctx.font = fontOf(10, env.font, 600);
+    ctx.font = oddFont(env, 10, 600);
     ctx.fillStyle = ink.text;
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
@@ -2228,7 +2331,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   const { mini, ink } = env;
   const legend = ys.map((b) => ({ label: b, color: env.colors[(catIdx.get(b) ?? 0) % env.colors.length]! }));
   const base = basePlot(env);
-  const legH = mini ? 0 : drawSwatchRow(ctx, legend, 0, 0, base.right - base.left, ink, env.font, { measureOnly: true, maxRows: 2 });
+  const legH = mini ? 0 : drawSwatchRow(ctx, legend, 0, 0, base.right - base.left, ink, env.font, { axisFontSize: env.opts.axisFontSize, measureOnly: true, maxRows: 2 });
   const plot = mini ? base : { ...base, bottom: Math.min(base.bottom, env.h - 6 - legH - 22) };
   const pw = plot.right - plot.left;
   const ph = plot.bottom - plot.top;
@@ -2249,7 +2352,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
       ctx.fillRect(xCursor, yCursor, Math.max(0, colW - gap), Math.max(0, segH - gap));
       ctx.globalAlpha = 1;
       if (!mini && colW - gap >= 30 && segH - gap >= 14) {
-        ctx.font = fontOf(10, env.font);
+        ctx.font = oddFont(env, 10);
         ctx.fillStyle = inkOn(color);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -2258,7 +2361,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
       yCursor += segH;
     });
     if (!mini && colW >= 18) {
-      ctx.font = fontOf(10, env.font);
+      ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
@@ -2267,7 +2370,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     xCursor += colW;
   });
   if (mini) return;
-  ctx.font = fontOf(10, env.font);
+  ctx.font = oddFont(env, 10);
   ctx.fillStyle = ink.muted;
   ctx.textAlign = "right";
   ctx.textBaseline = "middle";
@@ -2278,7 +2381,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   ctx.textAlign = "center";
   ctx.fillText(fitTextEllipsis(ctx, `Share within ${fieldName(env, xi)} · width = ${aggregateAxisTitle(how, fieldName(env, yi) || null).toLowerCase()}`, ph), 0, 0);
   ctx.restore();
-  drawSwatchRow(ctx, legend, plot.left, plot.bottom + 20, pw, ink, env.font, { maxRows: 2, align: "center" });
+  drawSwatchRow(ctx, legend, plot.left, plot.bottom + 20, pw, ink, env.font, { axisFontSize: env.opts.axisFontSize, maxRows: 2, align: "center" });
 }
 
 // ---- contour ---------------------------------------------------------------
@@ -2391,7 +2494,7 @@ function drawContour(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     title: "Point density",
     endLabels: ["sparse", "dense"],
     ink,
-    fontFamily: env.font,
+    axisFontSize: env.opts.axisFontSize, fontFamily: env.font,
     panel: true,
   });
 }

@@ -1305,6 +1305,33 @@ function storyId(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+/** Readable bit of a share URL: /plot/correlation-matrix/{id} */
+function storySlug(title: string | undefined): string {
+  const slug = (title || "")
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48)
+    .replace(/-+$/g, "");
+  return slug || "chart";
+}
+
+function storyPageUrl(origin: string, id: string, title: string | undefined): string {
+  return `${origin}/plot/${storySlug(title)}/${id}`;
+}
+
+/** Id or id.ext from /plot/{slug}/{id}, /plot/{id}, /s/{id}, or /p/{id}. */
+function storyFileFromPath(pathname: string): string | null {
+  const path = pathname.replace(/\/+$/, "");
+  const file = "([a-z0-9]{8,32}(?:\\.(?:img|jpe?g|png|data))?)";
+  const plot = path.match(new RegExp(`^/plot/(?:[a-z0-9-]+/)?${file}$`, "i"));
+  if (plot?.[1]) return plot[1];
+  const legacy = path.match(new RegExp(`^/(?:s|p)/${file}$`, "i"));
+  return legacy?.[1] ?? null;
+}
+
 export async function handlePublishStory(request: Request, env: Env): Promise<Response> {
   // Publishing is intentionally anonymous for approved Loom web origins, but
   // Origin (or STORY_ADMIN_TOKEN) is required — a missing Origin is not auth.
@@ -1368,9 +1395,10 @@ export async function handlePublishStory(request: Request, env: Env): Promise<Re
     }
     await kv.put(`s:${id}:img`, bytes.buffer, {
       expirationTtl: ttl,
-      metadata: { contentType: og[1]! },
+      metadata: { contentType: og[1]!, width: 1200, height: 627 },
     });
-    const hosted = `${origin}/s/${id}.img`;
+    const ext = og[1] === "image/jpeg" ? "jpg" : "png";
+    const hosted = `${storyPageUrl(origin, id, payload.title)}.${ext}`;
     html = html
       .split("__LOOM_SHARE_IMG__")
       .join(hosted)
@@ -1388,6 +1416,11 @@ export async function handlePublishStory(request: Request, env: Env): Promise<Re
     html = html.replace(/data-loom-open="1"\s+href="[^"]*"/g, `data-loom-open="1" href="${storyOpen}"`);
   }
 
+  // Canonical, og:url, and oEmbed so LinkedIn / Slack / iMessage / X unfurl the public page.
+  const page = storyPageUrl(origin, id, payload.title);
+  html = html.split("__LOOM_PAGE_URL__").join(page);
+  html = html.split("__LOOM_OEMBED_URL__").join(`${origin}/oembed?url=${encodeURIComponent(page)}`);
+
   await kv.put(`s:${id}:html`, html, {
     expirationTtl: ttl,
     metadata: {
@@ -1397,12 +1430,12 @@ export async function handlePublishStory(request: Request, env: Env): Promise<Re
     },
   });
 
-  return json({ id, url: `${origin}/s/${id}`, hasData });
+  return json({ id, url: storyPageUrl(origin, id, payload.title), hasData });
 }
 
 async function handleGetStory(id: string, env: Env): Promise<Response> {
   // Legacy 12-char base36 ids + new 32-char hex ids
-  if (!/^[a-z0-9]{8,32}(\.(img|data))?$/i.test(id)) {
+  if (!/^[a-z0-9]{8,32}(\.(img|jpe?g|png|data))?$/i.test(id)) {
     return json({ error: "Invalid story id" }, 400);
   }
   const kv = env.LOOM_STORIES;
@@ -1414,13 +1447,14 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
   }
 
   const [baseId, ext] = id.includes(".") ? (id.split(".") as [string, string]) : [id, "html"];
-  const key = `s:${baseId}:${ext === "img" ? "img" : ext === "data" ? "data" : "html"}`;
+  const imageExt = ext === "img" || ext === "jpg" || ext === "jpeg" || ext === "png";
+  const key = `s:${baseId}:${imageExt ? "img" : ext === "data" ? "data" : "html"}`;
   type StoryKvHit = KVNamespaceGetWithMetadataResult<
     string | ArrayBuffer,
     { contentType?: string; title?: string; hasData?: string }
   >;
   const hit: StoryKvHit =
-    ext === "img"
+    imageExt
       ? await kv.getWithMetadata(key, "arrayBuffer")
       : await kv.getWithMetadata(key, "text");
 
@@ -1443,8 +1477,12 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
   });
   applyBaselineSecurityHeaders(headers);
 
-  if (ext === "img") {
+  if (imageExt) {
     headers.set("Content-Type", meta.contentType || "image/png");
+    headers.set("Content-Disposition", "inline");
+    headers.set("X-Robots-Tag", "index, follow, max-image-preview:large");
+    headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+    headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800");
     return new Response(hit.value as unknown as ArrayBuffer, { status: 200, headers });
   }
   if (ext === "data") {
@@ -1454,6 +1492,7 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
 
   headers.set("Content-Type", meta.contentType || "text/html; charset=utf-8");
   headers.set("Content-Security-Policy", STORY_HTML_CSP);
+  headers.set("X-Robots-Tag", "index, follow, max-image-preview:large");
   if (meta.title) headers.set("X-Loom-Story-Title", meta.title);
   if (meta.hasData === "1") headers.set("X-Loom-Story-Data", "1");
   return new Response(hit.value as string, { status: 200, headers });
@@ -1479,11 +1518,54 @@ async function handleDeleteStory(id: string, request: Request, env: Env): Promis
   return json({ ok: true, id, deleted: true });
 }
 
+/** oEmbed photo for Slack, WordPress, Embedly, and other OG companions. Lives at /oembed so robots.txt can keep disallowing /api/. */
+async function handleOEmbed(url: URL, env: Env): Promise<Response> {
+  let target: URL;
+  try {
+    target = new URL(url.searchParams.get("url") || "");
+  } catch {
+    return json({ error: "Invalid url" }, 400);
+  }
+  const file = storyFileFromPath(target.pathname);
+  if (!file || file.includes(".")) return json({ error: "Not a story" }, 404);
+  const kv = env.LOOM_STORIES;
+  if (!kv) return json({ error: "Story storage not configured" }, 503);
+  const htmlHit = await kv.getWithMetadata(`s:${file}:html`, "text");
+  if (htmlHit.value == null) return json({ error: "Story not found" }, 404);
+  const meta = (htmlHit.metadata || {}) as { title?: string };
+  const imgHit = await kv.getWithMetadata(`s:${file}:img`, "arrayBuffer");
+  const imgMeta = (imgHit.metadata || {}) as { contentType?: string; width?: number; height?: number };
+  const origin = publicWebOrigin(env);
+  const page = `${origin}${target.pathname.replace(/\/+$/, "")}`;
+  const title = meta.title || "Loom chart";
+  if (imgHit.value == null) {
+    return json({
+      version: "1.0",
+      type: "link",
+      title,
+      url: page,
+      provider_name: "Loom",
+      provider_url: origin,
+    });
+  }
+  const ext = imgMeta.contentType === "image/png" ? "png" : "jpg";
+  return json({
+    version: "1.0",
+    type: "photo",
+    title,
+    url: `${page}.${ext}`,
+    width: imgMeta.width || 1200,
+    height: imgMeta.height || 627,
+    provider_name: "Loom",
+    provider_url: origin,
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: WaitUntil): Promise<Response> {
     const url = new URL(request.url);
 
-    if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/"))) {
+    if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/") || url.pathname.startsWith("/p/") || url.pathname.startsWith("/plot/"))) {
       if (url.pathname === "/api/fetch-csv" || url.pathname.startsWith("/api/source/")) {
         if (
           url.pathname === "/api/fetch-csv" &&
@@ -1515,6 +1597,9 @@ export default {
       if (url.pathname === "/api/feedback" && request.method === "POST") {
         return await handleFeedback(request, env);
       }
+      if (url.pathname === "/oembed" && request.method === "GET") {
+        return await handleOEmbed(url, env);
+      }
       if (url.pathname === "/api/stories" && request.method === "POST") {
         return await handlePublishStory(request, env);
       }
@@ -1524,9 +1609,10 @@ export default {
           return await handleDeleteStory(del[1]!, request, env);
         }
       }
-      if (url.pathname.startsWith("/s/")) {
-        const id = url.pathname.slice(3).replace(/\/$/, "");
-        return await handleGetStory(id, env);
+      const storyFile = storyFileFromPath(url.pathname);
+      if (storyFile) return await handleGetStory(storyFile, env);
+      if (/^\/(?:plot|s|p)\//.test(url.pathname)) {
+        return json({ error: "Invalid story id" }, 400);
       }
     } catch {
       return json({ error: "Request failed", requestId }, 502);

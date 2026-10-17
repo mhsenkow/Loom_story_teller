@@ -97,6 +97,13 @@ describe("chartCapabilities advanced encoding", () => {
     expect(chartCapabilities("scatter").residualOverlay).toBe(true);
     expect(chartCapabilities("scatter").anomalyHighlight).toBe(true);
     expect(chartCapabilities("bump").bumpMode).toBe(true);
+    expect(chartCapabilities("pyramid").pyramidScaleMode).toBe(true);
+    expect(chartCapabilities("pyramid").topN).toBe(true);
+    expect(chartCapabilities("pyramid").aggregate).toBe(true);
+    expect(chartCapabilities("pyramid").deltaDisplay).toBe(true);
+    expect(chartCapabilities("dumbbell").deltaDisplay).toBe(true);
+    expect(chartCapabilities("bar").comparePrevious).toBe(true);
+    expect(chartCapabilities("bar").compareY).toBe(false);
   });
 
   it("tick label rotation only on continuous-X kinds — not bar", () => {

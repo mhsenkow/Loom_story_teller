@@ -12,6 +12,8 @@ import { type YAggregateOption } from "../recommendations";
 import { widestText } from "./axisHelpers";
 import { drawAxisTicks, drawGridLines, numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
+import { directedUnit } from "../channelInvert";
+import { chartFont, chartTypeRamp } from "../chartType";
 
 /** Top slices + "Other" so a pie never has more than 8 wedges. */
 export function pieSlices(rows: unknown[][], xi: number, yi: number, agg: YAggregateOption) {
@@ -48,7 +50,7 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   };
 
   // Legend beside the donut on wide stages, underneath on tall ones
-  const legendFont = `11px '${fontFamily}', sans-serif`;
+  const legendFont = chartFont(chartTypeRamp(opts?.axisFontSize).legend, fontFamily);
   const legendTexts = entries.map((e) => `${e.label}  ${pct(e.value)}`);
   const textW = widestText(ctx, legendTexts, legendFont);
   const portrait = plotH > plotW * 1.1;
@@ -84,7 +86,7 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
       const mid = start + sweep / 2;
       const r2 = (radius + innerR) / 2;
       ctx.fillStyle = contrastingInk(fill);
-      ctx.font = `600 ${Math.max(10, Math.min(13, (radius - innerR) * 0.32))}px '${fontFamily}', sans-serif`;
+      ctx.font = chartFont(Math.max(chartTypeRamp(opts?.axisFontSize).mark, Math.min(13, (radius - innerR) * 0.32)), fontFamily, 600);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(pct(e.value), cx + Math.cos(mid) * r2, cy + Math.sin(mid) * r2);
@@ -106,10 +108,10 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
     ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = `600 ${Math.max(12, Math.min(22, innerR * 0.38))}px '${fontFamily}', sans-serif`;
+    ctx.font = chartFont(Math.max(chartTypeRamp(opts?.axisFontSize).titleCompact, Math.min(22, innerR * 0.38)), fontFamily, 600);
     ctx.fillText(formatDataValue(total), cx, cy - innerR * 0.08);
     ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
-    ctx.font = `${Math.max(10, Math.min(12, innerR * 0.22))}px '${fontFamily}', sans-serif`;
+    ctx.font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily);
     ctx.fillText(fitTextEllipsis(ctx, agg === "count" ? "total rows" : "total", innerR * 1.6), cx, cy + innerR * 0.28);
   }
 
@@ -216,8 +218,8 @@ export function renderFullBubble(
     if (sizeIdx >= 0) {
       const s = Number(r[sizeIdx]);
       if (!isNaN(s)) {
-        const t = (s - sizeMin) / sizeRange;
-        radius = minR + Math.sqrt(Math.max(0, Math.min(1, t))) * (maxR - minR);
+        const t = directedUnit((s - sizeMin) / sizeRange, opts?.channelInvert?.size);
+        radius = minR + Math.sqrt(t) * (maxR - minR);
       }
     }
     const sx = pad + ((x - xMin) / xRange) * plotW;
@@ -259,7 +261,7 @@ export function renderFullBubble(
   // Size key: three nested reference circles, bottom-right inside the plot
   if (sizeIdx >= 0 && maxR >= 4) {
     const steps = [0.1, 0.5, 1.0];
-    const font = `9px '${fontFamily}', sans-serif`;
+    const font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily);
     const labels = steps.map((t) => formatDataValue(sizeMin + t * sizeRange));
     const labelW = widestText(ctx, labels, font);
     const boxW = maxR * 2 + labelW + 22;

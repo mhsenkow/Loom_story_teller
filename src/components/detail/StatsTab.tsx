@@ -194,9 +194,9 @@ export default function StatsTab() {
               id={col.name ? `loom-stat-${col.name}` : undefined}
               className="loom-card space-y-1.5 scroll-mt-3 transition-shadow"
             >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-mono font-medium text-loom-text">{col.name ?? "—"}</span>
-                <span className="loom-badge">{col.data_type ?? "?"}</span>
+              <div className="flex items-start justify-between gap-2">
+                <span className="text-xs font-mono font-medium text-loom-text break-words min-w-0">{col.name ?? "—"}</span>
+                <span className="loom-badge shrink-0">{col.data_type ?? "?"}</span>
               </div>
               <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-2xs font-mono">
                 <StatRow label="Distinct" value={formatNumber(Number(col.distinct_count) || 0)} />
@@ -227,7 +227,7 @@ function ProvenanceCard({ provenance }: { provenance: DataProvenance }) {
       <div className="flex items-start justify-between gap-2 min-w-0">
         <div className="min-w-0 space-y-0.5">
           <p className="text-2xs uppercase tracking-[0.12em] text-loom-muted/90">Source</p>
-          <p className="text-xs font-semibold text-loom-text leading-snug truncate" title={provenance.title}>
+          <p className="text-xs font-semibold text-loom-text leading-snug break-words" title={provenance.title}>
             {provenance.title}
           </p>
         </div>
@@ -271,10 +271,11 @@ function ProvenanceCard({ provenance }: { provenance: DataProvenance }) {
 }
 
 function StatRow({ label, value }: { label: string; value: string }) {
+  const wide = value.length > 10;
   return (
-    <div className="flex justify-between">
-      <span className="text-loom-muted">{label}</span>
-      <span className="text-loom-text truncate max-w-[120px]" title={value}>{value}</span>
+    <div className={`flex justify-between items-baseline gap-2 ${wide ? "col-span-2" : ""}`}>
+      <span className="text-loom-muted shrink-0">{label}</span>
+      <span className="text-loom-text text-right break-words min-w-0" title={value}>{value}</span>
     </div>
   );
 }

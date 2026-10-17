@@ -21,6 +21,7 @@ import { CHART_ASPECTS, type ChartAspectId, type ChartDeviceId } from "./chartVi
 import type { AppSettings, ChartVisualOverrides, ColumnInfo, FileEntry } from "./store";
 import { sanitizeChartVisualOverrides } from "./chartVisualSanitize";
 import { packChannelInvert, unpackChannelInvert } from "./channelInvert";
+import { parseChartEmojiMap, type ChartEmojiMap } from "./chartEmoji";
 
 export const CHART_LINK_VERSION = 1;
 
@@ -43,6 +44,7 @@ export interface ChartLinkChart {
   opacityField?: string;
   shapeField?: string;
   emojiField?: string;
+  emojiMap?: ChartEmojiMap;
   yAggregate?: YAggregateOption;
   topN?: number;
   y2Field?: string;
@@ -162,6 +164,7 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     opacityField: str(rec.opacityField),
     shapeField: str(rec.shapeField),
     emojiField: str(rec.emojiField),
+    emojiMap: parseChartEmojiMap(rec.emojiMap),
     yAggregate: rec.yAggregate ?? undefined,
     topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
     y2Field: str(rec.y2Field),
@@ -229,6 +232,7 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["opacityField", "op"],
   ["shapeField", "sh"],
   ["emojiField", "em"],
+  ["emojiMap", "emv"],
   ["yAggregate", "a"],
   ["topN", "tn"],
   ["y2Field", "y2"],
@@ -318,6 +322,7 @@ export function decodeChartLink(hash: string): ChartLink | null {
       f === "xField" ||
       f === "yAggregate" ||
       f === "tooltipFields" ||
+      f === "emojiMap" ||
       f === "topN" ||
       f === "comparePrevious" ||
       f === "rollingWindow" ||
@@ -337,6 +342,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
     if (v) chart[f] = v;
   }
   if (typeof cr.a === "string" && AGGS.has(cr.a)) chart.yAggregate = cr.a as YAggregateOption;
+  const emojiMap = parseChartEmojiMap(cr.emv);
+  if (emojiMap?.field === chart.emojiField) chart.emojiMap = emojiMap;
   if (typeof cr.tn === "number" && Number.isFinite(cr.tn)) chart.topN = Math.max(3, Math.min(50, Math.round(cr.tn)));
   if (cr.cp === true) chart.comparePrevious = true;
   if (cr.rw === 7 || cr.rw === 30) chart.rollingWindow = cr.rw;
@@ -435,6 +442,7 @@ export function restoreChartRec(
       opacityField: c.opacityField ?? null,
       shapeField: c.shapeField ?? null,
       emojiField: c.emojiField ?? null,
+      emojiMap: c.emojiMap,
       yAggregate: c.yAggregate ?? null,
       topN: c.topN ?? null,
       y2Field: c.y2Field ?? null,
@@ -471,6 +479,7 @@ export function restoreChartRec(
   // Overlay the shared encodings so channels createChartRec ignores for this
   // kind (e.g. a story scatter's time field) still come back.
   const out: ChartRecommendation = { ...rec };
+  out.emojiMap = parseChartEmojiMap(c.emojiMap);
   for (const f of ENCODING_FIELDS) {
     if (f === "xField") continue;
     const v = c[f];

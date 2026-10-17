@@ -22,6 +22,10 @@ import {
   isMeasureColumn,
   stableLiveChartId,
   parseChartKind,
+  ensureCompareKindsInWindow,
+  pickBestCompareEncoding,
+  CORE_COMPARE_KINDS,
+  type ChartRecommendation,
 } from "../recommendations";
 import {
   chartCapabilities,
@@ -598,7 +602,7 @@ describe("recommendations", () => {
       const base = createChartRec("bar", cols, "region", "sales", null, "t")!;
       const expanded = expandRecommendationsWithExtras([base], cols);
       const variants = expanded.filter((c) => c.id !== base.id);
-      expect(variants.length).toBeLessThanOrEqual(3);
+      expect(variants.length).toBeLessThanOrEqual(5);
       expect(
         variants.some(
           (c) =>
@@ -643,10 +647,29 @@ describe("recommendations", () => {
       ];
       const expanded = expandRecommendationsWithExtras(base, cols);
       const perBase = (id: string) => expanded.filter((r) => r.id.startsWith(`${id}-`)).length;
-      expect(perBase(base[0]!.id)).toBeLessThanOrEqual(3);
-      expect(perBase(base[1]!.id)).toBeLessThanOrEqual(3);
-      expect(perBase(base[2]!.id)).toBeLessThanOrEqual(3);
+      expect(perBase(base[0]!.id)).toBeLessThanOrEqual(5);
+      expect(perBase(base[1]!.id)).toBeLessThanOrEqual(5);
+      expect(perBase(base[2]!.id)).toBeLessThanOrEqual(5);
       expect(expanded.length).toBeGreaterThan(base.length);
+    });
+
+    it("adds pyramid scale / delta and promotes dual measures to dumbbell / slope", () => {
+      const cols: ColumnInfo[] = [
+        { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 8, min_value: null, max_value: null },
+        { name: "sales", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "1", max_value: "999" },
+        { name: "profit", data_type: "DOUBLE", null_count: 0, distinct_count: 80, min_value: "0", max_value: "200" },
+      ];
+      const pyramid = createChartRec("pyramid", cols, "region", "sales", null, "t", {
+        sizeField: "profit",
+        yAggregate: "sum",
+        pyramidScaleMode: "auto",
+      })!;
+      const bar = createChartRec("bar", cols, "region", "sales", null, "t")!;
+      const expanded = expandRecommendationsWithExtras([pyramid, bar], cols);
+      expect(expanded.some((r) => r.kind === "pyramid" && r.pyramidScaleMode === "shared")).toBe(true);
+      expect(expanded.some((r) => r.kind === "pyramid" && r.deltaDisplay === "diff")).toBe(true);
+      expect(expanded.some((r) => r.kind === "dumbbell" && r.deltaDisplay === "diff")).toBe(true);
+      expect(expanded.some((r) => r.kind === "slope")).toBe(true);
     });
 
   it("adds time-window variants when a timestamp column exists", () => {
@@ -849,6 +872,110 @@ describe("column semantics (LOOM-030–034)", () => {
     const b = recommendSourceStory("usgs", cols, null).charts[0]!.id;
     expect(a).toBe(b);
     expect(a).toContain("usgs-");
+  });
+
+  it("COVID discover probe keeps pyramid / dumbbell / slope in a short window", () => {
+    const cols: ColumnInfo[] = [
+      { name: "country", data_type: "VARCHAR", null_count: 0, distinct_count: 50, min_value: null, max_value: null },
+      { name: "continent", data_type: "VARCHAR", null_count: 0, distinct_count: 6, min_value: null, max_value: null },
+      { name: "cases", data_type: "BIGINT", null_count: 0, distinct_count: 50, min_value: "1", max_value: "1e8" },
+      { name: "deaths", data_type: "BIGINT", null_count: 0, distinct_count: 50, min_value: "0", max_value: "1e6" },
+      { name: "cases_per_million", data_type: "DOUBLE", null_count: 0, distinct_count: 50, min_value: "1", max_value: "1e5" },
+      { name: "deaths_per_million", data_type: "DOUBLE", null_count: 0, distinct_count: 50, min_value: "0", max_value: "1e4" },
+      { name: "population", data_type: "BIGINT", null_count: 0, distinct_count: 50, min_value: "1e5", max_value: "1e9" },
+    ];
+    const story = recommendSourceStory("covid", cols, null, {
+      discoverProbe: true,
+      chartLimit: 8,
+    });
+    expect(story.charts.length).toBeLessThanOrEqual(8);
+    const kinds = new Set(story.charts.map((c) => c.kind));
+    expect(kinds.has("pyramid")).toBe(true);
+    expect(kinds.has("dumbbell")).toBe(true);
+    expect(kinds.has("slope")).toBe(true);
+    expect(story.charts.some((c) => c.deltaDisplay === "diff" || c.deltaDisplay === "pct")).toBe(true);
+  });
+
+  it("world_bank / countries / crypto discover probes surface dual-measure compares", () => {
+    const wb = recommendSourceStory(
+      "world_bank",
+      [
+        { name: "country_name", data_type: "VARCHAR", null_count: 0, distinct_count: 40, min_value: null, max_value: null },
+        { name: "country_code", data_type: "VARCHAR", null_count: 0, distinct_count: 40, min_value: null, max_value: null },
+        { name: "yr", data_type: "INTEGER", null_count: 0, distinct_count: 24, min_value: "2000", max_value: "2023" },
+        { name: "gdp_per_capita", data_type: "DOUBLE", null_count: 0, distinct_count: 40, min_value: "100", max_value: "1e5" },
+        { name: "life_expectancy", data_type: "DOUBLE", null_count: 0, distinct_count: 40, min_value: "40", max_value: "85" },
+        { name: "population", data_type: "BIGINT", null_count: 0, distinct_count: 40, min_value: "1e5", max_value: "1e9" },
+        { name: "co2_per_capita", data_type: "DOUBLE", null_count: 0, distinct_count: 40, min_value: "0.1", max_value: "40" },
+      ],
+      null,
+      { discoverProbe: true, chartLimit: 8 },
+    );
+    const wbKinds = new Set(wb.charts.map((c) => c.kind));
+    expect(wbKinds.has("pyramid")).toBe(true);
+    expect(wbKinds.has("dumbbell")).toBe(true);
+    expect(wbKinds.has("slope")).toBe(true);
+
+    const countries = recommendSourceStory(
+      "countries",
+      [
+        { name: "name", data_type: "VARCHAR", null_count: 0, distinct_count: 50, min_value: null, max_value: null },
+        { name: "cca3", data_type: "VARCHAR", null_count: 0, distinct_count: 50, min_value: null, max_value: null },
+        { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 6, min_value: null, max_value: null },
+        { name: "population", data_type: "BIGINT", null_count: 0, distinct_count: 50, min_value: "1e5", max_value: "1e9" },
+        { name: "area", data_type: "DOUBLE", null_count: 0, distinct_count: 50, min_value: "10", max_value: "1e7" },
+        { name: "density", data_type: "DOUBLE", null_count: 0, distinct_count: 50, min_value: "0.1", max_value: "2e4" },
+      ],
+      null,
+      { discoverProbe: true, chartLimit: 8 },
+    );
+    const cKinds = new Set(countries.charts.map((c) => c.kind));
+    expect(cKinds.has("pyramid")).toBe(true);
+    expect(cKinds.has("dumbbell")).toBe(true);
+    expect(cKinds.has("slope")).toBe(true);
+  });
+
+  it("ensureCompareKindsInWindow promotes buried core compares into a short limit", () => {
+    const mk = (id: string, kind: ChartRecommendation["kind"], score: number): ChartRecommendation =>
+      ({
+        id,
+        kind,
+        title: id,
+        subtitle: "",
+        score,
+        spec: {},
+        xField: "x",
+        yField: "y",
+      }) as ChartRecommendation;
+    const buried = [
+      mk("a", "choropleth", 99),
+      mk("b", "bar", 98),
+      mk("c", "bar", 97),
+      mk("d", "geoPoints", 96),
+      mk("e", "pie", 95),
+      mk("f", "histogram", 94),
+      mk("g", "pyramid", 80),
+      mk("h", "dumbbell", 79),
+      mk("i", "slope", 78),
+    ];
+    const windowed = ensureCompareKindsInWindow(buried, 6);
+    expect(windowed.length).toBe(6);
+    const kinds = new Set(windowed.map((c) => c.kind));
+    for (const k of CORE_COMPARE_KINDS) expect(kinds.has(k)).toBe(true);
+  });
+
+  it("pickBestCompareEncoding is deterministic", () => {
+    const cols: ColumnInfo[] = [
+      { name: "region", data_type: "VARCHAR", null_count: 0, distinct_count: 8, min_value: null, max_value: null },
+      { name: "sales", data_type: "DOUBLE", null_count: 0, distinct_count: 40, min_value: "1", max_value: "999" },
+      { name: "profit", data_type: "DOUBLE", null_count: 0, distinct_count: 40, min_value: "0", max_value: "200" },
+    ];
+    const a = pickBestCompareEncoding(cols, "pyramid");
+    const b = pickBestCompareEncoding(cols, "pyramid");
+    expect(a).toEqual(b);
+    expect(a?.xField).toBe("region");
+    expect(a?.yField).toBe("profit");
+    expect(a?.sizeField).toBe("sales");
   });
 
   it("does not add log-y extras when min y ≤ 0", () => {

@@ -105,7 +105,7 @@ import { renderFullLollipop, renderFullRadar, renderFullViolin, renderFullWaterf
 import { renderFullArcDiagram, renderFullForceBubble, renderFullNetwork, renderFullSankey, renderFullTreemap } from "@/lib/canvasCharts/flowCharts";
 import { renderFullCorrMatrix, renderFullDumbbell, renderFullFunnel, renderFullHexbin, renderFullParallel, renderFullPareto, renderFullRidgeline } from "@/lib/canvasCharts/statCharts";
 import { categoryShape } from "@/lib/chartMarks";
-import { firstGrapheme } from "@/lib/chartText";
+import { chartEmoji, chartEmojiLabel } from "@/lib/chartEmoji";
 export type { ChartRenderOpts } from "@/lib/chartRenderTypes";
 
 // The WebGPU globe pass (globe.wgsl) only draws glowing points — no sphere,
@@ -607,6 +607,7 @@ export function ChartView() {
       markEmoji: chartVisualOverrides.markEmoji ?? "😀",
       shapeField: activeChart?.shapeField ?? null,
       emojiField: activeChart?.emojiField ?? null,
+      emojiMap: activeChart?.emojiMap,
       markStroke: chartVisualOverrides.markStroke ?? motif === "ring",
       markStrokeWidth: chartVisualOverrides.markStrokeWidth ?? 1,
       markStrokeColor: chartVisualOverrides.markStrokeColor ?? "auto",
@@ -818,6 +819,9 @@ export function ChartView() {
     GPU_GLOBE_ENABLED &&
     !!activeChart &&
     isWebGpuGlobeKind(activeChart.kind) &&
+    !activeChart.emojiField && !activeChart.shapeField &&
+    chartVisualOverrides.markerMode !== "emoji" &&
+    (!chartVisualOverrides.markShape || chartVisualOverrides.markShape === "circle") &&
     gpuReady &&
     !forceCanvasCapture &&
     !!sceneRendererRef.current;
@@ -2933,6 +2937,7 @@ export function ChartView() {
                 markEmoji: opts.markEmoji,
                 shapeField: activeChart.shapeField,
                 emojiField: activeChart.emojiField,
+                emojiMap: activeChart.emojiMap,
                 yAggregate: opts.yAggregate,
                 continuousStops: opts.continuousStops,
                 channelInvert: opts.channelInvert,
@@ -2981,6 +2986,7 @@ export function ChartView() {
                   markEmoji: opts.markEmoji,
                   shapeField: activeChart.shapeField,
                   emojiField: activeChart.emojiField,
+                  emojiMap: activeChart.emojiMap,
                   yAggregate: opts.yAggregate,
                   continuousStops: opts.continuousStops,
                   channelInvert: opts.channelInvert,
@@ -3106,10 +3112,10 @@ export function ChartView() {
               if (!seen.has(label)) seen.set(label, seen.size);
             }
             legendEntries = [...seen.entries()].map(([label, i]) => ({
-              label,
+              label: chartEmojiLabel(label, activeChart.emojiField, activeChart.emojiMap),
               color: opts.colors[i % opts.colors.length]!,
               ...(activeChart.emojiField
-                ? { glyph: firstGrapheme(label) ?? undefined }
+                ? { glyph: chartEmoji(label, activeChart.emojiField, activeChart.emojiMap) ?? undefined }
                 : { shape: categoryShape(i) }),
             }));
           }
