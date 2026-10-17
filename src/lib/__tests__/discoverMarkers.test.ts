@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  assignChartEmoji,
   chartEmoji,
   chartEmojiLabel,
   isEmojiGlyph,
   parseChartEmojiMap,
 } from "../chartEmoji";
-import { addDiscoverMarkerVariants } from "../discoverMarkers";
+import { addDiscoverMarkerVariants, semanticEmojiMap } from "../discoverMarkers";
 import { createDiscoverAssessor } from "../discoverSignals";
 import {
   chartLinkFromState,
@@ -216,5 +217,31 @@ describe("expressive discovery candidates", () => {
     const assess = createDiscoverAssessor(columns, dense, "meteo");
     expect(assess(emoji())).toBeNull();
     expect(assess({ ...emoji(), rowField: "region" })).not.toBeNull();
+  });
+
+  it("keeps every category as an emoji when one symbol changes", () => {
+    const semantic = semanticEmojiMap("event_type");
+    const next = assignChartEmoji(
+      "event_type",
+      ["EQ", "TC", "FL"],
+      semantic,
+      "TC",
+      "⭐",
+      semantic,
+    );
+    expect(next?.values.TC).toBe("⭐");
+    expect(next?.values.EQ).toBe("🫨");
+    expect(next?.values.FL).toBe("🌊");
+    expect(chartEmojiLabel("EQ", "event_type", next)).toBe("Earthquake");
+    const fresh = assignChartEmoji(
+      "note",
+      ["Wildfire", "Flood"],
+      null,
+      "Flood",
+      "🌊",
+    );
+    expect(fresh?.values.Flood).toBe("🌊");
+    expect(isEmojiGlyph(fresh?.values.Wildfire)).toBe(true);
+    expect(fresh?.values.Wildfire).not.toBe("W");
   });
 });

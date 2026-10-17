@@ -39,6 +39,10 @@ export const CHANGELOG: ChangelogRelease[] = [
         detail: "What’s interesting right now sits with the filters in one line: showing a perspective, in a topic, from a source. Search lives at the lower right, where a thumb can reach it. S, M, and L change how large the cards are, and the page mixes a lead story with wider and shorter ones.",
       },
       {
+        title: "Each symbol keeps its name",
+        detail: "When a chart uses emoji, the side panel lists the symbol next to what it means. Changing one keeps the others. The panel is wider so those names, and the tooltip fields, have room.",
+      },
+      {
         title: "Globes show every country",
         detail: "Spinning a globe, or any map of latitude and longitude, draws the world. In Basemap you can switch to a more detailed world, US states, or US counties when the story is local.",
       },

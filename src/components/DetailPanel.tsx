@@ -18,7 +18,7 @@ const SmartTab = lazy(() => import("@/components/detail/SmartTab"));
 const DashboardsTab = lazy(() => import("@/components/detail/DashboardsTab"));
 const SettingsTab = lazy(() => import("@/components/detail/SettingsTab"));
 
-/** `short` is what the tab strip shows (all six must fit a 280px tablet panel). */
+/** `short` is what the tab strip shows (all six must fit the tablet panel). */
 const TABS: { key: PanelTab; label: string; short?: string; icon?: boolean }[] = [
   { key: "stats", label: "Stats" },
   { key: "chart", label: "Chart" },

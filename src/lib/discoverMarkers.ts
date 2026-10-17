@@ -140,6 +140,11 @@ const SEMANTIC: Record<string, ChartEmojiMap> = {
     },
   },
 };
+/** Documented source codes for a column, when Loom already knows the symbols. */
+export function semanticEmojiMap(field: string): ChartEmojiMap | undefined {
+  return Object.values(SEMANTIC).find((map) => map.field === field);
+}
+
 export const DISCOVER_SYMBOL_KINDS = new Set([
   "scatter",
   "geoPoints",

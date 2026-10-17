@@ -136,6 +136,13 @@ import {
 } from "@/lib/socialExport";
 import { downloadBlob } from "@/lib/zipStore";
 import { CURATED_MARK_EMOJIS, MARK_SHAPE_OPTIONS } from "@/lib/chartMarks";
+import {
+  assignChartEmoji,
+  chartEmojiLabel,
+  emojiFieldKeys,
+  seedEmojiMap,
+} from "@/lib/chartEmoji";
+import { semanticEmojiMap } from "@/lib/discoverMarkers";
 
 const DRAG_TYPE_COLUMN = "application/x-loom-column";
 
@@ -818,6 +825,103 @@ const Ico = {
 } as const;
 
 
+function EmojiAssignments({
+  field,
+  rows,
+  columns,
+  map,
+  onAssign,
+}: {
+  field: string;
+  rows: unknown[][];
+  columns: string[];
+  map: import("@/lib/chartEmoji").ChartEmojiMap | null;
+  onAssign: (map: import("@/lib/chartEmoji").ChartEmojiMap) => void;
+}) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const [custom, setCustom] = useState("");
+  const semantic = semanticEmojiMap(field) ?? null;
+  const keys = useMemo(
+    () => emojiFieldKeys(rows, columns, field),
+    [rows, columns, field],
+  );
+  const seeded = useMemo(
+    () => seedEmojiMap(field, keys, map, semantic),
+    [field, keys, map, semantic],
+  );
+  if (!keys.length || !seeded) return null;
+  const choose = (key: string, glyph: string) => {
+    const next = assignChartEmoji(field, keys, map, key, glyph, semantic);
+    if (next) onAssign(next);
+    setOpenKey(null);
+    setCustom("");
+  };
+  return (
+    <div className="space-y-1 pl-0.5">
+      <p className="text-2xs text-loom-muted">Which symbol is which</p>
+      <ul className="space-y-1">
+        {keys.map((key) => {
+          const glyph = seeded.values[key] ?? "⭐";
+          const label = chartEmojiLabel(key, field, seeded);
+          const open = openKey === key;
+          return (
+            <li key={key} className="rounded-md border border-loom-border/70">
+              <button
+                type="button"
+                aria-expanded={open}
+                className="flex w-full items-center gap-2 min-h-8 px-2 text-left text-2xs"
+                onClick={() => {
+                  setOpenKey(open ? null : key);
+                  setCustom("");
+                }}
+              >
+                <span className="text-base leading-none shrink-0" aria-hidden>
+                  {glyph}
+                </span>
+                <span className="min-w-0 flex-1 text-loom-text break-words">
+                  {label}
+                </span>
+              </button>
+              {open && (
+                <div className="px-2 pb-2 space-y-1.5">
+                  <div className="grid grid-cols-8 gap-1" role="listbox" aria-label={`Symbol for ${label}`}>
+                    {CURATED_MARK_EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        className={`h-8 rounded border text-base leading-none ${
+                          glyph === emoji
+                            ? "border-loom-accent bg-loom-accent/15"
+                            : "border-loom-border hover:border-loom-accent/40"
+                        }`}
+                        onClick={() => choose(key, emoji)}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                  <label className="flex items-center gap-1.5 text-2xs text-loom-muted">
+                    <span className="shrink-0">Or paste</span>
+                    <input
+                      value={custom}
+                      onChange={(event) => setCustom(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") choose(key, custom);
+                      }}
+                      placeholder="🌪️"
+                      className="min-w-0 flex-1 rounded border border-loom-border bg-transparent px-2 min-h-8 text-base"
+                    />
+                  </label>
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 // --- Save chart view button (used in Chart tab) ---
 function SaveChartViewButton() {
   const selectedFile = useLoomStore((s) => s.selectedFile);
@@ -1180,6 +1284,12 @@ export default function ChartPanelTab() {
           opacityField,
           shapeField: emojiField ? null : shapeField,
           emojiField: shapeField ? null : emojiField,
+          emojiMap:
+            !emojiField || shapeField
+              ? null
+              : activeChart.emojiMap?.field === emojiField
+                ? activeChart.emojiMap
+                : semanticEmojiMap(emojiField) ?? null,
           y2Field,
         },
       );
@@ -2487,8 +2597,23 @@ export default function ChartPanelTab() {
                           options={allColOptions}
                           allowEmpty
                           onChange={(v) => applyEncodingExtra("emoji", v === "" ? "__none__" : v)}
-                          info="Draws the first complete emoji or visible character in each value. Selecting this clears Shape by category."
+                          info="Each category keeps its own symbol. Picking a column clears Shape by category."
                         />
+                        {activeChart.emojiField && sampleRows && (
+                          <EmojiAssignments
+                            field={activeChart.emojiField}
+                            rows={sampleRows.rows}
+                            columns={sampleRows.columns}
+                            map={activeChart.emojiMap ?? null}
+                            onAssign={(emojiMap) =>
+                              patchChartExtra({
+                                emojiField: activeChart.emojiField,
+                                emojiMap,
+                                shapeField: null,
+                              })
+                            }
+                          />
+                        )}
                       </>
                     )}
                   </div>
@@ -2797,7 +2922,7 @@ export default function ChartPanelTab() {
                             else cur.add(c.name);
                             applyTooltipFields([...cur]);
                           }}
-                          className={`min-h-8 px-2 rounded-md text-2xs border transition-colors ${
+                          className={`min-h-8 max-w-full px-2 py-1 rounded-md text-2xs border text-left leading-snug break-words transition-colors ${
                             on
                               ? "border-loom-accent/50 bg-loom-accent/15 text-loom-text"
                               : "border-loom-border text-loom-muted hover:border-loom-accent/30 hover:text-loom-text"

@@ -442,7 +442,7 @@ code, pre, .font-mono { font-variant-ligatures: none; }
 
   /* ---- Layout ---- */
   --sidebar-width: 260px;
-  --panel-width: 320px;
+  --panel-width: 400px;
   --topbar-height: 48px;
   --statusbar-height: 28px;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -1161,7 +1161,7 @@ html {
 
   @media (min-width: 768px) and (max-width: 1099px) {
     :root {
-      --panel-width: 280px;
+      --panel-width: 360px;
     }
   }
 
