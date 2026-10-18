@@ -82,7 +82,8 @@ xcrun altool --upload-app --type macos \
 Signing: **Apple Distribution** (app) + **3rd Party Mac Developer Installer** (pkg). Identity overrides: `APPLE_DISTRIBUTION_IDENTITY`, `APPLE_INSTALLER_IDENTITY`.
 
 ## Build attached (2026-10-18)
-- **Build:** CFBundleVersion `8` (upload UUID `602f6059-faac-470d-9fd1-ad2aa5f0ab48`) — forecast, anomaly, and event overlays
+- **Build:** CFBundleVersion `9` (upload UUID `9077327a-bcd4-4dfc-968b-dd844e90803d`) — forecast methods in a focus curtain
+- Prior: CFBundleVersion `8` (upload UUID `602f6059-faac-470d-9fd1-ad2aa5f0ab48`) — forecast, anomaly, and event overlays
 - Prior: CFBundleVersion `7` (upload UUID `078c8561-4e4a-4fc5-9fbf-45f4a46c76c6`) — theme release
 - Prior: CFBundleVersion `6` (upload UUID `61164006-5c75-45d8-9f0e-3b9a25b67f18`) — typography and spacing
 - Prior: CFBundleVersion `5` (upload UUID `39e94bf0-26ea-4460-ba88-770f491136f5`) — Codex UI + What’s interesting compare charts
@@ -93,7 +94,8 @@ Signing: **Apple Distribution** (app) + **3rd Party Mac Developer Installer** (p
 
 ## Submitted (2026-10-15)
 - macOS **1.0** · build **2** · **WAITING_FOR_REVIEW** (listing)
-- **TestFlight:** build **8** — forecast, anomaly, and event overlays
+- **TestFlight:** build **9** — forecast methods in a focus curtain
+- Build **8** uploaded 2026-10-18 — forecast, anomaly, and event overlays
 - Build **7** uploaded 2026-10-17 — theme release
 - Build **6** uploaded 2026-10-16 — typography and spacing
 - Build **5** — Codex updates + discover compares
