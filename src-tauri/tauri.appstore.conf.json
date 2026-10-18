@@ -3,7 +3,7 @@
   "bundle": {
     "macOS": {
       "minimumSystemVersion": "12.0",
-      "bundleVersion": "8",
+      "bundleVersion": "9",
       "signingIdentity": "Apple Distribution: Michael Senkow (WC44W2QVE4)",
       "entitlements": "./Entitlements.plist",
       "files": {

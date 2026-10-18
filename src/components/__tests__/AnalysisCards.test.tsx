@@ -21,6 +21,9 @@ it("applies, hides, removes and explains a forecast without removing anomalies",
   fireEvent.click(screen.getByRole("button", { name: "Hide forecast" }));
   expect(useLoomStore.getState().smartResults?.analysis?.forecast?.enabled).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "About forecast" }));
+  expect(screen.getByRole("dialog", { name: "Compare forecast methods" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Recent trend/ }));
+  expect(useLoomStore.getState().smartResults?.analysis?.forecast?.method).toBe("holt");
   expect(screen.getByText("Full calculation code · TypeScript")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Remove forecast" }));
   expect(useLoomStore.getState().smartResults?.analysis?.forecast).toBeUndefined();

@@ -1566,6 +1566,18 @@ html[data-shell-mode="phone"]:not([data-shell-ready="1"]) main {
   }
 }
 
+/* Focus curtain: dim the workspace and slide a reading column in from the right. */
+.loom-focus-scrim {
+  background: var(--overlay-scrim);
+  animation: loom-focus-scrim 220ms ease-out;
+}
+.loom-focus-panel {
+  box-shadow: -24px 0 48px color-mix(in srgb, var(--loom-bg) 55%, transparent);
+  animation: loom-focus-panel 280ms cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes loom-focus-scrim { from { opacity: 0; } to { opacity: 1; } }
+@keyframes loom-focus-panel { from { transform: translateX(1.5rem); opacity: 0; } to { transform: none; opacity: 1; } }
+
 /* Prefer less motion when requested */
 @media (prefers-reduced-motion: reduce) {
   html:not(.reduced-motion) *,

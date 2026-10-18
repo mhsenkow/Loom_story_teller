@@ -18,6 +18,7 @@ import { axisFont, densityStops, drawXModelAxis, drawZeroLine, labelGutter, time
 import { applyLineDash, drawSmoothLine, numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
 import { chartEmojiLabel } from "../chartEmoji";
+import { FORECAST_METHOD_LABEL } from "../timeSeriesAnalysis";
 import { drawMarkSymbol, markSymbols } from "../markSymbols";
 
 export function renderFullLine(
@@ -246,7 +247,7 @@ export function renderFullLine(
   if (analysisConfig && opts?.scales?.x) {
     drawAnalysisLayers(ctx, analysis, analysisConfig, model.kind, opts.scales.x, Y, rect, opts);
     const entries = [{ label: vTitle, color: cols[0] }];
-    if (analysisConfig.forecast?.enabled) entries.push({ label: analysis.forecast ? "Forecast · approx. 95% interval" : "Forecast needs 8 valid points", color: cols[1] ?? cols[0] });
+    if (analysisConfig.forecast?.enabled) entries.push({ label: analysis.forecast ? `Forecast · ${FORECAST_METHOD_LABEL[analysisConfig.forecast.method ?? "line"]}` : "Forecast needs 8 valid points", color: cols[1] ?? cols[0] });
     if (analysisConfig.anomaly?.enabled) entries.push({ label: data[0].pts.length <= analysisConfig.anomaly.window ? "Anomalies need more history" : `${analysis.anomalies.length} unusual ${analysis.anomalies.length === 1 ? "point" : "points"}`, color: cols[2] ?? cols[0] });
     setLegend(opts, entries);
   }

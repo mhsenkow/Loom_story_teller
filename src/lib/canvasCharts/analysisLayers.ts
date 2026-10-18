@@ -7,7 +7,7 @@ import { pushHit } from "./plumbing";
 
 export function computeAnalysis(points: AnalysisPoint[], config?: TimeSeriesAnalysis) {
   return {
-    forecast: config?.forecast?.enabled ? forecastSeries(points, config.forecast.horizon) : null,
+    forecast: config?.forecast?.enabled ? forecastSeries(points, config.forecast.horizon, config.forecast.method ?? "line", config.forecast.season ?? 12) : null,
     anomalies: config?.anomaly?.enabled ? detectSeriesAnomalies(points, config.anomaly.window, config.anomaly.threshold) : [],
   };
 }

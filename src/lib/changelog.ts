@@ -25,6 +25,16 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-18b",
+    date: "2026-10-18",
+    title: "More than one way forward",
+    summary: "Compare forecast methods in a focused reading panel, and the chart follows the one you choose.",
+    items: [
+      { title: "A curtain for the hard part", detail: "Forecast and anomaly explanations now open as a full-height panel on the right. The rest of Loom dims so the reasoning can be read from top to bottom." },
+      { title: "Four forecasts, none of them universal", detail: "Keep the straight line, or switch to the last value, a recent trend, or a repeated cycle. Each choice explains when it holds, when it misleads, and how its shaded range is only an approximation." },
+    ],
+  },
+  {
     id: "2026-10-18",
     date: "2026-10-18",
     title: "See what comes next",
