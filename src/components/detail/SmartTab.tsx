@@ -1,137 +1,27 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
-import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
-import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
-import { clampSmartFloat, clampSmartInt, SMART_TOP_N, SMART_Z } from "@/lib/smartInputClamp";
-import { useIsMobile, useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
-import { useFocusTrap } from "@/lib/useFocusTrap";
-import { clearPersistedPreferences } from "@/lib/persist";
-import { Button } from "@/components/ui/Button";
-import { WorkspaceBackupControls } from "@/components/WorkspaceBackupControls";
-import { useShallow } from "zustand/react/shallow";
-import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
-import { formatNumber } from "@/lib/format";
-import { ChartKindPicker } from "@/components/ChartKindPicker";
-import {
-  AXIS_LABEL_COLOR_SWATCHES,
-  AXIS_LINE_COLOR_SWATCHES,
-  COLOR_PALETTES,
-  palettesGrouped,
-  resolveChartColors,
-  type PaletteKind,
-} from "@/lib/chartPalettes";
-import {
-  THEMES,
-  THEME_LABEL,
-  UI_CHROMES,
-  UI_CHROME_LABEL,
-  APP_FONTS,
-  APP_FONT_LABEL,
-  FACES_SOURCES,
-  VISUAL_PRESETS,
-  VISUAL_PRESET_BLURB,
-  shuffleVisualOverrides,
-  VISUAL_SHUFFLE_SECTIONS,
-  type VisualPresetId,
-  type VisualShuffleLocks,
-  type VisualShuffleSection,
-  normalizeTheme,
-  type LookTheme,
-  type UiChrome,
-  type AppFont,
-  type FacesSource,
-} from "@/lib/lookSystem";
-import {
-  createChartRec,
-  fitEncodingToKind,
-  Y_AGGREGATE_OPTIONS,
-  getRecommendationReason,
-  getRandomEncoding,
-  applyEncodingLocks,
-  chartKindDataSupport,
-  tryBuildRandomChartRec,
-  randomEncodingToExtra,
-  recommendStorySequence,
-  recommendStreamStory,
-  type ChartKind,
-  type YAggregateOption,
-  type EncodingShuffleLocks,
-} from "@/lib/recommendations";
-import {
-  computeDataQualityHints,
-  formatChartAggregationSummary,
-  chartCapabilities,
-  encodingChannelLabels,
-  CHART_LAYOUT_DIRECTIONS,
-  CHART_Y_SCALE_OPTIONS,
-  type ChartLayoutDirection,
-  type ChartYScaleOption,
-} from "@/lib/chartSupport";
-import {
-  chromeDomId,
-  chromeSectionFor,
-  type ChartChromeTarget,
-} from "@/lib/chartChromeLink";
-import { CHART_TOOLTIP_MODES, type ChartTooltipMode } from "@/lib/chartTooltipMode";
-import {
-  resolveDataProvenance,
-  provenanceKindLabel,
-  type DataProvenance,
-} from "@/lib/dataProvenance";
-import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
-import {
-  CHART_TIME_RANGES,
-  applyChartTimeWindow,
-  chartTimeRangeOptions,
-  pickDefaultTimeField,
-  temporalColumnNames,
-  timeColumnSpanMs,
-  type ChartTimeRange,
-} from "@/lib/chartTime";
-import {
-  runAnomaly,
-  runForecast,
-  runTrend,
-  runReferenceLines,
-  runClustering,
-  runCorrelationMatrix,
-  type AnomalyMethod,
-} from "@/lib/smartAnalytics";
-import { corrCellInk, corrFillT, sampleCorrDiverging, DEFAULT_CORR_DIVERGING } from "@/lib/corrMatrixStyle";
-import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
-import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
-import { exportDashboardMicrosite, streamSnapshot, isDesktop, isTauri, openExternalUrl } from "@/lib/tauri";
+import { useState, useCallback, useId } from "react";
+import { useLoomStore } from "@/lib/store";
+import { runAnomaly, type AnomalyMethod, runTrend, runReferenceLines, runClustering, runCorrelationMatrix } from "@/lib/smartAnalytics";
 import { isNumericColumnType } from "@/lib/dataCubeSchema";
-import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
-import {
-  SOCIAL_PRESETS,
-  getSocialPreset,
-  buildSocialCaption,
-  shareOrDownloadFile,
-  copyTextToClipboard,
-  slugifyFilename,
-  publishStoryToWorker,
-  recordCanvasVideo,
-} from "@/lib/socialExport";
-import { downloadBlob } from "@/lib/zipStore";
+import { corrCellInk, corrFillT, sampleCorrDiverging, DEFAULT_CORR_DIVERGING } from "@/lib/corrMatrixStyle";
+import { clampSmartFloat, SMART_Z } from "@/lib/smartInputClamp";
+import AnalysisCards from "./AnalysisCards";
 
 export default function SmartTab() {
   const anomalyColId = useId();
   const anomalyMethodId = useId();
   const anomalyThresholdId = useId();
+  const [anomalyCol, setAnomalyCol] = useState("");
+  const [anomalyMethod, setAnomalyMethod] = useState<AnomalyMethod>("z-score");
+  const [anomalyThreshold, setAnomalyThreshold] = useState(2.5);
+  const setTableFilterRowIndices = useLoomStore(s => s.setTableFilterRowIndices);
   const activeChart = useLoomStore((s) => s.activeChart);
   const sampleRows = useLoomStore((s) => s.sampleRows);
   const columnStats = useLoomStore((s) => s.columnStats);
   const setSmartResults = useLoomStore((s) => s.setSmartResults);
   const smartResults = useLoomStore((s) => s.smartResults);
-  const setTableFilterRowIndices = useLoomStore((s) => s.setTableFilterRowIndices);
   const setToast = useLoomStore((s) => s.setToast);
-  const [anomalyCol, setAnomalyCol] = useState("");
-  const [anomalyMethod, setAnomalyMethod] = useState<AnomalyMethod>("z-score");
-  const [anomalyThreshold, setAnomalyThreshold] = useState(2.5);
-  const [forecastHorizon, setForecastHorizon] = useState(5);
-  const [forecastMethod, setForecastMethod] = useState<"linear" | "moving-avg">("linear");
   const [refCol, setRefCol] = useState("");
   const [refAxis, setRefAxis] = useState<"x" | "y">("y");
   const [refTypes, setRefTypes] = useState<("mean" | "median" | "q1" | "q3")[]>(["mean", "median"]);
@@ -144,22 +34,9 @@ export default function SmartTab() {
 
   const runAnomalyCard = useCallback(() => {
     if (!canRun || !anomalyCol) return;
-    const result = runAnomaly(rows, anomalyCol, columns, anomalyMethod, anomalyThreshold);
+    const result = runAnomaly(rows, anomalyCol, columns, anomalyMethod, anomalyMethod === "iqr" ? 1.5 : anomalyThreshold);
     if (result) setSmartResults((prev) => ({ ...prev, anomaly: result }));
   }, [canRun, anomalyCol, anomalyMethod, anomalyThreshold, rows, columns, setSmartResults]);
-
-  const runForecastCard = useCallback(() => {
-    if (!canRun || !activeChart?.yField) return;
-    const result = runForecast(
-      rows,
-      activeChart.xField,
-      activeChart.yField,
-      columns,
-      forecastHorizon,
-      forecastMethod,
-    );
-    if (result) setSmartResults((prev) => ({ ...prev, forecast: result }));
-  }, [canRun, activeChart, forecastHorizon, forecastMethod, rows, columns, setSmartResults]);
 
   const runTrendCard = useCallback(() => {
     if (!canRun || !activeChart?.yField) return;
@@ -199,20 +76,12 @@ export default function SmartTab() {
 
   return (
     <div className="p-3 space-y-4">
-      <p className="text-2xs text-loom-muted">
-        Run analytics below; results appear on the chart. Switch to Chart view to see them.
-      </p>
-      <button
-        type="button"
-        onClick={clearSmart}
-        className="text-2xs py-1 px-2 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text"
-      >
-        Clear all overlays
-      </button>
-
+      <AnalysisCards key={activeChart.id} />
+      <details className="space-y-3"><summary className="text-sm font-medium cursor-pointer">More analysis tools</summary>
+      <button type="button" className="loom-btn-ghost text-xs" onClick={clearSmart}>Clear all analysis and events</button>
       {/* Anomaly detection */}
       <div className="loom-card p-2 space-y-2">
-        <p className="text-xs font-semibold text-loom-text">Anomaly detection</p>
+        <p className="text-xs font-semibold text-loom-text">Column outliers</p>
         <p className="text-2xs text-loom-muted">Highlight outliers in a numeric column (table + chart).</p>
         <div>
           <label htmlFor={anomalyColId} className="block text-2xs text-loom-muted mb-0.5">Column</label>
@@ -274,42 +143,6 @@ export default function SmartTab() {
             Filter table to anomalies
           </button>
         )}
-      </div>
-
-      {/* Forecast */}
-      <div className="loom-card p-2 space-y-2">
-        <p className="text-xs font-semibold text-loom-text">Forecast</p>
-        <p className="text-2xs text-loom-muted">Extend the chart with predicted points (linear or moving avg).</p>
-        <div>
-          <label className="block text-2xs text-loom-muted mb-0.5">Horizon (points)</label>
-          <input
-            type="number"
-            min={1}
-            max={50}
-            value={forecastHorizon}
-            onChange={(e) => setForecastHorizon(Number(e.target.value))}
-            className="loom-input w-full text-xs py-1"
-          />
-        </div>
-        <div>
-          <label className="block text-2xs text-loom-muted mb-0.5">Method</label>
-          <select
-            value={forecastMethod}
-            onChange={(e) => setForecastMethod(e.target.value as "linear" | "moving-avg")}
-            className="loom-input w-full text-xs py-1"
-          >
-            <option value="linear">Linear</option>
-            <option value="moving-avg">Moving average</option>
-          </select>
-        </div>
-        <button
-          type="button"
-          onClick={runForecastCard}
-          disabled={!activeChart.yField || rows.length === 0}
-          className="w-full px-2 py-1.5 text-xs font-medium text-loom-text bg-loom-accent/20 border border-loom-accent rounded hover:bg-loom-accent/30"
-        >
-          Run
-        </button>
       </div>
 
       {/* Trend line */}
@@ -457,16 +290,7 @@ export default function SmartTab() {
         })() : null}
       </div>
 
-      {/* AI / Vision (future) */}
-      <div className="loom-card p-2 space-y-2 opacity-80">
-        <p className="text-xs font-semibold text-loom-text">Chart insight (AI)</p>
-        <p className="text-2xs text-loom-muted">
-          Future: use a vision model (e.g. Ollama with LLaVA) to &quot;look&quot; at the chart — describe it, suggest anomalies, or answer questions.
-        </p>
-        <button type="button" disabled className="w-full px-2 py-1.5 text-xs text-loom-muted border border-loom-border rounded cursor-not-allowed">
-          Coming soon
-        </button>
-      </div>
+      </details>
     </div>
   );
 }

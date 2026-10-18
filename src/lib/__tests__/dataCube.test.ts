@@ -1,3 +1,6 @@
+import { resolveDataCubeInk } from "../dataCube";
+import { THEME_UI } from "../chartPalettes";
+import { relativeLuminance } from "../chartInk";
 /**
  * Unit tests for the rows × columns × depth data cube.
  */
@@ -267,4 +270,15 @@ describe("pivoting", () => {
     expect(pickDataCubeCell(cube, v, p.sx, p.sy, { slice: 0 })?.zi).toBe(0);
     expect(pickDataCubeCell(cube, v, p.sx, p.sy, { slice: 2 })?.zi ?? 2).toBe(2);
   });
+});
+
+
+it("keeps cube walls close to every theme surface instead of opaque mid-gray", () => {
+  for (const ui of Object.values(THEME_UI)) {
+    const ink = resolveDataCubeInk({ themeBg: ui.bg, themeText: ui.text, themeBorder: ui.border });
+    const wallDistance = Math.abs(relativeLuminance(ink.wall) - relativeLuminance(ui.bg));
+    const gridDistance = Math.abs(relativeLuminance(ink.grid) - relativeLuminance(ui.bg));
+    expect(wallDistance).toBeLessThan(0.15);
+    expect(gridDistance).toBeGreaterThan(wallDistance);
+  }
 });

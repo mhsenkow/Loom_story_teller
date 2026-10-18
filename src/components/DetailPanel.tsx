@@ -14,16 +14,14 @@ import { useLoomStore, type PanelTab } from "@/lib/store";
 const StatsTab = lazy(() => import("@/components/detail/StatsTab"));
 const ChartPanelTab = lazy(() => import("@/components/detail/ChartPanelTab"));
 const ExportTab = lazy(() => import("@/components/detail/ExportTab"));
-const SmartTab = lazy(() => import("@/components/detail/SmartTab"));
 const DashboardsTab = lazy(() => import("@/components/detail/DashboardsTab"));
 const SettingsTab = lazy(() => import("@/components/detail/SettingsTab"));
 
-/** `short` is what the tab strip shows (all six must fit the tablet panel). */
+/** `short` is what the tab strip shows (the strip scrolls on narrow panels). */
 const TABS: { key: PanelTab; label: string; short?: string; icon?: boolean }[] = [
   { key: "stats", label: "Stats" },
   { key: "chart", label: "Chart" },
   { key: "export", label: "Export" },
-  { key: "smart", label: "Smart" },
   { key: "dashboards", label: "Dashboards", short: "Boards" },
   { key: "settings", label: "Settings", icon: true },
 ];
@@ -62,7 +60,6 @@ function DetailTabContent({ panelTab, hasDataset }: { panelTab: PanelTab; hasDat
   if (!hasDataset) return <EmptyDatasetState />;
   if (panelTab === "stats") return <StatsTab />;
   if (panelTab === "export") return <ExportTab />;
-  if (panelTab === "smart") return <SmartTab />;
   return <ChartPanelTab />;
 }
 
@@ -128,7 +125,7 @@ export function DetailPanel() {
           </button>
         </div>
 
-        <div role="tablist" aria-label="Panel sections" className="loom-tabs px-1.5 sm:px-2 min-h-[var(--topbar-height)] border-b border-loom-border">
+        <div role="tablist" aria-label="Panel sections" className="loom-tabs overflow-x-auto shrink-0 px-1.5 sm:px-2 min-h-[var(--topbar-height)] border-b border-loom-border">
           {TABS.map((tab) => (
             <button
               key={tab.key}

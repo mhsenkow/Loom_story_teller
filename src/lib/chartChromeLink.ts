@@ -6,7 +6,7 @@
 // control. Hovering those controls outlines the related chart region.
 // =================================================================
 
-export type ChartChromeSection = "encoding" | "visual";
+export type ChartChromeSection = "encoding" | "visual" | "analyze" | "overlays";
 
 /** Stable ids shared by canvas hit tests and `data-chrome-target` in the panel. */
 export type ChartChromeTarget =

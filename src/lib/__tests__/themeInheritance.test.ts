@@ -51,3 +51,12 @@ it("preserves explicit edge grammar in saved chart styles and SVG", () => {
   expect(vegaExportConfigForTheme("nes").line).toMatchObject({ strokeCap: "square", strokeJoin: "miter" });
   expect(vegaExportConfigForTheme("glass").line).toMatchObject({ strokeCap: "round", strokeJoin: "round" });
 });
+
+
+it("inherits material and restores flat without losing other theme rules", () => {
+  expect(resolveThemeChartStyle("glass").markMaterial).toBe("glaze");
+  expect(resolveThemeChartStyle("paper").markMaterial).toBe("ink");
+  expect(resolveThemeChartStyle("tank").markMaterial).toBe("etched");
+  expect(resolveThemeChartStyle("glass", { markMaterial: "flat" })).toMatchObject({ markMaterial: "flat", lineJoin: "round" });
+  expect(sanitizeChartVisualOverrides({ markMaterial: "satin" })?.markMaterial).toBe("satin");
+});

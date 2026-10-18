@@ -58,7 +58,7 @@ describe("coreSlice", () => {
   });
 
   it("setPanelTab updates panel tab", () => {
-    getState().setPanelTab("smart");
-    expect(getState().panelTab).toBe("smart");
+    getState().setPanelTab("settings");
+    expect(getState().panelTab).toBe("settings");
   });
 });

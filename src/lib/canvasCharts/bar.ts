@@ -1,3 +1,4 @@
+import { fillMaterialPath } from "./material";
 // =================================================================
 // Canvas 2D bar and histogram renderers.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -121,7 +122,7 @@ export function renderFullBar(
           ctx.globalAlpha = alpha;
           ctx.beginPath();
           barPath(ctx, x + 0.5, top, Math.max(1, innerW - 1), bh, cornerR, vBarDir(val));
-          ctx.fill();
+          fillMaterialPath(ctx, rect.top, rect.bottom, opts);
           if (showDataLabels && innerW >= 18 && bh > 0) {
             ctx.globalAlpha = 1;
             ctx.fillStyle = axisLabelColor;
@@ -155,7 +156,7 @@ export function renderFullBar(
           ctx.globalAlpha = alpha;
           ctx.beginPath();
           ctx.rect(x0, yTop, bw, yBot - yTop);
-          ctx.fill();
+          fillMaterialPath(ctx, rect.top, rect.bottom, opts);
           // Hairline separator between stacked segments
           ctx.globalAlpha = 1;
           ctx.strokeStyle = opts?.themeBg ?? "#111114";
@@ -249,7 +250,7 @@ export function renderFullBar(
       ctx.beginPath();
       if (g.val !== 0) barPath(ctx, left, yMid - barT / 2, len, barT, cornerR, hBarDir(g.val));
       else ctx.rect(left, yMid - barT / 2, len, barT);
-      ctx.fill();
+      fillMaterialPath(ctx, rect.top, rect.bottom, opts);
     }
     entries.forEach(([label, val], i) => {
       const yMid = rect.top + band * (i + 0.5);
@@ -263,7 +264,7 @@ export function renderFullBar(
       ctx.beginPath();
       if (val !== 0) barPath(ctx, left, yMid - barT / 2, len, barT, cornerR, hBarDir(val));
       else ctx.rect(left, yMid - barT / 2, len, barT);
-      ctx.fill();
+      fillMaterialPath(ctx, rect.top, rect.bottom, opts);
       ctx.globalAlpha = 1;
       ctx.fillStyle = axisLabelColor;
       ctx.font = valueFont;
@@ -304,7 +305,7 @@ export function renderFullBar(
     ctx.globalAlpha = 0.22;
     ctx.beginPath();
     barPath(ctx, cx - barW / 2, top, barW, bh, cornerR, vBarDir(g.val));
-    ctx.fill();
+    fillMaterialPath(ctx, rect.top, rect.bottom, opts);
   }
   entries.forEach(([label, val], i) => {
     const cx = rect.left + band * (i + 0.5);
@@ -317,7 +318,7 @@ export function renderFullBar(
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     barPath(ctx, cx - barW / 2, top, barW, bh, cornerR, vBarDir(val));
-    ctx.fill();
+    fillMaterialPath(ctx, rect.top, rect.bottom, opts);
     if (showDataLabels) {
       const lbl = formatDataValue(val);
       ctx.globalAlpha = 1;

@@ -34,8 +34,8 @@ describe("store", () => {
     it("updates panelTab", () => {
       getState().setPanelTab("stats");
       expect(getState().panelTab).toBe("stats");
-      getState().setPanelTab("smart");
-      expect(getState().panelTab).toBe("smart");
+      getState().setPanelTab("settings");
+      expect(getState().panelTab).toBe("settings");
       getState().setPanelTab("export");
       expect(getState().panelTab).toBe("export");
     });
@@ -154,7 +154,7 @@ describe("store", () => {
 
   describe("reset", () => {
     it("restores initial state", () => {
-      getState().setPanelTab("smart");
+      getState().setPanelTab("settings");
       getState().setSmartResults({ anomaly: { column: "x", method: "z-score", threshold: 2, rowIndices: [] } });
       getState().reset();
       expect(getState().panelTab).toBe("chart");

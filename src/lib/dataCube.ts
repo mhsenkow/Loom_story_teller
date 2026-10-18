@@ -715,7 +715,7 @@ export function drawDataCubeBackLayer(ctx: CanvasRenderingContext2D, cube: DataC
   let far = 0;
   proj.forEach((p, i) => { if (p.depth > proj[far]!.depth) far = i; });
   const fc = corners[far]!;
-  const ink = cubeInk(opts);
+  const ink = resolveDataCubeInk(opts);
 
   ctx.save();
   ctx.lineWidth = 1;
@@ -732,7 +732,7 @@ export function drawDataCubeBackLayer(ctx: CanvasRenderingContext2D, cube: DataC
       p[others[1]!] = b! * ext[others[1]!]!;
       return p;
     });
-    ctx.fillStyle = withAlpha(ink.wall, 1);
+    ctx.fillStyle = ink.wall;
     ctx.beginPath();
     wallPts.forEach((p, i) => {
       const s = projectCube(v, p[0], p[1], p[2]);
@@ -804,12 +804,12 @@ export function drawDataCubeVoxels(ctx: CanvasRenderingContext2D, cube: DataCube
  * edges stay visible in light and dark themes (raw `themeBorder` is nearly
  * the bg in dark themes). Transparent bgs fall back to the document theme.
  */
-function cubeInk(opts: DataCubeRenderOpts): ChartInk & { wall: string; grid: string; edge: string } {
+export function resolveDataCubeInk(opts: Pick<DataCubeRenderOpts, "themeBg" | "themeText" | "themeMuted" | "themeBorder">): ChartInk & { wall: string; grid: string; edge: string } {
   const ink = resolveChartInk(opts);
   return {
     ...ink,
-    wall: withAlpha(mixColor(ink.bg, ink.text, 0.5), ink.light ? 0.05 : 0.06),
-    grid: mixColor(ink.bg, ink.text, ink.light ? 0.16 : 0.2),
+    wall: mixColor(ink.bg, ink.border, ink.light ? 0.06 : 0.12),
+    grid: mixColor(ink.bg, ink.border, ink.light ? 0.42 : 0.55),
     edge: mixColor(ink.bg, ink.text, ink.light ? 0.38 : 0.42),
   };
 }
@@ -828,7 +828,7 @@ export function drawDataCubeFrontLayer(
   const { ex, ey, ez, pitch } = cubeExtents(cube);
   const corners = boxCorners(ex, ey, ez);
   const proj = corners.map((c) => projectCube(v, c[0], c[1], c[2]));
-  const ink = cubeInk(opts);
+  const ink = resolveDataCubeInk(opts);
   const text = ink.text;
   const muted = ink.muted;
   const font = opts.fontFamily ?? "Inter";

@@ -478,7 +478,7 @@ export default function Home() {
   );
 }
 
-const PANEL_TABS = ["stats", "chart", "export", "smart", "dashboards", "settings"] as const;
+const PANEL_TABS = ["stats", "chart", "export", "dashboards", "settings"] as const;
 
 /** GitHub issue bodies must stay small; base64 images blow past limits quickly. */
 const FEEDBACK_IMAGE_MAX_MARKDOWN_CHARS = 48_000;
@@ -647,7 +647,7 @@ function HomeContent({
         return;
       }
       if (ariaModalOpen()) return;
-      if (e.altKey && !e.metaKey && !e.ctrlKey && e.key >= "1" && e.key <= "6") {
+      if (e.altKey && !e.metaKey && !e.ctrlKey && e.key >= "1" && e.key <= "5") {
         const i = parseInt(e.key, 10) - 1;
         if (i >= 0 && i < PANEL_TABS.length) {
           setPanelTab(PANEL_TABS[i]);
@@ -791,7 +791,7 @@ function HomeContent({
             {helpTab === "shortcuts" && (
               <ul className="text-xs text-loom-text space-y-2.5 leading-relaxed">
                 <li><kbd className="loom-kbd">1</kbd> Explorer · <kbd className="loom-kbd">2</kbd> Chart · <kbd className="loom-kbd">3</kbd> Query · <kbd className="loom-kbd">4</kbd> Dive</li>
-                <li><kbd className="loom-kbd">⌘1</kbd>–<kbd className="loom-kbd">⌘6</kbd> Panel tabs (Stats → Settings)</li>
+                <li><kbd className="loom-kbd">⌥1</kbd>–<kbd className="loom-kbd">⌥5</kbd> Panel tabs (Stats → Settings)</li>
                 <li><kbd className="loom-kbd">[</kbd> Sidebar · <kbd className="loom-kbd">]</kbd> Right panel</li>
                 <li className="pt-1 text-loom-muted font-medium text-2xs uppercase tracking-wider">Scatter</li>
                 <li>Two-finger scroll pans · pinch / mouse wheel zooms toward cursor · double-click resets</li>

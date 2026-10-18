@@ -115,7 +115,7 @@ export const MOBILE_LIVE_EDIT_SHEET = "clamp(14rem, calc(100dvh - 25rem), 48dvh)
 export function useMobileLiveEdit(): boolean {
   const isMobile = useIsMobile();
   const live = useLoomStore(
-    (s) => s.panelOpen && s.viewMode === "chart" && (s.panelTab === "chart" || s.panelTab === "smart"),
+    (s) => s.panelOpen && s.viewMode === "chart" && s.panelTab === "chart",
   );
   return isMobile && live;
 }

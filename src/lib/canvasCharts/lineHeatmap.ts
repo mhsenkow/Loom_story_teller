@@ -3,6 +3,7 @@
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
 // =================================================================
 
+import { computeAnalysis, drawAnalysisLayers } from "./analysisLayers";
 import { aggregateValues, fieldLabel, plotOf, pushHit, setLegend, valueTitle } from "./plumbing";
 import { buildXModel, classifyKeys, formatDataValue, linear, niceTicks } from "../chartAxes";
 import { contrastingInk } from "../chartLayout";
@@ -67,7 +68,7 @@ export function renderFullLine(
         if (measureIdx < 0) byX.get(k)!.push(1);
         else {
           const v = Number(r[measureIdx]);
-          if (!isNaN(v)) byX.get(k)!.push(v);
+          if (r[measureIdx] != null && r[measureIdx] !== "" && Number.isFinite(v)) byX.get(k)!.push(v);
         }
       }
       const pts = model.keys
@@ -122,9 +123,20 @@ export function renderFullLine(
     });
   }
 
+  const originalDomain = model.domain ? [...model.domain] as [number, number] : null;
+  const analysisConfig = ci < 0 && y2Idx < 0 && !comparePrev && !rollW && !normMode && model.domain && (opts?.yScale ?? "linear") === "linear" ? opts?.analysis : undefined;
+  const analysis = computeAnalysis(analysisConfig && originalDomain ? data[0].pts.map(p => ({ x: originalDomain[0] + p.t * (originalDomain[1] - originalDomain[0]), y: p.v })) : [], analysisConfig);
+  let domainFraction = 1;
+  if (analysis.forecast && model.domain && originalDomain) {
+    model.domain = [originalDomain[0], analysis.forecast.points.at(-1)!.x];
+    domainFraction = (originalDomain[1] - originalDomain[0]) / (model.domain[1] - model.domain[0]);
+    model.pos = model.pos.map(t => t * domainFraction);
+  }
+
   let yMin = Infinity;
   let yMax = -Infinity;
   for (const s of data) for (const p of s.pts) { yMin = Math.min(yMin, p.v); yMax = Math.max(yMax, p.v); }
+  for (const p of analysis.forecast?.points ?? []) { yMin = Math.min(yMin, p.lower); yMax = Math.max(yMax, p.upper); }
   if (opts?.sharedValueDomain) {
     yMin = opts.sharedValueDomain.min;
     yMax = opts.sharedValueDomain.max;
@@ -145,7 +157,7 @@ export function renderFullLine(
     const dom = model.domain;
     opts.scales = { y: Y, x: dom ? (v: number) => rect.left + ((v - dom[0]) / (dom[1] - dom[0] || 1)) * span : undefined, valueAxis: "y", rect };
   }
-  const X = (t: number) => rect.left + t * span;
+  const X = (t: number) => rect.left + t * domainFraction * span;
 
   drawChartGrid(ctx, w, h, rect, opts, { x: model.kind === "number" ? model.domain : null, y: [ys.min, ys.max] });
 
@@ -230,6 +242,13 @@ export function renderFullLine(
         ...(symbol?.glyph ? { glyph: symbol.glyph } : symbol ? { shape: symbol.shape } : {}),
       };
     }));
+  }
+  if (analysisConfig && opts?.scales?.x) {
+    drawAnalysisLayers(ctx, analysis, analysisConfig, model.kind, opts.scales.x, Y, rect, opts);
+    const entries = [{ label: vTitle, color: cols[0] }];
+    if (analysisConfig.forecast?.enabled) entries.push({ label: analysis.forecast ? "Forecast · approx. 95% interval" : "Forecast needs 8 valid points", color: cols[1] ?? cols[0] });
+    if (analysisConfig.anomaly?.enabled) entries.push({ label: data[0].pts.length <= analysisConfig.anomaly.window ? "Anomalies need more history" : `${analysis.anomalies.length} unusual ${analysis.anomalies.length === 1 ? "point" : "points"}`, color: cols[2] ?? cols[0] });
+    setLegend(opts, entries);
   }
   if (ys.min < 0 && ys.max > 0) drawZeroLine(ctx, rect.left, Y(0), rect.right, Y(0), opts);
   drawChartTicks(ctx, 0, 1, ys.min, ys.max, w, h, rect, opts, { x: false });

@@ -3,6 +3,7 @@
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
 // =================================================================
 
+import { fillMaterialPath } from "./material";
 import { aggregateValues, fieldLabel, plotOf, pushHit, setLegend, valueTitle } from "./plumbing";
 import { formatDataValue } from "../chartAxes";
 import { contrastingInk, densityAwarePointMarks, fitTextEllipsis } from "../chartLayout";
@@ -77,7 +78,7 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
     ctx.arc(cx, cy, radius, start, start + sweep);
     ctx.arc(cx, cy, innerR, start + sweep, start, true);
     ctx.closePath();
-    ctx.fill();
+    fillMaterialPath(ctx, cy - radius, cy + radius, opts);
     ctx.strokeStyle = opts?.themeBg ?? "#1a1a1f";
     ctx.lineWidth = 2;
     ctx.globalAlpha = 1;

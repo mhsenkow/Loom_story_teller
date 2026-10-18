@@ -81,8 +81,9 @@ xcrun altool --upload-app --type macos \
 
 Signing: **Apple Distribution** (app) + **3rd Party Mac Developer Installer** (pkg). Identity overrides: `APPLE_DISTRIBUTION_IDENTITY`, `APPLE_INSTALLER_IDENTITY`.
 
-## Build attached (2026-10-17)
-- **Build:** CFBundleVersion `7` (upload UUID `078c8561-4e4a-4fc5-9fbf-45f4a46c76c6`) — theme release
+## Build attached (2026-10-18)
+- **Build:** CFBundleVersion `8` — forecast, anomaly, and event overlays
+- Prior: CFBundleVersion `7` (upload UUID `078c8561-4e4a-4fc5-9fbf-45f4a46c76c6`) — theme release
 - Prior: CFBundleVersion `6` (upload UUID `61164006-5c75-45d8-9f0e-3b9a25b67f18`) — typography and spacing
 - Prior: CFBundleVersion `5` (upload UUID `39e94bf0-26ea-4460-ba88-770f491136f5`) — Codex UI + What’s interesting compare charts
 - Prior: CFBundleVersion `4` (upload UUID `6cbb5ef1-59c2-43ee-8064-833bec8f935b`) — Gatekeeper fix + honest CSV row counts (`COUNT(*)` on mount/inspect; activateDataset patches deferred zeros)
@@ -92,7 +93,8 @@ Signing: **Apple Distribution** (app) + **3rd Party Mac Developer Installer** (p
 
 ## Submitted (2026-10-15)
 - macOS **1.0** · build **2** · **WAITING_FOR_REVIEW** (listing)
-- **TestFlight:** build **7** uploaded 2026-10-17 — theme release
+- **TestFlight:** build **8** — forecast, anomaly, and event overlays
+- Build **7** uploaded 2026-10-17 — theme release
 - Build **6** uploaded 2026-10-16 — typography and spacing
 - Build **5** — Codex updates + discover compares
 - Build **4** — CSV row counts + no unsigned extension autoinstall

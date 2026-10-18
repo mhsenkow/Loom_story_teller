@@ -3,7 +3,7 @@
 import { isNumericType } from "@/lib/canvasCharts/shared";
 import { useChartTheme } from "@/components/useChartTheme";
 import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
-import { useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
+import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
 import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
 import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
 import { clampSmartFloat, clampSmartInt, SMART_TOP_N, SMART_Z } from "@/lib/smartInputClamp";
@@ -976,6 +976,15 @@ function SaveChartViewButton() {
   );
 }
 
+const AnalyzeSection = lazy(() => import("./SmartTab"));
+const OverlaysSection = lazy(() => import("./OverlaysTab"));
+const CHART_SECTIONS = [
+  { id: "encoding", label: "Encoding", path: "M4 5h16M4 12h16M4 19h16M8 3v4M16 10v4M10 17v4" },
+  { id: "visual", label: "Visual", path: "M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 1.5 1.5 0 0 1 1-2.8H17a4 4 0 0 0 4-4C21 6.4 17 3 12 3ZM7 10h.01M10 7h.01M15 7h.01M18 10h.01" },
+  { id: "analyze", label: "Analyze", path: "M3 3v18h18M6 15l4-5 4 3 6-8M16 5h4v4" },
+  { id: "overlays", label: "Overlays", path: "m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" },
+] as const;
+
 export default function ChartPanelTab() {
   const {
     activeChart,
@@ -1842,21 +1851,16 @@ export default function ChartPanelTab() {
 
   return (
     <div className="flex flex-col min-h-0">
-      {/* Sticky Encoding | Visual secondary header */}
+      {/* Chart authoring sections share one sticky navigation strip. */}
       <div className="sticky top-0 z-10 bg-loom-surface">
-      <ChartEditToolbar />
+      {(chartPanelSection === "encoding" || chartPanelSection === "visual") && <ChartEditToolbar />}
       <div
         role="tablist"
         aria-label="Chart panel sections"
         className="flex items-center gap-0.5 px-2 py-1.5 border-b border-loom-border bg-loom-surface shrink-0"
       >
         <div className="flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5 w-full">
-          {(
-            [
-              { id: "encoding" as const, label: "Encoding" },
-              { id: "visual" as const, label: "Visual" },
-            ]
-          ).map((sec) => (
+          {CHART_SECTIONS.map((sec) => (
             <button
               key={sec.id}
               type="button"
@@ -1867,20 +1871,23 @@ export default function ChartPanelTab() {
               tabIndex={chartPanelSection === sec.id ? 0 : -1}
               onClick={() => setChartPanelSection(sec.id)}
               onKeyDown={(e) => {
-                if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+                if (["ArrowRight", "ArrowLeft", "Home", "End"].includes(e.key)) {
                   e.preventDefault();
-                  const next = chartPanelSection === "encoding" ? "visual" : "encoding";
+                  const index = CHART_SECTIONS.findIndex(s => s.id === sec.id);
+                  const nextIndex = e.key === "Home" ? 0 : e.key === "End" ? CHART_SECTIONS.length - 1 : (index + (e.key === "ArrowRight" ? 1 : -1) + CHART_SECTIONS.length) % CHART_SECTIONS.length;
+                  const next = CHART_SECTIONS[nextIndex].id;
                   setChartPanelSection(next);
                   queueMicrotask(() => document.getElementById(`chart-section-${next}`)?.focus());
                 }
               }}
               className={`
-                flex-1 min-h-9 px-3 py-1.5 text-xs font-medium rounded transition-colors
+                flex-1 min-w-0 min-h-12 flex flex-col items-center justify-center gap-1 px-1 py-2 text-xs font-medium rounded transition-colors
                 ${chartPanelSection === sec.id
                   ? "bg-loom-surface text-loom-text shadow-sm border border-loom-border"
                   : "text-loom-muted hover:text-loom-text border border-transparent"}
               `}
             >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={sec.path} /></svg>
               {sec.label}
             </button>
           ))}
@@ -1888,6 +1895,13 @@ export default function ChartPanelTab() {
       </div>
       </div>
 
+      {(chartPanelSection === "analyze" || chartPanelSection === "overlays") && (
+        <div role="tabpanel" id={`chart-section-panel-${chartPanelSection}`} aria-labelledby={`chart-section-${chartPanelSection}`}>
+          <Suspense fallback={<div className="p-3 text-xs text-loom-muted">Loading…</div>}>
+            {chartPanelSection === "analyze" ? <AnalyzeSection /> : <OverlaysSection />}
+          </Suspense>
+        </div>
+      )}
       <div className="flex flex-col gap-3 p-3">
       {chartPanelSection === "encoding" && (
         <div
@@ -3329,6 +3343,13 @@ export default function ChartPanelTab() {
 
             {/* Look spectrum — only controls that affect this chart kind */}
             <ChartInspectorSection title="Composition" open={!!visualSections.look} onToggle={() => toggleVisualSection("look")}>
+              {activeChart && ["bar", "pie"].includes(activeChart.kind) && <label className="block text-2xs text-loom-muted">Mark material
+                <select aria-label="Mark material" className="loom-input w-full mt-1" value={chartVisualOverrides.markMaterial ?? "auto"} onChange={(event) => updateOverride("markMaterial", event.target.value === "auto" ? undefined : event.target.value as ChartVisualOverrides["markMaterial"])}>
+                  <option value="auto">Follow theme · {inheritedStyle.markMaterial}</option>
+                  <option value="flat">Flat</option><option value="glaze">Glaze</option><option value="satin">Satin</option><option value="ink">Printed edge</option><option value="etched">Etched edge</option>
+                </select>
+              </label>}
+
 
               <IconToggleGroup
                 label="Detail"
@@ -3540,7 +3561,7 @@ export default function ChartPanelTab() {
                 <p className="text-2xs text-loom-muted mt-1">Scales titles, axes, legends, values, and source notes. Crowded labels are spaced or skipped.</p>
               </div>
               <div className="loom-type-preview" role="group" aria-label="Chart typography sample" style={{ fontFamily: chartFontStack(previewFont), fontSize: previewType.tick }}>
-                <span className="line-clamp-2" title={previewTitle} style={{ fontSize: previewType.title, fontWeight: chartVisualOverrides.titleFontWeight ?? 600, fontStyle: chartVisualOverrides.titleItalic ? "italic" : "normal", lineHeight: 1.3 }}>{previewTitle}</span>
+                <span className="line-clamp-2" title={previewTitle} style={{ fontSize: previewType.title, fontWeight: chartVisualOverrides.titleFontWeight ?? inheritedStyle.titleFontWeight ?? 600, fontStyle: chartVisualOverrides.titleItalic ? "italic" : "normal", lineHeight: 1.3 }}>{previewTitle}</span>
                 <span>{activeChart?.xField ?? "Category Aa"}{activeChart?.yField ? ` · ${activeChart.yField}` : ""}</span>
                 <span className="tabular-nums">12,345.67 · −8.2%</span>
               </div>
@@ -3550,7 +3571,7 @@ export default function ChartPanelTab() {
               </p>
               <IconToggleGroup
                 label="Title weight"
-                value={chartVisualOverrides.titleFontWeight ?? 600}
+                value={chartVisualOverrides.titleFontWeight ?? inheritedStyle.titleFontWeight ?? 600}
                 onChange={(v) => updateOverride("titleFontWeight", v)}
                 options={[
                   { value: 300, label: "Light", icon: Ico.weightLight },
@@ -3865,7 +3886,7 @@ export default function ChartPanelTab() {
               </div>
               <IconToggleGroup
                 label="Grid style"
-                value={chartVisualOverrides.gridStyle ?? "solid"}
+                value={chartVisualOverrides.gridStyle ?? inheritedStyle.gridStyle ?? "solid"}
                 onChange={(v) => updateOverride("gridStyle", v)}
                 options={[
                   { value: "solid", label: "Solid", icon: Ico.solid },
@@ -3881,11 +3902,11 @@ export default function ChartPanelTab() {
                   min={0}
                   max={1}
                   step={0.1}
-                  value={chartVisualOverrides.gridOpacity ?? 0.5}
+                  value={chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5}
                   onChange={(e) => updateOverride("gridOpacity", Number(e.target.value))}
                   className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                 />
-                <span className="text-2xs font-mono text-loom-muted ml-2">{((chartVisualOverrides.gridOpacity ?? 0.5) * 100).toFixed(0)}%</span>
+                <span className="text-2xs font-mono text-loom-muted ml-2">{((chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5) * 100).toFixed(0)}%</span>
               </div>
               <div>
                 <label className="block text-2xs text-loom-muted mb-1">Tick count</label>

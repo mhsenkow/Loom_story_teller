@@ -30,6 +30,7 @@ export interface ChartVisualOverrides {
   markShape?: string;
   markerMode?: "shape" | "emoji";
   markEmoji?: string;
+  markMaterial?: "flat" | "glaze" | "satin" | "ink" | "etched";
   markStroke?: boolean;
   markStrokeWidth?: number;
   markStrokeColor?: string;

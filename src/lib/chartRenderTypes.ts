@@ -9,6 +9,7 @@ import type { HitTarget } from "./chartTooltip";
 import type { YAggregateOption } from "./recommendations";
 
 export interface ChartRenderOpts {
+  analysis?: import("./timeSeriesAnalysis").TimeSeriesAnalysis;
   /** Thumbnail paint uses the same marks without axis/grid chrome. */
   mini?: boolean;
   plotBounds?: PlotRect;
@@ -40,6 +41,7 @@ export interface ChartRenderOpts {
   shapeField?: string | null;
   emojiField?: string | null;
   emojiMap?: import("./chartEmoji").ChartEmojiMap | null;
+  markMaterial?: "flat" | "glaze" | "satin" | "ink" | "etched";
   markStroke?: boolean;
   markStrokeWidth?: number;
   markStrokeColor?: string;

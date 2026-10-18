@@ -25,6 +25,16 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-18",
+    date: "2026-10-18",
+    title: "See what comes next",
+    summary: "Forecast a line, mark what stands out, and give bars and pies a quieter finish.",
+    items: [
+      { title: "Analyze what comes next", detail: "Add a forecast and uncertainty band, flag unusual points, or mark events alongside a line chart. Chart now groups Encoding, Visual, Analyze, and Overlays in one icon-labeled tab strip. Analyze cards keep controls simple and reveal the calculation code on demand; Overlays adds timing and context. First-draft layers appear in PNG captures and last for this session." },
+      { title: "Material, with restraint", detail: "Bars and pies inherit subtle glazed, satin, printed, or etched finishes. Theme-specific grid weight and title weight add character; data cube walls stay close to the chart surface. The toolbar theme button now cycles looks with a distinct icon for each." },
+    ],
+  },
+  {
     id: "2026-10-17c",
     date: "2026-10-17",
     title: "Themes that carry through",

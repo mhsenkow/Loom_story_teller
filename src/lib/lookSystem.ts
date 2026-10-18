@@ -639,7 +639,7 @@ const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]>
   marks: [
     "pointSize", "sizeScale", "markShape", "markerMode", "markEmoji", "markStroke", "markStrokeWidth",
     "markStrokeColor", "markJitter", "barCornerRadius", "lineStrokeStyle",
-    "lineCurveSmooth", "lineWidth", "lineCap", "lineJoin", "showDataLabels",
+    "markMaterial", "lineCurveSmooth", "lineWidth", "lineCap", "lineJoin", "showDataLabels",
   ],
   axes: [
     "showGrid", "gridStyle", "gridOpacity", "axisLineColor", "axisLineWidth",

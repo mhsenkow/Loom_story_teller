@@ -195,3 +195,28 @@ it.each(["round", "square", "butt"] as const)("line and area painters honor %s e
     expect(calls.strokes).toContainEqual({ cap: lineCap, join: "bevel" });
   }
 });
+
+it("fits forecast bands inside the plot and keeps date events on the extended axis", () => {
+  const { ctx } = fakeCtx();
+  const o = opts();
+  const data = Array.from({ length: 20 }, (_, i) => [new Date(Date.UTC(2026, 0, i + 1)).toISOString(), 10 + i + i % 3]);
+  o.analysis = { scope: "test", forecast: { enabled: true, horizon: 7 }, anomaly: { enabled: true, window: 10, threshold: 3.5 }, events: [{ id: "launch", label: "Launch", start: "2026-01-10", end: "2026-01-12", visible: true }] };
+  renderFullLine(ctx, data, 0, 1, -1, W, H, PAD, o);
+  const predictions = o.hits!.filter(hit => hit.summary?.columns[0] === "Forecast");
+  expect(predictions).toHaveLength(7);
+  for (const hit of predictions) {
+    expect(hit.shape).toBe("circle");
+    if (hit.shape === "circle") {
+      expect(hit.cx).toBeLessThanOrEqual(o.scales!.rect.right);
+      expect(hit.cy).toBeGreaterThanOrEqual(o.scales!.rect.top);
+      expect(hit.cy).toBeLessThanOrEqual(o.scales!.rect.bottom);
+    }
+  }
+  const event = o.hits!.find(hit => hit.summary?.columns[0] === "Event")!;
+  expect(event.shape).toBe("rect");
+  if (event.shape === "rect") expect(event.x).toBeCloseTo(o.scales!.x!(Date.UTC(2026, 0, 10)) - 5);
+  o.analysis.forecast!.enabled = false;
+  o.hits = [];
+  renderFullLine(ctx, data, 0, 1, -1, W, H, PAD, o);
+  expect(o.hits.some(hit => hit.summary?.columns[0] === "Forecast")).toBe(false);
+});

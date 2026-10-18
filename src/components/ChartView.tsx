@@ -24,6 +24,7 @@ import { buildChartA11ySummary } from "@/lib/chartA11ySummary";
 import { chartEntranceKey, markChartEntrancePlayed, shouldPlayChartEntrance } from "@/lib/chartEntranceOnce";
 import { dataTableRowsFromHits } from "@/lib/chartDataTableFromHits";
 import { keyboardNavigableHits, nextMarkIndex } from "@/lib/chartMarkKeyboard";
+import { analysisScope, analysisUnavailable } from "@/lib/timeSeriesAnalysis";
 import { smartOverlayPalette } from "@/lib/chartSmartOverlayStyle";
 import { chartStageLiveMessage, chartStageStatus } from "@/lib/chartStageStatus";
 import { useReducedMotion } from "@/lib/useReducedMotion";
@@ -615,6 +616,7 @@ export function ChartView() {
       shapeField: activeChart?.shapeField ?? null,
       emojiField: activeChart?.emojiField ?? null,
       emojiMap: activeChart?.emojiMap,
+      markMaterial: chartVisualOverrides.markMaterial,
       markStroke: chartVisualOverrides.markStroke ?? motif === "ring",
       markStrokeWidth: chartVisualOverrides.markStrokeWidth ?? 1,
       markStrokeColor: chartVisualOverrides.markStrokeColor ?? "auto",
@@ -2737,6 +2739,7 @@ export function ChartView() {
         const ropts: ChartRenderOpts = {
           ...opts,
           hits,
+          analysis: !analysisUnavailable(activeChart) && smartResults?.analysis?.scope === analysisScope(activeChart) ? smartResults.analysis : undefined,
           fieldNames: cols,
           legend: null,
           scales: null,

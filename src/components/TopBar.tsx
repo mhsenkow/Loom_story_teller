@@ -7,6 +7,7 @@
 
 "use client";
 
+import { ThemeCycleButton } from "./ThemeCycleButton";
 import { useLoomStore, type ViewMode } from "@/lib/store";
 import {
   CHART_ASPECTS,
@@ -88,11 +89,6 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
   const devicePreset = appSettings.chartDevice ?? "auto";
   const effectiveDevice = resolveDevice(devicePreset, viewportW);
   const hasData = columnStats.length > 0 && Boolean(sampleRows ?? queryResult);
-
-  const openSettings = () => {
-    if (!panelOpen) togglePanel();
-    setPanelTab("settings");
-  };
 
   const openPanel = () => {
     if (!panelOpen && viewMode === "chart") setPanelTab("chart");
@@ -295,18 +291,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           ?
         </button>
       )}
-      <button
-        type="button"
-        onClick={openSettings}
-        className="loom-btn-ghost hidden md:flex min-h-10 min-w-10 md:min-h-0 md:min-w-0 items-center justify-center text-xs px-2 rounded-md"
-        title="Settings"
-        aria-label="Settings"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <circle cx="12" cy="12" r="3" />
-          <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72l1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
-        </svg>
-      </button>
+      <ThemeCycleButton />
 
       <button
         type="button"

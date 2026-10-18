@@ -148,3 +148,18 @@ it("keeps accessible Auto and explicit palette selection connected to undo", () 
   act(() => useLoomStore.getState().undoChartEdit());
   expect(screen.getByText(/Applied · cividis/)).toBeTruthy();
 });
+
+it("keeps Analyze and Overlays in the chart section navigation with icons and keyboard access", async () => {
+  render(<ChartPanelTab />);
+  for (const name of ["Encoding", "Visual", "Analyze", "Overlays"]) {
+    expect(screen.getByRole("tab", { name }).querySelector('svg[aria-hidden="true"]')).not.toBeNull();
+  }
+  fireEvent.click(screen.getByRole("tab", { name: "Analyze" }));
+  expect(await screen.findByRole("heading", { name: "Go beyond the line" })).toBeInTheDocument();
+  expect(useLoomStore.getState().panelTab).toBe("chart");
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Analyze" }), { key: "ArrowRight" });
+  expect(await screen.findByRole("heading", { name: "What else was happening?" })).toBeInTheDocument();
+  expect(useLoomStore.getState().chartPanelSection).toBe("overlays");
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Overlays" }), { key: "Home" });
+  expect(useLoomStore.getState().chartPanelSection).toBe("encoding");
+});

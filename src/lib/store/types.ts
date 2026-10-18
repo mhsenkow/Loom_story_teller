@@ -33,6 +33,7 @@ export type { ChartVisualOverrides } from "../chartVisualTypes";
 export type { ColumnInfo, QueryResult } from "../queryTypes";
 
 export interface SmartResults {
+  analysis?: import("../timeSeriesAnalysis").TimeSeriesAnalysis | null;
   anomaly?: AnomalyResult | null;
   forecast?: ForecastResult | null;
   trend?: TrendResult | null;
@@ -55,7 +56,7 @@ export interface FileEntry {
 }
 
 export type ViewMode = "explorer" | "chart" | "query" | "dive";
-export type PanelTab = "stats" | "chart" | "export" | "smart" | "settings" | "dashboards";
+export type PanelTab = "stats" | "chart" | "export" | "settings" | "dashboards";
 
 export interface ChartViewItem {
   id: string;

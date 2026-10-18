@@ -16,6 +16,7 @@ it("cycles every theme without changing chart edits or other settings", () => {
     const next = THEMES[(index + 1) % THEMES.length]!;
     fireEvent.click(screen.getByRole("button", { name: `Theme: ${THEME_LABEL[theme]}. Switch to ${THEME_LABEL[next]}` }));
     expect(useLoomStore.getState().appSettings.theme).toBe(next);
+    expect(document.querySelector("[data-theme-icon]")?.getAttribute("data-theme-icon")).toBe(next);
     expect(useLoomStore.getState().appSettings.colorblindCharts).toBe(true);
     expect(useLoomStore.getState().chartVisualOverrides).toEqual({ colorPalette: "viridis", lineWidth: 4 });
   }

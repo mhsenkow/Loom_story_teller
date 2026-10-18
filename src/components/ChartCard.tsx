@@ -7,6 +7,7 @@
 
 "use client";
 
+import { fillMaterialPath } from "@/lib/canvasCharts/material";
 import { useChartTheme } from "@/components/useChartTheme";
 import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
 import type { ChartVisualOverrides } from "@/lib/chartVisualTypes";
@@ -587,7 +588,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
       opacityIdx: a.columns.indexOf(a.pointEncoding.opacityField ?? ""),
     });
   } else if (kind === "bar") {
-    drawBar(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN, a.barStackMode ?? "grouped", a.yAggregate, a.yScale, a.themeStyle.barCornerRadius);
+    drawBar(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, a.topN, a.barStackMode ?? "grouped", a.yAggregate, a.yScale, a.themeStyle.barCornerRadius, a.themeStyle, ui.text);
   } else if (kind === "pareto") {
     drawPareto(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.topN);
   } else if (kind === "corrMatrix") {
@@ -605,7 +606,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
   } else if (kind === "area") {
     drawArea(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize, a.yAggregate, a.yScale);
   } else if (kind === "pie") {
-    drawPie(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
+    drawPie(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.themeStyle, ui.text);
   } else if (kind === "bubble" && yIdx >= 0) {
     drawBubble(ctx, rows, xIdx, yIdx, cIdx, sizeIdx, w, h, pad, COLORS, a.yScale);
   } else if (kind === "violin" && yIdx >= 0) {
@@ -900,11 +901,11 @@ function drawCorrMatrixThumb(
   ctx.globalAlpha = 1;
 }
 
-function fillBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, radius: number) {
-  if (!radius || typeof ctx.roundRect !== "function") { ctx.fillRect(x, y, w, h); return; }
+function fillBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, radius: number, style: ChartVisualOverrides, themeText: string) {
   ctx.beginPath();
-  ctx.roundRect(x, y, w, h, Math.min(radius, Math.abs(w) / 2, Math.abs(h) / 2));
-  ctx.fill();
+  if (!radius || typeof ctx.roundRect !== "function") ctx.rect(x, y, w, h);
+  else ctx.roundRect(x, y, w, h, Math.min(radius, Math.abs(w) / 2, Math.abs(h) / 2));
+  fillMaterialPath(ctx, y, y + h, { markMaterial: style.markMaterial, lineJoin: style.lineJoin, themeText });
 }
 
 function drawBar(
@@ -922,6 +923,8 @@ function drawBar(
   aggregate?: YAggregateOption | null,
   yScale: YScaleKind = "linear",
   radius = 0,
+  style: ChartVisualOverrides = {},
+  themeText = "#808080",
 ) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const plotH = h - 2 * pad;
@@ -950,7 +953,7 @@ function drawBar(
           const x = pad + gi * groupW + 2 + si * innerW;
           ctx.fillStyle = COL[si % COL.length];
           ctx.globalAlpha = 0.85;
-          fillBar(ctx, x, h - pad - barH, Math.max(1, innerW - 1), barH, radius);
+          fillBar(ctx, x, h - pad - barH, Math.max(1, innerW - 1), barH, radius, style, themeText);
         }
       }
     } else {
@@ -974,7 +977,7 @@ function drawBar(
           const segH = share * plotH;
           ctx.fillStyle = COL[si % COL.length];
           ctx.globalAlpha = 0.85;
-          fillBar(ctx, x, h - pad - acc - segH, barW, segH, radius);
+          fillBar(ctx, x, h - pad - acc - segH, barW, segH, radius, style, themeText);
           acc += segH;
         }
       }
@@ -1008,7 +1011,7 @@ function drawBar(
     const x = pad + i * ((w - 2 * pad) / entries.length);
     ctx.fillStyle = COL[0];
     ctx.globalAlpha = 0.8;
-    fillBar(ctx, x, Math.min(y, zeroY), barW, Math.max(1, Math.abs(zeroY - y)), radius);
+    fillBar(ctx, x, Math.min(y, zeroY), barW, Math.max(1, Math.abs(zeroY - y)), radius, style, themeText);
   });
   ctx.globalAlpha = 1;
 }
@@ -1283,7 +1286,7 @@ function drawArea(
   ctx.globalAlpha = 1;
 }
 
-function drawPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
+function drawPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[], style: ChartVisualOverrides, themeText: string) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const groups = new Map<string, number>();
   for (const r of rows) {
@@ -1305,7 +1308,7 @@ function drawPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, y
     ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, radius, start, start + sweep);
     ctx.closePath();
-    ctx.fill();
+    fillMaterialPath(ctx, cy - radius, cy + radius, { markMaterial: style.markMaterial, lineJoin: style.lineJoin, themeText });
     start += sweep;
   });
   ctx.globalAlpha = 1;
