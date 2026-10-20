@@ -64,7 +64,6 @@ pub(crate) fn disable_extension_auto_fetch(conn: &Connection) -> Result<(), duck
     Ok(())
 }
 
-
 /// Compute the table expression (read_* or sqlite_src.main."table") for a file path.
 /// Used by table_expr and testable without a DB connection.
 pub(crate) fn table_expr_for_path(file_path: &str) -> String {
@@ -339,7 +338,9 @@ impl LoomDb {
                 Self::query_inner(conn, file_path, "SELECT * FROM loom_active", sample_limit)?;
             // Sample LIMIT must not masquerade as the table size (Explorer "0 rows" / "N of N").
             let total: u64 = conn
-                .query_row("SELECT COUNT(*) FROM loom_active", params![], |r| r.get::<_, i64>(0))
+                .query_row("SELECT COUNT(*) FROM loom_active", params![], |r| {
+                    r.get::<_, i64>(0)
+                })
                 .map(|n| n as u64)
                 .unwrap_or(sample.rows.len() as u64);
             sample.total_rows = total;
