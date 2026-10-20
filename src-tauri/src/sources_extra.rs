@@ -263,7 +263,7 @@ pub(crate) fn ioda_rows(body: &Value) -> Result<Vec<Row>, String> {
             ))
         })
         .collect();
-    rows.sort_by(|a, b| b.0.cmp(&a.0));
+    rows.sort_by_key(|r| std::cmp::Reverse(r.0));
     Ok(rows
         .into_iter()
         .take(IODA_MAX_ROWS)
