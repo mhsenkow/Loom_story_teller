@@ -21,6 +21,15 @@ import { exportMonitorsJson, parseMonitorsJson } from "@/lib/monitoring/storage"
 import { ALERT_OUTCOME_LABELS, type AlertOutcome, type CheckRecord, type CheckStatus, type Monitor, type MonitorAlert } from "@/lib/monitoring/types";
 import { MonitorEditor } from "./monitor/MonitorEditor";
 import { AlwaysOnPanel } from "./monitor/AlwaysOnPanel";
+import { MonitorPreviewChart } from "./monitor/MonitorPreviewChart";
+import { useFeedSample } from "./monitor/useFeedSample";
+import { metricSeries, simulate, spanLabel } from "@/lib/monitoring/backfill";
+import { suggestMonitorsForFeed } from "@/lib/monitoring/suggest";
+import { monitorDraftFromChart } from "@/lib/monitoring/fromChart";
+import { chartLinkFromState } from "@/lib/chartLink";
+import { sourceKindFromPath, type SourceKind } from "@/lib/sourceRegistry";
+import type { MonitorDraft } from "@/lib/monitoring/templates";
+import type { QueryResult } from "@/lib/queryTypes";
 import { MonitorSparkline } from "./monitor/MonitorSparkline";
 
 const STATUS_STYLE: Record<CheckStatus | "idle" | "paused", { dot: string; label: string }> = {
@@ -100,6 +109,81 @@ function AlertReview({ alert, monitor }: { alert: MonitorAlert; monitor?: Monito
   );
 }
 
+/** Until a monitor has its own history, replay it over the feed's loaded rows. */
+function ReplayChart({ draft, height = 96 }: { draft: Pick<Monitor, "metric" | "rule" | "confirmChecks" | "expected" | "notify" | "severity">; height?: number }) {
+  const feed = useFeedSample(draft.metric.source);
+  const series = useMemo(() => (feed.sample ? metricSeries(draft.metric, feed.sample) : []), [feed.sample, draft.metric]);
+  const sim = useMemo(() => simulate({ ...draft, id: "replay" }, series), [draft, series]);
+  if (feed.loading) return <div className="text-2xs text-loom-muted" style={{ height }}>Loading feed…</div>;
+  if (!series.length || draft.rule.kind === "stale") return <MonitorSparkline checks={[]} rule={draft.rule} unit={draft.metric.unit} />;
+  return (
+    <div>
+      <MonitorPreviewChart series={series} records={sim.records} rule={draft.rule} unit={draft.metric.unit} height={height} />
+      <p className="text-2xs text-loom-muted">
+        Replayed over the last {spanLabel(sim.span!.to - sim.span!.from)} loaded: would have alerted {sim.alerts === 0 ? "never" : sim.alerts === 1 ? "once" : `${sim.alerts} times`}.
+      </p>
+    </div>
+  );
+}
+
+function SuggestionCard({ title, blurb, draft, badge }: { title: string; blurb: string; draft: MonitorDraft; badge?: string }) {
+  const openMonitorEditor = useLoomStore((s) => s.openMonitorEditor);
+  return (
+    <button type="button" className="loom-card text-left rounded-md border border-loom-border p-3 hover:border-loom-accent space-y-1.5 min-w-0" onClick={() => openMonitorEditor("new", draft)}>
+      <span className="flex items-center gap-1.5">
+        <span className="text-sm font-medium text-loom-text truncate">{title}</span>
+        {badge && <span className="loom-badge shrink-0">{badge}</span>}
+      </span>
+      <span className="block text-2xs text-loom-muted">{blurb}</span>
+      <ReplayChart draft={draft} height={84} />
+      <span className="block text-2xs text-loom-accent-text">Set it up →</span>
+    </button>
+  );
+}
+
+/** Suggestions from the feed and chart that are open right now. */
+function ForYourData() {
+  const path = useLoomStore((s) => s.selectedFile?.path ?? null);
+  const fileName = useLoomStore((s) => s.selectedFile?.name ?? null);
+  const activeChart = useLoomStore((s) => s.activeChart);
+  const kind: SourceKind | null = sourceKindFromPath(path);
+  const feed = useFeedSample(kind);
+  const chartDraft = useMemo(() => {
+    if (!kind || !activeChart) return null;
+    const s = useLoomStore.getState();
+    const title = s.chartTitleOverrides?.[activeChart.id] ?? activeChart.title;
+    const r = monitorDraftFromChart(activeChart, path, chartLinkFromState(s), title);
+    return "draft" in r ? r.draft : null;
+  }, [kind, activeChart, path]);
+  const suggestions = useMemo(() => (kind && feed.sample ? suggestMonitorsForFeed(kind, feed.sample as QueryResult) : []), [kind, feed.sample]);
+
+  if (!path) return null;
+  if (!kind) {
+    return (
+      <p className="text-xs text-loom-muted border border-dashed border-loom-border rounded-md p-3">
+        You&apos;re looking at <strong className="text-loom-text">{fileName}</strong>, which is a file. Monitors watch live feeds that update on their own. Open one from Data &amp; sources to get suggestions here.
+      </p>
+    );
+  }
+  return (
+    <section className="space-y-2" aria-labelledby="mon-yours">
+      <h2 id="mon-yours" className="text-sm font-medium text-loom-text">For the data you&apos;re looking at <span className="text-loom-muted font-normal">· {fileName}</span></h2>
+      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {chartDraft && (
+          <SuggestionCard
+            title={`This chart: ${chartDraft.chart?.title ?? chartDraft.name}`}
+            blurb={chartDraft.rationale ?? "Watch the number this chart shows."}
+            draft={chartDraft}
+            badge="Chart"
+          />
+        )}
+        {feed.loading && <p className="text-xs text-loom-muted p-3">Reading the feed…</p>}
+        {suggestions.map((s) => <SuggestionCard key={s.id} title={s.title} blurb={s.blurb} draft={s.draft} />)}
+      </div>
+    </section>
+  );
+}
+
 function MonitorCard({ m, checks, alerts }: { m: Monitor; checks: CheckRecord[]; alerts: MonitorAlert[] }) {
   const running = useLoomStore((s) => s.monitorsRunning.includes(m.id));
   const { setMonitorEnabled, removeMonitor, openMonitorEditor, setToast } = useLoomStore.getState();
@@ -125,7 +209,11 @@ function MonitorCard({ m, checks, alerts }: { m: Monitor; checks: CheckRecord[];
           <p className="text-2xs text-loom-muted">{running ? "Checking…" : st.label}</p>
         </div>
       </header>
-      <MonitorSparkline checks={checks} rule={m.rule} unit={m.metric.unit} />
+      {checks.filter((c) => c.value != null).length >= 8 ? (
+        <MonitorSparkline checks={checks} rule={m.rule} unit={m.metric.unit} />
+      ) : (
+        <ReplayChart draft={m} />
+      )}
       {last && <p className="text-xs text-loom-text/90">{last.reason}</p>}
       <p className="text-2xs text-loom-muted"><span className="text-loom-label">Decision:</span> {m.decision}</p>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-2xs text-loom-muted">
@@ -172,6 +260,7 @@ export function MonitorView() {
   const [perm, setPerm] = useState<NotifyPermission>("unsupported");
   const [showHistory, setShowHistory] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const hasFeedOpen = useLoomStore((s) => !!s.selectedFile?.path.startsWith("stream://"));
 
   useEffect(() => { void notificationPermission().then(setPerm); }, []);
 
@@ -240,9 +329,11 @@ export function MonitorView() {
           </section>
         )}
 
+        <ForYourData />
+
         {monitors.length === 0 ? (
           <section className="space-y-3" aria-labelledby="mon-start">
-            <h2 id="mon-start" className="text-sm font-medium text-loom-text">Start from an example</h2>
+            <h2 id="mon-start" className="text-sm font-medium text-loom-text">{hasFeedOpen ? "Or start from an example" : "Start from an example"}</h2>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {MONITOR_TEMPLATES.map((t) => (
                 <button key={t.id} type="button" className="loom-card text-left rounded-md border border-loom-border p-3 hover:border-loom-accent" onClick={() => openMonitorEditor("new", t.draft)}>

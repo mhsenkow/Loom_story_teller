@@ -59,6 +59,15 @@ cloud     optional "Always on": evaluated by the Worker cron, delivered to a web
 - Cards ("Open chart" / "Chart feed") and alerts ("See it on …") call `openMonitorChart`. It opens the feed and hands the link to `setChartLink`, so `ChartLinkSync` restores that exact chart.
 - The chart's bell shows as pressed when the open feed already has monitors.
 
+## Seeing the number before you watch it
+
+- `monitoring/backfill.ts`: `metricSeries` replays a metric over the feed rows already loaded (up to 72 evenly spaced moments, each using only rows known at that time). `simulate` runs the real `runCheck` over that series, so the editor and cards can say "would have alerted N times in the last 2 days".
+- `MonitorPreviewChart` draws the series, rule lines you can drag (or move with arrow keys), range bands, the anomaly "normal" band (baseline ± sensitivity · MAD / 0.6745, from `CheckRecord.spread`) and simulated alerts.
+- New monitors and feed / column changes take their limits from the data (98th percentile for a limit, 5th–95th for a range).
+- `monitoring/suggest.ts` builds suggestions for the open feed: its main measures with data-driven limits, unusual row counts for event feeds, and a feed-went-quiet check. Together with "This chart" they show first in Monitor.
+- `monitorRefLines` (chartBridge) draws enabled threshold and range monitors on charts of the same feed whose y is the monitored column, as `🔔 ▲ name` reference lines.
+- A check whose lookback window has no rows is `ok` ("Nothing in the last 1 h"), not `no-data`.
+
 ## Where checks run
 
 | Runtime | How |

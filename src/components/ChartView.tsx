@@ -16,7 +16,7 @@ import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { type LoomState, useLoomStore } from "@/lib/store";
-import { createChartMonitorDraft } from "@/lib/monitoring/chartBridge";
+import { createChartMonitorDraft, monitorRefLines } from "@/lib/monitoring/chartBridge";
 import { ChartCard } from "@/components/ChartCard";
 import type { GPUScatterPoint } from "@/lib/webgpu";
 import { acquireSharedGpuDevice } from "@/lib/gpuDevice";
@@ -145,6 +145,7 @@ type GpuSceneRenderer = import("@/lib/webgpuScenes").LoomSceneRenderer;
 type GpuCubeRenderer = import("@/lib/webgpuCube").LoomCubeRenderer;
 
 export function ChartView() {
+  const allMonitors = useLoomStore((s) => s.monitors);
   const chartMonitorCount = useLoomStore((s) => {
     const path = s.selectedFile?.path;
     return path?.startsWith("stream://") ? s.monitors.filter((m) => `stream://${m.metric.source}` === path).length : 0;
@@ -3200,7 +3201,8 @@ export function ChartView() {
         canvas2DHitRef.current = { ...baseHit, chromeLayout };
         reportArrangementLayout(chromeLayout);
         // Custom reference lines ("+ Add reference line") on the renderer's own value scale
-        const refLines = customRefLines[activeChart.id] ?? [];
+        // …plus limits from monitors watching this feed's plotted column ("🔔 ▲ name").
+        const refLines = [...(customRefLines[activeChart.id] ?? []), ...monitorRefLines(allMonitors, selectedFile?.path, activeChart.yField)];
         if (refLines.length && ropts.scales) {
           drawReferenceLines(ctx, refLines, ropts.scales, opts);
         }
@@ -3291,7 +3293,7 @@ export function ChartView() {
     }
     notifyChartPainted();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- LOOM-617: omit hover/export-only fields so crosshair moves do not rerun the full draw/GPU path.
-  }, [canvasSized, activeChart, chartSampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, isMobile, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines, geoAtlasBundle, reducedMotion, fontEpoch]);
+  }, [canvasSized, activeChart, chartSampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, isMobile, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines, allMonitors, selectedFile?.path, geoAtlasBundle, reducedMotion, fontEpoch]);
 
   // WebGPU scatter: upload packed points when data/zoom scale changes (not pan).
   useEffect(() => {

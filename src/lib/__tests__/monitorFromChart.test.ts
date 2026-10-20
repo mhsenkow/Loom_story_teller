@@ -25,3 +25,19 @@ describe("monitorDraftFromChart", () => {
     expect(monitorDraftFromChart(null, "stream://fx", null)).toHaveProperty("error");
   });
 });
+
+import { monitorRefLines } from "../monitoring/chartBridge";
+import type { Monitor } from "../monitoring/types";
+
+describe("monitorRefLines", () => {
+  const m = (patch: Partial<Monitor>): Monitor => ({
+    id: "m", name: "Hot", decision: "x", metric: { source: "meteo", agg: "latest", column: "temperature" }, rule: { kind: "threshold", above: 30 },
+    confirmChecks: 1, severity: "info", schedule: { kind: "interval", minutes: 15 }, notify: { inApp: true, system: false, cooldownMinutes: 0 }, expected: [], enabled: true, createdAt: 0, ...patch,
+  });
+  it("draws limits for monitors on the same feed and plotted column only", () => {
+    const lines = monitorRefLines([m({}), m({ id: "r", rule: { kind: "range", low: 0, high: 10 } }), m({ id: "o", metric: { source: "aq", agg: "latest", column: "temperature" } }), m({ id: "p", enabled: false })], "stream://meteo", "temperature");
+    expect(lines.map((l) => l.value)).toEqual([30, 0, 10]);
+    expect(lines[0]!.label).toContain("Hot");
+    expect(monitorRefLines([m({})], "stream://meteo", "humidity")).toEqual([]);
+  });
+});

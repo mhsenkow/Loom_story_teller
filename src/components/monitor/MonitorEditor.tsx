@@ -3,14 +3,16 @@
 // Create / edit a monitor. The decision field is required: monitoring that
 // isn't tied to an action is just a dashboard that beeps.
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLoomStore } from "@/lib/store";
-import { SOURCE_DEFS, SOURCE_BY_KIND, SOURCE_EXPLORE_ROWS, type SourceKind } from "@/lib/sourceRegistry";
-import { sourceSnapshot, sourceStart, sourceStatus } from "@/lib/tauri";
-import { computeMetric, describeRule, evaluateRule, expectedWindowAt, fmtValue } from "@/lib/monitoring/engine";
+import { SOURCE_DEFS, SOURCE_BY_KIND, type SourceKind } from "@/lib/sourceRegistry";
+import { computeMetric, describeRule, fmtValue } from "@/lib/monitoring/engine";
 import { describeSchedule, nextRunAfter, scheduleError } from "@/lib/monitoring/schedule";
 import { requestNotificationPermission } from "@/lib/monitoring/notify";
 import type { MonitorDraft } from "@/lib/monitoring/templates";
+import { metricSeries, simulate, spanLabel } from "@/lib/monitoring/backfill";
+import { MonitorPreviewChart } from "./MonitorPreviewChart";
+import { useFeedSample } from "./useFeedSample";
 import { CLOUD_MIN_INTERVAL_MINUTES, loadWebhook } from "@/lib/monitoring/cloudSync";
 import type { ExpectedWindow, MetricFilter, MonitorAgg, MonitorRule, MonitorSchedule } from "@/lib/monitoring/types";
 
@@ -38,10 +40,18 @@ const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const NUMERIC = new Set(["DOUBLE", "INTEGER", "BIGINT", "BOOLEAN"]);
 const TIME = new Set(["TIMESTAMP", "DATE"]);
 
-function defaultRule(kind: MonitorRule["kind"]): MonitorRule {
+function q(vals: number[], p: number): number | undefined {
+  if (!vals.length) return undefined;
+  const s = [...vals].sort((a, b) => a - b);
+  const v = s[Math.min(s.length - 1, Math.max(0, Math.round((s.length - 1) * p)))]!;
+  return Number(v.toPrecision(3));
+}
+
+/** New rules start from the data: limits at the high end of what the feed has shown. */
+function defaultRule(kind: MonitorRule["kind"], vals: number[] = []): MonitorRule {
   switch (kind) {
-    case "threshold": return { kind, above: 0 };
-    case "range": return { kind, low: 0, high: 100 };
+    case "threshold": return { kind, above: q(vals, 0.95) ?? 0 };
+    case "range": return { kind, low: q(vals, 0.05) ?? 0, high: q(vals, 0.95) ?? 100 };
     case "change": return { kind, pct: 10, direction: "either", versus: "previous" };
     case "anomaly": return { kind, sensitivity: 3.5, window: 30, seasonal: "none" };
     case "stale": return { kind, maxAgeMinutes: 120 };
@@ -81,8 +91,6 @@ export function MonitorEditor() {
     }
     return structuredClone(seed ?? blankDraft());
   });
-  const [preview, setPreview] = useState<string | null>(null);
-  const [testing, setTesting] = useState(false);
   const [newWin, setNewWin] = useState<{ label: string; mode: "recurring" | "once"; weekdays: number[]; from: string; to: string; start: string; end: string }>(
     { label: "", mode: "recurring", weekdays: [1, 2, 3, 4, 5], from: "2", to: "4", start: "", end: "" },
   );
@@ -102,8 +110,25 @@ export function MonitorEditor() {
     const nd = SOURCE_BY_KIND[kind];
     const firstNum = nd.columns.find((_, i) => NUMERIC.has(nd.types[i]!));
     const firstTime = nd.columns.find((_, i) => TIME.has(nd.types[i]!));
+    setReseed(true);
     setMetric({ source: kind, column: firstNum, timeColumn: firstTime, filters: [], unit: firstNum ? nd.units?.[firstNum] : undefined });
   };
+
+  const feed = useFeedSample(d.metric.source);
+  const series = useMemo(() => (feed.sample ? metricSeries(d.metric, feed.sample) : []), [feed.sample, d.metric]);
+  const sim = useMemo(() => simulate({ ...d, id: "preview" }, series), [d, series]);
+  const nowValue = useMemo(() => (feed.sample ? computeMetric(d.metric, feed.sample, Date.now()) : null), [feed.sample, d.metric]);
+  const seriesVals = series.map((p) => p.value);
+  // A blank monitor, or a new feed / column, takes its limits from the data once it loads.
+  const [reseed, setReseed] = useState(() => !existing && !seed);
+  useEffect(() => {
+    if (!reseed || feed.loading || !feed.sample) return;
+    const vals = seriesVals.length ? seriesVals : nowValue?.value != null ? [nowValue.value] : [];
+    if (!vals.length) return;
+    setReseed(false);
+    if (d.rule.kind === "threshold" || d.rule.kind === "range") setD((x) => ({ ...x, rule: defaultRule(x.rule.kind, vals) }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reseed, feed.loading, feed.sample, series]);
 
   const schedErr = scheduleError(d.schedule);
   const upcoming = useMemo(() => {
@@ -122,31 +147,6 @@ export function MonitorEditor() {
   if (d.rule.kind === "range" && d.rule.low >= d.rule.high) problems.push("Low must be below high");
   if (d.rule.kind === "threshold" && d.rule.above == null && d.rule.below == null) problems.push("Set a limit");
   if (schedErr) problems.push(schedErr);
-
-  const test = async () => {
-    setTesting(true);
-    setPreview(null);
-    try {
-      const st = await sourceStatus(d.metric.source);
-      if (!st.running) await sourceStart(d.metric.source);
-      let snap = await sourceSnapshot(d.metric.source, SOURCE_EXPLORE_ROWS);
-      for (let i = 0; i < 10 && !snap.sample.rows.length; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        snap = await sourceSnapshot(d.metric.source, SOURCE_EXPLORE_ROWS);
-      }
-      const now = Date.now();
-      const m = computeMetric(d.metric, snap.sample, now);
-      if (m.error) { setPreview(m.error); return; }
-      const history = existing ? useLoomStore.getState().monitorChecks[existing.id] ?? [] : [];
-      const v = evaluateRule(d.rule, m.value, history, now, d.metric.unit, m.newestAt);
-      const exp = expectedWindowAt(d.expected, now);
-      setPreview(`Right now: ${fmtValue(m.value, d.metric.unit)} from ${m.rowsSeen} rows. ${v.reason}.${v.breach ? (exp ? ` It would not alert: ${exp.label}.` : " This would count as a breach.") : ""}`);
-    } catch (e) {
-      setPreview(`Couldn't read ${def.label}: ${e instanceof Error ? e.message : e}`);
-    } finally {
-      setTesting(false);
-    }
-  };
 
   const save = async () => {
     if (problems.length) return;
@@ -241,7 +241,7 @@ export function MonitorEditor() {
                 className="loom-input w-full"
                 disabled={d.metric.agg === "count"}
                 value={d.metric.column ?? ""}
-                onChange={(e) => setMetric({ column: e.target.value, unit: def.units?.[e.target.value] ?? d.metric.unit })}
+                onChange={(e) => { setReseed(true); setMetric({ column: e.target.value, unit: def.units?.[e.target.value] ?? d.metric.unit }); }}
               >
                 {(d.metric.agg === "distinct" ? cols : numericCols).map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
@@ -283,6 +283,36 @@ export function MonitorEditor() {
 
         <section className="space-y-3">
           <h3 className="text-sm font-medium text-loom-text">When is it a problem?</h3>
+          <div className="rounded-md border border-loom-border bg-loom-bg/60 p-2 space-y-1.5">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-xs text-loom-text min-w-0 truncate">
+                {AGGS.find((a) => a.id === d.metric.agg)?.label ?? d.metric.agg} {d.metric.agg !== "count" && d.metric.column ? `of ${d.metric.column}` : "rows"}
+                {d.metric.lookbackMinutes ? ` · last ${d.metric.lookbackMinutes >= 1440 ? `${Math.round(d.metric.lookbackMinutes / 1440)} d` : d.metric.lookbackMinutes >= 60 ? `${Math.round(d.metric.lookbackMinutes / 60)} h` : `${d.metric.lookbackMinutes} min`}` : ""}
+              </p>
+              <p className="text-sm font-mono text-loom-text shrink-0">{feed.loading ? "…" : fmtValue(nowValue?.value, d.metric.unit)} <span className="text-2xs text-loom-muted font-sans">now</span></p>
+            </div>
+            {feed.loading ? (
+              <div className="h-24 flex items-center justify-center text-xs text-loom-muted">Loading {def.label}…</div>
+            ) : feed.error ? (
+              <p className="text-xs text-loom-error">{feed.error}</p>
+            ) : nowValue?.error ? (
+              <p className="text-xs text-loom-error">{nowValue.error}</p>
+            ) : (
+              <MonitorPreviewChart series={series} records={sim.records} rule={d.rule} unit={d.metric.unit} liveValue={nowValue?.value} onRuleChange={setRule} />
+            )}
+            {!feed.loading && sim.span && d.rule.kind !== "stale" && (
+              <p className="text-2xs text-loom-muted" role="status">
+                Over the last {spanLabel(sim.span.to - sim.span.from)} loaded, this would have alerted{" "}
+                <strong className={sim.alerts ? "text-loom-error" : "text-loom-text"}>{sim.alerts === 0 ? "never" : sim.alerts === 1 ? "once" : `${sim.alerts} times`}</strong>
+                {sim.suppressed ? `; ${sim.suppressed} breach${sim.suppressed === 1 ? " was" : "es were"} inside expected windows` : ""}.
+                {sim.alerts > 6 ? " That's a lot. Raise the limit or confirm over more checks." : ""}
+                {(r.kind === "threshold" || r.kind === "range") && " Drag the dashed line to change the limit."}
+              </p>
+            )}
+            {!feed.loading && !sim.span && !nowValue?.error && (
+              <p className="text-2xs text-loom-muted">{d.metric.timeColumn ? "Not enough timestamped rows yet to replay history." : "This feed is a snapshot without timestamps, so only the current value is shown. Checks build the history from here."}</p>
+            )}
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5" role="radiogroup" aria-label="Rule">
             {RULE_KINDS.map((k) => (
               <button
@@ -291,7 +321,7 @@ export function MonitorEditor() {
                 role="radio"
                 aria-checked={r.kind === k.id}
                 className={`text-left rounded-md border px-2 py-1.5 ${r.kind === k.id ? "border-loom-accent bg-loom-accent/10" : "border-loom-border"}`}
-                onClick={() => r.kind !== k.id && setRule(defaultRule(k.id))}
+                onClick={() => r.kind !== k.id && setRule(defaultRule(k.id, seriesVals.length ? seriesVals : nowValue?.value != null ? [nowValue.value] : []))}
               >
                 <span className="block text-xs font-medium text-loom-text">{k.label}</span>
                 <span className="block text-2xs text-loom-muted">{k.hint}</span>
@@ -358,10 +388,6 @@ export function MonitorEditor() {
           </div>
           <p className="text-2xs text-loom-muted">{describeRule(d.rule, d.metric.unit)}{d.confirmChecks > 1 ? `, after ${d.confirmChecks} checks in a row` : ""}.</p>
 
-          <div className="flex items-center gap-2">
-            <button type="button" className="loom-btn text-xs px-3 py-1.5 rounded-md" disabled={testing} onClick={test}>{testing ? "Reading feed…" : "Test against live data"}</button>
-          </div>
-          {preview && <p className="text-xs text-loom-text bg-loom-elevated rounded-md p-2" role="status">{preview}</p>}
         </section>
 
         <section className="space-y-3">

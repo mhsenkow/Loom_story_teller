@@ -131,6 +131,8 @@ export interface CheckRecord {
   baseline?: number;
   /** Robust z-score for anomaly rules. */
   score?: number;
+  /** Anomaly baseline MAD (draws the normal band). */
+  spread?: number;
   rowsSeen?: number;
 }
 

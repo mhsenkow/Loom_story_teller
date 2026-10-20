@@ -193,12 +193,15 @@ export interface RuleVerdict {
   reason: string;
   baseline?: number;
   score?: number;
+  /** Anomaly: MAD of the baseline (normal band = baseline ± sensitivity · spread / 0.6745). */
+  spread?: number;
   /** Not enough history yet to judge (anomaly / baseline change). */
   warmingUp?: boolean;
 }
 
 export function fmtValue(v: number | null | undefined, unit?: string): string {
   if (v == null || !Number.isFinite(v)) return "—";
+  if (v === 0) return unit ? `0 ${unit}` : "0";
   const abs = Math.abs(v);
   const s = abs >= 1e6 ? v.toExponential(2) : abs >= 100 ? v.toFixed(0) : abs >= 1 ? v.toFixed(2).replace(/\.?0+$/, "") : v.toPrecision(3);
   return unit ? `${s} ${unit}` : s;
@@ -279,8 +282,8 @@ export function evaluateRule(
       const score = mad > tol ? (0.67448975 * dev) / mad : dev > tol ? Infinity : 0;
       const scoreLabel = Number.isFinite(score) ? score.toFixed(1) : "∞";
       return score > rule.sensitivity
-        ? { breach: true, reason: `${v} is unusual (score ${scoreLabel}; normal ≈ ${fmtValue(m, unit)})`, baseline: m, score }
-        : { breach: false, reason: `${v} is normal (score ${scoreLabel}; normal ≈ ${fmtValue(m, unit)})`, baseline: m, score };
+        ? { breach: true, reason: `${v} is unusual (score ${scoreLabel}; normal ≈ ${fmtValue(m, unit)})`, baseline: m, score, spread: mad }
+        : { breach: false, reason: `${v} is normal (score ${scoreLabel}; normal ≈ ${fmtValue(m, unit)})`, baseline: m, score, spread: mad };
     }
   }
 }
@@ -328,6 +331,13 @@ export function runCheck(
   if (metric.error) {
     return { record: { ...base, status: "error", reason: metric.error }, notify: false };
   }
+  // Nothing in the lookback window is a real answer ("no M6+ quake this hour"), not missing data.
+  if (metric.value == null && metric.rowsSeen === 0 && monitor.metric.lookbackMinutes && monitor.rule.kind !== "stale") {
+    const mins = monitor.metric.lookbackMinutes;
+    const span = mins >= 1440 ? `${Math.round(mins / 1440)} d` : mins >= 60 ? `${Math.round(mins / 60)} h` : `${mins} min`;
+    const record: CheckRecord = { ...base, status: "ok", reason: `Nothing in the last ${span}` };
+    return open ? { record, alert: { ...open, closedAt: at, lastAt: at }, notify: false } : { record, notify: false };
+  }
   if (metric.value == null && monitor.rule.kind !== "stale") {
     return { record: { ...base, status: "no-data", reason: metric.rowsSeen ? "No numeric values matched" : "No rows matched" }, notify: false };
   }
@@ -341,12 +351,13 @@ export function runCheck(
       reason: verdict.breach ? `${verdict.reason} — expected: ${expected.label}` : verdict.reason,
       baseline: verdict.baseline,
       score: verdict.score,
+      spread: verdict.spread,
     };
     return { record, notify: false };
   }
 
   if (!verdict.breach) {
-    const record: CheckRecord = { ...base, status: "ok", reason: verdict.reason, baseline: verdict.baseline, score: verdict.score };
+    const record: CheckRecord = { ...base, status: "ok", reason: verdict.reason, baseline: verdict.baseline, score: verdict.score, spread: verdict.spread };
     if (open) return { record, alert: { ...open, closedAt: at, lastAt: at }, notify: false };
     return { record, notify: false };
   }
@@ -355,7 +366,7 @@ export function runCheck(
   const needed = Math.max(1, monitor.confirmChecks);
   let status: CheckStatus = streak >= needed ? "firing" : "breach";
   const reason = status === "breach" ? `${verdict.reason} (${streak}/${needed} checks to confirm)` : verdict.reason;
-  const record: CheckRecord = { ...base, status, reason, baseline: verdict.baseline, score: verdict.score };
+  const record: CheckRecord = { ...base, status, reason, baseline: verdict.baseline, score: verdict.score, spread: verdict.spread };
   if (status !== "firing") return { record, notify: false };
 
   const peak = (prev: number | null) =>
