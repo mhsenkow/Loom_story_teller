@@ -41,7 +41,7 @@ const parse = (_k: string, body: unknown) => (body as { mags: number[] }).mags.m
 describe("monitorCron", () => {
   it("evaluates due monitors, shares one fetch per feed, and posts once", async () => {
     const fetchSource = vi.fn(async () => ({ mags: [4.2, 6.1] }));
-    const send = vi.fn(async () => true);
+    const send = vi.fn(async () => {});
     const bundle: CloudBundle = {
       monitors: [mon(), mon({ id: "c2", rule: { kind: "threshold", above: 7 } }), mon({ id: "c3", nextRunAt: NOW + 3_600_000 })],
       webhook: { kind: "ntfy", url: "https://ntfy.sh/loom-test" },
@@ -67,7 +67,7 @@ describe("monitorCron", () => {
 
   it("records upstream failures as errors without alerting", async () => {
     const bundle: CloudBundle = { monitors: [mon()], checks: {}, alerts: [], updatedAt: 0 };
-    await evaluateBundle(bundle, NOW, async () => { throw new Error("down"); }, parse, async () => true);
+    await evaluateBundle(bundle, NOW, async () => { throw new Error("down"); }, parse, async () => {});
     expect(bundle.checks.c1?.[0]).toMatchObject({ status: "error", reason: "down" });
     expect(bundle.alerts).toHaveLength(0);
   });
@@ -124,5 +124,53 @@ describe("monitorCron", () => {
     const k = await deviceKey("a".repeat(40));
     expect(k).toMatch(/^mon:[0-9a-f]{64}$/);
     expect(k).not.toContain("aaaa");
+  });
+});
+
+import { pushPayload, validatePushSubscription } from "../monitorCron";
+import { publicFeedXml, publicMomentSvg, publicPageHtml } from "../monitorPublic";
+
+describe("moments, push, and public pages", () => {
+  it("records a moment when an alert opens and notifies with it", async () => {
+    const seen: (string | undefined)[] = [];
+    const bundle: CloudBundle = { monitors: [mon()], checks: {}, alerts: [], updatedAt: 0, webhook: { kind: "json", url: "https://example.com/h" }, push: [] };
+    await evaluateBundle(bundle, NOW, async () => ({ mags: [6.5] }), parse, async (_b, _m, _r, mo) => { seen.push(mo?.id); });
+    expect(bundle.moments).toHaveLength(1);
+    expect(bundle.moments![0]).toMatchObject({ monitorId: "c1", value: 6.5, cloud: true });
+    expect(seen[0]).toBe(bundle.moments![0]!.id);
+    expect(pushPayload(bundle.monitors[0]!, "6.5 is above 5", bundle.moments![0]).url).toContain("#moment=");
+  });
+
+  it("adds / removes push subscriptions and publishes a page", () => {
+    const sub = { endpoint: "https://fcm.googleapis.com/fcm/send/abc", keys: { p256dh: "x".repeat(87), auth: "y".repeat(22) } };
+    expect(validatePushSubscription(sub)).not.toBeNull();
+    expect(validatePushSubscription({ ...sub, endpoint: "https://evil.example/push" })).toBeNull();
+    const a = mergeUpload(null, [mon()], undefined, NOW, [], { push: { add: sub }, publicTitle: "My page", newPublicId: () => "0123456789abcdef" });
+    expect(a.push).toHaveLength(1);
+    expect(a.public).toEqual({ id: "0123456789abcdef", title: "My page" });
+    const b = mergeUpload(a, [mon()], undefined, NOW, [], { push: { remove: sub.endpoint } });
+    expect(b.push).toHaveLength(0);
+    expect(b.public?.id).toBe("0123456789abcdef");
+    expect(mergeUpload(b, [mon()], undefined, NOW, [], { publicTitle: null }).public).toBeUndefined();
+  });
+
+  it("renders public HTML / RSS / SVG without secrets", async () => {
+    const bundle: CloudBundle = {
+      monitors: [mon({ name: "Quake <b>" })], checks: {}, alerts: [], updatedAt: NOW,
+      webhook: { kind: "slack", url: "https://hooks.slack.com/services/SECRET" },
+      push: [{ endpoint: "https://fcm.googleapis.com/fcm/send/SECRETPUSH", keys: { p256dh: "k", auth: "a" } }],
+      public: { id: "0123456789abcdef", title: "Status & <stuff>" },
+    };
+    await evaluateBundle(bundle, NOW, async () => ({ mags: [6.5] }), parse, async () => {});
+    const html = publicPageHtml(bundle, "0123456789abcdef", "https://loom.ibm.io");
+    expect(html).toContain("Status &amp; &lt;stuff&gt;");
+    expect(html).toContain("Quake &lt;b&gt;");
+    expect(html).not.toMatch(/SECRET/);
+    expect(html).toContain("1 alert right now");
+    const xml = publicFeedXml(bundle, "0123456789abcdef", "https://loom.ibm.io");
+    expect(xml).toContain("<item><title>");
+    expect(xml).not.toMatch(/SECRET/);
+    expect(publicMomentSvg(bundle, bundle.moments![0]!.id)).toMatch(/^<svg/);
+    expect(publicMomentSvg(bundle, "nope")).toBeNull();
   });
 });

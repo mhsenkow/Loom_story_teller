@@ -13,7 +13,9 @@ import { sourceSnapshot, sourceStart, sourceStatus } from "../tauri";
 import { SOURCE_BY_KIND, SOURCE_EXPLORE_ROWS, type SourceKind } from "../sourceRegistry";
 import type { InspectResult } from "../tauri";
 import { computeMetric, describeRule, fmtValue, runCheck } from "./engine";
-import { sendSystemNotification } from "./notify";
+import { playChime, sendSystemNotification } from "./notify";
+import { metricSeries } from "./backfill";
+import { momentFrom, type Moment } from "./moments";
 import type { Monitor } from "./types";
 
 const TICK_MS = 20_000;
@@ -57,7 +59,23 @@ export async function runMonitorNow(monitorId: string, cache?: Map<SourceKind, P
     const open = s.monitorAlerts.find((a) => a.monitorId === m.id && !a.closedAt);
     const out = runCheck(m, metric, history, open, at, uid);
     s.recordCheck(m.id, out.record, out.alert);
-    if (out.notify) deliver(m, out.record.reason, out.record.value);
+    let moment: Moment | undefined;
+    if (out.alert && !open && !out.alert.closedAt) {
+      moment = momentFrom(m, {
+        id: `mom_${out.alert.id}`,
+        at,
+        value: out.record.value,
+        reason: out.record.reason,
+        feedLabel: SOURCE_BY_KIND[m.metric.source]?.label ?? m.metric.source,
+        series: m.metric.timeColumn ? metricSeries(m.metric, snap.sample) : [],
+      });
+      useLoomStore.getState().addMoment(moment);
+      if (m.onFire?.shareMoment) {
+        const mo = moment;
+        void import("./shareMoment").then(({ publishMoment }) => publishMoment(mo)).catch(() => undefined);
+      }
+    }
+    if (out.notify) deliver(m, out.record.reason, out.record.value, moment?.id);
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
     useLoomStore.getState().recordCheck(m.id, { monitorId: m.id, at, value: null, status: "error", reason }, undefined);
@@ -66,15 +84,20 @@ export async function runMonitorNow(monitorId: string, cache?: Map<SourceKind, P
   }
 }
 
-function deliver(m: Monitor, reason: string, value: number | null) {
+function deliver(m: Monitor, reason: string, value: number | null, momentId?: string) {
   const s = useLoomStore.getState();
   const icon = m.severity === "critical" ? "🔴" : m.severity === "warning" ? "🟠" : "🔵";
   if (m.notify.inApp) s.setToast(`${icon} ${m.name}: ${reason}`);
   if (m.notify.system) {
     const feed = SOURCE_BY_KIND[m.metric.source]?.label ?? m.metric.source;
     const body = `${reason}\n→ ${m.decision}`;
-    void sendSystemNotification(`${icon} ${m.name}`, body || `${feed}: ${fmtValue(value, m.metric.unit)}`, m.id);
+    void sendSystemNotification(`${icon} ${m.name}`, body || `${feed}: ${fmtValue(value, m.metric.unit)}`, m.id, () => {
+      const st = useLoomStore.getState();
+      st.setViewMode("monitor");
+      if (momentId) st.focusMoment(momentId);
+    });
   }
+  if (m.onFire?.chime) playChime(m.severity);
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;

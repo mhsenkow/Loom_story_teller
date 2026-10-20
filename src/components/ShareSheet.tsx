@@ -9,6 +9,7 @@
 
 "use client";
 
+import { handOffToNeoSpace } from "@/lib/neospaceShare";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
 import { getRecommendationReason } from "@/lib/recommendations";
@@ -295,8 +296,6 @@ function ShareSheetBody() {
     });
   };
 
-  const NEOSPACE_ORIGIN = "https://neospace.ibm.io";
-
   const handlePostToNeoSpace = async () => {
     if (!blob || desktopApp) {
       setToast(desktopApp ? "Post to NeoSpace from the web app at loom.ibm.io" : "Render the chart first");
@@ -314,61 +313,13 @@ function ShareSheetBody() {
       setLink(published.url);
       const storyUrl = published.url;
       const body = [caption.trim(), `\n${storyUrl}`].join("").trim();
-      const dest = new URL(NEOSPACE_ORIGIN);
-      dest.searchParams.set("compose", "loom");
-      dest.searchParams.set("story", storyUrl);
-      dest.searchParams.set("text", body);
-
-      if (child) {
-        child.location.href = dest.toString();
-      } else {
-        window.location.assign(dest.toString());
-        close();
-        return;
-      }
-
-      try {
-        const buffer = await blob.arrayBuffer();
-        const nsName = `${slugifyFilename(chartTitle || "chart")}.png`;
-        const payload = {
-          type: "loom-neospace-share" as const,
-          v: 1 as const,
-          text: body,
-          story: storyUrl,
-          image: {
-            name: nsName,
-            type: "image/png",
-            buffer,
-          },
-        };
-        const send = () => {
-          if (child.closed) return;
-          try {
-            child.postMessage(payload, NEOSPACE_ORIGIN);
-          } catch {
-            /* ignore */
-          }
-        };
-        const onReady = (e: MessageEvent) => {
-          if (e.source !== child) return;
-          if (e.origin !== NEOSPACE_ORIGIN && !String(e.origin).includes("neospace")) return;
-          const type = (e.data as { type?: string } | null)?.type;
-          if (type === "neospace-loom-ready" || type === "neospace-loom-ack") send();
-          if (type === "neospace-loom-ack") {
-            window.removeEventListener("message", onReady);
-            window.clearInterval(pump);
-          }
-        };
-        window.addEventListener("message", onReady);
-        const pump = window.setInterval(send, 400);
-        window.setTimeout(() => {
-          window.removeEventListener("message", onReady);
-          window.clearInterval(pump);
-        }, 10_000);
-        send();
-      } catch {
-        /* NeoSpace will fetch /s/{id}.img instead */
-      }
+      if (!child) close();
+      await handOffToNeoSpace(child, {
+        storyUrl,
+        text: body,
+        image: { blob, name: `${slugifyFilename(chartTitle || "chart")}.png` },
+      });
+      if (!child) return;
 
       setToast("Opening NeoSpace with chart + lineage…");
       close();

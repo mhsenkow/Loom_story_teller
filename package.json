@@ -37,7 +37,8 @@
     "deploy": "npm run build && wrangler deploy",
     "deploy:dry": "npm run build && wrangler deploy --dry-run",
     "bundle-budget": "node scripts/bundle-budget.mjs",
-    "check:rust-full": "cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test"
+    "check:rust-full": "cd src-tauri && cargo fmt --check && cargo clippy -- -D warnings && cargo test",
+    "vapid:keys": "node scripts/generate-vapid.mjs"
   },
   "dependencies": {
     "@capacitor/cli": "^8.5.3",
@@ -52,6 +53,7 @@
     "d3-geo": "^3.1.1",
     "hyparquet": "^1.31.3",
     "next": "^15.1.0",
+    "qrcode-generator": "^1.4.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "topojson-client": "^3.1.0",

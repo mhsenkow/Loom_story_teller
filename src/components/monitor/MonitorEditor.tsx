@@ -470,6 +470,11 @@ export function MonitorEditor() {
           <h3 className="text-sm font-medium text-loom-text">How to tell you</h3>
           <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={d.notify.inApp} onChange={(e) => setNotify({ inApp: e.target.checked })} /> In-app banner</label>
           <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={d.notify.system} onChange={(e) => setNotify({ system: e.target.checked })} /> System notification</label>
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!d.onFire?.chime} onChange={(e) => set({ onFire: { ...d.onFire, chime: e.target.checked } })} /> Chime</label>
+          <label className="flex items-start gap-2 text-xs">
+            <input type="checkbox" className="mt-0.5" checked={!!d.onFire?.shareMoment} onChange={(e) => set({ onFire: { ...d.onFire, shareMoment: e.target.checked } })} />
+            <span>Auto-share the moment<span className="block text-2xs text-loom-muted">Publishes a public story page with the chart of what happened, ready to send or post to NeoSpace.</span></span>
+          </label>
           <div className="grid grid-cols-3 gap-2">
             <div><label className={label} htmlFor="n-cool">Remind every (min)</label>
               <input id="n-cool" className="loom-input w-full" inputMode="numeric" value={d.notify.cooldownMinutes} onChange={(e) => setNotify({ cooldownMinutes: Math.max(0, numOr(e.target.value, 0)!) })} /></div>

@@ -121,3 +121,42 @@ self.addEventListener("fetch", (event) => {
     );
   }
 });
+
+/* Always-on monitor alerts (Web Push from workers/monitorCron.ts). */
+self.addEventListener("push", (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { title: "Loom alert", body: event.data ? event.data.text() : "" };
+  }
+  const title = data.title || "Loom alert";
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || "",
+      tag: data.tag || "loom-monitor",
+      renotify: true,
+      icon: "/icon-192.png",
+      badge: "/favicon-32x32.png",
+      data: { url: data.url || "/#view=monitor" },
+    }),
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || "/", self.location.origin).href;
+  event.waitUntil(
+    (async () => {
+      const wins = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+      for (const w of wins) {
+        if (new URL(w.url).origin === self.location.origin) {
+          await w.focus();
+          w.postMessage({ type: "loom-open", url: target });
+          return;
+        }
+      }
+      await self.clients.openWindow(target);
+    })(),
+  );
+});

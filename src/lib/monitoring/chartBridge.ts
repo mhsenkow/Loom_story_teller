@@ -24,8 +24,7 @@ export function createChartMonitorDraft(opts?: { anomaly?: { sensitivity: number
     return false;
   }
   if (opts?.anomaly) res.draft.rule = { kind: "anomaly", sensitivity: opts.anomaly.sensitivity, window: Math.max(5, opts.anomaly.window), seasonal: "none" };
-  s.openMonitorEditor("new", res.draft);
-  s.setViewMode("monitor");
+  s.openMonitorEditor("new", res.draft, "quick");
   return true;
 }
 

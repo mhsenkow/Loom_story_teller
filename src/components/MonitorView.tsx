@@ -20,7 +20,8 @@ import { openMonitorChart } from "@/lib/monitoring/openChart";
 import { exportMonitorsJson, parseMonitorsJson } from "@/lib/monitoring/storage";
 import { ALERT_OUTCOME_LABELS, type AlertOutcome, type CheckRecord, type CheckStatus, type Monitor, type MonitorAlert } from "@/lib/monitoring/types";
 import { MonitorEditor } from "./monitor/MonitorEditor";
-import { AlwaysOnPanel } from "./monitor/AlwaysOnPanel";
+import { ConnectPanel } from "./monitor/ConnectPanel";
+import { MomentsSection } from "./monitor/MomentsSection";
 import { MonitorPreviewChart } from "./monitor/MonitorPreviewChart";
 import { useFeedSample } from "./monitor/useFeedSample";
 import { metricSeries, simulate, spanLabel } from "@/lib/monitoring/backfill";
@@ -129,7 +130,7 @@ function ReplayChart({ draft, height = 96 }: { draft: Pick<Monitor, "metric" | "
 function SuggestionCard({ title, blurb, draft, badge }: { title: string; blurb: string; draft: MonitorDraft; badge?: string }) {
   const openMonitorEditor = useLoomStore((s) => s.openMonitorEditor);
   return (
-    <button type="button" className="loom-card text-left rounded-md border border-loom-border p-3 hover:border-loom-accent space-y-1.5 min-w-0" onClick={() => openMonitorEditor("new", draft)}>
+    <button type="button" className="loom-card text-left rounded-md border border-loom-border p-3 hover:border-loom-accent space-y-1.5 min-w-0" onClick={() => openMonitorEditor("new", draft, "quick")}>
       <span className="flex items-center gap-1.5">
         <span className="text-sm font-medium text-loom-text truncate">{title}</span>
         {badge && <span className="loom-badge shrink-0">{badge}</span>}
@@ -256,6 +257,7 @@ export function MonitorView() {
   const checks = useLoomStore((s) => s.monitorChecks);
   const alerts = useLoomStore((s) => s.monitorAlerts);
   const editingId = useLoomStore((s) => s.monitorEditingId);
+  const editorMode = useLoomStore((s) => s.monitorEditorMode);
   const { openMonitorEditor, addMonitor, setToast } = useLoomStore.getState();
   const [perm, setPerm] = useState<NotifyPermission>("unsupported");
   const [showHistory, setShowHistory] = useState(false);
@@ -329,6 +331,8 @@ export function MonitorView() {
           </section>
         )}
 
+        <MomentsSection />
+
         <ForYourData />
 
         {monitors.length === 0 ? (
@@ -336,7 +340,7 @@ export function MonitorView() {
             <h2 id="mon-start" className="text-sm font-medium text-loom-text">{hasFeedOpen ? "Or start from an example" : "Start from an example"}</h2>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
               {MONITOR_TEMPLATES.map((t) => (
-                <button key={t.id} type="button" className="loom-card text-left rounded-md border border-loom-border p-3 hover:border-loom-accent" onClick={() => openMonitorEditor("new", t.draft)}>
+                <button key={t.id} type="button" className="loom-card text-left rounded-md border border-loom-border p-3 hover:border-loom-accent" onClick={() => openMonitorEditor("new", t.draft, "quick")}>
                   <span className="block text-sm font-medium text-loom-text">{t.title}</span>
                   <span className="block text-2xs text-loom-muted mt-0.5">{t.blurb}</span>
                   <span className="block text-2xs text-loom-label mt-1.5">→ {t.draft.decision}</span>
@@ -367,7 +371,7 @@ export function MonitorView() {
             <summary className="cursor-pointer text-loom-muted">Add from examples</summary>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {MONITOR_TEMPLATES.map((t) => (
-                <button key={t.id} type="button" className="loom-btn-ghost text-2xs px-2 py-1 rounded-md border border-loom-border" onClick={() => openMonitorEditor("new", t.draft)}>{t.title}</button>
+                <button key={t.id} type="button" className="loom-btn-ghost text-2xs px-2 py-1 rounded-md border border-loom-border" onClick={() => openMonitorEditor("new", t.draft, "quick")}>{t.title}</button>
               ))}
             </div>
           </details>
@@ -393,13 +397,13 @@ export function MonitorView() {
           </section>
         )}
 
-        <AlwaysOnPanel cloudCount={monitors.filter((m) => m.cloud).length} />
+        <ConnectPanel />
 
         <p className="text-2xs text-loom-muted">
           Checks run while Loom is open, unless a monitor is Always on. On the web, browsers slow background tabs, so keep a tab open or use the desktop app for steady schedules.
         </p>
       </div>
-      {editingId && <MonitorEditor key={editingId} />}
+      {editingId && editorMode === "full" && <MonitorEditor key={editingId} />}
     </div>
   );
 }

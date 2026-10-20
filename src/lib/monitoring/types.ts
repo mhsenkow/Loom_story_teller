@@ -111,6 +111,13 @@ export interface Monitor {
   enabled: boolean;
   /** The chart this monitor was made from (`chart=…` link), so cards and alerts can reopen it. */
   chart?: { link: string; title: string };
+  /** Extras when it fires (beyond notifications). */
+  onFire?: {
+    /** Publish the moment as a public story page automatically. */
+    shareMoment?: boolean;
+    /** Play a short chime in the app. */
+    chime?: boolean;
+  };
   /** Always on: evaluated by the Worker cron (app closed too) and alerts go to the webhook. */
   cloud?: boolean;
   createdAt: number;

@@ -24,6 +24,7 @@ import { DeployMismatchBanner } from "@/components/DeployMismatchBanner";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { HydrateStore } from "@/components/HydrateStore";
 import { MonitorRunner } from "@/components/MonitorRunner";
+import { QuickWatchHost } from "@/components/monitor/QuickWatch";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toast } from "@/components/Toast";
 import { requestWhatsNew } from "@/lib/changelog";
@@ -466,6 +467,7 @@ export default function Home() {
       <OfflineBanner />
       <HydrateStore />
       <MonitorRunner />
+      <QuickWatchHost />
       <WebSessionResume />
       <NeoSpaceIngest />
       <ErrorBoundary resetKeys={[viewMode, selectedFilePath ?? "", activeChartId ?? ""]}>

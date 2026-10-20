@@ -68,6 +68,18 @@ cloud     optional "Always on": evaluated by the Worker cron, delivered to a web
 - `monitorRefLines` (chartBridge) draws enabled threshold and range monitors on charts of the same feed whose y is the monitored column, as `🔔 ▲ name` reference lines.
 - A check whose lookback window has no rows is `ok` ("Nothing in the last 1 h"), not `no-data`.
 
+## Quick Watch, moments, and channels
+
+- **Quick Watch** (`monitor/QuickWatch.tsx`, mounted once in `page.tsx`) is the default way in: the chart bell, suggestions and examples call `openMonitorEditor("new", draft, "quick")`. It reads as one sentence ("Tell me when *the highest magnitude* over the last 1 h *goes above* 6 M") over the draggable preview, with a plan (preset chips or free text, never empty), and where to hear about it. **More options** hands the same draft to the full editor.
+- **Moments** (`monitoring/moments.ts`): when an alert opens, the runner (or the Worker cron) stores the value, reason, rule, decision, chart link and up to 72 points of history leading up to it. Before a monitor has 8 checks of its own, that history is replayed from the feed rows. `momentSvg` draws a 1200×627 card with no DOM, so the app (theme tokens), published pages, RSS and the Worker all render the same thing. `shareMoment.ts` rasterises it and publishes a story page through `/api/stories`; **Post to NeoSpace** uses `lib/neospaceShare.ts`, the same handoff as the Share sheet. NeoSpace has no server API, so posting is always one tap from a person; `onFire.shareMoment` can publish the page automatically.
+- **Channels** (`monitor/ConnectPanel.tsx`):
+  - **This screen:** banners plus system notifications, and `onFire.chime`.
+  - **Your phone:** `newNtfyTopicUrl()` makes an unguessable ntfy.sh topic, set as the device webhook, and shows a QR code (`qrcode-generator`).
+  - **This browser, even when closed:** Web Push. `workers/webPush.ts` (RFC 8291 aes128gcm + VAPID ES256, WebCrypto only, tested against the RFC vector), with subscriptions stored on the device bundle (≤ 5). Endpoints are limited to known push services. `public/sw.js` shows the notification and opens `/#moment=<id>`. Needs `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_JWK` and `VAPID_SUBJECT` Worker secrets (`npm run vapid:keys` prints the commands). Without them the row says "Not available".
+  - **Slack / Discord / webhook:** as before. There is one webhook per device, so it replaces ntfy.
+  - **Public page & RSS:** `/w/<id>` (HTML, refreshes every 5 min, CSP `default-src 'none'`), `/w/<id>/feed.xml` and `/w/<id>/m/<moment>.svg`, rendered by `workers/monitorPublic.ts`. The id is random and indexed as `monpub:<id>` → device key. These pages never include the webhook, push endpoints or token.
+- **Deep links:** `#moment=<id>` and `#view=monitor` open Monitor (from system notifications, pushes and the service worker `loom-open` message). The tab title shows `(n)` for open alerts.
+
 ## Where checks run
 
 | Runtime | How |

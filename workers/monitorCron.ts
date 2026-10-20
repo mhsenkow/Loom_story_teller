@@ -21,6 +21,9 @@ import type { CheckRecord, Monitor, MonitorAlert } from "../src/lib/monitoring/t
 import { SOURCE_BY_KIND, isSourceKind, sortRowsByOrderBy, type SourceKind } from "../src/lib/sourceRegistry";
 import { assertHttpUrlAllowed } from "../src/lib/ssrfGuard";
 import type { QueryResult } from "../src/lib/queryTypes";
+import { momentFrom, type Moment } from "../src/lib/monitoring/moments";
+import { metricSeries } from "../src/lib/monitoring/backfill";
+import { sendWebPush, isAllowedPushEndpoint, type PushSubscriptionJSON, type VapidKeys } from "./webPush";
 
 export interface MonitorKv {
   get(key: string, type: "json"): Promise<unknown>;
@@ -45,10 +48,22 @@ export interface CloudWebhook {
 export interface CloudBundle {
   monitors: Monitor[];
   webhook?: CloudWebhook;
+  /** Browser Web Push subscriptions for this device (≤ 5). */
+  push?: PushSubscriptionJSON[];
   checks: Record<string, CheckRecord[]>;
   alerts: MonitorAlert[];
+  /** Snapshots of each alert as it opened (newest first). */
+  moments?: Moment[];
+  /** Public, read-only status page + RSS (`/w/<id>`), when the device opted in. */
+  public?: { id: string; title: string };
   updatedAt: number;
 }
+
+export const MOMENT_CAP = 30;
+export const PUSH_CAP = 5;
+
+/** How one firing check reaches people. */
+export type Notifier = (bundle: CloudBundle, m: Monitor, reason: string, moment?: Moment) => Promise<void>;
 
 /** Raw `/api/source/<kind>` body for one feed. */
 export type SourceFetch = (kind: SourceKind) => Promise<unknown>;
@@ -147,7 +162,7 @@ export async function evaluateBundle(
   now: number,
   fetchSource: SourceFetch,
   parse: SourceParse,
-  send: (hook: CloudWebhook, m: Monitor, reason: string) => Promise<boolean> = postWebhook,
+  notify: Notifier = makeNotifier(),
 ): Promise<{ bundle: CloudBundle; changed: boolean }> {
   const snaps = new Map<SourceKind, Promise<QueryResult>>();
   let changed = false;
@@ -158,15 +173,17 @@ export async function evaluateBundle(
     const open = bundle.alerts.find((a) => a.monitorId === m.id && !a.closedAt);
     let record: CheckRecord;
     let alert: MonitorAlert | undefined;
-    let notify = false;
+    let fire = false;
+    let sample: QueryResult | undefined;
     try {
       let p = snaps.get(m.metric.source);
       if (!p) {
         p = fetchSource(m.metric.source).then((body) => sampleFor(m.metric.source, body, parse));
         snaps.set(m.metric.source, p);
       }
-      const out = runCheck(m, computeMetric(m.metric, await p, now), history, open, now, () => `alr_${now.toString(36)}${Math.random().toString(36).slice(2, 7)}`);
-      ({ record, alert, notify } = out);
+      sample = await p;
+      const out = runCheck(m, computeMetric(m.metric, sample, now), history, open, now, () => `alr_${now.toString(36)}${Math.random().toString(36).slice(2, 7)}`);
+      ({ record, alert, notify: fire } = out);
     } catch (e) {
       record = { monitorId: m.id, at: now, value: null, status: "error", reason: e instanceof Error ? e.message : String(e) };
     }
@@ -175,7 +192,15 @@ export async function evaluateBundle(
       const i = bundle.alerts.findIndex((a) => a.id === alert!.id);
       bundle.alerts = (i >= 0 ? bundle.alerts.map((a, j) => (j === i ? alert! : a)) : [alert, ...bundle.alerts]).slice(0, ALERT_CAP);
     }
-    if (notify && bundle.webhook) await send(bundle.webhook, m, record.reason);
+    let moment: Moment | undefined;
+    if (alert && !open && !alert.closedAt) {
+      // Our own checks once there are enough of them; before that, replay the feed's rows.
+      const own = bundle.checks[m.id]!.filter((c) => c.value != null).map((c) => ({ at: c.at, value: c.value as number }));
+      const series = own.length >= 8 || !sample || !m.metric.timeColumn ? own : metricSeries(m.metric, sample);
+      moment = momentFrom(m, { id: `mom_${alert.id}`, at: now, value: record.value, reason: record.reason, feedLabel: SOURCE_BY_KIND[m.metric.source]?.label ?? m.metric.source, series, cloud: true });
+      bundle.moments = [moment, ...(bundle.moments ?? [])].slice(0, MOMENT_CAP);
+    }
+    if (fire) await notify(bundle, m, record.reason, moment);
     try { m.nextRunAt = nextRunAfter(m.schedule, now); } catch { m.nextRunAt = now + 3_600_000; }
   }
   if (changed) bundle.updatedAt = now;
@@ -183,7 +208,7 @@ export async function evaluateBundle(
 }
 
 /** Cron entry: walk every device bundle (paged), evaluate, write back what changed. */
-export async function runMonitorCron(kv: MonitorKv, now: number, fetchSource: SourceFetch, parse: SourceParse): Promise<{ devices: number; evaluated: number }> {
+export async function runMonitorCron(kv: MonitorKv, now: number, fetchSource: SourceFetch, parse: SourceParse, notify: Notifier = makeNotifier()): Promise<{ devices: number; evaluated: number }> {
   let cursor: string | undefined;
   let devices = 0;
   let evaluated = 0;
@@ -200,7 +225,7 @@ export async function runMonitorCron(kv: MonitorKv, now: number, fetchSource: So
       devices++;
       const bundle = (await kv.get(name, "json")) as CloudBundle | null;
       if (!bundle?.monitors?.length) continue;
-      const { changed } = await evaluateBundle(bundle, now, cachedFetch, parse);
+      const { changed } = await evaluateBundle(bundle, now, cachedFetch, parse, notify);
       if (changed) {
         evaluated++;
         await kv.put(name, JSON.stringify(bundle), { expirationTtl: BUNDLE_TTL_SECS });
@@ -212,8 +237,23 @@ export async function runMonitorCron(kv: MonitorKv, now: number, fetchSource: So
 }
 
 /** PUT body → stored bundle, keeping existing history for monitors that remain. */
-export function mergeUpload(prev: CloudBundle | null, monitors: Monitor[], webhook: CloudWebhook | undefined, now: number, acks: string[] = []): CloudBundle {
+export interface UploadExtras {
+  /** This browser's push subscription (added; others kept), or null to remove it. */
+  push?: { add?: PushSubscriptionJSON; remove?: string };
+  /** Public page title to enable it, null to turn it off, undefined to leave as is. */
+  publicTitle?: string | null;
+  newPublicId?: () => string;
+}
+
+export function mergeUpload(prev: CloudBundle | null, monitors: Monitor[], webhook: CloudWebhook | undefined, now: number, acks: string[] = [], extras: UploadExtras = {}): CloudBundle {
   const acked = new Set(acks);
+  let push = (prev?.push ?? []).filter((s) => s.endpoint !== extras.push?.remove && s.endpoint !== extras.push?.add?.endpoint);
+  if (extras.push?.add) push = [extras.push.add, ...push].slice(0, PUSH_CAP);
+  const pub = extras.publicTitle === null
+    ? undefined
+    : extras.publicTitle !== undefined
+      ? { id: prev?.public?.id ?? extras.newPublicId?.() ?? crypto.randomUUID().replace(/-/g, "").slice(0, 16), title: extras.publicTitle.slice(0, 80) || "Loom monitors" }
+      : prev?.public;
   const ids = new Set(monitors.map((m) => m.id));
   const prevById = new Map((prev?.monitors ?? []).map((m) => [m.id, m]));
   return {
@@ -227,8 +267,60 @@ export function mergeUpload(prev: CloudBundle | null, monitors: Monitor[], webho
     alerts: (prev?.alerts ?? [])
       .filter((a) => ids.has(a.monitorId))
       .map((a) => (acked.has(a.id) && !a.acknowledgedAt ? { ...a, acknowledgedAt: now } : a)),
+    moments: prev?.moments ?? [],
+    push,
+    public: pub,
     updatedAt: now,
   };
 }
 
 export { BUNDLE_TTL_SECS };
+
+/** Push payload the service worker shows (`public/sw.js`). Kept under the 3.8 KB push limit. */
+export function pushPayload(m: Monitor, reason: string, moment?: Moment) {
+  const icon = m.severity === "critical" ? "🔴" : m.severity === "warning" ? "🟠" : "🔵";
+  return {
+    title: `${icon} ${m.name}`.slice(0, 120),
+    body: `${reason}${m.decision ? `\n→ ${m.decision}` : ""}`.slice(0, 400),
+    tag: m.id,
+    url: moment ? `/#moment=${encodeURIComponent(moment.id)}` : "/#view=monitor",
+  };
+}
+
+/**
+ * Default delivery: the device's webhook (ntfy / Slack / Discord / JSON) and its
+ * Web Push subscriptions. Expired subscriptions (404 / 410) are dropped.
+ */
+export function makeNotifier(vapid?: VapidKeys, post: (hook: CloudWebhook, m: Monitor, reason: string) => Promise<boolean> = postWebhook): Notifier {
+  return async (bundle, m, reason, moment) => {
+    if (bundle.webhook) await post(bundle.webhook, m, reason);
+    if (!vapid || !bundle.push?.length) return;
+    const keep: PushSubscriptionJSON[] = [];
+    for (const sub of bundle.push) {
+      try {
+        const r = await sendWebPush(sub, pushPayload(m, reason, moment), vapid, { urgency: m.severity === "critical" ? "high" : "normal", ttl: 6 * 3600 });
+        if (!r.gone) keep.push(sub);
+      } catch {
+        keep.push(sub);
+      }
+    }
+    bundle.push = keep;
+  };
+}
+
+export function validatePushSubscription(v: unknown): PushSubscriptionJSON | null {
+  const s = v as PushSubscriptionJSON | undefined;
+  if (!s || typeof s.endpoint !== "string" || !s.keys || typeof s.keys.p256dh !== "string" || typeof s.keys.auth !== "string") return null;
+  if (!isAllowedPushEndpoint(s.endpoint) || s.keys.p256dh.length > 200 || s.keys.auth.length > 64) return null;
+  return { endpoint: s.endpoint, keys: { p256dh: s.keys.p256dh, auth: s.keys.auth } };
+}
+
+/** VAPID keys from Worker secrets, or undefined when push isn't configured. */
+export function vapidFromEnv(env: { VAPID_PUBLIC_KEY?: string; VAPID_PRIVATE_JWK?: string; VAPID_SUBJECT?: string }): VapidKeys | undefined {
+  if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_JWK) return undefined;
+  try {
+    return { publicKey: env.VAPID_PUBLIC_KEY, privateJwk: JSON.parse(env.VAPID_PRIVATE_JWK) as JsonWebKey, subject: env.VAPID_SUBJECT || "https://loom.ibm.io" };
+  } catch {
+    return undefined;
+  }
+}

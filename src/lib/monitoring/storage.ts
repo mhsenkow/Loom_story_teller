@@ -6,6 +6,7 @@
 // =================================================================
 
 import type { CheckRecord, Monitor, MonitorAlert } from "./types";
+import type { Moment } from "./moments";
 
 const KEY = "loom-monitors";
 const VERSION = 1;
@@ -14,9 +15,10 @@ export interface MonitorBundle {
   monitors: Monitor[];
   checks: Record<string, CheckRecord[]>;
   alerts: MonitorAlert[];
+  moments?: Moment[];
 }
 
-const EMPTY: MonitorBundle = { monitors: [], checks: {}, alerts: [] };
+const EMPTY: MonitorBundle = { monitors: [], checks: {}, alerts: [], moments: [] };
 
 function isMonitor(v: unknown): v is Monitor {
   const m = v as Monitor;
@@ -39,7 +41,10 @@ export function loadMonitors(): MonitorBundle {
     const alerts = Array.isArray(parsed.data.alerts)
       ? parsed.data.alerts.filter((a) => a && typeof a.id === "string" && ids.has(a.monitorId))
       : [];
-    return { monitors, checks, alerts };
+    const moments = Array.isArray(parsed.data.moments)
+      ? parsed.data.moments.filter((m) => m && typeof m.id === "string" && typeof m.at === "number" && Array.isArray(m.series))
+      : [];
+    return { monitors, checks, alerts, moments };
   } catch {
     return EMPTY;
   }
@@ -54,7 +59,8 @@ export function saveMonitors(bundle: MonitorBundle): boolean {
     // Quota: keep definitions and alerts, trim history to the last 100 checks each.
     try {
       const checks = Object.fromEntries(Object.entries(bundle.checks).map(([k, v]) => [k, v.slice(-100)]));
-      globalThis.localStorage?.setItem(KEY, JSON.stringify({ v: VERSION, data: { ...bundle, checks } }));
+      const moments = (bundle.moments ?? []).slice(0, 30);
+      globalThis.localStorage?.setItem(KEY, JSON.stringify({ v: VERSION, data: { ...bundle, checks, moments } }));
       return true;
     } catch {
       return false;

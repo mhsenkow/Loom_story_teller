@@ -14,8 +14,12 @@ import {
   sanitizeCloudMonitors,
   validateWebhook,
   webhookRequest,
+  makeNotifier,
+  validatePushSubscription,
+  vapidFromEnv,
   type CloudBundle,
 } from "./monitorCron";
+import { isPublicId, publicFeedXml, publicMomentSvg, publicPageHtml } from "./monitorPublic";
 import { parseSourceRows } from "../src/lib/sourceParsers";
 import {
   fetchUkCatalogUpstream,
@@ -129,6 +133,10 @@ export interface Env {
    * Keeps Cap / workers.dev publishes off personal *.workers.dev hostnames.
    */
   PUBLIC_WEB_ORIGIN?: string;
+  /** Web Push (always-on monitors): base64url P-256 public key, private JWK JSON, contact. */
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_JWK?: string;
+  VAPID_SUBJECT?: string;
 }
 
 /** Product host for share links — never mint mhsenkow.workers.dev URLs for recipients. */
@@ -1872,9 +1880,19 @@ async function handleMonitors(request: Request, url: URL, env: Env): Promise<Res
 
   if (request.method === "GET") {
     const b = (await kv.get(key, "json")) as CloudBundle | null;
-    return reply({ checks: b?.checks ?? {}, alerts: b?.alerts ?? [], updatedAt: b?.updatedAt ?? null, monitors: b?.monitors.length ?? 0 });
+    return reply({
+      checks: b?.checks ?? {},
+      alerts: b?.alerts ?? [],
+      moments: b?.moments ?? [],
+      updatedAt: b?.updatedAt ?? null,
+      monitors: b?.monitors.length ?? 0,
+      public: b?.public ?? null,
+      pushDevices: b?.push?.length ?? 0,
+    });
   }
   if (request.method === "DELETE") {
+    const old = (await kv.get(key, "json")) as CloudBundle | null;
+    if (old?.public) await kv.delete(`monpub:${old.public.id}`);
     await kv.delete(key);
     return reply({ ok: true });
   }
@@ -1882,22 +1900,55 @@ async function handleMonitors(request: Request, url: URL, env: Env): Promise<Res
     if (!(await rateLimitAllow(env, "mon-up", key, 60, 3_600_000))) return reply({ error: "Too many updates — try later" }, 429);
     const text = await request.text();
     if (text.length > 200_000) return reply({ error: "Too large" }, 413);
-    let body: { monitors?: unknown; webhook?: unknown; acks?: unknown };
+    let body: { monitors?: unknown; webhook?: unknown; acks?: unknown; push?: { add?: unknown; remove?: unknown }; public?: { title?: unknown } | null };
     try { body = JSON.parse(text); } catch { return reply({ error: "Bad JSON" }, 400); }
     const monitors = sanitizeCloudMonitors(body.monitors);
     const webhook = body.webhook == null ? undefined : validateWebhook(body.webhook) ?? undefined;
     if (body.webhook != null && !webhook) return reply({ error: "Use an https ntfy, Slack, Discord or JSON webhook URL" }, 400);
+    const prev = (await kv.get(key, "json")) as CloudBundle | null;
     if (!monitors.length) {
+      if (prev?.public) await kv.delete(`monpub:${prev.public.id}`);
       await kv.delete(key);
       return reply({ ok: true, monitors: 0 });
     }
-    const prev = (await kv.get(key, "json")) as CloudBundle | null;
     const acks = Array.isArray(body.acks) ? body.acks.filter((x): x is string => typeof x === "string").slice(0, 200) : [];
-    const next = mergeUpload(prev, monitors, webhook, Date.now(), acks);
+    const add = body.push?.add != null ? validatePushSubscription(body.push.add) : undefined;
+    if (body.push?.add != null && !add) return reply({ error: "Unsupported push service" }, 400);
+    const publicTitle = body.public === null ? null : body.public && typeof body.public.title === "string" ? body.public.title : body.public ? "Loom monitors" : undefined;
+    const next = mergeUpload(prev, monitors, webhook, Date.now(), acks, {
+      push: { add: add ?? undefined, remove: typeof body.push?.remove === "string" ? body.push.remove : undefined },
+      publicTitle,
+    });
     await kv.put(key, JSON.stringify(next), { expirationTtl: BUNDLE_TTL_SECS });
-    return reply({ ok: true, monitors: monitors.length, max: CLOUD_MAX_MONITORS });
+    if (prev?.public && prev.public.id !== next.public?.id) await kv.delete(`monpub:${prev.public.id}`);
+    if (next.public) await kv.put(`monpub:${next.public.id}`, key, { expirationTtl: BUNDLE_TTL_SECS });
+    return reply({ ok: true, monitors: monitors.length, max: CLOUD_MAX_MONITORS, public: next.public ?? null, pushDevices: next.push?.length ?? 0 });
   }
   return reply({ error: "Method not allowed" }, 405);
+}
+
+/** `/w/<id>`, `/w/<id>/feed.xml`, `/w/<id>/m/<moment>.svg` — read-only public monitor pages. */
+async function handlePublicMonitors(url: URL, env: Env): Promise<Response> {
+  const m = url.pathname.match(/^\/w\/([a-f0-9]{16})(?:\/(feed\.xml|m\/([A-Za-z0-9_-]{1,80})\.svg))?\/?$/);
+  const notFound = () => new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain" } });
+  if (!m || !isPublicId(m[1]!) || !env.LOOM_STORIES) return notFound();
+  const id = m[1]!;
+  const deviceKeyName = await env.LOOM_STORIES.get(`monpub:${id}`);
+  const bundle = deviceKeyName ? ((await env.LOOM_STORIES.get(deviceKeyName, "json")) as CloudBundle | null) : null;
+  if (!bundle?.public || bundle.public.id !== id) return notFound();
+  const origin = publicWebOrigin(env);
+  const cache = { "Cache-Control": "public, max-age=60", "X-Content-Type-Options": "nosniff" };
+  if (m[2] === "feed.xml") return new Response(publicFeedXml(bundle, id, origin), { headers: { "Content-Type": "application/rss+xml; charset=utf-8", ...cache } });
+  if (m[3]) {
+    const svg = publicMomentSvg(bundle, m[3]);
+    return svg
+      ? new Response(svg, { headers: { "Content-Type": "image/svg+xml", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'", ...cache, "Cache-Control": "public, max-age=86400" } })
+      : notFound();
+  }
+  const headers = new Headers({ "Content-Type": "text/html; charset=utf-8", ...cache });
+  applyBaselineSecurityHeaders(headers);
+  headers.set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'");
+  return new Response(publicPageHtml(bundle, id, origin), { headers });
 }
 
 async function cronSourceBody(kind: string, ctx: WaitUntil): Promise<unknown> {
@@ -1938,6 +1989,13 @@ export default {
       if (url.pathname.startsWith("/api/source/")) {
         const kind = url.pathname.replace("/api/source/", "").replace(/\/$/, "");
         return await handleSource(kind, request, ctx);
+      }
+      if (url.pathname === "/api/monitors/push-key" && request.method === "GET") {
+        const vapid = vapidFromEnv(env);
+        return vapid ? jsonFor(request, { publicKey: vapid.publicKey }) : jsonFor(request, { error: "Push is not configured" }, 404);
+      }
+      if (url.pathname.startsWith("/w/")) {
+        return await handlePublicMonitors(url, env);
       }
       if (url.pathname === "/api/monitors" || url.pathname === "/api/monitors/test-webhook") {
         return await handleMonitors(request, url, env);
@@ -1984,7 +2042,7 @@ export default {
     if (!env.LOOM_STORIES) return;
     const kv = env.LOOM_STORIES;
     ctx.waitUntil(
-      runMonitorCron(kv, Date.now(), (kind) => cronSourceBody(kind, ctx), parseSourceRows).then((r) => {
+      runMonitorCron(kv, Date.now(), (kind) => cronSourceBody(kind, ctx), parseSourceRows, makeNotifier(vapidFromEnv(env))).then((r) => {
         console.log(JSON.stringify({ event: "monitor_cron", ...r }));
       }),
     );

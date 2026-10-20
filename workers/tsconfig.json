@@ -17,6 +17,8 @@
   "include": [
     "catalog-proxy.ts",
     "monitorCron.ts",
+    "webPush.ts",
+    "monitorPublic.ts",
     "sourceTransforms.ts",
     "extraSources.ts",
     "../src/lib/sourceParsers.ts",

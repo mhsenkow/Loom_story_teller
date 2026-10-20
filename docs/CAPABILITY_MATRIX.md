@@ -10,7 +10,8 @@
 | Live feeds (54 kinds) | Rust poll → DuckDB (bluesky / bgp via Worker) | Worker `/api/source/*` → buffer | Worker | Worker |
 | Monitors (in-app schedule) | Yes, while app open | Yes, while app open | Yes; hidden tabs throttle timers | Same |
 | Monitor notifications | Tauri notification plugin | Tauri notification plugin | Web Notifications | Web Notifications (16.4+; home-screen app on iOS) |
-| Always-on monitors | Worker cron → webhook | Same | Same | Same |
+| Always-on monitors | Worker cron → webhook / ntfy | Same | Same + Web Push | Same + Web Push (16.4+, Home Screen app on iOS) |
+| Monitor moments (share / NeoSpace) | Share link + image (NeoSpace from web) | Same | Yes | Yes |
 | WebGPU scatter | When eligible; custom/category shapes and emoji use Canvas | Same rules | Same | Same; GPU may be unavailable |
 | On-screen charts | Canvas 2D + gated WebGPU | Same | Same | Same |
 | Vega-Lite | Spec + SVG export only | Same | Same | Same |

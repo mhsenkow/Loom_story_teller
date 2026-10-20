@@ -44,7 +44,7 @@ export async function requestNotificationPermission(): Promise<NotifyPermission>
   return (await Notification.requestPermission()) as NotifyPermission;
 }
 
-export async function sendSystemNotification(title: string, body: string, tag?: string): Promise<boolean> {
+export async function sendSystemNotification(title: string, body: string, tag?: string, onClick?: () => void): Promise<boolean> {
   if (isTauri()) {
     try {
       const n = await tauriNotification();
@@ -60,10 +60,39 @@ export async function sendSystemNotification(title: string, body: string, tag?: 
     const note = new Notification(title, { body, tag, icon: "/icon-192.png" });
     note.onclick = () => {
       window.focus();
+      onClick?.();
       note.close();
     };
     return true;
   } catch {
     return false;
+  }
+}
+
+let audio: AudioContext | null = null;
+
+/** Two soft notes; louder and lower for critical. Silently does nothing without WebAudio. */
+export function playChime(severity: "info" | "warning" | "critical" = "warning"): void {
+  try {
+    const Ctx = (globalThis as unknown as { AudioContext?: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext
+      ?? (globalThis as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    audio ??= new Ctx();
+    const notes = severity === "critical" ? [440, 330] : severity === "warning" ? [660, 880] : [880, 1175];
+    notes.forEach((f, i) => {
+      const o = audio!.createOscillator();
+      const g = audio!.createGain();
+      const t = audio!.currentTime + i * 0.16;
+      o.type = "sine";
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(severity === "critical" ? 0.25 : 0.12, t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+      o.connect(g).connect(audio!.destination);
+      o.start(t);
+      o.stop(t + 0.4);
+    });
+  } catch {
+    /* audio blocked until a user gesture — fine */
   }
 }

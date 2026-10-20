@@ -25,6 +25,20 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-21",
+    date: "2026-10-21",
+    title: "Moments worth sharing",
+    summary: "Watch a number in one sentence, hear about it anywhere, and share what happened.",
+    items: [
+      { title: "Quick Watch", detail: "Tap the bell on a chart: \"Tell me when the highest magnitude goes above 6.\" Drag the line on the chart, see how often it would have fired, pick what you'll do, done. Every suggestion and example opens the same way." },
+      { title: "Moments", detail: "Each alert keeps a card of what happened: the number, the limit, and the history that led up to it. Share it as a link, post it to NeoSpace in one tap, save the image, or jump back to the chart. Monitors can share their moments automatically." },
+      { title: "Your phone in one scan", detail: "Where alerts go → Your phone makes a private ntfy topic and shows a QR code. Install the free ntfy app, scan, and always-on alerts arrive on your phone." },
+      { title: "Push to this browser", detail: "Always-on alerts can arrive as real browser notifications even with Loom closed, including on iPhone when Loom is on your Home Screen." },
+      { title: "A public page and RSS", detail: "Publish a live status page of your always-on monitors with their moments, plus an RSS feed you can plug into Slack, Zapier, IFTTT or any reader." },
+      { title: "Little things", detail: "A chime when something fires, and the tab title shows how many alerts are waiting." },
+    ],
+  },
+  {
     id: "2026-10-20b",
     date: "2026-10-20",
     title: "Watch it so you don't have to",
