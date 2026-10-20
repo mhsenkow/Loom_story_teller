@@ -10,6 +10,8 @@
 // =================================================================
 
 import type { FileEntry, ColumnInfo, QueryResult } from "./store";
+import type { InspectResult, StreamStatus, SourceStatus } from "./liveTypes";
+export type { InspectResult, StreamStatus, SourceStatus } from "./liveTypes";
 async function webMockData() {
   return import("./mock-data");
 }
@@ -153,10 +155,6 @@ export async function getSampleRows(
  * growing buffer.
  */
 
-export interface InspectResult {
-  stats: ColumnInfo[];
-  sample: QueryResult;
-}
 
 export async function inspectFile(
   filePath: string,
@@ -216,15 +214,6 @@ export const OPEN_DATA_PORTALS: Record<string, { url: string; label: string }> =
 // Wikipedia Live Stream IPC
 // =================================================================
 
-export interface StreamStatus {
-  running: boolean;
-  total_events: number;
-  events_per_sec: number;
-  buffer_rows: number;
-  wikis_seen: number;
-  started_at: number | null;
-  uptime_secs: number;
-}
 
 export async function streamStart(): Promise<void> {
   if (!isDesktop()) {
@@ -283,24 +272,6 @@ import { SOURCE_KINDS, type SourceKind } from "./sourceRegistry";
 /** Canonical live poll sources (registry order) — discover scan + sidebar read this. */
 export const ALL_SOURCE_KINDS: readonly SourceKind[] = SOURCE_KINDS;
 
-export interface SourceStatus {
-  running: boolean;
-  total_events: number;
-  events_per_sec: number;
-  buffer_rows: number;
-  started_at: number | null;
-  uptime_secs: number;
-  /** Web: last upstream failure while polling (null once a poll succeeds). */
-  last_error?: string | null;
-  /** Web: wall-clock ms when the buffer last accepted a successful poll. */
-  last_success_at?: number | null;
-  /** Desktop poll success, Unix seconds (normalized by discovery at its boundary). */
-  last_ok_at?: number | null;
-  /** Web: rows are from a cached snapshot — not a current live measurement. */
-  snapshot_stale?: boolean;
-  /** Web: ms when the cached snapshot was captured (if snapshot_stale). */
-  snapshot_captured_at?: number | null;
-}
 
 export async function sourceStart(kind: SourceKind): Promise<void> {
   if (!isDesktop()) {

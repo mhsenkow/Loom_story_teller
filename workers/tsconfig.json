@@ -18,6 +18,7 @@
     "catalog-proxy.ts",
     "sourceTransforms.ts",
     "extraSources.ts",
+    "../src/lib/sourceParsers.ts",
     "__tests__/*.test.ts",
     "../src/lib/openDataCatalog.ts",
     "../src/lib/ssrfGuard.ts",
