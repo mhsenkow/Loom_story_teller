@@ -22,6 +22,7 @@ export type CommandPaletteActionId =
   | "view:chart"
   | "view:query"
   | "view:dive"
+  | "view:monitor"
   | "chrome:share"
   | "chrome:whats-new"
   | "chrome:settings"
@@ -112,6 +113,14 @@ const STATIC_ITEMS: CommandPaletteItem[] = [
     hint: "Linked exploration",
     chip: "dive",
     keywords: ["dive", "go to dive", "show dive", "open dive"],
+    weight: 6,
+  },
+  {
+    id: "view:monitor",
+    label: "Open Monitor",
+    hint: "Alerts · scheduled checks",
+    chip: "monitor",
+    keywords: ["monitor", "alert", "alerts", "watch", "notify", "threshold", "cron", "schedule", "anomaly"],
     weight: 6,
   },
   {

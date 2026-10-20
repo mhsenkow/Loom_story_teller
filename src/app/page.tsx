@@ -23,6 +23,7 @@ import { WebServiceWorker } from "@/components/WebServiceWorker";
 import { DeployMismatchBanner } from "@/components/DeployMismatchBanner";
 import { OfflineBanner } from "@/components/OfflineBanner";
 import { HydrateStore } from "@/components/HydrateStore";
+import { MonitorRunner } from "@/components/MonitorRunner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { Toast } from "@/components/Toast";
 import { requestWhatsNew } from "@/lib/changelog";
@@ -63,6 +64,10 @@ const QueryView = dynamic(() => import("@/components/QueryView").then((m) => m.Q
   loading: () => viewSkeleton,
 });
 const DiveView = dynamic(() => import("@/components/DiveView").then((m) => m.DiveView), {
+  ssr: false,
+  loading: () => viewSkeleton,
+});
+const MonitorView = dynamic(() => import("@/components/MonitorView").then((m) => m.MonitorView), {
   ssr: false,
   loading: () => viewSkeleton,
 });
@@ -460,6 +465,7 @@ export default function Home() {
       <DeployMismatchBanner />
       <OfflineBanner />
       <HydrateStore />
+      <MonitorRunner />
       <WebSessionResume />
       <NeoSpaceIngest />
       <ErrorBoundary resetKeys={[viewMode, selectedFilePath ?? "", activeChartId ?? ""]}>
@@ -673,6 +679,9 @@ function HomeContent({
           break;
         case "4":
           setViewMode("dive");
+          break;
+        case "5":
+          setViewMode("monitor");
           break;
         case "[":
           useLoomStore.getState().toggleSidebar();
@@ -902,6 +911,7 @@ function HomeContent({
                 {(!dataSourcesExpanded || socialExportReady) && (viewMode === "chart" || socialExportReady) && <ChartView />}
                 {!dataSourcesExpanded && viewMode === "query" && !socialExportReady && <QueryView />}
                 {!dataSourcesExpanded && viewMode === "dive" && !socialExportReady && <DiveView />}
+                {!dataSourcesExpanded && viewMode === "monitor" && !socialExportReady && <MonitorView />}
               </>
             )}
             {previewCapture && (

@@ -171,7 +171,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       const id = match.id;
 
       if (id.startsWith("view:")) {
-        const mode = id.slice(5) as "explorer" | "chart" | "query" | "dive";
+        const mode = id.slice(5) as "explorer" | "chart" | "query" | "dive" | "monitor";
         store.setViewMode(mode);
         store.setToast(`${mode[0]!.toUpperCase()}${mode.slice(1)}`);
         onClose();

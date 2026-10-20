@@ -48,7 +48,7 @@ When `isDesktop()` is false, there is no DuckDB folder scan. Own-data flows use 
 
 ### Cloudflare Worker (`workers/catalog-proxy.ts`)
 
-Serves the static export (`ASSETS`) and JSON/HTML API routes: `/api/catalog/us|uk`, `/api/fetch-csv` (SSRF-guarded, origin-gated), `/api/source/<kind>` (cached upstream proxies), `/api/stories` + `/s/<id>` (published stories), `/api/feedback`. Policy helpers live in `src/lib/workerCatalogPolicy.ts` (cache schema version, catalog row clamps, story byte limits). Local full-stack preview: `npm run build` + `wrangler dev` (Docker `serve out` alone has no `/api/*`).
+Serves the static export (`ASSETS`) and JSON/HTML API routes: `/api/catalog/us|uk`, `/api/fetch-csv` (SSRF-guarded, origin-gated), `/api/source/<kind>` (cached upstream proxies), `/api/stories` + `/s/<id>` (published stories), `/api/feedback`, `/api/monitors` (always-on monitors; the `scheduled` handler runs `workers/monitorCron.ts` every 5 min, see [docs/MONITORING.md](docs/MONITORING.md)). Policy helpers live in `src/lib/workerCatalogPolicy.ts` (cache schema version, catalog row clamps, story byte limits). Local full-stack preview: `npm run build` + `wrangler dev` (Docker `serve out` alone has no `/api/*`).
 
 **Adding a format:** extend `WEB_FORMATS` → branch in `webIngest.ts` → wire Sidebar accept filters; do not add a parallel global cache.
 
@@ -181,6 +181,18 @@ Encoding can also drive **glow**, **outline**, and **opacity** per point (scatte
 - **Rows** — `src/lib/diveSource.ts` `loadDiveDataset`: desktop pulls up to 30k rows through DuckDB (`USING SAMPLE` for files, newest-first for `wiki_stream`, whole source tables); web uses the stream/source JS buffers (8k), full mock data for demo files, else the in-store sample. Live paths (`stream://…`) re-pull every 5 s web / 10 s desktop while **Live** is on.
 - **State** — `diveQuery` `{ src, query }` in the store (query is tied to the dataset path it was built for); `diveLink` holds a shared link until its dataset opens. `WebSessionResume` reads `#dive=` on load, opens stream / `mock://` sources itself, and lands in Dive. DiveView mirrors the query into the hash (see History). The builder width is a per-viewer `localStorage` convenience (`loom-dive-sidebar`).
 - **Handoffs** — **Open as cube** replaces `sampleRows` with the matched rows (≤20k) and builds a `dataCube` rec (2 group-bys + time, or 3 group-bys). **SQL → Open in Query** (desktop) sets `querySql`.
+
+---
+
+## Monitor (alerts and scheduled checks)
+
+View mode `monitor` (TopBar **Monitor**, key **5**). Full design and file map: [docs/MONITORING.md](docs/MONITORING.md).
+
+- **Engine:** `src/lib/monitoring/engine.ts` is pure. `computeMetric` reduces a feed snapshot to one number. `evaluateRule` handles threshold / range / change / anomaly / stale. `runCheck` produces a check record and an alert transition, applying expected windows, confirm-N and cooldown. `monitorUsefulness` reports the action rate from reviews. `schedule.ts` handles interval / daily / weekly / 5-field cron.
+- **State:** `src/lib/store/monitorSlice.ts` (`monitors`, `monitorChecks`, `monitorAlerts`). Persisted by `monitoring/storage.ts` under `loom-monitors`, not by HydrateStore.
+- **Runner:** `MonitorRunner` (mounted in `page.tsx`) hydrates, saves, starts `runner.ts` (20s tick, one snapshot per feed per tick, auto-connects the feed), and syncs always-on monitors (`cloudSync.ts`).
+- **Notifications:** `monitoring/notify.ts` uses `@tauri-apps/plugin-notification` on desktop / iOS (permission `notification:default` in both capabilities) and the Web Notifications API in browsers.
+- **Always on:** `workers/monitorCron.ts` plus `/api/monitors` in the Worker. KV keys are `mon:<sha256(device secret)>`. Cron `*/5 * * * *` in `wrangler.jsonc`.
 
 ---
 

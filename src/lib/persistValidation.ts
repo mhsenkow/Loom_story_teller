@@ -18,7 +18,7 @@ import type { ChartViewItem, DashboardItem, QueryViewItem, ViewMode } from "./st
 const FONT_SCALES = new Set([0.9, 1, 1.1, 1.15]);
 const ASPECTS = new Set(CHART_ASPECTS.map((a) => a.id));
 const DEVICES = new Set<ChartDeviceId>(["auto", "mobile", "tablet", "desktop"]);
-const VIEW_MODES = new Set<ViewMode>(["explorer", "chart", "query", "dive"]);
+const VIEW_MODES = new Set<ViewMode>(["explorer", "chart", "query", "dive", "monitor"]);
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);

@@ -19,6 +19,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tauri-plugin-notification = "2"
 
 # Desktop-only: DuckDB, folder FS, native dialogs, Rust poll/SSE sources
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]

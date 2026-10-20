@@ -9,6 +9,7 @@ import { dashboardInitialState } from "./dashboardSlice";
 import { uiInitialState } from "./uiSlice";
 import { chartInitialState } from "./chartSlice";
 import { pointerViewsInitialState } from "./pointerViewsSlice";
+import { monitorInitialState } from "./monitorSlice";
 
 export { datasetScopedResetSlice };
 
@@ -20,4 +21,5 @@ export const initialState = {
   ...uiInitialState(),
   ...chartInitialState(),
   ...pointerViewsInitialState(),
+  ...monitorInitialState,
 };

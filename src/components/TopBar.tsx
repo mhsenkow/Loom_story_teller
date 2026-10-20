@@ -22,6 +22,7 @@ const VIEW_MODES: { key: ViewMode; label: string; short: string; shortcut: strin
   { key: "chart", label: "Chart", short: "Chart", shortcut: "2" },
   { key: "query", label: "Query", short: "SQL", shortcut: "3" },
   { key: "dive", label: "Dive", short: "Dive", shortcut: "4" },
+  { key: "monitor", label: "Monitor", short: "Watch", shortcut: "5" },
 ];
 
 const DEVICES: { id: ChartDeviceId; label: string; icon: "phone" | "tablet" | "desktop" | "auto" }[] = [
@@ -65,6 +66,7 @@ function DeviceIcon({ kind }: { kind: (typeof DEVICES)[number]["icon"] }) {
 }
 
 export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
+  const firingCount = useLoomStore((s) => s.monitorAlerts.filter((x) => !x.closedAt && !x.acknowledgedAt).length);
   const {
     viewMode,
     setViewMode,
@@ -163,6 +165,11 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             <span className="sm:hidden">{mode.short}</span>
             <span className="hidden sm:inline">{mode.label}</span>
             <span className="ml-1 text-2xs opacity-50 font-mono hidden md:inline">{mode.shortcut}</span>
+            {mode.key === "monitor" && firingCount > 0 && (
+              <span className="ml-1 inline-flex min-w-4 h-4 px-1 items-center justify-center rounded-full bg-loom-error text-2xs font-semibold text-loom-bg" aria-label={`${firingCount} open alerts`}>
+                {firingCount}
+              </span>
+            )}
           </button>
         ))}
       </nav>

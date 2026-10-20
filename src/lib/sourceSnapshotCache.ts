@@ -6,7 +6,7 @@
 // a fresh network success.
 // =================================================================
 
-import type { SourceKind } from "./tauri";
+import type { SourceKind } from "./sourceRegistry";
 
 const KEY_PREFIX = "loom-source-snapshot:";
 

@@ -27,6 +27,7 @@ import type { SourcePreferences, SourceReaction } from "../sourcePreferences";
 import type { SourceRef } from "../sourceRef";
 import type { ChartVisualOverrides } from "../chartVisualTypes";
 import type { ColumnInfo, QueryResult } from "../queryTypes";
+import type { MonitorState } from "./monitorSlice";
 
 export type { ChartAspectId, ChartDeviceId };
 export type { ChartVisualOverrides } from "../chartVisualTypes";
@@ -55,7 +56,7 @@ export interface FileEntry {
   originPath?: string;
 }
 
-export type ViewMode = "explorer" | "chart" | "query" | "dive";
+export type ViewMode = "explorer" | "chart" | "query" | "dive" | "monitor";
 export type PanelTab = "stats" | "chart" | "export" | "settings" | "dashboards";
 
 export interface ChartViewItem {
@@ -178,7 +179,7 @@ export interface AppSettings {
   chartDevice: ChartDeviceId;
 }
 
-export interface LoomState {
+export interface LoomState extends MonitorState {
   // Folder
   mountedFolder: string | null;
   files: FileEntry[];

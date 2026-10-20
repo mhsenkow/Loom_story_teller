@@ -12,6 +12,7 @@ import { createTableSlice } from "./tableSlice";
 import { createDashboardSlice } from "./dashboardSlice";
 import { createUiSlice } from "./uiSlice";
 import { createPointerViewsSlice } from "./pointerViewsSlice";
+import { createMonitorSlice } from "./monitorSlice";
 
 export const useLoomStore = create<LoomState>((set, get) => ({
   ...(initialState as unknown as LoomState),
@@ -22,6 +23,7 @@ export const useLoomStore = create<LoomState>((set, get) => ({
   ...createDashboardSlice(set),
   ...createPointerViewsSlice(set),
   ...createUiSlice(set, get, initialState),
+  ...createMonitorSlice(set, get, undefined as never),
 }));
 
 export type {

@@ -18,6 +18,8 @@
       "preview_id": "cd3cf9384ec54444ace1549f2b9dd399"
     }
   ],
+  // Always-on monitors (workers/monitorCron.ts): evaluate due cloud monitors every 5 minutes.
+  "triggers": { "crons": ["*/5 * * * *"] },
   "routes": [
     { "pattern": "loom.ibm.io", "custom_domain": true }
   ],

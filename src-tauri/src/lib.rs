@@ -48,6 +48,7 @@ pub fn run() {
             .plugin(tauri_plugin_fs::init())
             .plugin(tauri_plugin_dialog::init())
             .plugin(tauri_plugin_shell::init())
+            .plugin(tauri_plugin_notification::init())
             .plugin(
                 tauri_plugin_log::Builder::new()
                     .target(tauri_plugin_log::Target::new(

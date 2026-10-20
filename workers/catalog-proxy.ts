@@ -6,6 +6,18 @@
 // =================================================================
 
 import {
+  CLOUD_MAX_MONITORS,
+  BUNDLE_TTL_SECS,
+  deviceKey,
+  mergeUpload,
+  runMonitorCron,
+  sanitizeCloudMonitors,
+  validateWebhook,
+  webhookRequest,
+  type CloudBundle,
+} from "./monitorCron";
+import { parseSourceRows } from "../src/lib/sourceParsers";
+import {
   fetchUkCatalogUpstream,
   fetchUsCatalogUpstream,
   type DataGovSortKey,
@@ -1827,12 +1839,79 @@ async function handleOEmbed(url: URL, env: Env): Promise<Response> {
   });
 }
 
+// ---- Always-on monitors (`/api/monitors`, cron) ----
+
+async function handleMonitors(request: Request, url: URL, env: Env): Promise<Response> {
+  const kv = env.LOOM_STORIES;
+  const cors = corsHeadersFor(request, env);
+  const reply = (data: unknown, status = 200) =>
+    new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", ...cors } });
+  if (!kv) return reply({ error: "Always-on monitors are not configured" }, 503);
+  const auth = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? null;
+  const key = await deviceKey(auth);
+  if (!key) return reply({ error: "Missing device token" }, 401);
+
+  if (url.pathname === "/api/monitors/test-webhook" && request.method === "POST") {
+    if (!(await rateLimitAllow(env, "mon-test", key, 10, 3_600_000))) return reply({ error: "Too many tests — try later" }, 429);
+    const body = (await request.json().catch(() => null)) as { webhook?: unknown } | null;
+    const hook = validateWebhook(body?.webhook);
+    if (!hook) return reply({ error: "Use an https ntfy, Slack, Discord or JSON webhook URL" }, 400);
+    try {
+      const res = await fetch(hook.url, {
+        ...webhookRequest(hook, { name: "Loom test alert", decision: "Nothing — this is a test.", severity: "info" }, "Your always-on monitors can reach this channel."),
+        redirect: "manual",
+        signal: AbortSignal.timeout(8000),
+      });
+      return reply({ ok: res.ok, status: res.status });
+    } catch {
+      return reply({ ok: false, status: 0 });
+    }
+  }
+
+  if (url.pathname !== "/api/monitors") return reply({ error: "Not found" }, 404);
+
+  if (request.method === "GET") {
+    const b = (await kv.get(key, "json")) as CloudBundle | null;
+    return reply({ checks: b?.checks ?? {}, alerts: b?.alerts ?? [], updatedAt: b?.updatedAt ?? null, monitors: b?.monitors.length ?? 0 });
+  }
+  if (request.method === "DELETE") {
+    await kv.delete(key);
+    return reply({ ok: true });
+  }
+  if (request.method === "POST") {
+    if (!(await rateLimitAllow(env, "mon-up", key, 60, 3_600_000))) return reply({ error: "Too many updates — try later" }, 429);
+    const text = await request.text();
+    if (text.length > 200_000) return reply({ error: "Too large" }, 413);
+    let body: { monitors?: unknown; webhook?: unknown; acks?: unknown };
+    try { body = JSON.parse(text); } catch { return reply({ error: "Bad JSON" }, 400); }
+    const monitors = sanitizeCloudMonitors(body.monitors);
+    const webhook = body.webhook == null ? undefined : validateWebhook(body.webhook) ?? undefined;
+    if (body.webhook != null && !webhook) return reply({ error: "Use an https ntfy, Slack, Discord or JSON webhook URL" }, 400);
+    if (!monitors.length) {
+      await kv.delete(key);
+      return reply({ ok: true, monitors: 0 });
+    }
+    const prev = (await kv.get(key, "json")) as CloudBundle | null;
+    const acks = Array.isArray(body.acks) ? body.acks.filter((x): x is string => typeof x === "string").slice(0, 200) : [];
+    const next = mergeUpload(prev, monitors, webhook, Date.now(), acks);
+    await kv.put(key, JSON.stringify(next), { expirationTtl: BUNDLE_TTL_SECS });
+    return reply({ ok: true, monitors: monitors.length, max: CLOUD_MAX_MONITORS });
+  }
+  return reply({ error: "Method not allowed" }, 405);
+}
+
+async function cronSourceBody(kind: string, ctx: WaitUntil): Promise<unknown> {
+  const res = await handleSource(kind, new Request(`https://loom.internal/api/source/${kind}`), ctx);
+  if (!res.ok) throw new Error(`Feed ${kind} returned ${res.status}`);
+  return res.json();
+}
+
 export default {
   async fetch(request: Request, env: Env, ctx: WaitUntil): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/") || url.pathname.startsWith("/p/") || url.pathname.startsWith("/plot/"))) {
-      if (url.pathname === "/api/fetch-csv" || url.pathname.startsWith("/api/source/")) {
+      if (url.pathname === "/api/fetch-csv" || url.pathname.startsWith("/api/source/") || url.pathname.startsWith("/api/monitors")) {
         if (
           url.pathname === "/api/fetch-csv" &&
           !fetchCsvAuthorized(request, env) &&
@@ -1859,6 +1938,9 @@ export default {
       if (url.pathname.startsWith("/api/source/")) {
         const kind = url.pathname.replace("/api/source/", "").replace(/\/$/, "");
         return await handleSource(kind, request, ctx);
+      }
+      if (url.pathname === "/api/monitors" || url.pathname === "/api/monitors/test-webhook") {
+        return await handleMonitors(request, url, env);
       }
       if (url.pathname === "/api/feedback" && request.method === "POST") {
         return await handleFeedback(request, env);
@@ -1896,5 +1978,15 @@ export default {
       statusText: asset.statusText,
       headers,
     });
+  },
+
+  async scheduled(_controller: unknown, env: Env, ctx: WaitUntil): Promise<void> {
+    if (!env.LOOM_STORIES) return;
+    const kv = env.LOOM_STORIES;
+    ctx.waitUntil(
+      runMonitorCron(kv, Date.now(), (kind) => cronSourceBody(kind, ctx), parseSourceRows).then((r) => {
+        console.log(JSON.stringify({ event: "monitor_cron", ...r }));
+      }),
+    );
   },
 };

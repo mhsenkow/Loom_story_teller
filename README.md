@@ -58,6 +58,14 @@ The desktop app (Tauri + DuckDB) adds folder mounting, millions of rows, SQL ove
 - **Share** — the whole query lives in the URL (`#dive=…`); links to live feeds and demo files reopen the dataset on load. **SQL** shows the equivalent DuckDB query (open it in Query on desktop). **Open as cube** sends the filtered rows to the Data cube.
 - Works on web and desktop: the engine runs in the browser over the loaded rows (desktop pulls a 30k-row DuckDB sample first; web streams use their 8k-row buffer; uploaded CSVs on web use the 500-row sample).
 
+### Monitor
+- **Watch any live feed:** pick a number (latest, average, max, 95th percentile, count…), filter rows (city = "New York"), and choose when it matters: a limit, a healthy range, a sudden % change, **unusual for this hour or weekday**, or a feed that went quiet.
+- **Tied to decisions:** every monitor says what you'll do when it fires. Each alert asks what actually happened (acted, expected, done on purpose, false alarm), and the card tells you when a monitor is mostly noise.
+- **Expected is not wrong:** add maintenance windows, planned events, or recurring quiet hours. Mark an alert "expected" and Loom stops alerting at that weekday and hour.
+- **Scorecards:** group related metrics (temperature + humidity + air quality) and see the worst status at a glance.
+- **Schedules:** every N minutes, daily, weekly, or cron (`0 7 * * 1-5`). Confirm over several checks to skip one-off blips, set reminder cooldowns, and set quiet hours.
+- **Notifications:** in-app banners plus system notifications (desktop, iPhone/iPad, browser). **Always on** monitors are checked by Loom's server every 5 minutes even with the app closed, and alert your ntfy topic, Slack, Discord, or a webhook.
+
 ### Query
 - **SQL editor** — Run DuckDB SQL against `loom_active`. Schema browser (Tables + Columns) and click-to-insert. **Validation** (parentheses, SELECT/WITH) before run.
 - **Results** — Paginated grid, copy cell/row, export CSV. **Query history** and **snippets** (save/load named SQL). **Snapshot** current result and **Diff** vs a snapshot (row count delta).
