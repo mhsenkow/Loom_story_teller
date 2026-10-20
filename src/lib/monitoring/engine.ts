@@ -18,6 +18,7 @@
 // =================================================================
 
 import type { QueryResult } from "../queryTypes";
+import { wallParts } from "./zone";
 import type {
   AlertOutcome,
   CheckRecord,
@@ -152,10 +153,8 @@ export function computeMetric(spec: MetricSpec, sample: QueryResult, now: number
 
 // ---- Expected context ----
 
-export function expectedWindowAt(windows: ExpectedWindow[], at: number): ExpectedWindow | null {
-  const d = new Date(at);
-  const wd = d.getDay();
-  const hour = d.getHours() + d.getMinutes() / 60;
+export function expectedWindowAt(windows: ExpectedWindow[], at: number, tz?: string): ExpectedWindow | null {
+  const { weekday: wd, hourFloat: hour } = wallParts(at, tz);
   for (const w of windows) {
     if (w.start != null && w.end != null) {
       if (at >= w.start && at < w.end) return w;
@@ -173,13 +172,14 @@ export function expectedWindowAt(windows: ExpectedWindow[], at: number): Expecte
 }
 
 /** An "expected" review becomes a recurring window at that weekday and hour. */
-export function windowFromReview(alert: MonitorAlert, id: string, label?: string): ExpectedWindow {
-  const d = new Date(alert.openedAt);
-  const h = d.getHours();
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+export function windowFromReview(alert: MonitorAlert, id: string, label?: string, tz?: string): ExpectedWindow {
+  const { weekday, hour: h } = wallParts(alert.openedAt, tz);
   return {
     id,
-    label: label?.trim() || `Normal on ${d.toLocaleDateString(undefined, { weekday: "long" })}s around ${h}:00`,
-    weekdays: [d.getDay()],
+    label: label?.trim() || `Normal on ${WEEKDAY_NAMES[weekday]}s around ${h}:00`,
+    weekdays: [weekday],
     fromHour: h,
     toHour: (h + 1) % 24 || 24,
     origin: "review",
@@ -207,21 +207,21 @@ export function fmtValue(v: number | null | undefined, unit?: string): string {
   return unit ? `${s} ${unit}` : s;
 }
 
-function sameSlot(a: number, b: number, seasonal: "none" | "hour" | "weekday-hour"): boolean {
+function sameSlot(a: number, b: number, seasonal: "none" | "hour" | "weekday-hour", tz?: string): boolean {
   if (seasonal === "none") return true;
-  const da = new Date(a);
-  const db = new Date(b);
-  if (da.getHours() !== db.getHours()) return false;
-  return seasonal === "hour" || da.getDay() === db.getDay();
+  const pa = wallParts(a, tz);
+  const pb = wallParts(b, tz);
+  if (pa.hour !== pb.hour) return false;
+  return seasonal === "hour" || pa.weekday === pb.weekday;
 }
 
 /** Prior values that may serve as a baseline: real readings, not expected / errored checks. */
-function baselineValues(history: CheckRecord[], at: number, seasonal: "none" | "hour" | "weekday-hour", window: number): number[] {
+function baselineValues(history: CheckRecord[], at: number, seasonal: "none" | "hour" | "weekday-hour", window: number, tz?: string): number[] {
   const out: number[] = [];
   for (let i = history.length - 1; i >= 0 && out.length < window; i--) {
     const h = history[i]!;
     if (h.value == null || h.status === "expected" || h.status === "error" || h.status === "no-data") continue;
-    if (!sameSlot(h.at, at, seasonal)) continue;
+    if (!sameSlot(h.at, at, seasonal, tz)) continue;
     out.push(h.value);
   }
   return out;
@@ -234,6 +234,7 @@ export function evaluateRule(
   at: number,
   unit?: string,
   newestAt?: number | null,
+  tz?: string,
 ): RuleVerdict {
   if (rule.kind === "stale") {
     if (newestAt == null) return { breach: true, reason: "No timestamped rows in the feed" };
@@ -270,7 +271,7 @@ export function evaluateRule(
       return { breach: hit, reason: `${v} is ${pctLabel} vs ${vs} (${fmtValue(ref, unit)})`, baseline: ref };
     }
     case "anomaly": {
-      const base = baselineValues(history, at, rule.seasonal, Math.max(5, Math.min(200, rule.window)));
+      const base = baselineValues(history, at, rule.seasonal, Math.max(5, Math.min(200, rule.window)), tz);
       if (base.length < MIN_ANOMALY_BASELINE) {
         const slot = rule.seasonal === "none" ? "checks" : rule.seasonal === "hour" ? "checks at this hour" : "checks at this weekday and hour";
         return { breach: false, reason: `Learning normal: ${base.length}/${MIN_ANOMALY_BASELINE} ${slot}`, warmingUp: true };
@@ -301,7 +302,7 @@ export interface CheckOutcome {
 function inQuietHours(m: Monitor, at: number): boolean {
   const { quietFromHour: f, quietToHour: t } = m.notify;
   if (f == null || t == null || f === t) return false;
-  const h = new Date(at).getHours();
+  const h = wallParts(at, m.tz).hour;
   return f < t ? h >= f && h < t : h >= f || h < t;
 }
 
@@ -342,8 +343,8 @@ export function runCheck(
     return { record: { ...base, status: "no-data", reason: metric.rowsSeen ? "No numeric values matched" : "No rows matched" }, notify: false };
   }
 
-  const verdict = evaluateRule(monitor.rule, metric.value, history, at, monitor.metric.unit, metric.newestAt);
-  const expected = expectedWindowAt(monitor.expected, at);
+  const verdict = evaluateRule(monitor.rule, metric.value, history, at, monitor.metric.unit, metric.newestAt, monitor.tz);
+  const expected = expectedWindowAt(monitor.expected, at, monitor.tz);
   if (expected) {
     const record: CheckRecord = {
       ...base,

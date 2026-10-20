@@ -960,7 +960,8 @@ function HomeContent({
             )}
           </main>
 
-          {!socialExportReady && <DetailPanel />}
+          {/* Monitor has its own panels; the dataset detail panel would only cover it (phones). */}
+          {!socialExportReady && viewMode !== "monitor" && <DetailPanel />}
         </div>
 
         {/* Preview as footer — suite waffle docks just above it (rides expand/collapse) */}

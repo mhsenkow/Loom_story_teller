@@ -8,8 +8,10 @@
 // =================================================================
 
 import type { Monitor } from "./types";
+import { SOURCE_BY_KIND, type SourceKind } from "../sourceRegistry";
 
-export type MonitorDraft = Omit<Monitor, "id" | "createdAt" | "nextRunAt">;
+/** `reseed`: the limit is a placeholder — set it from the feed's values once they load. */
+export type MonitorDraft = Omit<Monitor, "id" | "createdAt" | "nextRunAt"> & { reseed?: boolean };
 
 const notify = { inApp: true, system: true, cooldownMinutes: 60 } as const;
 
@@ -154,3 +156,36 @@ export const MONITOR_TEMPLATES: { id: string; title: string; blurb: string; draf
     },
   },
 ];
+
+const MEASURE_SKIP = /^(id|.*_id|lat|lon|lng|latitude|longitude|rank|yr|year|height)$/i;
+
+/** Numeric columns worth watching on a feed (units first). */
+export function feedMeasures(kind: SourceKind): string[] {
+  const d = SOURCE_BY_KIND[kind];
+  return d.columns
+    .filter((c, i) => ["DOUBLE", "INTEGER", "BIGINT"].includes(d.types[i]!) && !MEASURE_SKIP.test(c))
+    .sort((a, b) => Number(!!d.units?.[b]) - Number(!!d.units?.[a]));
+}
+
+/** A sensible starting monitor for any feed; Quick Watch sets the limit from the data. */
+export function draftForFeed(kind: SourceKind, column?: string): MonitorDraft {
+  const d = SOURCE_BY_KIND[kind];
+  const timeColumn = d.columns.find((_, i) => d.types[i] === "TIMESTAMP" || d.types[i] === "DATE");
+  const col = column ?? feedMeasures(kind)[0];
+  const event = d.grain === "event";
+  return {
+    name: col ? `${d.label}: ${col.replace(/_/g, " ")}` : `${d.label}: new rows`,
+    decision: "",
+    metric: col
+      ? { source: kind, agg: event ? "max" : "latest", column: col, timeColumn, lookbackMinutes: event && timeColumn ? 60 : undefined, unit: d.units?.[col] }
+      : { source: kind, agg: "count", timeColumn, lookbackMinutes: timeColumn ? 60 : undefined },
+    rule: { kind: "threshold", above: 0 },
+    confirmChecks: 1,
+    severity: "warning",
+    schedule: { kind: "interval", minutes: Math.max(15, Math.round((d.pollMs || 3_600_000) / 60_000)) },
+    notify: { inApp: true, system: true, cooldownMinutes: 120 },
+    expected: [],
+    enabled: true,
+    reseed: true,
+  };
+}

@@ -53,8 +53,11 @@ function parseStoryId(hash: string): string | null {
 
 /** Landing view + collapsed chrome applied with the resumed live feed. */
 function landExtra(landView: "dive" | "chart") {
+  // A notification / push opened Monitor (or a moment) — resuming the feed must not pull it away.
+  const st = useLoomStore.getState();
+  const stayOnMonitor = st.viewMode === "monitor" || !!st.focusedMomentId;
   return {
-    viewMode: landView,
+    viewMode: stayOnMonitor ? ("monitor" as const) : landView,
     panelTab: "chart" as const,
     dataSourcesExpanded: false,
     dataRegionOpen: false,

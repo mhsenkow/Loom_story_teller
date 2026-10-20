@@ -10,7 +10,7 @@ import { MOMENT_THEME, momentSvg, momentText, type Moment } from "@/lib/monitori
 import { downloadMomentPng, postMomentToNeoSpace, publishMoment } from "@/lib/monitoring/shareMoment";
 import { openMonitorChart } from "@/lib/monitoring/openChart";
 import { copyTextToClipboard } from "@/lib/socialExport";
-import { isDesktop } from "@/lib/tauri";
+import { isNativeShell, openExternalUrl } from "@/lib/tauri";
 
 function ago(t: number): string {
   const m = Math.round((Date.now() - t) / 60_000);
@@ -40,7 +40,8 @@ function MomentActions({ mo, large }: { mo: Moment; large?: boolean }) {
   return (
     <div className="flex flex-wrap gap-1">
       <button type="button" className={btn} disabled={!!busy} onClick={shareLink}>{busy === "link" ? "Publishing…" : mo.storyUrl ? "Copy link" : "Share link"}</button>
-      {!isDesktop() && (
+      {/* NeoSpace compose needs a real browser window (native webviews can't open one). */}
+      {!isNativeShell() && (
         <button type="button" className={btn} disabled={!!busy} onClick={async () => { setBusy("neo"); try { await postMomentToNeoSpace(mo); } finally { setBusy(null); } }}>
           {busy === "neo" ? "Sending…" : "Post to NeoSpace"}
         </button>
@@ -79,14 +80,14 @@ function FocusedMoment({ mo }: { mo: Moment }) {
   useEffect(() => { ref.current?.focus(); }, []);
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center loom-overlay animate-fade-in p-4" onClick={() => focusMoment(null)} onKeyDown={(e) => { if (e.key === "Escape") focusMoment(null); }}>
-      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={mo.monitorName} className="loom-focus-panel w-full max-w-3xl bg-loom-surface border border-loom-border rounded-lg p-4 space-y-3 outline-none" onClick={(e) => e.stopPropagation()}>
+      <div ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={mo.monitorName} className="loom-focus-panel w-full max-w-3xl max-h-[92vh] overflow-y-auto bg-loom-surface border border-loom-border rounded-lg p-4 space-y-3 outline-none" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-2">
           <p className="text-2xs uppercase tracking-wide text-loom-label">Moment · {new Date(mo.at).toLocaleString()}</p>
           <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" onClick={() => focusMoment(null)}>Close</button>
         </div>
         <div className="rounded-md overflow-hidden [&>svg]:w-full [&>svg]:h-auto" dangerouslySetInnerHTML={{ __html: svg }} />
         {mo.decision && <p className="text-sm text-loom-text"><span className="text-loom-label">Plan:</span> {mo.decision}</p>}
-        {mo.storyUrl && <p className="text-2xs text-loom-muted break-all">Published at <a className="underline" href={mo.storyUrl} target="_blank" rel="noreferrer">{mo.storyUrl}</a></p>}
+        {mo.storyUrl && <p className="text-2xs text-loom-muted break-all">Published at <a className="underline" href={mo.storyUrl} target="_blank" rel="noreferrer" onClick={(e) => { if (isNativeShell()) { e.preventDefault(); void openExternalUrl(mo.storyUrl!); } }}>{mo.storyUrl}</a></p>}
         <MomentActions mo={mo} large />
       </div>
     </div>

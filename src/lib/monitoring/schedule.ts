@@ -7,6 +7,7 @@
 // =================================================================
 
 import type { MonitorSchedule } from "./types";
+import { fromWall, tzOffsetMs, wall } from "./zone";
 
 export const MIN_INTERVAL_MINUTES = 1;
 
@@ -41,49 +42,66 @@ export function parseCron(expr: string): ParsedCron {
   };
 }
 
-function cronMatches(c: ParsedCron, d: Date): boolean {
-  if (!c.minute.values.has(d.getMinutes()) || !c.hour.values.has(d.getHours()) || !c.month.values.has(d.getMonth() + 1)) return false;
-  const domOk = c.dom.values.has(d.getDate());
-  const dowOk = c.dow.values.has(d.getDay());
+function dayMatches(c: ParsedCron, d: Date): boolean {
+  const domOk = c.dom.values.has(d.getUTCDate());
+  const dowOk = c.dow.values.has(d.getUTCDay());
   if (c.dom.any && c.dow.any) return true;
   if (c.dom.any) return dowOk;
   if (c.dow.any) return domOk;
   return domOk || dowOk;
 }
 
-/** First run strictly after `from` (ms). */
-export function nextRunAfter(s: MonitorSchedule, from: number): number {
-  const d = new Date(from);
-  d.setSeconds(0, 0);
+function cronMatches(c: ParsedCron, d: Date): boolean {
+  // `d` is a wall Date (UTC fields = wall clock in the monitor's zone).
+  if (!c.minute.values.has(d.getUTCMinutes()) || !c.hour.values.has(d.getUTCHours()) || !c.month.values.has(d.getUTCMonth() + 1)) return false;
+  const domOk = c.dom.values.has(d.getUTCDate());
+  const dowOk = c.dow.values.has(d.getUTCDay());
+  if (c.dom.any && c.dow.any) return true;
+  if (c.dom.any) return dowOk;
+  if (c.dow.any) return domOk;
+  return domOk || dowOk;
+}
+
+/** First run strictly after `from` (ms), with wall-clock schedules read in `tz` (default: this device). */
+export function nextRunAfter(s: MonitorSchedule, from: number, tz?: string): number {
+  if (s.kind === "interval") {
+    const mins = Number(s.minutes);
+    if (!Number.isFinite(mins)) throw new Error("Interval must be a number of minutes");
+    return from + Math.max(MIN_INTERVAL_MINUTES, mins) * 60_000;
+  }
+  const d = wall(from, tz);
+  d.setUTCSeconds(0, 0);
+  const fromWallMs = from + tzOffsetMs(from, tz);
   switch (s.kind) {
-    case "interval": {
-      const mins = Math.max(MIN_INTERVAL_MINUTES, s.minutes);
-      return from + mins * 60_000;
-    }
     case "daily": {
-      d.setHours(s.hour, s.minute, 0, 0);
-      if (d.getTime() <= from) d.setDate(d.getDate() + 1);
-      return d.getTime();
+      if (!(s.hour >= 0 && s.hour <= 23 && s.minute >= 0 && s.minute <= 59)) throw new Error("Pick a time of day");
+      d.setUTCHours(s.hour, s.minute, 0, 0);
+      if (d.getTime() <= fromWallMs) d.setUTCDate(d.getUTCDate() + 1);
+      return fromWall(d.getTime(), tz);
     }
     case "weekly": {
-      d.setHours(s.hour, s.minute, 0, 0);
-      let add = (s.weekday - d.getDay() + 7) % 7;
-      if (add === 0 && d.getTime() <= from) add = 7;
-      d.setDate(d.getDate() + add);
-      return d.getTime();
+      if (!(s.weekday >= 0 && s.weekday <= 6 && s.hour >= 0 && s.hour <= 23 && s.minute >= 0 && s.minute <= 59)) throw new Error("Pick a weekday and time");
+      d.setUTCHours(s.hour, s.minute, 0, 0);
+      let add = (s.weekday - d.getUTCDay() + 7) % 7;
+      if (add === 0 && d.getTime() <= fromWallMs) add = 7;
+      d.setUTCDate(d.getUTCDate() + add);
+      return fromWall(d.getTime(), tz);
     }
     case "cron": {
       const c = parseCron(s.expr);
-      d.setMinutes(d.getMinutes() + 1);
-      // Search up to ~1 year minute by minute, skipping whole hours/days that cannot match.
-      for (let i = 0; i < 527_040; i++) {
-        if (!c.month.values.has(d.getMonth() + 1)) { d.setMonth(d.getMonth() + 1, 1); d.setHours(0, 0, 0, 0); continue; }
-        if (!c.hour.values.has(d.getHours())) { d.setHours(d.getHours() + 1, 0, 0, 0); continue; }
-        if (cronMatches(c, d)) return d.getTime();
-        d.setMinutes(d.getMinutes() + 1);
+      d.setUTCMinutes(d.getUTCMinutes() + 1);
+      // Search up to ~1 year, skipping whole months / hours that cannot match.
+      for (let i = 0; i < 20_000; i++) {
+        if (!c.month.values.has(d.getUTCMonth() + 1)) { d.setUTCMonth(d.getUTCMonth() + 1, 1); d.setUTCHours(0, 0, 0, 0); continue; }
+        if (!dayMatches(c, d)) { d.setUTCDate(d.getUTCDate() + 1); d.setUTCHours(0, 0, 0, 0); continue; }
+        if (!c.hour.values.has(d.getUTCHours())) { d.setUTCHours(d.getUTCHours() + 1, 0, 0, 0); continue; }
+        if (cronMatches(c, d)) return fromWall(d.getTime(), tz);
+        d.setUTCMinutes(d.getUTCMinutes() + 1);
       }
       throw new Error("Cron never matches within a year");
     }
+    default:
+      throw new Error("Unknown schedule");
   }
 }
 
@@ -103,10 +121,11 @@ export function describeSchedule(s: MonitorSchedule): string {
 }
 
 /** Validation message, or null when the schedule is usable. */
-export function scheduleError(s: MonitorSchedule): string | null {
+export function scheduleError(s: MonitorSchedule, tz?: string): string | null {
   try {
     if (s.kind === "interval" && !(s.minutes >= MIN_INTERVAL_MINUTES)) return `Interval must be at least ${MIN_INTERVAL_MINUTES} minute`;
-    nextRunAfter(s, Date.now());
+    const n = nextRunAfter(s, Date.now(), tz);
+    if (!Number.isFinite(n)) return "This schedule never runs";
     return null;
   } catch (e) {
     return e instanceof Error ? e.message : String(e);

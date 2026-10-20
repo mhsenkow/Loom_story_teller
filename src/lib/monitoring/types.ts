@@ -118,6 +118,8 @@ export interface Monitor {
     /** Play a short chime in the app. */
     chime?: boolean;
   };
+  /** IANA zone for schedules, quiet hours, expected windows and seasonal baselines (set on create). */
+  tz?: string;
   /** Always on: evaluated by the Worker cron (app closed too) and alerts go to the webhook. */
   cloud?: boolean;
   createdAt: number;

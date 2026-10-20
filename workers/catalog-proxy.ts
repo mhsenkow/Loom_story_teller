@@ -15,11 +15,13 @@ import {
   validateWebhook,
   webhookRequest,
   makeNotifier,
+  bundleExpiry,
   validatePushSubscription,
   vapidFromEnv,
   type CloudBundle,
 } from "./monitorCron";
 import { isPublicId, publicFeedXml, publicMomentSvg, publicPageHtml } from "./monitorPublic";
+import type { CheckRecord } from "../src/lib/monitoring/types";
 import { parseSourceRows } from "../src/lib/sourceParsers";
 import {
   fetchUkCatalogUpstream,
@@ -1858,9 +1860,12 @@ async function handleMonitors(request: Request, url: URL, env: Env): Promise<Res
   const auth = request.headers.get("Authorization")?.replace(/^Bearer\s+/i, "") ?? null;
   const key = await deviceKey(auth);
   if (!key) return reply({ error: "Missing device token" }, 401);
+  // Device tokens are self-minted, so also cap per network: the Worker must not be a free relay.
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
 
   if (url.pathname === "/api/monitors/test-webhook" && request.method === "POST") {
     if (!(await rateLimitAllow(env, "mon-test", key, 10, 3_600_000))) return reply({ error: "Too many tests — try later" }, 429);
+    if (!(await rateLimitAllow(env, "mon-test-ip", ip, 30, 3_600_000))) return reply({ error: "Too many tests — try later" }, 429);
     const body = (await request.json().catch(() => null)) as { webhook?: unknown } | null;
     const hook = validateWebhook(body?.webhook);
     if (!hook) return reply({ error: "Use an https ntfy, Slack, Discord or JSON webhook URL" }, 400);
@@ -1898,18 +1903,23 @@ async function handleMonitors(request: Request, url: URL, env: Env): Promise<Res
   }
   if (request.method === "POST") {
     if (!(await rateLimitAllow(env, "mon-up", key, 60, 3_600_000))) return reply({ error: "Too many updates — try later" }, 429);
+    if (!(await rateLimitAllow(env, "mon-up-ip", ip, 300, 3_600_000))) return reply({ error: "Too many updates — try later" }, 429);
     const text = await request.text();
     if (text.length > 200_000) return reply({ error: "Too large" }, 413);
-    let body: { monitors?: unknown; webhook?: unknown; acks?: unknown; push?: { add?: unknown; remove?: unknown }; public?: { title?: unknown } | null };
+    let body: {
+      monitors?: unknown; webhook?: unknown; acks?: unknown; push?: { add?: unknown; remove?: unknown }; public?: { title?: unknown } | null;
+      seedChecks?: unknown; dropMoments?: unknown;
+    };
     try { body = JSON.parse(text); } catch { return reply({ error: "Bad JSON" }, 400); }
     const monitors = sanitizeCloudMonitors(body.monitors);
     const webhook = body.webhook == null ? undefined : validateWebhook(body.webhook) ?? undefined;
     if (body.webhook != null && !webhook) return reply({ error: "Use an https ntfy, Slack, Discord or JSON webhook URL" }, 400);
     const prev = (await kv.get(key, "json")) as CloudBundle | null;
-    if (!monitors.length) {
-      if (prev?.public) await kv.delete(`monpub:${prev.public.id}`);
+    if (!prev && !(await rateLimitAllow(env, "mon-new-ip", ip, 20, 86_400_000))) return reply({ error: "Too many new devices from this network today" }, 429);
+    // Nothing always-on and nothing to keep (no push devices, no public page): forget the device.
+    if (!monitors.length && !prev?.push?.length && !prev?.public && body.push?.add == null && !body.public) {
       await kv.delete(key);
-      return reply({ ok: true, monitors: 0 });
+      return reply({ ok: true, monitors: 0, public: null, pushDevices: 0 });
     }
     const acks = Array.isArray(body.acks) ? body.acks.filter((x): x is string => typeof x === "string").slice(0, 200) : [];
     const add = body.push?.add != null ? validatePushSubscription(body.push.add) : undefined;
@@ -1918,11 +1928,13 @@ async function handleMonitors(request: Request, url: URL, env: Env): Promise<Res
     const next = mergeUpload(prev, monitors, webhook, Date.now(), acks, {
       push: { add: add ?? undefined, remove: typeof body.push?.remove === "string" ? body.push.remove : undefined },
       publicTitle,
+      seedChecks: body.seedChecks && typeof body.seedChecks === "object" ? (body.seedChecks as Record<string, CheckRecord[]>) : undefined,
+      dropMoments: Array.isArray(body.dropMoments) ? body.dropMoments.filter((x): x is string => typeof x === "string").slice(0, 300) : undefined,
     });
-    await kv.put(key, JSON.stringify(next), { expirationTtl: BUNDLE_TTL_SECS });
+    await kv.put(key, JSON.stringify(next), { expiration: bundleExpiry(next) });
     if (prev?.public && prev.public.id !== next.public?.id) await kv.delete(`monpub:${prev.public.id}`);
     if (next.public) await kv.put(`monpub:${next.public.id}`, key, { expirationTtl: BUNDLE_TTL_SECS });
-    return reply({ ok: true, monitors: monitors.length, max: CLOUD_MAX_MONITORS, public: next.public ?? null, pushDevices: next.push?.length ?? 0 });
+    return reply({ ok: true, monitors: monitors.length, accepted: monitors.map((m) => m.id), max: CLOUD_MAX_MONITORS, public: next.public ?? null, pushDevices: next.push?.length ?? 0 });
   }
   return reply({ error: "Method not allowed" }, 405);
 }

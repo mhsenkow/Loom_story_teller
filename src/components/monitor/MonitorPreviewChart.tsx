@@ -91,8 +91,20 @@ export function MonitorPreviewChart({
 
   const onMove = (e: React.PointerEvent) => {
     if (!drag || !onRuleChange || !svgRef.current) return;
-    const r = svgRef.current.getBoundingClientRect();
-    const v = nice(yInv(((e.clientY - r.top) / r.height) * H));
+    // Map through the SVG's own transform: the viewBox is letterboxed when the panel is narrower than W.
+    const svg = svgRef.current;
+    const ctm = svg.getScreenCTM();
+    let py: number;
+    if (ctm) {
+      const pt = svg.createSVGPoint();
+      pt.x = e.clientX;
+      pt.y = e.clientY;
+      py = pt.matrixTransform(ctm.inverse()).y;
+    } else {
+      const r = svg.getBoundingClientRect();
+      py = ((e.clientY - r.top) / r.height) * H;
+    }
+    const v = nice(yInv(py));
     if (rule.kind === "threshold") onRuleChange({ ...rule, [drag]: v });
     if (rule.kind === "range") {
       if (drag === "low") onRuleChange({ ...rule, low: Math.min(v, rule.high) });
@@ -111,7 +123,7 @@ export function MonitorPreviewChart({
     <svg
       ref={svgRef}
       viewBox={`0 0 ${W} ${H}`}
-      className={`w-full select-none touch-none ${drag ? "cursor-ns-resize" : ""}`}
+      className={`w-full select-none ${drag ? "cursor-ns-resize touch-none" : ""}`}
       style={{ height: H }}
       role="img"
       aria-label={`Preview of the monitored value over the loaded history${lines.length ? `, limits at ${lines.map((l) => fmtValue(l.v, unit)).join(" and ")}` : ""}`}
@@ -157,7 +169,7 @@ export function MonitorPreviewChart({
               y={y(l.v) - 7}
               height={14}
               fill="transparent"
-              className="cursor-ns-resize"
+              className="cursor-ns-resize touch-none"
               role="slider"
               tabIndex={0}
               aria-label={`${l.key} limit`}

@@ -74,8 +74,8 @@ describe("monitorCron", () => {
 
   it("walks KV and writes back only changed bundles", async () => {
     const store = new Map<string, string>([
-      ["mon:a", JSON.stringify({ monitors: [mon()], checks: {}, alerts: [], updatedAt: 0 })],
-      ["mon:b", JSON.stringify({ monitors: [mon({ nextRunAt: NOW + 1 })], checks: {}, alerts: [], updatedAt: 0 })],
+      ["mon:a", JSON.stringify({ monitors: [mon()], checks: {}, alerts: [], updatedAt: 0, syncedAt: NOW })],
+      ["mon:b", JSON.stringify({ monitors: [mon({ nextRunAt: NOW + 1 })], checks: {}, alerts: [], updatedAt: 0, syncedAt: NOW })],
     ]);
     const puts: string[] = [];
     const kv: MonitorKv = {
@@ -172,5 +172,45 @@ describe("moments, push, and public pages", () => {
     expect(xml).not.toMatch(/SECRET/);
     expect(publicMomentSvg(bundle, bundle.moments![0]!.id)).toMatch(/^<svg/);
     expect(publicMomentSvg(bundle, "nope")).toBeNull();
+  });
+});
+
+import { bundleExpiry, foldCronResults } from "../monitorCron";
+
+describe("cron safety", () => {
+  it("folds cron results into a newer device write without reverting it", async () => {
+    const before: CloudBundle = { monitors: [mon()], checks: {}, alerts: [], updatedAt: 0, rev: 1, syncedAt: NOW, webhook: { kind: "json", url: "https://example.com/a" }, push: [] };
+    const evaluated: CloudBundle = structuredClone(before);
+    await evaluateBundle(evaluated, NOW, async () => ({ mags: [6] }), parse, async () => {});
+    const deviceWrite: CloudBundle = { ...structuredClone(before), rev: 2, webhook: undefined, public: undefined };
+    const out = foldCronResults(deviceWrite, evaluated, new Set());
+    expect(out.webhook).toBeUndefined();
+    expect(out.rev).toBe(2);
+    expect(out.checks.c1).toHaveLength(1);
+    expect(out.alerts).toHaveLength(1);
+    expect(out.moments).toHaveLength(1);
+  });
+  it("expires 45 days after the last device sync, not the last cron run", async () => {
+    const stale: CloudBundle = { monitors: [mon()], checks: {}, alerts: [], updatedAt: NOW, syncedAt: NOW - 46 * 86_400_000 };
+    const store = new Map<string, string>([["mon:x", JSON.stringify(stale)]]);
+    const kv: MonitorKv = {
+      get: async (k) => JSON.parse(store.get(k) ?? "null"),
+      put: async (k, v) => { store.set(k, v); },
+      delete: async (k) => { store.delete(k); },
+      list: async ({ prefix }) => ({ keys: [...store.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name })), list_complete: true }),
+    };
+    await runMonitorCron(kv, NOW, async () => ({ mags: [6] }), parse, async () => {});
+    expect(store.has("mon:x")).toBe(false);
+    expect(bundleExpiry({ syncedAt: NOW, updatedAt: NOW + 999 })).toBe(Math.floor((NOW + 45 * 86_400_000) / 1000));
+  });
+  it("seeds history for monitors new to the cloud and drops dismissed / orphaned moments", () => {
+    const seed = { c1: [{ monitorId: "c1", at: 1, value: 3, status: "ok" as const, reason: "" }] };
+    const a = mergeUpload(null, [mon()], undefined, NOW, [], { seedChecks: seed });
+    expect(a.checks.c1).toHaveLength(1);
+    expect(a.rev).toBe(1);
+    const withMoments = { ...a, moments: [{ id: "m1", monitorId: "c1" }, { id: "m2", monitorId: "gone" }, { id: "m3", monitorId: "c1" }] } as unknown as CloudBundle;
+    const b = mergeUpload(withMoments, [mon()], undefined, NOW, [], { dropMoments: ["m3"] });
+    expect(b.moments!.map((m) => m.id)).toEqual(["m1"]);
+    expect(b.rev).toBe(2);
   });
 });

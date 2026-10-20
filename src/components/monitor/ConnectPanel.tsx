@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import qrcode from "qrcode-generator";
 import { useLoomStore } from "@/lib/store";
-import { isTauri } from "@/lib/tauri";
+import { isNativeShell, openExternalUrl } from "@/lib/tauri";
 import { publicLoomWebOrigin } from "@/lib/publicOrigin";
 import { copyTextToClipboard } from "@/lib/socialExport";
 import { notificationPermission, playChime, requestNotificationPermission, type NotifyPermission } from "@/lib/monitoring/notify";
@@ -24,6 +24,7 @@ import {
   syncCloudNow,
   syncCloudWith,
   testCloudWebhook,
+  webhookProblem,
   webPushAvailable,
   webhookKindFor,
   type CloudWebhookKind,
@@ -88,10 +89,25 @@ export function ConnectPanel() {
   };
 
   const setWebhook = async (url: string | null) => {
+    const problem = url ? webhookProblem(url) : null;
+    if (problem) throw new Error(problem);
     const w = url ? { kind: webhookKindFor(url), url } : null;
+    const before = loadWebhook();
     saveWebhook(w);
+    try {
+      await syncCloudNow(true);
+    } catch (e) {
+      // The server refused it: don't keep a channel that every later sync would fail on.
+      saveWebhook(before);
+      throw e;
+    }
     setHook(w);
-    await syncCloudNow(true);
+  };
+  /** Native shells open links in the system browser. */
+  const ext = (url: string) => (e: React.MouseEvent) => {
+    if (!isNativeShell()) return;
+    e.preventDefault();
+    void openExternalUrl(url);
   };
 
   const origin = publicLoomWebOrigin();
@@ -119,7 +135,7 @@ export function ConnectPanel() {
         <Row title="Your phone" status={hook?.kind === "ntfy" ? "Connected" : "Not set up"} on={hook?.kind === "ntfy"}>
           {hook?.kind === "ntfy" ? (
             <>
-              <p className="text-2xs text-loom-muted">Always-on alerts go to the free <a className="underline" href="https://ntfy.sh/" target="_blank" rel="noreferrer">ntfy</a> app. Scan to subscribe on another phone.</p>
+              <p className="text-2xs text-loom-muted">Always-on alerts go to the free <a className="underline" href="https://ntfy.sh/" target="_blank" rel="noreferrer" onClick={ext("https://ntfy.sh/")}>ntfy</a> app. Scan to subscribe on another phone.</p>
               {showQr && <div className="flex items-center gap-3"><Qr text={hook.url} /><p className="text-2xs text-loom-muted break-all">{hook.url}</p></div>}
               <div className="flex flex-wrap gap-1">
                 <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" onClick={() => setShowQr((x) => !x)}>{showQr ? "Hide QR" : "Show QR"}</button>
@@ -137,7 +153,7 @@ export function ConnectPanel() {
           )}
         </Row>
 
-        {!isTauri() && (
+        {!isNativeShell() && (
           <Row title="This browser, even when closed" status={!pushOk ? "Not available here" : pushOn ? "On" : "Off"} on={pushOn}>
             <p className="text-2xs text-loom-muted">
               {pushOk ? "Real push notifications from Loom's server, for always-on monitors. On iPhone, add Loom to your Home Screen first." : "Needs a browser with push support on loom.ibm.io (and server keys)."}
@@ -164,7 +180,12 @@ export function ConnectPanel() {
           <div className="flex flex-wrap gap-1">
             <input className="loom-input flex-1 min-w-40 text-xs" type="url" inputMode="url" aria-label="Webhook URL" placeholder={hook && hook.kind !== "ntfy" ? hook.url : "https://hooks.slack.com/…"} value={pasted} onChange={(e) => setPasted(e.target.value)} />
             <button type="button" className="loom-btn text-xs px-2 py-1 rounded-md" disabled={!!busy || !pasted.trim()} onClick={() => run("hook", async () => { await setWebhook(pasted.trim()); setPasted(""); setToast(`Alerts go to ${KIND_LABEL[webhookKindFor(pasted.trim())]}`); })}>Save</button>
-            {hook && hook.kind !== "ntfy" && <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" disabled={!!busy} onClick={() => run("test2", async () => { setToast((await testCloudWebhook(hook)) ? "Test sent" : "The channel didn't accept the test"); })}>Send test</button>}
+            {hook && hook.kind !== "ntfy" && (
+              <>
+                <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" disabled={!!busy} onClick={() => run("test2", async () => { setToast((await testCloudWebhook(hook)) ? "Test sent" : "The channel didn't accept the test"); })}>Send test</button>
+                <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" disabled={!!busy} onClick={() => run("rm2", async () => { await setWebhook(null); setToast("Channel disconnected"); })}>Disconnect</button>
+              </>
+            )}
           </div>
         </Row>
 
@@ -172,7 +193,7 @@ export function ConnectPanel() {
           <p className="text-2xs text-loom-muted">A read-only status page of your always-on monitors and their moments, plus an RSS feed for Slack, Zapier, IFTTT or any reader. Only names, rules, values and moments are shown.</p>
           {pub && pageUrl ? (
             <div className="space-y-1">
-              <a className="block text-xs underline break-all text-loom-accent-text" href={pageUrl} target="_blank" rel="noreferrer">{pageUrl}</a>
+              <a className="block text-xs underline break-all text-loom-accent-text" href={pageUrl} target="_blank" rel="noreferrer" onClick={ext(pageUrl)}>{pageUrl}</a>
               <div className="flex flex-wrap gap-1">
                 <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" onClick={async () => setToast((await copyTextToClipboard(pageUrl)) ? "Page link copied" : pageUrl)}>Copy page link</button>
                 <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" onClick={async () => setToast((await copyTextToClipboard(`${pageUrl}/feed.xml`)) ? "RSS link copied" : `${pageUrl}/feed.xml`)}>Copy RSS link</button>

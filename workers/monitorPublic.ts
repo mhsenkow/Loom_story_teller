@@ -84,7 +84,8 @@ export function publicFeedXml(b: CloudBundle, id: string, origin: string): strin
   const items = (b.moments ?? []).slice(0, 30).map((mo: Moment) => {
     const link = `${origin}/w/${id}#${encodeURIComponent(mo.id)}`;
     const img = `${origin}/w/${id}/m/${encodeURIComponent(mo.id)}.svg`;
-    const desc = `<p>${esc(mo.reason)}</p>${mo.decision ? `<p>Plan: ${esc(mo.decision)}</p>` : ""}<p><img src="${img}" alt="${esc(mo.monitorName)}"/></p>`;
+    // The private "if this fires, I will…" plan never goes public.
+    const desc = `<p>${esc(mo.reason)}</p><p><img src="${img}" alt="${esc(mo.monitorName)}"/></p>`;
     return `<item><title>${esc(`${mo.monitorName}: ${fmtValue(mo.value, mo.unit)}`)}</title><link>${link}</link><guid isPermaLink="false">${esc(mo.id)}</guid><pubDate>${new Date(mo.at).toUTCString()}</pubDate><category>${esc(mo.feedLabel)}</category><description><![CDATA[${desc}]]></description><enclosure url="${img}" type="image/svg+xml" length="0"/></item>`;
   }).join("");
   return `<?xml version="1.0" encoding="UTF-8"?><rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom"><channel><title>${title}</title><link>${origin}/w/${id}</link><atom:link href="${origin}/w/${id}/feed.xml" rel="self" type="application/rss+xml"/><description>Alerts from live open-data monitors, by Loom.</description><lastBuildDate>${new Date(b.updatedAt).toUTCString()}</lastBuildDate>${items}</channel></rss>`;

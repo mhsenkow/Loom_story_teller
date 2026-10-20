@@ -16,6 +16,7 @@ export interface MonitorBundle {
   checks: Record<string, CheckRecord[]>;
   alerts: MonitorAlert[];
   moments?: Moment[];
+  dismissedMoments?: string[];
 }
 
 const EMPTY: MonitorBundle = { monitors: [], checks: {}, alerts: [], moments: [] };
@@ -44,7 +45,8 @@ export function loadMonitors(): MonitorBundle {
     const moments = Array.isArray(parsed.data.moments)
       ? parsed.data.moments.filter((m) => m && typeof m.id === "string" && typeof m.at === "number" && Array.isArray(m.series))
       : [];
-    return { monitors, checks, alerts, moments };
+    const dismissedMoments = Array.isArray(parsed.data.dismissedMoments) ? parsed.data.dismissedMoments.filter((x) => typeof x === "string").slice(0, 300) : [];
+    return { monitors, checks, alerts, moments, dismissedMoments };
   } catch {
     return EMPTY;
   }

@@ -29,7 +29,7 @@ import { suggestMonitorsForFeed } from "@/lib/monitoring/suggest";
 import { monitorDraftFromChart } from "@/lib/monitoring/fromChart";
 import { chartLinkFromState } from "@/lib/chartLink";
 import { sourceKindFromPath, type SourceKind } from "@/lib/sourceRegistry";
-import type { MonitorDraft } from "@/lib/monitoring/templates";
+import { draftForFeed, type MonitorDraft } from "@/lib/monitoring/templates";
 import type { QueryResult } from "@/lib/queryTypes";
 import { MonitorSparkline } from "./monitor/MonitorSparkline";
 
@@ -230,7 +230,11 @@ function MonitorCard({ m, checks, alerts }: { m: Monitor; checks: CheckRecord[];
         <p className="text-2xs text-loom-warning-text">Most alerts here didn&apos;t lead to action. Try a wider limit, more confirm checks, or expected windows.</p>
       )}
       <div className="flex flex-wrap gap-1 pt-1">
-        <button type="button" className="loom-btn text-2xs px-2 py-1 rounded-md" disabled={running} onClick={() => void runMonitorNow(m.id)}>Check now</button>
+        {m.cloud ? (
+          <span className="text-2xs text-loom-muted px-2 py-1" title="Always-on monitors are checked by Loom's server; results arrive here within a minute">Checked by the server</span>
+        ) : (
+          <button type="button" className="loom-btn text-2xs px-2 py-1 rounded-md" disabled={running} onClick={() => void runMonitorNow(m.id)}>Check now</button>
+        )}
         <button type="button" className="loom-btn-ghost text-2xs px-2 py-1 rounded-md" title={m.chart ? `Open “${m.chart.title}”` : `Chart ${feed?.label ?? "this feed"}`} onClick={() => void openMonitorChart(m)}>
           {m.chart ? "Open chart" : "Chart feed"}
         </button>
@@ -318,7 +322,10 @@ export function MonitorView() {
             {monitors.length > 0 && <button type="button" className="loom-btn-ghost text-xs px-2 py-1.5 rounded-md" onClick={exportAll}>Export</button>}
             <button type="button" className="loom-btn-ghost text-xs px-2 py-1.5 rounded-md" onClick={() => fileRef.current?.click()}>Import</button>
             <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ""; }} />
-            <button type="button" className="loom-btn-primary text-sm px-3 py-1.5 rounded-md" onClick={() => openMonitorEditor("new")}>New monitor</button>
+            <button type="button" className="loom-btn-primary text-sm px-3 py-1.5 rounded-md" onClick={() => {
+              const kind = sourceKindFromPath(useLoomStore.getState().selectedFile?.path) ?? "usgs";
+              openMonitorEditor("new", draftForFeed(kind), "quick");
+            }}>New monitor</button>
           </div>
         </header>
 

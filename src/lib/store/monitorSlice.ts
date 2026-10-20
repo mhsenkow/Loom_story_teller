@@ -13,6 +13,10 @@ import type { MonitorDraft } from "../monitoring/templates";
 import { MAX_HISTORY_PER_MONITOR, windowFromReview } from "../monitoring/engine";
 import { nextRunAfter } from "../monitoring/schedule";
 import { MAX_MOMENTS, type Moment } from "../monitoring/moments";
+import { deviceTimeZone } from "../monitoring/zone";
+
+/** Mirrors the Worker's per-device cap (cloudSync.CLOUD_MAX_MONITORS). */
+const CLOUD_CAP = 20;
 
 export const MAX_ALERTS = 300;
 
@@ -25,6 +29,8 @@ export interface MonitorState {
   monitorAlerts: MonitorAlert[];
   /** Snapshots of what each alert looked like (newest first). */
   monitorMoments: Moment[];
+  /** Moments the person deleted (so a cloud pull doesn't bring them back). */
+  monitorDismissedMoments: string[];
   /** Moment opened in the Monitor view (from a notification, card, or link). */
   focusedMomentId: string | null;
   /** Ids currently being checked (spinners, no double-runs). */
@@ -34,7 +40,7 @@ export interface MonitorState {
   /** Quick Watch (one sentence, over any view) or the full editor (Monitor view). */
   monitorEditorMode: "quick" | "full";
 
-  hydrateMonitors: (data: { monitors: Monitor[]; checks: Record<string, CheckRecord[]>; alerts: MonitorAlert[]; moments?: Moment[] }) => void;
+  hydrateMonitors: (data: { monitors: Monitor[]; checks: Record<string, CheckRecord[]>; alerts: MonitorAlert[]; moments?: Moment[]; dismissedMoments?: string[] }) => void;
   addMoment: (m: Moment) => void;
   updateMoment: (id: string, patch: Partial<Moment>) => void;
   removeMoment: (id: string) => void;
@@ -59,6 +65,7 @@ export const monitorInitialState = {
   monitorChecks: {} as Record<string, CheckRecord[]>,
   monitorAlerts: [] as MonitorAlert[],
   monitorMoments: [] as Moment[],
+  monitorDismissedMoments: [] as string[],
   focusedMomentId: null as string | null,
   monitorsRunning: [] as string[],
   monitorEditingId: null as string | "new" | null,
@@ -66,20 +73,35 @@ export const monitorInitialState = {
   monitorEditorMode: "full" as "quick" | "full",
 };
 
-export const createMonitorSlice: StateCreator<LoomState, [], [], Omit<MonitorState, keyof typeof monitorInitialState>> = (set) => ({
-  hydrateMonitors: ({ monitors, checks, alerts, moments }) => set({ monitors, monitorChecks: checks, monitorAlerts: alerts, monitorMoments: moments ?? [] }),
+export const createMonitorSlice: StateCreator<LoomState, [], [], Omit<MonitorState, keyof typeof monitorInitialState>> = (set, get) => ({
+  hydrateMonitors: ({ monitors, checks, alerts, moments, dismissedMoments }) =>
+    set({ monitors: monitors.map((m) => (m.tz ? m : { ...m, tz: deviceTimeZone() })), monitorChecks: checks, monitorAlerts: alerts, monitorMoments: moments ?? [], monitorDismissedMoments: dismissedMoments ?? [] }),
   addMoment: (m) => set((s) => ({ monitorMoments: [m, ...s.monitorMoments.filter((x) => x.id !== m.id)].slice(0, MAX_MOMENTS) })),
   updateMoment: (id, patch) => set((s) => ({ monitorMoments: s.monitorMoments.map((m) => (m.id === id ? { ...m, ...patch } : m)) })),
-  removeMoment: (id) => set((s) => ({ monitorMoments: s.monitorMoments.filter((m) => m.id !== id) })),
+  removeMoment: (id) =>
+    set((s) => ({ monitorMoments: s.monitorMoments.filter((m) => m.id !== id), monitorDismissedMoments: [id, ...s.monitorDismissedMoments.filter((x) => x !== id)].slice(0, 300) })),
   focusMoment: (id) => set({ focusedMomentId: id }),
   addMonitor: (draft) => {
     const id = uid("mon");
     const now = Date.now();
-    const m: Monitor = { ...draft, id, createdAt: now, nextRunAt: now };
+    const { reseed: _r, ...rest } = draft;
+    const m: Monitor = { ...rest, id, createdAt: now, nextRunAt: now, tz: rest.tz ?? deviceTimeZone() };
+    if (m.cloud && get().monitors.filter((x) => x.cloud).length >= CLOUD_CAP) {
+      m.cloud = undefined;
+      get().setToast(`Always on is full (${CLOUD_CAP} monitors). “${m.name}” checks while Loom is open.`);
+    }
     set((s) => ({ monitors: [...s.monitors, m] }));
     return id;
   },
-  updateMonitor: (id, patch) =>
+  updateMonitor: (id, patch) => {
+    if (patch.cloud) {
+      const s0 = get();
+      const already = s0.monitors.find((m) => m.id === id)?.cloud;
+      if (!already && s0.monitors.filter((m) => m.cloud).length >= CLOUD_CAP) {
+        patch = { ...patch, cloud: undefined };
+        s0.setToast(`Always on is full (${CLOUD_CAP} monitors). This one checks while Loom is open.`);
+      }
+    }
     set((s) => ({
       monitors: s.monitors.map((m) => {
         if (m.id !== id) return m;
@@ -88,7 +110,8 @@ export const createMonitorSlice: StateCreator<LoomState, [], [], Omit<MonitorSta
         if (patch.schedule || patch.rule || patch.metric) next.nextRunAt = Date.now();
         return next;
       }),
-    })),
+    }));
+  },
   removeMonitor: (id) =>
     set((s) => {
       const checks = { ...s.monitorChecks };
@@ -107,6 +130,8 @@ export const createMonitorSlice: StateCreator<LoomState, [], [], Omit<MonitorSta
     })),
   recordCheck: (id, record, alert) =>
     set((s) => {
+      // Deleted while its check was in flight: drop the result.
+      if (!s.monitors.some((m) => m.id === id)) return s;
       const prev = s.monitorChecks[id] ?? [];
       const checks = { ...s.monitorChecks, [id]: [...prev, record].slice(-MAX_HISTORY_PER_MONITOR) };
       let alerts = s.monitorAlerts;
@@ -118,7 +143,7 @@ export const createMonitorSlice: StateCreator<LoomState, [], [], Omit<MonitorSta
       const monitors = s.monitors.map((m) => {
         if (m.id !== id) return m;
         let nextRunAt: number;
-        try { nextRunAt = nextRunAfter(m.schedule, record.at); } catch { nextRunAt = record.at + 3_600_000; }
+        try { nextRunAt = nextRunAfter(m.schedule, record.at, m.tz); } catch { nextRunAt = record.at + 3_600_000; }
         return { ...m, nextRunAt };
       });
       return { monitorChecks: checks, monitorAlerts: alerts, monitors };
@@ -130,7 +155,7 @@ export const createMonitorSlice: StateCreator<LoomState, [], [], Omit<MonitorSta
       const now = Date.now();
       const reviewed: MonitorAlert = { ...alert, outcome, note: note?.trim() || undefined, acknowledgedAt: alert.acknowledgedAt ?? now };
       const monitors = learnExpected && (outcome === "expected" || outcome === "deliberate")
-        ? s.monitors.map((m) => (m.id === alert.monitorId ? { ...m, expected: [...m.expected, windowFromReview(alert, uid("exp"), note)] } : m))
+        ? s.monitors.map((m) => (m.id === alert.monitorId ? { ...m, expected: [...m.expected, windowFromReview(alert, uid("exp"), note, m.tz)] } : m))
         : s.monitors;
       return { monitorAlerts: s.monitorAlerts.map((a) => (a.id === alertId ? reviewed : a)), monitors };
     }),
@@ -147,7 +172,13 @@ export const createMonitorSlice: StateCreator<LoomState, [], [], Omit<MonitorSta
       if (!cloudIds.size) return s;
       const local = new Map(s.monitorAlerts.map((a) => [a.id, a]));
       const nextChecks = { ...s.monitorChecks };
-      for (const id of cloudIds) if (checks[id]) nextChecks[id] = checks[id]!.slice(-MAX_HISTORY_PER_MONITOR);
+      // Union by timestamp: history from before a monitor went always-on, and the server's checks.
+      for (const id of cloudIds) {
+        if (!checks[id]?.length) continue;
+        const byAt = new Map((nextChecks[id] ?? []).map((c) => [c.at, c]));
+        for (const c of checks[id]!) byAt.set(c.at, c);
+        nextChecks[id] = [...byAt.values()].sort((a, b) => a.at - b.at).slice(-MAX_HISTORY_PER_MONITOR);
+      }
       const fromCloud = alerts
         .filter((a) => cloudIds.has(a.monitorId))
         .map((a) => {
@@ -157,8 +188,11 @@ export const createMonitorSlice: StateCreator<LoomState, [], [], Omit<MonitorSta
       const ids = new Set(fromCloud.map((a) => a.id));
       const rest = s.monitorAlerts.filter((a) => !ids.has(a.id) && !(cloudIds.has(a.monitorId) && !a.outcome));
       const merged = [...fromCloud, ...rest].sort((a, b) => b.openedAt - a.openedAt).slice(0, MAX_ALERTS);
+      const dismissed = new Set(s.monitorDismissedMoments);
       const known = new Map(s.monitorMoments.map((m) => [m.id, m]));
-      const fresh = moments.filter((m) => cloudIds.has(m.monitorId)).map((m) => ({ ...m, storyUrl: known.get(m.id)?.storyUrl ?? m.storyUrl }));
+      const fresh = moments
+        .filter((m) => cloudIds.has(m.monitorId) && !dismissed.has(m.id))
+        .map((m) => ({ ...m, storyUrl: known.get(m.id)?.storyUrl ?? m.storyUrl }));
       const freshIds = new Set(fresh.map((m) => m.id));
       const allMoments = [...fresh, ...s.monitorMoments.filter((m) => !freshIds.has(m.id))].sort((a, b) => b.at - a.at).slice(0, MAX_MOMENTS);
       return { monitorChecks: nextChecks, monitorAlerts: merged, monitorMoments: allMoments };

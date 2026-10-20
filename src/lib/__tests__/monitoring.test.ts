@@ -194,3 +194,32 @@ describe("templates", () => {
     }
   });
 });
+
+import { fromWall, tzOffsetMs, wallParts } from "../monitoring/zone";
+
+describe("time zones", () => {
+  it("evaluates wall-clock schedules in the monitor's zone, whatever the runtime zone", () => {
+    const from = Date.parse("2026-10-20T15:00:00Z"); // 08:00 in Los Angeles (PDT)
+    const next = nextRunAfter({ kind: "daily", hour: 9, minute: 0 }, from, "America/Los_Angeles");
+    expect(new Date(next).toISOString()).toBe("2026-10-20T16:00:00.000Z");
+    const nyCron = nextRunAfter({ kind: "cron", expr: "0 7 * * 1-5" }, from, "America/New_York");
+    expect(new Date(nyCron).toISOString()).toBe("2026-10-21T11:00:00.000Z");
+  });
+  it("handles DST and offsets", () => {
+    expect(tzOffsetMs(Date.parse("2026-07-01T12:00:00Z"), "Europe/London")).toBe(3_600_000);
+    expect(tzOffsetMs(Date.parse("2026-12-01T12:00:00Z"), "Europe/London")).toBe(0);
+    const w = Date.UTC(2026, 10, 1, 9, 0); // Nov 1 09:00 wall (after US DST ends)
+    expect(new Date(fromWall(w, "America/Los_Angeles")).toISOString()).toBe("2026-11-01T17:00:00.000Z");
+  });
+  it("quiet hours, expected windows and seasonal slots use the zone", () => {
+    const at = Date.parse("2026-10-20T05:30:00Z"); // 22:30 Mon in LA, 05:30 Tue in UTC
+    expect(wallParts(at, "America/Los_Angeles")).toMatchObject({ weekday: 1, hour: 22 });
+    expect(expectedWindowAt([{ id: "n", label: "night", fromHour: 22, toHour: 6, origin: "manual" }], at, "America/Los_Angeles")).not.toBeNull();
+    expect(expectedWindowAt([{ id: "n", label: "night", fromHour: 22, toHour: 6, origin: "manual" }], at, "Asia/Tokyo")).toBeNull();
+  });
+  it("rejects schedules that never run", () => {
+    expect(scheduleError({ kind: "cron", expr: "0 0 31 2 *" })).toMatch(/never/);
+    expect(scheduleError({ kind: "daily", hour: Number.NaN, minute: 0 })).toBeTruthy();
+    expect(scheduleError({ kind: "bogus" } as never)).toBeTruthy();
+  });
+});

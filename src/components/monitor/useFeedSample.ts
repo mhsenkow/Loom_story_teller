@@ -10,11 +10,22 @@ import { SOURCE_EXPLORE_ROWS, sourceStreamPath, type SourceKind } from "@/lib/so
 import type { QueryResult } from "@/lib/queryTypes";
 
 const cache = new Map<SourceKind, { at: number; sample: QueryResult }>();
+const inflight = new Map<SourceKind, Promise<QueryResult>>();
 const TTL = 60_000;
 
-async function load(kind: SourceKind): Promise<QueryResult> {
+/** One load per feed at a time, however many cards ask. */
+function load(kind: SourceKind): Promise<QueryResult> {
   const hit = cache.get(kind);
-  if (hit && Date.now() - hit.at < TTL) return hit.sample;
+  if (hit && Date.now() - hit.at < TTL) return Promise.resolve(hit.sample);
+  let p = inflight.get(kind);
+  if (!p) {
+    p = loadFresh(kind).finally(() => inflight.delete(kind));
+    inflight.set(kind, p);
+  }
+  return p;
+}
+
+async function loadFresh(kind: SourceKind): Promise<QueryResult> {
   const st = await sourceStatus(kind);
   if (!st.running) await sourceStart(kind);
   let snap = await sourceSnapshot(kind, SOURCE_EXPLORE_ROWS);
@@ -27,7 +38,8 @@ async function load(kind: SourceKind): Promise<QueryResult> {
 }
 
 export function useFeedSample(kind: SourceKind | null): { sample: QueryResult | null; loading: boolean; error: string | null } {
-  const open = useLoomStore((s) => (kind && s.selectedFile?.path === sourceStreamPath(kind) ? s.sampleRows : null));
+  // The open dataset is used only when it actually has rows (otherwise fetch like any other feed).
+  const open = useLoomStore((s) => (kind && s.selectedFile?.path === sourceStreamPath(kind) && s.sampleRows?.rows.length ? s.sampleRows : null));
   const [state, setState] = useState<{ kind: SourceKind | null; sample: QueryResult | null; error: string | null }>({ kind: null, sample: null, error: null });
   useEffect(() => {
     if (!kind || open) return;

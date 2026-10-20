@@ -100,7 +100,13 @@ async function call(path: string, init: RequestInit = {}): Promise<Response> {
 export async function pushCloudMonitors(monitors: Monitor[], acks: string[], extras: CloudUploadExtras = {}): Promise<CloudState & { monitors: number }> {
   const list = monitors.filter((m) => m.cloud).slice(0, CLOUD_MAX_MONITORS).map(({ nextRunAt: _n, rationale: _r, ...m }) => m);
   const webhook = loadWebhook();
-  const res = await call("/api/monitors", { method: "POST", body: JSON.stringify({ monitors: list, webhook, acks, ...extras }) });
+  const st = useLoomStore.getState();
+  // Local history goes up with each always-on monitor; the server only uses it for ones it hasn't seen.
+  const seedChecks = Object.fromEntries(list.map((m) => [m.id, (st.monitorChecks[m.id] ?? []).slice(-100)]));
+  const res = await call("/api/monitors", {
+    method: "POST",
+    body: JSON.stringify({ monitors: list, webhook, acks, seedChecks, dropMoments: st.monitorDismissedMoments.slice(0, 300), ...extras }),
+  });
   const j = (await res.json()) as { monitors?: number; public?: CloudState["public"]; pushDevices?: number };
   const state = { public: j.public ?? null, pushDevices: j.pushDevices ?? 0 };
   cloudState = state;
@@ -126,7 +132,19 @@ export async function testCloudWebhook(w: CloudWebhookConfig): Promise<boolean> 
 /** Signature of what the Worker needs to know — push only when it changes. */
 export function cloudSignature(monitors: Monitor[], acks: string[]): string {
   const list = monitors.filter((m) => m.cloud).map(({ nextRunAt: _n, ...m }) => m);
-  return JSON.stringify([list, loadWebhook(), [...acks].sort()]);
+  return JSON.stringify([list, loadWebhook(), [...acks].sort(), useLoomStore.getState().monitorDismissedMoments.slice(0, 50)]);
+}
+
+/** Same rules as the Worker's `validateWebhook`: https, and Slack / Discord on their own hosts. */
+export function webhookProblem(url: string): string | null {
+  let u: URL;
+  try { u = new URL(url); } catch { return "That isn't a URL"; }
+  if (u.protocol !== "https:") return "Use an https:// URL";
+  const kind = webhookKindFor(url);
+  if (/hooks\.slack|slack\.com/.test(u.hostname) && kind !== "slack") return "Slack webhooks live on hooks.slack.com";
+  if (/discord/.test(u.hostname) && kind !== "discord") return "Discord webhooks live on discord.com";
+  if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.)/.test(u.hostname)) return "Private network addresses can't receive alerts";
+  return null;
 }
 
 let lastPushed: string | null = null;
@@ -139,8 +157,18 @@ export async function syncCloudNow(force = false): Promise<void> {
   const sig = cloudSignature(s.monitors, acks);
   // Nothing always-on and nothing ever pushed from this session: stay offline.
   if (!force && (sig === lastPushed || (!cloudIds.size && lastPushed == null))) return;
-  await pushCloudMonitors(s.monitors, acks);
+  const state = await pushCloudMonitors(s.monitors, acks);
   lastPushed = sig;
+  void healPushSubscription(state.pushDevices);
+}
+
+/** The browser is subscribed but the server forgot it (bundle reset): register it again. */
+async function healPushSubscription(serverDevices: number): Promise<void> {
+  if (serverDevices > 0) return;
+  const sub = await currentPushSubscription();
+  const j = sub?.toJSON() as { endpoint?: string; keys?: { p256dh?: string; auth?: string } } | undefined;
+  if (!j?.endpoint || !j.keys?.p256dh || !j.keys.auth) return;
+  await pushCloudMonitors(useLoomStore.getState().monitors, [], { push: { add: { endpoint: j.endpoint, keys: { p256dh: j.keys.p256dh, auth: j.keys.auth } } } }).catch(() => undefined);
 }
 
 /** Upload with extras now (push subscription, public page); needs at least one always-on monitor. */

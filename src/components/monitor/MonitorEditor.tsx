@@ -13,6 +13,7 @@ import type { MonitorDraft } from "@/lib/monitoring/templates";
 import { metricSeries, simulate, spanLabel } from "@/lib/monitoring/backfill";
 import { MonitorPreviewChart } from "./MonitorPreviewChart";
 import { useFeedSample } from "./useFeedSample";
+import { NumberField } from "./NumberField";
 import { CLOUD_MIN_INTERVAL_MINUTES, loadWebhook } from "@/lib/monitoring/cloudSync";
 import type { ExpectedWindow, MetricFilter, MonitorAgg, MonitorRule, MonitorSchedule } from "@/lib/monitoring/types";
 
@@ -130,12 +131,12 @@ export function MonitorEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reseed, feed.loading, feed.sample, series]);
 
-  const schedErr = scheduleError(d.schedule);
+  const schedErr = scheduleError(d.schedule, d.tz);
   const upcoming = useMemo(() => {
     if (schedErr) return [];
     const out: number[] = [];
     let t = Date.now();
-    for (let i = 0; i < 3; i++) { t = nextRunAfter(d.schedule, t); out.push(t); }
+    for (let i = 0; i < 3; i++) { t = nextRunAfter(d.schedule, t, d.tz); out.push(t); }
     return out;
   }, [d.schedule, schedErr]);
 
@@ -331,19 +332,19 @@ export function MonitorEditor() {
 
           {r.kind === "threshold" && (
             <div className="grid grid-cols-2 gap-2">
-              <div><label className={label} htmlFor="r-above">Above</label><input id="r-above" className="loom-input w-full" inputMode="decimal" value={r.above ?? ""} onChange={(e) => setRule({ ...r, above: numOr(e.target.value) })} /></div>
-              <div><label className={label} htmlFor="r-below">Below</label><input id="r-below" className="loom-input w-full" inputMode="decimal" value={r.below ?? ""} onChange={(e) => setRule({ ...r, below: numOr(e.target.value) })} /></div>
+              <div><label className={label} htmlFor="r-above">Above</label><NumberField id="r-above" className="loom-input w-full" allowEmpty value={r.above} onChange={(v) => setRule({ ...r, above: v })} /></div>
+              <div><label className={label} htmlFor="r-below">Below</label><NumberField id="r-below" className="loom-input w-full" allowEmpty value={r.below} onChange={(v) => setRule({ ...r, below: v })} /></div>
             </div>
           )}
           {r.kind === "range" && (
             <div className="grid grid-cols-2 gap-2">
-              <div><label className={label} htmlFor="r-low">Low</label><input id="r-low" className="loom-input w-full" inputMode="decimal" value={r.low} onChange={(e) => setRule({ ...r, low: numOr(e.target.value, 0)! })} /></div>
-              <div><label className={label} htmlFor="r-high">High</label><input id="r-high" className="loom-input w-full" inputMode="decimal" value={r.high} onChange={(e) => setRule({ ...r, high: numOr(e.target.value, 0)! })} /></div>
+              <div><label className={label} htmlFor="r-low">Low</label><NumberField id="r-low" className="loom-input w-full" value={r.low} onChange={(v) => v != null && setRule({ ...r, low: v })} /></div>
+              <div><label className={label} htmlFor="r-high">High</label><NumberField id="r-high" className="loom-input w-full" value={r.high} onChange={(v) => v != null && setRule({ ...r, high: v })} /></div>
             </div>
           )}
           {r.kind === "change" && (
             <div className="grid grid-cols-3 gap-2">
-              <div><label className={label} htmlFor="r-pct">By %</label><input id="r-pct" className="loom-input w-full" inputMode="decimal" value={r.pct} onChange={(e) => setRule({ ...r, pct: numOr(e.target.value, 0)! })} /></div>
+              <div><label className={label} htmlFor="r-pct">By %</label><NumberField id="r-pct" className="loom-input w-full" value={r.pct} onChange={(v) => v != null && setRule({ ...r, pct: Math.abs(v) })} /></div>
               <div><label className={label} htmlFor="r-dir">Direction</label>
                 <select id="r-dir" className="loom-input w-full" value={r.direction} onChange={(e) => setRule({ ...r, direction: e.target.value as "up" | "down" | "either" })}>
                   <option value="either">Either</option><option value="up">Rise</option><option value="down">Drop</option>

@@ -256,6 +256,9 @@ export async function sendWebPush(
       Authorization: await vapidAuthHeader(sub.endpoint, keys),
     },
     body: bytes(body),
+    redirect: "manual",
+    // One slow push service must not stall the whole cron run.
+    signal: AbortSignal.timeout(8000),
   });
   // Drain/cancel so the connection is released in Workers.
   try {

@@ -300,7 +300,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       )}
       <ThemeCycleButton />
 
-      <button
+      {viewMode !== "monitor" && <button
         type="button"
         onClick={openPanel}
         className={`loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 items-center justify-center text-xs px-2 rounded-md ${viewMode === "chart" ? "hidden md:flex" : "flex"}`}
@@ -313,7 +313,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           <rect x="1" y="2" width="14" height="12" rx="2" />
           <line x1="10.5" y1="2" x2="10.5" y2="14" />
         </svg>
-      </button>
+      </button>}
     </header>
   );
 }

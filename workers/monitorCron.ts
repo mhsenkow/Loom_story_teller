@@ -16,7 +16,8 @@
 // =================================================================
 
 import { computeMetric, runCheck } from "../src/lib/monitoring/engine";
-import { nextRunAfter } from "../src/lib/monitoring/schedule";
+import { nextRunAfter, scheduleError } from "../src/lib/monitoring/schedule";
+import { isValidTimeZone } from "../src/lib/monitoring/zone";
 import type { CheckRecord, Monitor, MonitorAlert } from "../src/lib/monitoring/types";
 import { SOURCE_BY_KIND, isSourceKind, sortRowsByOrderBy, type SourceKind } from "../src/lib/sourceRegistry";
 import { assertHttpUrlAllowed } from "../src/lib/ssrfGuard";
@@ -27,7 +28,7 @@ import { sendWebPush, isAllowedPushEndpoint, type PushSubscriptionJSON, type Vap
 
 export interface MonitorKv {
   get(key: string, type: "json"): Promise<unknown>;
-  put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
+  put(key: string, value: string, opts?: { expirationTtl?: number; expiration?: number }): Promise<void>;
   delete(key: string): Promise<void>;
   list(opts: { prefix: string; cursor?: string; limit?: number }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor?: string }>;
 }
@@ -57,6 +58,15 @@ export interface CloudBundle {
   /** Public, read-only status page + RSS (`/w/<id>`), when the device opted in. */
   public?: { id: string; title: string };
   updatedAt: number;
+  /** Bumped by every device write; the cron re-reads before writing and merges when it moved. */
+  rev?: number;
+  /** Last device write (ms). The bundle expires 45 days after this, however often the cron runs. */
+  syncedAt?: number;
+}
+
+/** When a bundle stops existing: 45 days after its device last synced (KV `expiration`, seconds). */
+export function bundleExpiry(b: Pick<CloudBundle, "syncedAt" | "updatedAt">): number {
+  return Math.floor(((b.syncedAt ?? b.updatedAt) + BUNDLE_TTL_SECS * 1000) / 1000);
 }
 
 export const MOMENT_CAP = 30;
@@ -106,6 +116,8 @@ export function sanitizeCloudMonitors(list: unknown): Monitor[] {
   if (!Array.isArray(list)) return [];
   return list
     .filter((m): m is Monitor => !!m && typeof (m as Monitor).id === "string" && isSourceKind(String((m as Monitor).metric?.source)) && !!(m as Monitor).rule && !!(m as Monitor).schedule)
+    // Drop schedules that never run, have bad fields, or would make the cron scan forever.
+    .filter((m) => scheduleError(m.schedule, isValidTimeZone(m.tz) ? m.tz : undefined) == null)
     .slice(0, CLOUD_MAX_MONITORS)
     .map((m) => {
       const schedule = m.schedule.kind === "interval" ? { ...m.schedule, minutes: Math.max(CLOUD_MIN_INTERVAL_MINUTES, Number(m.schedule.minutes) || 60) } : m.schedule;
@@ -114,6 +126,7 @@ export function sanitizeCloudMonitors(list: unknown): Monitor[] {
         name: String(m.name).slice(0, 120),
         decision: String(m.decision ?? "").slice(0, 400),
         rationale: undefined,
+        tz: isValidTimeZone(m.tz) ? m.tz : undefined,
         schedule,
         expected: Array.isArray(m.expected) ? m.expected.slice(0, 50) : [],
         metric: { ...m.metric, filters: (m.metric.filters ?? []).slice(0, 8) },
@@ -201,7 +214,8 @@ export async function evaluateBundle(
       bundle.moments = [moment, ...(bundle.moments ?? [])].slice(0, MOMENT_CAP);
     }
     if (fire) await notify(bundle, m, record.reason, moment);
-    try { m.nextRunAt = nextRunAfter(m.schedule, now); } catch { m.nextRunAt = now + 3_600_000; }
+    // Every schedule kind keeps the cloud minimum spacing (a */1 cron still runs at most every 15 min).
+    try { m.nextRunAt = Math.max(nextRunAfter(m.schedule, now, m.tz), now + CLOUD_MIN_INTERVAL_MINUTES * 60_000); } catch { m.nextRunAt = now + 3_600_000; }
   }
   if (changed) bundle.updatedAt = now;
   return { bundle, changed };
@@ -224,16 +238,68 @@ export async function runMonitorCron(kv: MonitorKv, now: number, fetchSource: So
     for (const { name } of page.keys) {
       devices++;
       const bundle = (await kv.get(name, "json")) as CloudBundle | null;
-      if (!bundle?.monitors?.length) continue;
+      if (!bundle) continue;
+      // A device that stopped syncing (cleared data, uninstalled) stops being alerted.
+      if (now >= bundleExpiry(bundle) * 1000) {
+        await kv.delete(name);
+        if (bundle.public) await kv.delete(`monpub:${bundle.public.id}`);
+        continue;
+      }
+      if (!bundle.monitors?.length) continue;
+      const pushBefore = new Set((bundle.push ?? []).map((p) => p.endpoint));
       const { changed } = await evaluateBundle(bundle, now, cachedFetch, parse, notify);
       if (changed) {
         evaluated++;
-        await kv.put(name, JSON.stringify(bundle), { expirationTtl: BUNDLE_TTL_SECS });
+        // KV has no compare-and-swap: if the device wrote meanwhile, fold our results into its copy.
+        const fresh = (await kv.get(name, "json")) as CloudBundle | null;
+        const out = fresh && (fresh.rev ?? 0) !== (bundle.rev ?? 0) ? foldCronResults(fresh, bundle, pushBefore) : bundle;
+        if (!fresh) continue; // deleted by the device mid-run
+        await kv.put(name, JSON.stringify(out), { expiration: bundleExpiry(out) });
       }
     }
     cursor = page.list_complete ? undefined : page.cursor;
   } while (cursor);
   return { devices, evaluated };
+}
+
+/**
+ * The device wrote while the cron was evaluating: keep the device's definitions,
+ * webhook, push list and public page; carry over only what the cron produced.
+ */
+export function foldCronResults(fresh: CloudBundle, evaluated: CloudBundle, pushBefore: Set<string>): CloudBundle {
+  const ids = new Set(fresh.monitors.map((m) => m.id));
+  const ran = new Map(evaluated.monitors.map((m) => [m.id, m]));
+  const checks = { ...fresh.checks };
+  for (const id of ids) {
+    const mine = evaluated.checks[id];
+    if (!mine) continue;
+    const byAt = new Map((checks[id] ?? []).map((c) => [c.at, c]));
+    for (const c of mine) byAt.set(c.at, c);
+    checks[id] = [...byAt.values()].sort((a, b) => a.at - b.at).slice(-HISTORY_CAP);
+  }
+  const alertById = new Map(fresh.alerts.map((a) => [a.id, a]));
+  for (const a of evaluated.alerts) {
+    if (!ids.has(a.monitorId)) continue;
+    const f = alertById.get(a.id);
+    alertById.set(a.id, f ? { ...a, acknowledgedAt: f.acknowledgedAt ?? a.acknowledgedAt } : a);
+  }
+  const momentIds = new Set((fresh.moments ?? []).map((m) => m.id));
+  const newMoments = (evaluated.moments ?? []).filter((m) => ids.has(m.monitorId) && !momentIds.has(m.id));
+  // Subscriptions the cron dropped as expired stay dropped; ones the device just added stay.
+  const goneByCron = [...pushBefore].filter((e) => !(evaluated.push ?? []).some((p) => p.endpoint === e));
+  return {
+    ...fresh,
+    monitors: fresh.monitors.map((m) => {
+      const r = ran.get(m.id);
+      const same = r && JSON.stringify(r.schedule) === JSON.stringify(m.schedule);
+      return same ? { ...m, nextRunAt: r!.nextRunAt } : m;
+    }),
+    checks,
+    alerts: [...alertById.values()].sort((a, b) => b.openedAt - a.openedAt).slice(0, ALERT_CAP),
+    moments: [...newMoments, ...(fresh.moments ?? [])].slice(0, MOMENT_CAP),
+    push: (fresh.push ?? []).filter((p) => !goneByCron.includes(p.endpoint)),
+    updatedAt: Math.max(fresh.updatedAt, evaluated.updatedAt),
+  };
 }
 
 /** PUT body → stored bundle, keeping existing history for monitors that remain. */
@@ -243,6 +309,10 @@ export interface UploadExtras {
   /** Public page title to enable it, null to turn it off, undefined to leave as is. */
   publicTitle?: string | null;
   newPublicId?: () => string;
+  /** Local history for monitors the server hasn't seen yet (so going always-on keeps the baseline). */
+  seedChecks?: Record<string, CheckRecord[]>;
+  /** Moments the person deleted on the device. */
+  dropMoments?: string[];
 }
 
 export function mergeUpload(prev: CloudBundle | null, monitors: Monitor[], webhook: CloudWebhook | undefined, now: number, acks: string[] = [], extras: UploadExtras = {}): CloudBundle {
@@ -263,14 +333,18 @@ export function mergeUpload(prev: CloudBundle | null, monitors: Monitor[], webho
       return { ...m, nextRunAt: same ? old!.nextRunAt : now };
     }),
     webhook,
-    checks: Object.fromEntries(Object.entries(prev?.checks ?? {}).filter(([id]) => ids.has(id))),
+    checks: Object.fromEntries(
+      [...ids].map((id) => [id, prev?.checks?.[id] ?? (extras.seedChecks?.[id] ?? []).filter((c) => c && typeof c.at === "number").slice(-HISTORY_CAP)] as const).filter(([, v]) => v.length),
+    ),
     alerts: (prev?.alerts ?? [])
       .filter((a) => ids.has(a.monitorId))
       .map((a) => (acked.has(a.id) && !a.acknowledgedAt ? { ...a, acknowledgedAt: now } : a)),
-    moments: prev?.moments ?? [],
+    moments: (prev?.moments ?? []).filter((m) => ids.has(m.monitorId) && !(extras.dropMoments ?? []).includes(m.id)),
     push,
     public: pub,
     updatedAt: now,
+    rev: (prev?.rev ?? 0) + 1,
+    syncedAt: now,
   };
 }
 

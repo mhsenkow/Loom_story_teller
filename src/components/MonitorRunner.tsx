@@ -17,15 +17,16 @@ export function MonitorRunner() {
     st0.hydrateMonitors(loadMonitors());
     let pending: ReturnType<typeof setTimeout> | null = null;
     let pushTimer: ReturnType<typeof setTimeout> | null = null;
+    let syncFailing = false;
     const hadCloud = useLoomStore.getState().monitors.some((m) => m.cloud);
     if (hadCloud) markCloudPushed();
 
     const unsub = useLoomStore.subscribe((s, prev) => {
-      if (s.monitors === prev.monitors && s.monitorChecks === prev.monitorChecks && s.monitorAlerts === prev.monitorAlerts && s.monitorMoments === prev.monitorMoments) return;
+      if (s.monitors === prev.monitors && s.monitorChecks === prev.monitorChecks && s.monitorAlerts === prev.monitorAlerts && s.monitorMoments === prev.monitorMoments && s.monitorDismissedMoments === prev.monitorDismissedMoments) return;
       if (pending) clearTimeout(pending);
       pending = setTimeout(() => {
         const st = useLoomStore.getState();
-        saveMonitors({ monitors: st.monitors, checks: st.monitorChecks, alerts: st.monitorAlerts, moments: st.monitorMoments });
+        saveMonitors({ monitors: st.monitors, checks: st.monitorChecks, alerts: st.monitorAlerts, moments: st.monitorMoments, dismissedMoments: st.monitorDismissedMoments });
       }, 500);
       // New / resumed / re-scheduled monitors run right away instead of on the next 20s tick.
       if (s.monitors !== prev.monitors && s.monitors.some((m) => m.enabled && !m.cloud && (m.nextRunAt ?? 0) <= Date.now())) {
@@ -34,7 +35,13 @@ export function MonitorRunner() {
       if (s.monitors !== prev.monitors || s.monitorAlerts !== prev.monitorAlerts) {
         if (pushTimer) clearTimeout(pushTimer);
         pushTimer = setTimeout(() => {
-          syncCloudNow().catch((e) => useLoomStore.getState().setToast(`Always-on sync failed: ${e instanceof Error ? e.message : e}`));
+          syncCloudNow()
+            .then(() => { syncFailing = false; })
+            .catch((e) => {
+              // Say it once; keep retrying quietly on later changes.
+              if (!syncFailing) useLoomStore.getState().setToast(`Always-on sync failed: ${e instanceof Error ? e.message : e}. Loom will retry.`);
+              syncFailing = true;
+            });
         }, 2_000);
       }
     });

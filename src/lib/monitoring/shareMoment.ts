@@ -41,7 +41,8 @@ export async function publishMoment(mo: Moment): Promise<{ url?: string; error?:
   const png = await momentPng(mo);
   const { publicLoomWebOrigin } = await import("../publicOrigin");
   const origin = publicLoomWebOrigin();
-  const caption = [`${mo.reason}.`, mo.decision ? `Plan: ${mo.decision}` : ""].filter(Boolean).join(" ");
+  // The private plan ("if this fires, I will…") stays private on published pages.
+  const caption = `${mo.reason}. ${mo.feedLabel}.`;
   const html = buildChartSharePageHtml({
     title: mo.monitorName,
     caption,

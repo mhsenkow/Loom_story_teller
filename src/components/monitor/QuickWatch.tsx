@@ -4,17 +4,18 @@
 // The chart is the control: drag the line, see how often it would have fired,
 // pick where to hear about it, done. Everything else lives in More options.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
-import { SOURCE_BY_KIND } from "@/lib/sourceRegistry";
+import { SOURCE_BY_KIND, SOURCE_DEFS, type SourceKind } from "@/lib/sourceRegistry";
 import { computeMetric, fmtValue } from "@/lib/monitoring/engine";
 import { metricSeries, simulate, spanLabel } from "@/lib/monitoring/backfill";
 import { requestNotificationPermission } from "@/lib/monitoring/notify";
 import { currentPushSubscription, loadWebhook } from "@/lib/monitoring/cloudSync";
-import type { MonitorDraft } from "@/lib/monitoring/templates";
+import { draftForFeed, feedMeasures, type MonitorDraft } from "@/lib/monitoring/templates";
 import type { MonitorAgg, MonitorRule } from "@/lib/monitoring/types";
 import { MonitorPreviewChart } from "./MonitorPreviewChart";
 import { useFeedSample } from "./useFeedSample";
+import { NumberField } from "./NumberField";
 
 const AGG_WORD: Record<MonitorAgg, string> = {
   latest: "the latest", avg: "the average", max: "the highest", min: "the lowest", median: "the median", p95: "the 95th percentile", sum: "the total", count: "the number of rows", distinct: "the number of distinct",
@@ -56,6 +57,30 @@ export function QuickWatch() {
   const vals = series.map((p) => p.value);
   const verb = verbOf(d.rule);
 
+  // New feed / measure (or a starter draft): put the limit near the top of what the data has shown.
+  useEffect(() => {
+    if (!d.reseed || feed.loading || !feed.sample) return;
+    const base = vals.length ? vals : now != null ? [now] : [];
+    if (!base.length) return;
+    setD((x) => {
+      const { reseed: _r, ...rest } = x;
+      if (x.rule.kind !== "threshold") return rest;
+      return { ...rest, rule: x.rule.below != null && x.rule.above == null ? { kind: "threshold", below: pct(base, 0.05) } : { kind: "threshold", above: pct(base, 0.95) } };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [d.reseed, feed.loading, feed.sample, series, now]);
+
+  const changeFeed = (kind: SourceKind) => {
+    const next = draftForFeed(kind);
+    setD((x) => ({ ...next, decision: x.decision, notify: x.notify, onFire: x.onFire, cloud: x.cloud, rule: verb === "below" ? { kind: "threshold", below: 0 } : next.rule }));
+  };
+  const changeMeasure = (key: string) => {
+    const next = draftForFeed(d.metric.source, key === "__rows" ? undefined : key);
+    if (key === "__rows") next.metric = { source: d.metric.source, agg: "count", timeColumn: next.metric.timeColumn, lookbackMinutes: next.metric.timeColumn ? 60 : undefined };
+    setD((x) => ({ ...x, name: x.chart ? x.name : next.name, metric: next.metric, chart: undefined, reseed: true, rule: x.rule.kind === "threshold" ? x.rule : next.rule }));
+  };
+  const measures = feedMeasures(d.metric.source);
+
   const setRule = (rule: MonitorRule) => setD((x) => ({ ...x, rule }));
   const setVerb = (v: Verb) => {
     const base = vals.length ? vals : now != null ? [now] : [0];
@@ -67,6 +92,9 @@ export function QuickWatch() {
   const limit = d.rule.kind === "threshold" ? (d.rule.above ?? d.rule.below) : d.rule.kind === "change" ? d.rule.pct : undefined;
 
   const close = () => openMonitorEditor(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Focus lands inside so Escape and Tab work straight away.
+  useEffect(() => { panelRef.current?.focus(); }, []);
   const draftNow = (): MonitorDraft => ({
     ...d,
     decision: plan.trim() || PLANS[0]!,
@@ -89,10 +117,16 @@ export function QuickWatch() {
 
   return (
     <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center loom-overlay animate-fade-in" onClick={close} onKeyDown={(e) => { if (e.key === "Escape") close(); }}>
-      <div role="dialog" aria-modal="true" aria-label="Quick watch" className="loom-focus-panel w-full sm:max-w-xl max-h-[92vh] overflow-y-auto bg-loom-surface border border-loom-border rounded-t-xl sm:rounded-xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Quick watch" className="outline-none loom-focus-panel w-full sm:max-w-xl max-h-[92vh] overflow-y-auto bg-loom-surface border border-loom-border rounded-t-xl sm:rounded-xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="text-2xs uppercase tracking-wide text-loom-label">Watch · {def.label}{d.chart ? ` · ${d.chart.title}` : ""}</p>
+            <p className="text-2xs uppercase tracking-wide text-loom-label flex items-center gap-1">
+              Watch ·
+              <select aria-label="Feed" className="bg-transparent uppercase tracking-wide text-2xs text-loom-label outline-none focus:underline max-w-[14rem]" value={d.metric.source} onChange={(e) => changeFeed(e.target.value as SourceKind)}>
+                {SOURCE_DEFS.map((s) => <option key={s.kind} value={s.kind}>{s.label}</option>)}
+              </select>
+              {d.chart ? <span className="truncate">· {d.chart.title}</span> : null}
+            </p>
             <input className="bg-transparent text-base font-semibold text-loom-text w-full outline-none focus:underline" aria-label="Monitor name" value={d.name} onChange={(e) => setD({ ...d, name: e.target.value })} />
           </div>
           <p className="text-right shrink-0"><span className="block text-lg font-mono text-loom-text">{feed.loading ? "…" : fmtValue(now, d.metric.unit)}</span><span className="text-2xs text-loom-muted">now</span></p>
@@ -105,7 +139,14 @@ export function QuickWatch() {
         )}
 
         <p className="text-sm text-loom-text leading-relaxed">
-          Tell me when <strong>{measure}</strong>{look}{" "}
+          Tell me when{" "}
+          {measures.length > 0 && !d.chart ? (
+            <select aria-label="Measure" className="loom-input inline-block w-auto py-0.5 text-sm font-semibold" value={d.metric.agg === "count" ? "__rows" : d.metric.column ?? ""} onChange={(e) => changeMeasure(e.target.value)}>
+              {measures.map((c) => <option key={c} value={c}>{AGG_WORD[d.metric.agg === "count" ? (def.grain === "event" ? "max" : "latest") : d.metric.agg]} {c.replace(/_/g, " ")}</option>)}
+              <option value="__rows">the number of new rows</option>
+            </select>
+          ) : <strong>{measure}</strong>}
+          {look}{" "}
           <select aria-label="Condition" className="loom-input inline-block w-auto py-0.5 text-sm" value={verb} onChange={(e) => setVerb(e.target.value as Verb)}>
             <option value="above">goes above</option>
             <option value="below">goes below</option>
@@ -114,14 +155,12 @@ export function QuickWatch() {
           </select>{" "}
           {limit != null && (
             <>
-              <input
+              <NumberField
                 aria-label="Limit"
-                inputMode="decimal"
                 className="loom-input inline-block w-24 py-0.5 text-sm font-mono"
                 value={limit}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  if (!Number.isFinite(v)) return;
+                onChange={(v) => {
+                  if (v == null) return;
                   if (d.rule.kind === "threshold") setRule(verb === "below" ? { kind: "threshold", below: v } : { kind: "threshold", above: v });
                   if (d.rule.kind === "change") setRule({ ...d.rule, pct: v });
                 }}
