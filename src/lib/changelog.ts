@@ -25,6 +25,20 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-20",
+    date: "2026-10-20",
+    title: "Eighteen new live feeds",
+    summary: "Fireballs to Powerball: more of the world to chart, all free and open.",
+    items: [
+      { title: "Sky and space", detail: "Fireballs caught by government sensors since 1988, and the satellites bright enough to see tonight with their orbits worked out." },
+      { title: "The internet, live", detail: "Country-level internet outages, a few seconds of live BGP routing each minute, a Bluesky pulse of posts per minute by language and hashtag, GitHub activity, and the newest arXiv papers. Bluesky and GitHub keep only counts and repository names — no posts or people." },
+      { title: "Safety and government", detail: "FDA food, drug, and device recalls; vehicle recalls; federal lobbying filings; and every federal agency's budget this year." },
+      { title: "Cities", detail: "US airport delays and ground stops, NYC restaurant inspections and parking tickets (no plates), Chicago crime reports, and bike share docks in Chicago, DC, and San Francisco." },
+      { title: "Just for fun", detail: "Trending books from Open Library and Project Gutenberg, and every Powerball draw since 2010." },
+      { title: "Wikipedia reverts", detail: "New Query snippets on the Wikipedia stream find reverts and pages that look like edit wars." },
+    ],
+  },
+  {
     id: "2026-10-18b",
     date: "2026-10-18",
     title: "More than one way forward",
