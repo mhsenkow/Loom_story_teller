@@ -30,6 +30,7 @@ export const CHANGELOG: ChangelogRelease[] = [
     title: "Watch it so you don't have to",
     summary: "Monitor any live feed on a schedule, and hear about it only when it matters.",
     items: [
+      { title: "Monitor this chart", detail: "Tap the bell beside any live-feed chart, or \"Alert me when this happens\" in Analyze → Anomaly detection. The monitor watches the same measure and lookback, and every card and alert opens that chart again." },
       { title: "Monitors tied to a decision", detail: "Open Monitor (key 5), pick a feed and a number, and say what you'll do when it fires. Start from examples like a big earthquake, a dirty grid hour, or city heat health." },
       { title: "Unusual isn't the same as wrong", detail: "Choose a limit, a healthy range, a sudden change, or \"unusual for this hour\". Add expected windows for maintenance or planned events. When you mark an alert as expected, Loom stops alerting at that time." },
       { title: "Was it worth it?", detail: "Each alert asks what happened next. Cards show how often alerts led to action and flag monitors that are mostly noise. Related metrics group into scorecards." },

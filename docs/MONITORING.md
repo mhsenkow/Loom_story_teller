@@ -48,6 +48,17 @@ cloud     optional "Always on": evaluated by the Worker cron, delivered to a web
 - A reminder is sent when the cooldown has passed and the alert hasn't been acknowledged. Quiet hours suppress system notifications but still record the check.
 - Reviewing an alert acknowledges it, which stops reminders.
 
+## From a chart, and back
+
+- **Monitor this chart** (bell in the chart's side toolbar, on live feeds) and **Alert me when this happens** (Analyze → Anomaly detection) both call `createChartMonitorDraft` in `monitoring/chartBridge.ts`. `fromChart.ts` maps the active chart into a draft:
+  - The feed comes from `stream://<kind>`.
+  - When x is time, the measure is y with the chart's aggregate. Otherwise it's the numeric size or color field, and if there isn't one, a row count. Latitude and longitude are never used.
+  - The lookback comes from the rolling window on daily feeds, otherwise from the chart's time window.
+  - Anomaly rings become the "unusual" rule with the same sensitivity.
+  - The chart's `chart=` link is stored on the monitor.
+- Cards ("Open chart" / "Chart feed") and alerts ("See it on …") call `openMonitorChart`. It opens the feed and hands the link to `setChartLink`, so `ChartLinkSync` restores that exact chart.
+- The chart's bell shows as pressed when the open feed already has monitors.
+
 ## Where checks run
 
 | Runtime | How |

@@ -109,6 +109,8 @@ export interface Monitor {
   /** Groups monitors into one scorecard (e.g. "City heat health"). */
   scorecard?: string;
   enabled: boolean;
+  /** The chart this monitor was made from (`chart=…` link), so cards and alerts can reopen it. */
+  chart?: { link: string; title: string };
   /** Always on: evaluated by the Worker cron (app closed too) and alerts go to the webhook. */
   cloud?: boolean;
   createdAt: number;

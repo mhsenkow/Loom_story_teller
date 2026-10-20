@@ -16,6 +16,7 @@ import { describeSchedule } from "@/lib/monitoring/schedule";
 import { MONITOR_TEMPLATES } from "@/lib/monitoring/templates";
 import { notificationPermission, requestNotificationPermission, type NotifyPermission } from "@/lib/monitoring/notify";
 import { runMonitorNow } from "@/lib/monitoring/runner";
+import { openMonitorChart } from "@/lib/monitoring/openChart";
 import { exportMonitorsJson, parseMonitorsJson } from "@/lib/monitoring/storage";
 import { ALERT_OUTCOME_LABELS, type AlertOutcome, type CheckRecord, type CheckStatus, type Monitor, type MonitorAlert } from "@/lib/monitoring/types";
 import { MonitorEditor } from "./monitor/MonitorEditor";
@@ -76,6 +77,11 @@ function AlertReview({ alert, monitor }: { alert: MonitorAlert; monitor?: Monito
         <span className="loom-badge shrink-0 capitalize">{alert.severity}</span>
       </div>
       {monitor?.decision && <p className="text-xs text-loom-muted"><span className="text-loom-label">Planned action:</span> {monitor.decision}</p>}
+      {monitor && (
+        <button type="button" className="loom-btn-ghost text-2xs px-2 py-1 rounded-md border border-loom-border" onClick={() => void openMonitorChart(monitor)}>
+          {monitor.chart ? `See it on “${monitor.chart.title}”` : "See it on a chart"} →
+        </button>
+      )}
       <div className="space-y-1.5">
         <p className="text-2xs text-loom-label uppercase tracking-wide">What happened?</p>
         <div className="flex flex-wrap gap-1">
@@ -112,7 +118,7 @@ function MonitorCard({ m, checks, alerts }: { m: Monitor; checks: CheckRecord[];
             {m.name}
             {m.cloud && <span className="loom-badge ml-1.5 align-middle" title="Checked by Loom's server, even when the app is closed">Always on</span>}
           </p>
-          <p className="text-2xs text-loom-muted">{feed?.label ?? m.metric.source} · {describeRule(m.rule, m.metric.unit)}</p>
+          <p className="text-2xs text-loom-muted">{feed?.label ?? m.metric.source}{m.chart ? ` · from chart “${m.chart.title}”` : ""} · {describeRule(m.rule, m.metric.unit)}</p>
         </div>
         <div className="text-right shrink-0">
           <p className="text-sm font-mono text-loom-text">{fmtValue(last?.value, m.metric.unit)}</p>
@@ -136,6 +142,9 @@ function MonitorCard({ m, checks, alerts }: { m: Monitor; checks: CheckRecord[];
       )}
       <div className="flex flex-wrap gap-1 pt-1">
         <button type="button" className="loom-btn text-2xs px-2 py-1 rounded-md" disabled={running} onClick={() => void runMonitorNow(m.id)}>Check now</button>
+        <button type="button" className="loom-btn-ghost text-2xs px-2 py-1 rounded-md" title={m.chart ? `Open “${m.chart.title}”` : `Chart ${feed?.label ?? "this feed"}`} onClick={() => void openMonitorChart(m)}>
+          {m.chart ? "Open chart" : "Chart feed"}
+        </button>
         <button type="button" className="loom-btn-ghost text-2xs px-2 py-1 rounded-md" onClick={() => openMonitorEditor(m.id)}>Edit</button>
         <button type="button" className="loom-btn-ghost text-2xs px-2 py-1 rounded-md" onClick={() => setMonitorEnabled(m.id, !m.enabled)}>{m.enabled ? "Pause" : "Resume"}</button>
         <button type="button" className="loom-btn-ghost text-2xs px-2 py-1 rounded-md text-loom-error ml-auto" onClick={() => { removeMonitor(m.id); setToast(`Stopped watching “${m.name}”`); }}>Delete</button>

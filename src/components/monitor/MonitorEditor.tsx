@@ -197,6 +197,12 @@ export function MonitorEditor() {
           <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" onClick={() => openMonitorEditor(null)}>Close</button>
         </div>
 
+        {d.chart && (
+          <p className="text-xs text-loom-text bg-loom-accent/10 border border-loom-accent/30 rounded-md p-2">
+            Watching the chart <strong>“{d.chart.title}”</strong>. The measure, calculation and lookback below match what it plots{d.rule.kind === "anomaly" && d.rule.sensitivity <= 2.5 ? ", and \"unusual\" uses the same |z| > 2.5 as its anomaly rings" : ""}. Adjust anything that doesn&apos;t fit.
+            <button type="button" className="ml-1 underline text-loom-muted" onClick={() => set({ chart: undefined })}>Unlink</button>
+          </p>
+        )}
         <section className="space-y-3">
           <div>
             <label className={label} htmlFor="mon-name">Name</label>

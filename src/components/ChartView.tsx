@@ -16,6 +16,7 @@ import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { type LoomState, useLoomStore } from "@/lib/store";
+import { createChartMonitorDraft } from "@/lib/monitoring/chartBridge";
 import { ChartCard } from "@/components/ChartCard";
 import type { GPUScatterPoint } from "@/lib/webgpu";
 import { acquireSharedGpuDevice } from "@/lib/gpuDevice";
@@ -91,6 +92,7 @@ import {
   ChartCellRail,
   IconArrange,
   IconDataTable,
+  IconBell,
   IconEditTitle,
   IconRefresh,
   IconSave,
@@ -143,6 +145,10 @@ type GpuSceneRenderer = import("@/lib/webgpuScenes").LoomSceneRenderer;
 type GpuCubeRenderer = import("@/lib/webgpuCube").LoomCubeRenderer;
 
 export function ChartView() {
+  const chartMonitorCount = useLoomStore((s) => {
+    const path = s.selectedFile?.path;
+    return path?.startsWith("stream://") ? s.monitors.filter((m) => `stream://${m.metric.source}` === path).length : 0;
+  });
   const {
     selectedFile, sampleRows, chartRecs, activeChart, setActiveChart, setPanelTab, columnStats,
     chartVisualOverrides: savedChartVisualOverrides, aiSuggestionReason, chartTitleOverrides, setChartTitleOverride,
@@ -4076,6 +4082,16 @@ export function ChartView() {
                     <IconSave />
                   </CellIconBtn>
                 )}
+                {selectedFile?.path.startsWith("stream://") && (
+                  <CellIconBtn
+                    label="Monitor this chart"
+                    title={chartMonitorCount ? `Watching ${chartMonitorCount} monitor${chartMonitorCount === 1 ? "" : "s"} on this feed. Click to add another` : "Get alerted when this chart does something unusual"}
+                    pressed={chartMonitorCount > 0}
+                    onClick={() => createChartMonitorDraft()}
+                  >
+                    <IconBell />
+                  </CellIconBtn>
+                )}
                 <CellIconBtn
                   label="Data table"
                   title="Show chart values as a table"
@@ -4624,6 +4640,16 @@ export function ChartView() {
                 {selectedFile && (
                   <CellIconBtn label="Save chart view" title="Save this chart for dashboards" onClick={saveActiveChartView}>
                     <IconSave />
+                  </CellIconBtn>
+                )}
+                {selectedFile?.path.startsWith("stream://") && (
+                  <CellIconBtn
+                    label="Monitor this chart"
+                    title={chartMonitorCount ? `Watching ${chartMonitorCount} monitor${chartMonitorCount === 1 ? "" : "s"} on this feed. Click to add another` : "Get alerted when this chart does something unusual"}
+                    pressed={chartMonitorCount > 0}
+                    onClick={() => createChartMonitorDraft()}
+                  >
+                    <IconBell />
                   </CellIconBtn>
                 )}
                 <CellIconBtn

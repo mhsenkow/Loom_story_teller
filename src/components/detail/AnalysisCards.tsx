@@ -9,6 +9,7 @@ import { applyChartTimeWindow, resolveEffectiveTimeRec } from "@/lib/chartTime";
 import { timeBuckets } from "@/lib/canvasCharts/axisHelpers";
 import { buildXModel } from "@/lib/chartAxes";
 import { useLoomStore } from "@/lib/store";
+import { createChartMonitorDraft } from "@/lib/monitoring/chartBridge";
 import { analysisScope, analysisUnavailable, FORECAST_METHOD_LABEL, type ForecastMethod, type TimeSeriesAnalysis } from "@/lib/timeSeriesAnalysis";
 import { FocusCurtain } from "./FocusCurtain";
 import { ForecastMethodList } from "./ForecastCurtain";
@@ -59,6 +60,7 @@ export default function AnalysisCards() {
   const [window, setWindow] = useState(config.anomaly?.window ?? 10);
   const [threshold, setThreshold] = useState(config.anomaly?.threshold ?? 3.5);
   const [curtain, setCurtain] = useState<"forecast" | "anomaly" | null>(null);
+  const isLiveFeed = useLoomStore((s) => !!s.selectedFile?.path.startsWith("stream://"));
   const setView = useLoomStore(s => s.setViewMode);
   const apply = (patch: Partial<TimeSeriesAnalysis>) => { update(patch); setView("chart"); };
   const clamp = (value: string, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(value) || min)));
@@ -89,6 +91,11 @@ export default function AnalysisCards() {
       <label className="block text-xs text-loom-muted">Look back · points<input aria-label="Anomaly lookback" className="loom-input w-full mt-1" type="number" min={5} max={50} value={window} onChange={e => setWindow(clamp(e.target.value, 5, 50))} /></label>
       <label className="block text-xs text-loom-muted">Sensitivity<select className="loom-input w-full mt-1" value={threshold} onChange={e => setThreshold(Number(e.target.value))}><option value={2.5}>More sensitive</option><option value={3.5}>Balanced</option><option value={5}>Only large departures</option></select></label>
       <button type="button" disabled={!!unavailable || series.count <= window} className="loom-btn-primary w-full text-xs disabled:opacity-50" onClick={() => apply({ anomaly: { enabled: true, window, threshold } })}>{config.anomaly ? "Update detection" : "Find anomalies"}</button>
+      {isLiveFeed && (
+        <button type="button" className="loom-btn w-full text-xs" onClick={() => createChartMonitorDraft({ anomaly: { sensitivity: threshold, window } })}>
+          Alert me when this happens
+        </button>
+      )}
     </AnalysisCard>
     <p className="text-2xs text-loom-muted">First draft · layers are session-only and included in PNG captures. Shared links, saved views, and Vega SVG do not include these layers.</p>
     <FocusCurtain open={curtain === "forecast"} title="Compare forecast methods" onClose={() => setCurtain(null)}>
