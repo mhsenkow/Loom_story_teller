@@ -1,0 +1,39 @@
+[
+ {
+  "report_received_date": "2026-10-16T00:00:00.000",
+  "nhtsa_id": "26V680000",
+  "recall_link": {
+   "url": "https://www.nhtsa.gov/recalls?nhtsaId=26V680000",
+   "description": "Go to Recall"
+  },
+  "manufacturer": "Alliance RV, LLC",
+  "subject": "Seating Power Cord May Have Inadequate Circuit Protection",
+  "component": "ELECTRICAL SYSTEM",
+  "recall_type": "Vehicle",
+  "potentially_affected": "3686",
+  "defect_summary": "Alliance RV, LLC (Alliance) is recalling certain 2025-2027 Valor and 2026-2027 Delta recreational trailers equipped with certain power seating assemblies. The power cord fuse may not provide adequate circuit protection.",
+  "consequence_summary": "In the event of a short circuit, inadequate protection increases the risk of a fire.",
+  "corrective_action": "Dealers will replace the power cord, free of charge. Owner notification letters are expected to be mailed December 7, 2026. Owners may contact Alliance customer service at 1-574-218-7165.",
+  "fire_risk_when_parked": "No",
+  "do_not_drive": "No"
+ },
+ {
+  "report_received_date": "2026-10-09T00:00:00.000",
+  "nhtsa_id": "26V668000",
+  "recall_link": {
+   "url": "https://www.nhtsa.gov/recalls?nhtsaId=26V668000",
+   "description": "Go to Recall"
+  },
+  "manufacturer": "Grand Design RV, LLC",
+  "subject": "Incorrect Tire Size and Pressure Information on Label/FMVSS 110",
+  "component": "EQUIPMENT",
+  "mfr_campaign_number": "910070",
+  "recall_type": "Vehicle",
+  "potentially_affected": "53",
+  "defect_summary": "Grand Design RV, LLC (Grand Design) is recalling certain 2027 Transcend travel trailers. The tire information label may state the incorrect tire size and cold inflation pressure. As such, these vehicles fail to comply with the requirements of Federal Motor Vehicle Safety Standard (FMVSS) number 110, \"Tire Selection and Rims.\"",
+  "consequence_summary": "Referencing incorrect information can result in installing the wrong size replacement tires or underinflating the tires, increasing the risk of a crash.",
+  "corrective_action": "Dealers will replace the labels, free of charge. Owner notification letters are expected to be mailed November 19, 2026. Owners may contact Grand Design customer service at 1-574-825-9679. Grand Design's number for this recall is 910070.",
+  "fire_risk_when_parked": "No",
+  "do_not_drive": "No"
+ }
+]

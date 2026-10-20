@@ -1,0 +1,65 @@
+[
+ {
+  "camis": "50055011",
+  "dba": "FISH CHEEKS",
+  "boro": "Manhattan",
+  "building": "55",
+  "street": "BOND STREET",
+  "zipcode": "10012",
+  "phone": "9173598142",
+  "cuisine_description": "Thai",
+  "inspection_date": "2026-10-17T00:00:00.000",
+  "action": "No violations were recorded at the time of this inspection.",
+  "critical_flag": "Not Applicable",
+  "score": "0",
+  "record_date": "2026-10-19T06:00:19.000",
+  "inspection_type": "Inter-Agency Task Force / Initial Inspection",
+  "latitude": "40.725899860012",
+  "longitude": "-73.992629129726",
+  "community_board": "102",
+  "council_district": "02",
+  "census_tract": "005502",
+  "bin": "1008437",
+  "bbl": "1005290035",
+  "nta": "MN23",
+  "location": {
+   "type": "Point",
+   "coordinates": [
+    -73.992629129726,
+    40.725899860012
+   ]
+  }
+ },
+ {
+  "camis": "50177492",
+  "dba": "FRITA BATIDOS",
+  "boro": "Brooklyn",
+  "building": "334",
+  "street": "KENT AVENUE",
+  "zipcode": "11249",
+  "phone": "9172160997",
+  "cuisine_description": "Other",
+  "inspection_date": "2026-10-17T00:00:00.000",
+  "action": "No violations were recorded at the time of this inspection.",
+  "critical_flag": "Not Applicable",
+  "score": "0",
+  "grade": "N",
+  "record_date": "2026-10-19T06:00:19.000",
+  "inspection_type": "Inter-Agency Task Force / Initial Inspection",
+  "latitude": "40.713390297272",
+  "longitude": "-73.96738382087",
+  "community_board": "301",
+  "council_district": "33",
+  "census_tract": "055100",
+  "bin": "3426897",
+  "bbl": "3024140026",
+  "nta": "BK73",
+  "location": {
+   "type": "Point",
+   "coordinates": [
+    -73.96738382087,
+    40.713390297272
+   ]
+  }
+ }
+]

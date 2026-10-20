@@ -1514,6 +1514,7 @@ async fn live_fetch_every_source() {
     let db = test_db();
     let mut ctx = PollCtx {
         client: build_client().unwrap(),
+        bikeshare_info: HashMap::new(),
         citibike_info: None,
         iss_seeded: false,
         opensky_retry_at: 0,
@@ -1657,4 +1658,229 @@ fn usafacts_nation_from_fred_and_fallback() {
         write_rows(&db, spec("usafacts_nation"), &fb).unwrap() as usize,
         fb.len()
     );
+}
+
+// ---------------------------------------------------------------
+// 2026-10 keyless batch (sources_extra.rs) — same fixtures as
+// src/lib/__tests__/extraSources.test.ts
+// ---------------------------------------------------------------
+
+fn f64_of(c: &Cell) -> f64 {
+    match c {
+        Cell::F64(v) => *v,
+        Cell::I64(v) => *v as f64,
+        other => panic!("not a number: {:?}", other),
+    }
+}
+
+#[test]
+fn extra_space_and_web_parse() {
+    let fb = fireballs_rows(&fixture("fireballs.json")).unwrap();
+    assert_eq!(fb[0][0], s("2026-10-04 03:14:45"));
+    assert_eq!(fb[0][1], Cell::F64(-41.8));
+    assert_eq!(fb[0][2], Cell::F64(-173.1));
+    assert_eq!(fb[0][6], Cell::F64(0.18));
+
+    let sats = satellites_rows(&fixture("satellites.json")).unwrap();
+    assert_eq!(sats[0][0], Cell::I64(694));
+    assert_eq!(sats[0][2], s("Payload"));
+    assert_eq!(sats[0][3], Cell::I64(1963));
+    assert!((f64_of(&sats[0][5]) - 101.92).abs() < 0.05);
+    assert!(f64_of(&sats[0][6]) > f64_of(&sats[0][7]));
+    assert!(sats.iter().any(|r| r[2] == s("Rocket body")));
+    assert_eq!(satellite_object_type("FENGYUN 1C DEB"), "Debris");
+
+    let ioda = ioda_rows(&fixture("ioda.json")).unwrap();
+    assert_eq!(ioda.len(), 3, "asn entities dropped");
+    let fi = ioda.iter().find(|r| r[1] == s("FI")).unwrap();
+    assert_eq!(fi[7], Cell::F64(24.2));
+    assert_eq!(ioda_window(1_000_000_000), (999_395_100, 999_999_900));
+
+    let arxiv = arxiv_rows(&[fixture_text("arxiv.xml"), fixture_text("arxiv.xml")]).unwrap();
+    assert_eq!(arxiv.len(), 2);
+    assert_eq!(arxiv[0][0], s("2610.26863v1"));
+    assert_eq!(arxiv[0][2], s("cs.LG"));
+    assert_eq!(arxiv[0][3], s("Computer science"));
+    assert_eq!(arxiv[0][6], s("2026-10-19 17:59:59"));
+    assert!(matches!(arxiv[0][5], Cell::I64(n) if n > 0));
+
+    let gh = github_events_rows(&fixture("github_events.json")).unwrap();
+    assert_eq!(gh[0][1], s("Push"));
+    assert_eq!(gh[0][3], Cell::Bool(false));
+    assert!(
+        !format!("{:?}", gh).contains("someone"),
+        "actor logins dropped"
+    );
+
+    let books = books_rows(
+        Some(&fixture("openlibrary.json")),
+        Some(&fixture("gutendex.json")),
+    )
+    .unwrap();
+    assert_eq!(books[0][2], s("Atomic Habits"));
+    assert_eq!(books[0][7], s("en"));
+    assert_eq!(books[2][3], s("Jane Austen"));
+    assert_eq!(books[2][6], Cell::I64(190246));
+    assert_eq!(
+        gutenberg_author("Shelley, Mary Wollstonecraft (1797-1851)"),
+        "Mary Wollstonecraft Shelley"
+    );
+
+    let db = test_db();
+    for (kind, rows) in [
+        ("fireballs", &fb),
+        ("satellites", &sats),
+        ("internet_outages", &ioda),
+        ("arxiv", &arxiv),
+        ("github_events", &gh),
+        ("books", &books),
+    ] {
+        assert_eq!(
+            write_rows(&db, spec(kind), rows).unwrap() as usize,
+            rows.len(),
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn extra_faa_xml_parse() {
+    let rows = faa_rows(&fixture_text("faa.xml")).unwrap();
+    let by = |a: &str| rows.iter().find(|r| r[0] == s(a)).unwrap().clone();
+    let sfo = by("SFO");
+    assert_eq!(sfo[1], s("Ground delay"));
+    assert_eq!(sfo[2], s("low ceilings & wind"));
+    assert_eq!(sfo[4], Cell::F64(121.0));
+    assert_eq!(sfo[5], Cell::F64(63.0));
+    assert_eq!(by("EWR")[1], s("Ground stop"));
+    let ege = by("EGE");
+    assert_eq!(ege[1], s("Arrival delay"));
+    assert_eq!(ege[3], Cell::F64(31.0));
+    assert_eq!(ege[6], s("Increasing"));
+    assert_eq!(by("SNA")[1], s("Closure"));
+    assert_eq!(sfo[7], s("2026-10-20 16:22:47"));
+    assert_eq!(faa_minutes(Some("2 hours")), Some(120.0));
+    assert!(faa_rows("<html>maintenance</html>").is_err());
+    let db = test_db();
+    assert_eq!(
+        write_rows(&db, spec("faa_delays"), &rows).unwrap() as usize,
+        rows.len()
+    );
+}
+
+#[test]
+fn extra_us_and_city_parse() {
+    let lda = lobbying_rows(&fixture("lda.json")).unwrap();
+    assert_eq!(lda[0][1], s("WILLIAMS AND JENSEN, PLLC"));
+    assert_eq!(lda[0][3], s("VA"));
+    assert_eq!(lda[0][6], s("third quarter"));
+    assert_eq!(lda[0][7], Cell::F64(60000.0));
+    assert_eq!(lda[0][8], s("income"));
+    assert_eq!(lda[0][11], s("2026-10-20 16:22:37"));
+
+    let fda = fda_rows(&[
+        fixture("fda_food.json"),
+        fixture("fda_drug.json"),
+        fixture("fda_food.json"),
+    ])
+    .unwrap();
+    assert_eq!(fda.len(), 4, "duplicate recall numbers dropped");
+    assert_eq!(fda[0][1], s("Food"));
+    assert_eq!(fda[0][11], s("2026-10-07"));
+
+    let veh = vehicle_recalls_rows(&fixture("nhtsa.json")).unwrap();
+    assert_eq!(veh[0][1], s("2026-10-16"));
+    assert_eq!(veh[0][6], Cell::I64(3686));
+    assert_eq!(veh[0][7], Cell::Bool(false));
+
+    let insp = nyc_inspections_rows(&fixture("nyc_inspections.json")).unwrap();
+    assert_eq!(insp[0][1], s("FISH CHEEKS"));
+    assert_eq!(insp[0][4], s("2026-10-17 00:00:00"));
+    assert_eq!(insp[0][6], Cell::I64(0));
+
+    let crime = chicago_crime_rows(&fixture("chicago_crime.json")).unwrap();
+    assert_eq!(crime[0][3], s("MOTOR VEHICLE THEFT"));
+    assert_eq!(crime[0][6], Cell::Bool(false));
+
+    let parking = nyc_parking_rows(&serde_json::json!([
+        {"summons_number": "1", "issue_date": "2025-07-27T00:00:00.000", "fine_amount": "180", "state": "NY", "plate": "ABC123"},
+        {"summons_number": "2", "issue_date": "70/40/2000"}
+    ]))
+    .unwrap();
+    assert_eq!(parking[0][1], s("2025-07-27"));
+    assert_eq!(parking[0][4], Cell::F64(180.0));
+    assert_eq!(parking[0][8], s("NY"));
+    assert_eq!(parking[1][1], Cell::Null);
+    assert!(!format!("{:?}", parking).contains("ABC123"));
+
+    let pb = powerball_rows(&fixture("powerball.json")).unwrap();
+    assert_eq!(pb[0][0], s("2026-10-19"));
+    assert_eq!(pb[0][1], Cell::I64(2026));
+    assert_eq!(pb[0][2], Cell::I64(8));
+    assert_eq!(pb[0][7], Cell::I64(23));
+    assert_eq!(pb[0][8], Cell::I64(4));
+
+    let fed = fed_spending_rows(&fixture("usaspending.json")).unwrap();
+    assert_eq!(fed[0][1], s("TREAS"));
+    assert!((f64_of(&fed[0][7]) - 24.609).abs() < 0.01);
+
+    let info = citibike_info(&fixture("gbfs_parity_info.json")).unwrap();
+    let bikes = bikeshare_rows(
+        "Divvy (Chicago)",
+        &fixture("gbfs_parity_status.json"),
+        &info,
+    )
+    .unwrap();
+    assert!(!bikes.is_empty());
+    assert_eq!(bikes[0][0], s("Divvy (Chicago)"));
+    assert_eq!(bikes[0].len(), spec("bikeshare").columns.len());
+
+    let db = test_db();
+    for (kind, rows) in [
+        ("lobbying", &lda),
+        ("fda_recalls", &fda),
+        ("vehicle_recalls", &veh),
+        ("nyc_inspections", &insp),
+        ("chicago_crime", &crime),
+        ("nyc_parking", &parking),
+        ("powerball", &pb),
+        ("fed_spending", &fed),
+        ("bikeshare", &bikes),
+    ] {
+        assert_eq!(
+            write_rows(&db, spec(kind), rows).unwrap() as usize,
+            rows.len(),
+            "{kind}"
+        );
+    }
+}
+
+#[test]
+fn extra_worker_columnar_feeds() {
+    // Shape the Worker sends for bluesky / bgp (workers/extraSources.ts)
+    let body = serde_json::json!({
+        "columns": ["id", "ts", "dimension", "key", "posts", "window_secs", "posts_per_min"],
+        "rows": [
+            ["2026-10-20T16:24:00.000Z|total|all posts", "2026-10-20T16:24:00.000Z", "total", "all posts", 300, 5.0, 3600.0],
+            ["2026-10-20T16:24:00.000Z|language|en", "2026-10-20T16:24:00.000Z", "language", "en", 200, 5.0, 2400.0]
+        ]
+    });
+    let rows = columnar_rows(&body, spec("bluesky")).unwrap();
+    assert_eq!(rows[0][1], s("2026-10-20 16:24:00"));
+    assert_eq!(rows[1][4], Cell::I64(200));
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("bluesky"), &rows).unwrap(), 2);
+    // Same poll again: upsert on id keeps one row per (ts, dimension, key)
+    write_rows(&db, spec("bluesky"), &rows).unwrap();
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM bluesky_activity"),
+        Some("2".into())
+    );
+
+    // Reordered / missing columns map by name
+    let bgp = serde_json::json!({"columns": ["ts", "id", "announcements"], "rows": [["2026-10-20T16:24:00Z", "x", 7]]});
+    let rows = columnar_rows(&bgp, spec("bgp")).unwrap();
+    assert_eq!(rows[0][0], s("x"));
+    assert_eq!(rows[0][4], Cell::I64(7));
+    assert_eq!(rows[0][5], Cell::Null);
 }

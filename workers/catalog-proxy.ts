@@ -50,6 +50,33 @@ import {
   usafactsPayload,
   usafactsToolCall,
 } from "./sourceTransforms";
+import {
+  ARXIV_PER_QUERY,
+  ARXIV_QUERIES,
+  FDA_CATEGORIES,
+  WS_MAX_MESSAGES,
+  WS_SAMPLE_MS,
+  arxivRows,
+  bgpRows,
+  bikeshareRows,
+  blueskyRows,
+  bookRows,
+  chicagoCrimeRows,
+  faaRows,
+  fdaRows,
+  fedSpendingRows,
+  fireballRows,
+  githubEventRows,
+  iodaRows,
+  IODA_MAX_ROWS,
+  iodaWindow,
+  lobbyingRows,
+  nycInspectionRows,
+  nycParkingRows,
+  powerballRows,
+  satelliteRows,
+  vehicleRecallRows,
+} from "./extraSources";
 import { assertHttpUrlAllowed, fetchWithSsrfGuard } from "../src/lib/ssrfGuard";
 import { applyBaselineSecurityHeaders, baselineSecurityHeaderRecord } from "../src/lib/securityHeaders";
 import {
@@ -585,6 +612,61 @@ async function settleLimited<T>(jobs: (() => Promise<T>)[], limit: number): Prom
 
 type SourceFetcher = (ctx: WaitUntil) => Promise<string>;
 
+/** Lyft GBFS systems in the `bikeshare` feed — mirrors BIKESHARE_SYSTEMS in sources.rs. */
+const BIKESHARE_SYSTEMS = [
+  { system: "Divvy (Chicago)", base: "https://gbfs.divvybikes.com/gbfs/en/" },
+  { system: "Capital Bikeshare (DC)", base: "https://gbfs.capitalbikeshare.com/gbfs/en/" },
+  { system: "Bay Wheels (SF)", base: "https://gbfs.lyftbikes.com/gbfs/en/" },
+] as const;
+
+/**
+ * Open an outbound WebSocket (fetch + `Upgrade: websocket`), collect text
+ * frames for `WS_SAMPLE_MS`, then close. Used by bluesky / bgp, which only
+ * keep per-window counts (see workers/extraSources.ts).
+ */
+async function sampleWebSocket(
+  label: string,
+  wssUrl: string,
+  subscribe?: string,
+): Promise<{ messages: string[]; secs: number }> {
+  let res: Response;
+  try {
+    res = await fetch(wssUrl.replace(/^wss:/, "https:"), {
+      headers: { Upgrade: "websocket", "User-Agent": UA },
+      signal: AbortSignal.timeout(8_000),
+    });
+  } catch (e) {
+    throw new UpstreamError(`${label} unreachable: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  const ws = (res as Response & { webSocket?: WebSocket | null }).webSocket;
+  if (!ws) throw new UpstreamError(`${label}: WebSocket upgrade refused (${res.status})`);
+  (ws as WebSocket & { accept: () => void }).accept();
+  const messages: string[] = [];
+  const started = Date.now();
+  await new Promise<void>((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, WS_SAMPLE_MS);
+    ws.addEventListener("message", (ev: MessageEvent) => {
+      if (typeof ev.data === "string") messages.push(ev.data);
+      if (messages.length >= WS_MAX_MESSAGES) done();
+    });
+    ws.addEventListener("close", done);
+    ws.addEventListener("error", done);
+    if (subscribe) ws.send(subscribe);
+  });
+  try {
+    ws.close(1000, "sample done");
+  } catch {
+    /* already closed */
+  }
+  const secs = Math.max(1, (Date.now() - started) / 1000);
+  if (!messages.length) throw new UpstreamError(`${label}: no messages in sample window`);
+  return { messages, secs };
+}
+
 const OPEN_METEO_LATS = WORLD_CITIES.map((c) => c.lat).join(",");
 const OPEN_METEO_LONS = WORLD_CITIES.map((c) => c.lon).join(",");
 
@@ -951,6 +1033,172 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     }
     return JSON.stringify(starlinkGp(JSON.parse(text)));
   },
+
+  // ---- 2026-10 keyless batch (transforms in workers/extraSources.ts) ----
+
+  fireballs: async () =>
+    JSON.stringify(fireballRows(await upstreamJson("NASA JPL", "https://ssd-api.jpl.nasa.gov/fireball.api", 15_000))),
+
+  satellites: async () => {
+    // Same CelesTrak etiquette as starlink: 2h refresh, 403 text when polled early.
+    const text = await upstreamText("CelesTrak", "https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=json", 20_000);
+    if (text.trimStart().startsWith("GP data has not updated") || text.trimStart().startsWith("<")) {
+      throw new UpstreamError("CelesTrak: GP not updated yet (try again after the 2h refresh)");
+    }
+    return JSON.stringify(satelliteRows(JSON.parse(text)));
+  },
+
+  internet_outages: async () => {
+    const { from, until } = iodaWindow(Date.now());
+    const body = await upstreamJson(
+      "IODA",
+      `https://api.ioda.inetintel.cc.gatech.edu/v2/outages/alerts?from=${from}&until=${until}&entityType=country&limit=${IODA_MAX_ROWS}`,
+      20_000,
+    );
+    return JSON.stringify(iodaRows(body));
+  },
+
+  faa_delays: async () =>
+    JSON.stringify(faaRows(await upstreamText("FAA NAS Status", "https://nasstatus.faa.gov/api/airport-status-information", 15_000))),
+
+  lobbying: async () => {
+    // lda.senate.gov now redirects here. Anonymous pages cap at 25 rows → newest 4 pages.
+    // Paging needs a filter: filing_year of 30 days ago (January still posts last year's Q4).
+    const settled = await Promise.allSettled(
+      [1, 2, 3, 4].map((p) =>
+        upstreamJson<{ results?: unknown[] }>("LDA", `https://lda.gov/api/v1/filings/?ordering=-dt_posted&filing_year=${utcDay(30).slice(0, 4)}&page_size=25&page=${p}`, 20_000),
+      ),
+    );
+    const results = settled.flatMap((r) => (r.status === "fulfilled" ? (r.value.results ?? []) : []));
+    if (!results.length) throw new UpstreamError("LDA: no filings returned");
+    return JSON.stringify(lobbyingRows({ results }));
+  },
+
+  fda_recalls: async () => {
+    const settled = await Promise.allSettled(
+      FDA_CATEGORIES.map((c) =>
+        upstreamJson("openFDA", `https://api.fda.gov/${c}/enforcement.json?limit=100&sort=report_date:desc`, 15_000),
+      ),
+    );
+    const ok = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (!ok.length) throw new UpstreamError("openFDA: no enforcement feeds returned");
+    return JSON.stringify(fdaRows(ok));
+  },
+
+  vehicle_recalls: async () =>
+    JSON.stringify(
+      vehicleRecallRows(
+        await upstreamJson(
+          "NHTSA",
+          "https://data.transportation.gov/resource/6axg-epim.json?$limit=400&$order=report_received_date%20DESC",
+          15_000,
+        ),
+      ),
+    ),
+
+  arxiv: async () => {
+    // arXiv asks for one request at a time with a short pause between them.
+    const feeds: string[] = [];
+    for (const q of ARXIV_QUERIES) {
+      try {
+        feeds.push(
+          await upstreamText(
+            "arXiv",
+            `https://export.arxiv.org/api/query?search_query=${encodeURIComponent(q)}&sortBy=submittedDate&sortOrder=descending&max_results=${ARXIV_PER_QUERY}`,
+            20_000,
+          ),
+        );
+      } catch {
+        /* one field missing is fine */
+      }
+      await new Promise((r) => setTimeout(r, 1_000));
+    }
+    if (!feeds.length) throw new UpstreamError("arXiv: no feeds returned");
+    return JSON.stringify(arxivRows(feeds));
+  },
+
+  github_events: async () =>
+    // Unauthenticated limit is 60/h per IP — the 10 min cache keeps us far under it.
+    JSON.stringify(githubEventRows(await upstreamJson("GitHub", "https://api.github.com/events?per_page=100", 10_000))),
+
+  books: async () => {
+    const [ol, gut] = await Promise.allSettled([
+      upstreamJson("Open Library", "https://openlibrary.org/trending/daily.json?limit=50", 20_000),
+      upstreamJson("Gutendex", "https://gutendex.com/books/?sort=popular", 20_000),
+    ]);
+    if (ol.status === "rejected" && gut.status === "rejected") throw new UpstreamError("Books: both upstreams failed");
+    return JSON.stringify(bookRows(ol.status === "fulfilled" ? ol.value : null, gut.status === "fulfilled" ? gut.value : null));
+  },
+
+  nyc_inspections: async () =>
+    JSON.stringify(
+      nycInspectionRows(
+        await upstreamJson(
+          "NYC DOHMH",
+          "https://data.cityofnewyork.us/resource/43nn-pn8j.json?$limit=1000&$order=inspection_date%20DESC&$where=inspection_date%3E%272001-01-01%27",
+          20_000,
+        ),
+      ),
+    ),
+
+  chicago_crime: async () =>
+    JSON.stringify(
+      chicagoCrimeRows(
+        await upstreamJson("Chicago Data Portal", "https://data.cityofchicago.org/resource/ijzp-q8t2.json?$limit=1000&$order=date%20DESC", 20_000),
+      ),
+    ),
+
+  nyc_parking: async () =>
+    // $select leaves the plate column out entirely. issue_date is text upstream with
+    // typos like "2097-12-11", so cap it at tomorrow.
+    JSON.stringify(
+      nycParkingRows(
+        await upstreamJson(
+          "NYC Finance",
+          "https://data.cityofnewyork.us/resource/nc67-uf89.json?$limit=1000&$order=issue_date%20DESC" +
+            "&$select=summons_number,issue_date,violation_time,violation,fine_amount,penalty_amount,amount_due,county,state,issuing_agency,precinct" +
+            `&$where=issue_date%20between%20%272000-01-01%27%20and%20%27${utcDay(-1)}%27`,
+          20_000,
+        ),
+      ),
+    ),
+
+  powerball: async () =>
+    JSON.stringify(
+      powerballRows(await upstreamJson("NY Lottery", "https://data.ny.gov/resource/d6yy-54nr.json?$limit=5000&$order=draw_date%20DESC", 15_000)),
+    ),
+
+  fed_spending: async () =>
+    JSON.stringify(fedSpendingRows(await upstreamJson("USAspending", "https://api.usaspending.gov/api/v2/references/toptier_agencies/", 20_000))),
+
+  bikeshare: async (ctx) => {
+    const settled = await Promise.allSettled(
+      BIKESHARE_SYSTEMS.map(async (s) => {
+        const [info, status] = await Promise.all([
+          cachedUpstreamJson("GBFS", `${s.base}station_information.json`, 86_400, ctx),
+          upstreamJson("GBFS", `${s.base}station_status.json`),
+        ]);
+        return { system: s.system, info, status };
+      }),
+    );
+    const ok = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (!ok.length) throw new UpstreamError("GBFS: no bike share systems returned");
+    return JSON.stringify(bikeshareRows(ok));
+  },
+
+  bluesky: async () => {
+    const msgs = await sampleWebSocket("Bluesky Jetstream", "wss://jetstream2.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post");
+    return JSON.stringify(blueskyRows(msgs.messages, msgs.secs, Date.now()));
+  },
+
+  bgp: async () => {
+    const msgs = await sampleWebSocket(
+      "RIPE RIS Live",
+      "wss://ris-live.ripe.net/v1/ws/?client=loom",
+      JSON.stringify({ type: "ris_subscribe", data: { host: "rrc00", type: "UPDATE" } }),
+    );
+    return JSON.stringify(bgpRows(msgs.messages, msgs.secs, Date.now()));
+  },
 };
 
 /** Fresh-for seconds per kind (roughly the upstream's own update cadence). */
@@ -992,6 +1240,24 @@ export const SOURCE_TTL_SECS: Record<string, number> = {
   usafacts_nation: 43_200,
   climate: 86_400,
   debt: 86_400,
+  fireballs: 21_600,
+  satellites: 7200,
+  internet_outages: 900,
+  faa_delays: 300,
+  lobbying: 3600,
+  fda_recalls: 21_600,
+  vehicle_recalls: 21_600,
+  arxiv: 3600,
+  github_events: 600,
+  books: 21_600,
+  nyc_inspections: 3600,
+  chicago_crime: 3600,
+  nyc_parking: 3600,
+  powerball: 21_600,
+  fed_spending: 21_600,
+  bikeshare: 120,
+  bluesky: 60,
+  bgp: 60,
 };
 
 /** How long past its TTL a cached copy may still be served when the upstream fails. */

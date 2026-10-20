@@ -17,6 +17,7 @@
   "include": [
     "catalog-proxy.ts",
     "sourceTransforms.ts",
+    "extraSources.ts",
     "__tests__/*.test.ts",
     "../src/lib/openDataCatalog.ts",
     "../src/lib/ssrfGuard.ts",

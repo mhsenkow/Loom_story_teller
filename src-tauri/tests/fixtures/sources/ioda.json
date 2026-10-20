@@ -1,0 +1,73 @@
+{
+ "type": "outages.alerts",
+ "data": [
+  {
+   "datasource": "bgp",
+   "entity": {
+    "code": "PW",
+    "name": "Palau",
+    "subnames": [],
+    "type": "country",
+    "attrs": {
+     "fqid": "geo.netacuity.OC.PW"
+    }
+   },
+   "time": 1791916500,
+   "level": "critical",
+   "condition": "< 0.99",
+   "value": 57,
+   "historyValue": 59,
+   "method": "median"
+  },
+  {
+   "datasource": "gtr",
+   "entity": {
+    "code": "FI",
+    "name": "Finland",
+    "subnames": [],
+    "type": "country",
+    "attrs": {
+     "fqid": "geo.netacuity.EU.FI"
+    }
+   },
+   "time": 1791918000,
+   "level": "critical",
+   "condition": "< 0.8",
+   "value": 3112,
+   "historyValue": 4108,
+   "method": "sarima"
+  },
+  {
+   "datasource": "bgp",
+   "entity": {
+    "code": "SS",
+    "name": "South Sudan",
+    "subnames": [],
+    "type": "country",
+    "attrs": {
+     "fqid": "geo.netacuity.AF.SS"
+    }
+   },
+   "time": 1791919200,
+   "level": "critical",
+   "condition": "< 0.99",
+   "value": 111,
+   "historyValue": 113,
+   "method": "median"
+  },
+  {
+   "datasource": "bgp",
+   "entity": {
+    "code": "1234",
+    "name": "AS1234",
+    "type": "asn"
+   },
+   "time": 1791916500,
+   "level": "critical",
+   "condition": "< 0.99",
+   "value": 57,
+   "historyValue": 59,
+   "method": "median"
+  }
+ ]
+}

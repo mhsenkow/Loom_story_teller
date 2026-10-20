@@ -1,0 +1,58 @@
+[
+ {
+  "id": "14355886",
+  "case_number": "JK447749",
+  "date": "2026-10-12T00:00:00.000",
+  "block": "030XX W SHERWIN AVE",
+  "iucr": "0910",
+  "primary_type": "MOTOR VEHICLE THEFT",
+  "description": "AUTOMOBILE",
+  "location_description": "STREET",
+  "arrest": false,
+  "domestic": false,
+  "beat": "2411",
+  "district": "024",
+  "ward": "50",
+  "community_area": "2",
+  "fbi_code": "07",
+  "x_coordinate": "1154991",
+  "y_coordinate": "1948564",
+  "year": "2026",
+  "updated_on": "2026-10-19T15:54:07.000",
+  "latitude": "42.014674403",
+  "longitude": "-87.705033582",
+  "location": {
+   "latitude": "42.014674403",
+   "longitude": "-87.705033582",
+   "human_address": "{\"address\": \"\", \"city\": \"\", \"state\": \"\", \"zip\": \"\"}"
+  }
+ },
+ {
+  "id": "14355958",
+  "case_number": "JK447867",
+  "date": "2026-10-12T00:00:00.000",
+  "block": "050XX N KENMORE AVE",
+  "iucr": "0910",
+  "primary_type": "MOTOR VEHICLE THEFT",
+  "description": "AUTOMOBILE",
+  "location_description": "STREET",
+  "arrest": false,
+  "domestic": false,
+  "beat": "2024",
+  "district": "020",
+  "ward": "48",
+  "community_area": "3",
+  "fbi_code": "07",
+  "x_coordinate": "1168335",
+  "y_coordinate": "1933947",
+  "year": "2026",
+  "updated_on": "2026-10-19T15:54:07.000",
+  "latitude": "41.974285812",
+  "longitude": "-87.656358176",
+  "location": {
+   "latitude": "41.974285812",
+   "longitude": "-87.656358176",
+   "human_address": "{\"address\": \"\", \"city\": \"\", \"state\": \"\", \"zip\": \"\"}"
+  }
+ }
+]

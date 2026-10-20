@@ -165,6 +165,94 @@ export const SOURCE_SQL_SNIPPETS = {
     { name: "Warmest years", sql: "SELECT year, ROUND(AVG(anomaly_c), 2) AS anomaly_c FROM global_temperature GROUP BY year ORDER BY anomaly_c DESC LIMIT 15" },
     { name: "By decade", sql: "SELECT (year // 10) * 10 AS decade, ROUND(AVG(anomaly_c), 2) AS anomaly_c FROM global_temperature GROUP BY 1 ORDER BY 1" },
   ],
+  fireballs: [
+    { name: "Most energetic", sql: "SELECT ts, latitude, longitude, impact_kt, energy_e10j, altitude_km FROM fireballs ORDER BY impact_kt DESC LIMIT 20" },
+    { name: "Fireballs per year", sql: "SELECT EXTRACT(year FROM ts) AS yr, COUNT(*) AS fireballs, ROUND(SUM(impact_kt), 1) AS total_kt FROM fireballs GROUP BY 1 ORDER BY 1" },
+    { name: "Fastest entries", sql: "SELECT ts, velocity_kms, altitude_km, impact_kt FROM fireballs WHERE velocity_kms IS NOT NULL ORDER BY velocity_kms DESC LIMIT 15" },
+  ],
+  satellites: [
+    { name: "Highest orbits", sql: "SELECT name, object_type, apogee_km, perigee_km, inclination FROM visual_satellites ORDER BY apogee_km DESC LIMIT 20" },
+    { name: "By object type", sql: "SELECT object_type, COUNT(*) AS cnt, ROUND(AVG(inclination), 1) AS avg_incl FROM visual_satellites GROUP BY 1 ORDER BY cnt DESC" },
+    { name: "Oldest still up", sql: "SELECT name, launch_year, perigee_km FROM visual_satellites ORDER BY launch_year ASC LIMIT 15" },
+  ],
+  internet_outages: [
+    { name: "Worst drops", sql: "SELECT ts, country, datasource, level, drop_pct FROM internet_outages WHERE level = 'critical' ORDER BY drop_pct DESC LIMIT 20" },
+    { name: "Alerts by country", sql: "SELECT country, COUNT(*) AS alerts, MAX(drop_pct) AS worst_drop FROM internet_outages WHERE level = 'critical' GROUP BY country ORDER BY alerts DESC LIMIT 20" },
+    { name: "By signal", sql: "SELECT datasource, level, COUNT(*) AS cnt FROM internet_outages GROUP BY 1, 2 ORDER BY cnt DESC" },
+  ],
+  faa_delays: [
+    { name: "Current problems", sql: "SELECT airport, status_type, reason, max_delay_min, avg_delay_min FROM faa_airport_status ORDER BY max_delay_min DESC" },
+    { name: "By status type", sql: "SELECT status_type, COUNT(*) AS airports FROM faa_airport_status GROUP BY 1 ORDER BY airports DESC" },
+  ],
+  lobbying: [
+    { name: "Biggest filings", sql: "SELECT client, registrant, amount_usd, amount_kind, issue_codes FROM lobbying_filings WHERE amount_usd IS NOT NULL ORDER BY amount_usd DESC LIMIT 20" },
+    { name: "Busiest firms", sql: "SELECT registrant, COUNT(*) AS filings, SUM(amount_usd) AS total_usd FROM lobbying_filings GROUP BY registrant ORDER BY filings DESC LIMIT 15" },
+    { name: "Clients by state", sql: "SELECT client_state, COUNT(*) AS filings FROM lobbying_filings WHERE client_state IS NOT NULL GROUP BY 1 ORDER BY filings DESC" },
+  ],
+  fda_recalls: [
+    { name: "Class I (most serious)", sql: "SELECT report_date, product_type, firm, reason FROM fda_recalls WHERE classification = 'Class I' ORDER BY report_date DESC LIMIT 25" },
+    { name: "By type and class", sql: "SELECT product_type, classification, COUNT(*) AS recalls FROM fda_recalls GROUP BY 1, 2 ORDER BY 1, 2" },
+    { name: "Top firms", sql: "SELECT firm, COUNT(*) AS recalls FROM fda_recalls GROUP BY firm ORDER BY recalls DESC LIMIT 15" },
+  ],
+  vehicle_recalls: [
+    { name: "Largest recalls", sql: "SELECT report_date, manufacturer, subject, potentially_affected FROM vehicle_recalls ORDER BY potentially_affected DESC LIMIT 20" },
+    { name: "Do-not-drive warnings", sql: "SELECT report_date, manufacturer, subject, component FROM vehicle_recalls WHERE do_not_drive OR park_outside ORDER BY report_date DESC" },
+    { name: "By component", sql: "SELECT component, COUNT(*) AS recalls, SUM(potentially_affected) AS vehicles FROM vehicle_recalls GROUP BY component ORDER BY recalls DESC LIMIT 15" },
+  ],
+  arxiv: [
+    { name: "Newest papers", sql: "SELECT published, primary_category, title, n_authors FROM arxiv_papers ORDER BY published DESC LIMIT 25" },
+    { name: "By category", sql: "SELECT field, primary_category, COUNT(*) AS papers, ROUND(AVG(n_authors), 1) AS avg_authors FROM arxiv_papers GROUP BY 1, 2 ORDER BY papers DESC" },
+    { name: "Biggest author lists", sql: "SELECT title, primary_category, n_authors FROM arxiv_papers ORDER BY n_authors DESC LIMIT 15" },
+  ],
+  github_events: [
+    { name: "Event mix", sql: "SELECT event_type, COUNT(*) AS events FROM github_events GROUP BY 1 ORDER BY events DESC" },
+    { name: "Busiest repos", sql: "SELECT repo, COUNT(*) AS events FROM github_events GROUP BY repo ORDER BY events DESC LIMIT 15" },
+    { name: "Events per minute", sql: "SELECT date_trunc('minute', ts) AS minute, COUNT(*) AS events FROM github_events GROUP BY 1 ORDER BY 1" },
+  ],
+  books: [
+    { name: "Open Library today", sql: "SELECT rank, title, author, first_year, editions FROM trending_books WHERE site = 'Open Library' ORDER BY rank LIMIT 25" },
+    { name: "Gutenberg downloads", sql: "SELECT rank, title, author, downloads FROM trending_books WHERE site = 'Project Gutenberg' ORDER BY downloads DESC" },
+    { name: "By decade first published", sql: "SELECT (first_year // 10) * 10 AS decade, COUNT(*) AS books FROM trending_books WHERE first_year IS NOT NULL GROUP BY 1 ORDER BY 1" },
+  ],
+  nyc_inspections: [
+    { name: "Worst scores", sql: "SELECT restaurant, borough, cuisine, score, grade, inspection_date FROM nyc_restaurant_inspections WHERE score IS NOT NULL ORDER BY score DESC LIMIT 20" },
+    { name: "Grades by borough", sql: "SELECT borough, grade, COUNT(DISTINCT camis) AS restaurants FROM nyc_restaurant_inspections WHERE grade IS NOT NULL GROUP BY 1, 2 ORDER BY 1, 2" },
+    { name: "Common violations", sql: "SELECT violation_code, violation, COUNT(*) AS cnt FROM nyc_restaurant_inspections WHERE violation_code IS NOT NULL GROUP BY 1, 2 ORDER BY cnt DESC LIMIT 15" },
+  ],
+  chicago_crime: [
+    { name: "By offense", sql: "SELECT primary_type, COUNT(*) AS reports, ROUND(100.0 * AVG(CASE WHEN arrest THEN 1 ELSE 0 END), 1) AS arrest_pct FROM chicago_crime GROUP BY 1 ORDER BY reports DESC" },
+    { name: "Reports per day", sql: "SELECT date_trunc('day', ts) AS day, COUNT(*) AS reports FROM chicago_crime GROUP BY 1 ORDER BY 1" },
+    { name: "By district", sql: "SELECT district, COUNT(*) AS reports FROM chicago_crime GROUP BY district ORDER BY reports DESC" },
+  ],
+  nyc_parking: [
+    { name: "Most common violations", sql: "SELECT violation, COUNT(*) AS tickets, ROUND(AVG(fine_amount), 2) AS avg_fine FROM nyc_parking_tickets GROUP BY violation ORDER BY tickets DESC LIMIT 15" },
+    { name: "Fines by county", sql: "SELECT county, COUNT(*) AS tickets, SUM(fine_amount) AS fines FROM nyc_parking_tickets GROUP BY county ORDER BY fines DESC" },
+    { name: "Out-of-state plates", sql: "SELECT plate_state, COUNT(*) AS tickets FROM nyc_parking_tickets WHERE plate_state <> 'NY' GROUP BY 1 ORDER BY tickets DESC LIMIT 15" },
+  ],
+  powerball: [
+    { name: "Most drawn Powerballs", sql: "SELECT powerball, COUNT(*) AS draws FROM powerball_draws GROUP BY powerball ORDER BY draws DESC LIMIT 15" },
+    { name: "Latest draws", sql: "SELECT draw_date, n1, n2, n3, n4, n5, powerball, multiplier FROM powerball_draws ORDER BY draw_date DESC LIMIT 20" },
+    { name: "Draws per year", sql: "SELECT yr, COUNT(*) AS draws, ROUND(AVG(powerball), 1) AS avg_powerball FROM powerball_draws GROUP BY yr ORDER BY yr" },
+  ],
+  fed_spending: [
+    { name: "Largest agencies", sql: "SELECT agency, budget_authority, obligated, outlays, pct_of_total FROM federal_agencies ORDER BY budget_authority DESC LIMIT 20" },
+    { name: "Spent vs authorized", sql: "SELECT agency, ROUND(100.0 * outlays / budget_authority, 1) AS outlay_pct FROM federal_agencies WHERE budget_authority > 1000000000 ORDER BY outlay_pct DESC" },
+  ],
+  bikeshare: [
+    { name: "Systems overview", sql: "SELECT system, COUNT(*) AS stations, SUM(bikes_available) AS bikes, SUM(ebikes_available) AS ebikes FROM bikeshare_stations GROUP BY system ORDER BY stations DESC" },
+    { name: "Empty docks", sql: "SELECT system, name, capacity, bikes_available FROM bikeshare_stations WHERE bikes_available = 0 AND is_renting ORDER BY capacity DESC LIMIT 20" },
+    { name: "Fullest stations", sql: "SELECT system, name, pct_full, capacity FROM bikeshare_stations ORDER BY pct_full DESC LIMIT 20" },
+  ],
+  bluesky: [
+    { name: "Posts per minute", sql: "SELECT ts, posts_per_min FROM bluesky_activity WHERE dimension = 'total' ORDER BY ts" },
+    { name: "Top languages", sql: "SELECT key AS lang, SUM(posts) AS posts FROM bluesky_activity WHERE dimension = 'language' GROUP BY 1 ORDER BY posts DESC LIMIT 15" },
+    { name: "Top hashtags", sql: "SELECT key AS hashtag, SUM(posts) AS posts FROM bluesky_activity WHERE dimension = 'hashtag' GROUP BY 1 ORDER BY posts DESC LIMIT 20" },
+  ],
+  bgp: [
+    { name: "Updates per sample", sql: "SELECT ts, announcements, withdrawals FROM bgp_updates WHERE dimension = 'total' ORDER BY ts" },
+    { name: "Noisiest origin networks", sql: "SELECT key AS origin, SUM(announcements) AS announced FROM bgp_updates WHERE dimension = 'origin_asn' GROUP BY 1 ORDER BY announced DESC LIMIT 20" },
+    { name: "By prefix length", sql: "SELECT key AS prefix_length, SUM(announcements) AS announced, SUM(withdrawals) AS withdrawn FROM bgp_updates WHERE dimension = 'prefix_len' GROUP BY 1 ORDER BY announced DESC" },
+  ],
 } satisfies Record<SourceKind, { name: string; sql: string }[]>;
 
 /** SQL queries that work well with the wiki_stream table for the Query view. */
@@ -192,5 +280,19 @@ export const STREAM_SQL_SNIPPETS = [
   {
     name: "Namespace breakdown",
     sql: "SELECT namespace, COUNT(*) AS edits, AVG(delta) AS avg_delta FROM wiki_stream GROUP BY namespace ORDER BY edits DESC",
+  },
+  {
+    // Edit summaries for reverts / undos / rollbacks ("Reverted edits by …", "Undid revision …", "rv vandalism")
+    name: "Reverts",
+    sql: "SELECT ts, wiki, title, \"user\", delta, comment FROM wiki_stream WHERE regexp_matches(lower(comment), '(^|\\W)(revert|reverted|undid|undo|rv|rvv|rollback)(\\W|$)') ORDER BY ts DESC LIMIT 50",
+  },
+  {
+    name: "Revert rate by wiki",
+    sql: "SELECT wiki, COUNT(*) AS edits, SUM(CASE WHEN regexp_matches(lower(comment), '(^|\\W)(revert|reverted|undid|undo|rv|rvv|rollback)(\\W|$)') THEN 1 ELSE 0 END) AS reverts, ROUND(100.0 * SUM(CASE WHEN regexp_matches(lower(comment), '(^|\\W)(revert|reverted|undid|undo|rv|rvv|rollback)(\\W|$)') THEN 1 ELSE 0 END) / COUNT(*), 2) AS revert_pct FROM wiki_stream WHERE edit_type = 'edit' GROUP BY wiki HAVING COUNT(*) >= 20 ORDER BY revert_pct DESC LIMIT 20",
+  },
+  {
+    // Pages with several reverts from more than one editor in the buffer — likely edit wars
+    name: "Possible edit wars",
+    sql: "SELECT wiki, title, COUNT(*) AS edits, COUNT(DISTINCT \"user\") AS editors, SUM(CASE WHEN regexp_matches(lower(comment), '(^|\\W)(revert|reverted|undid|undo|rv|rvv|rollback)(\\W|$)') THEN 1 ELSE 0 END) AS reverts FROM wiki_stream WHERE NOT bot GROUP BY wiki, title HAVING SUM(CASE WHEN regexp_matches(lower(comment), '(^|\\W)(revert|reverted|undid|undo|rv|rvv|rollback)(\\W|$)') THEN 1 ELSE 0 END) >= 2 AND COUNT(DISTINCT \"user\") >= 2 ORDER BY reverts DESC, edits DESC LIMIT 20",
   },
 ];

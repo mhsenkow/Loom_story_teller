@@ -1,0 +1,53 @@
+{
+ "count": 2,
+ "results": [
+  {
+   "filing_uuid": "3697defd-df16-4eed-918f-e9b4b0bb87fd",
+   "filing_type": "Q3",
+   "filing_year": 2026,
+   "filing_period": "third_quarter",
+   "income": "60000.00",
+   "expenses": null,
+   "dt_posted": "2026-10-20T12:22:37-04:00",
+   "registrant": {
+    "name": "WILLIAMS AND JENSEN, PLLC"
+   },
+   "client": {
+    "name": "NORFOLK SOUTHERN CORPORATION",
+    "state": "VA"
+   },
+   "lobbying_activities": [
+    {
+     "general_issue_code": "TRA",
+     "description": "x"
+    },
+    {
+     "general_issue_code": "RRR",
+     "description": "x"
+    }
+   ]
+  },
+  {
+   "filing_uuid": "9c1d9ba8-eaf1-4628-a442-f3671ce2260d",
+   "filing_type": "Q3",
+   "filing_year": 2026,
+   "filing_period": "third_quarter",
+   "income": "20000.00",
+   "expenses": null,
+   "dt_posted": "2026-10-20T12:22:33-04:00",
+   "registrant": {
+    "name": "PRASAM"
+   },
+   "client": {
+    "name": "CADENCE DESIGN SYSTEMS, INC.",
+    "state": "CA"
+   },
+   "lobbying_activities": [
+    {
+     "general_issue_code": "DEF",
+     "description": "x"
+    }
+   ]
+  }
+ ]
+}

@@ -62,7 +62,7 @@ describe("discoverStories", () => {
   });
 
   it("keeps room for many chart variants across every live feed", () => {
-    expect(ALL_SOURCE_KINDS.length).toBe(36);
+    expect(ALL_SOURCE_KINDS.length).toBe(54);
     expect(VARIANTS_PER_SOURCE).toBeGreaterThanOrEqual(20);
     expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(10_000);
     expect(DISCOVER_STORY_LIMIT).toBeGreaterThanOrEqual(ALL_SOURCE_KINDS.length * VARIANTS_PER_SOURCE);

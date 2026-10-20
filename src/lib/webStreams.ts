@@ -1031,6 +1031,25 @@ const SOURCE_PARSERS: Record<SourceKind, SourceParser> = {
   covid: parseCovid,
   countries: parseCountries,
   world_bank: parseWorldBank,
+  // 2026-10 batch: the Worker sends `{ columns, rows }` (workers/extraSources.ts)
+  fireballs: parseColumnar("fireballs"),
+  satellites: parseColumnar("satellites"),
+  internet_outages: parseColumnar("internet_outages"),
+  faa_delays: parseColumnar("faa_delays"),
+  lobbying: parseColumnar("lobbying"),
+  fda_recalls: parseColumnar("fda_recalls"),
+  vehicle_recalls: parseColumnar("vehicle_recalls"),
+  arxiv: parseColumnar("arxiv"),
+  github_events: parseColumnar("github_events"),
+  books: parseColumnar("books"),
+  nyc_inspections: parseColumnar("nyc_inspections"),
+  chicago_crime: parseColumnar("chicago_crime"),
+  nyc_parking: parseColumnar("nyc_parking"),
+  powerball: parseColumnar("powerball"),
+  fed_spending: parseColumnar("fed_spending"),
+  bikeshare: parseColumnar("bikeshare"),
+  bluesky: parseColumnar("bluesky"),
+  bgp: parseColumnar("bgp"),
 };
 
 /**
@@ -1080,6 +1099,24 @@ const SOURCE_MERGE: Record<SourceKind, { mode: "replace" | "append"; key?: numbe
   covid: { mode: "replace" },
   countries: { mode: "replace" },
   world_bank: { mode: "replace" },
+  fireballs: { mode: "replace", key: 0 },
+  satellites: { mode: "replace", key: 0 },
+  internet_outages: { mode: "replace" },
+  faa_delays: { mode: "replace" },
+  lobbying: { mode: "replace", key: 0 },
+  fda_recalls: { mode: "replace", key: 0 },
+  vehicle_recalls: { mode: "replace", key: 0 },
+  arxiv: { mode: "replace", key: 0 },
+  github_events: { mode: "append", key: 0 }, // rolling sample — accumulate unique event ids
+  books: { mode: "replace" },
+  nyc_inspections: { mode: "replace" }, // one row per violation
+  chicago_crime: { mode: "replace", key: 0 },
+  nyc_parking: { mode: "replace", key: 0 },
+  powerball: { mode: "replace", key: 0 },
+  fed_spending: { mode: "replace", key: 2 },
+  bikeshare: { mode: "replace" },
+  bluesky: { mode: "append", key: 0 }, // per-minute counts — id = ts|dimension|key
+  bgp: { mode: "append", key: 0 },
 };
 
 /** Parse a `/api/source/<kind>` body into rows in registry column order. */

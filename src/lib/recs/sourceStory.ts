@@ -969,5 +969,173 @@ export function recommendSourceStory(
       ]);
   }
 
+  if (kind === "fireballs") {
+    return finish("Fireballs over Earth", [
+        mk("geoBubbles", "Where they burst", "Each fireball sized by impact energy", 98, "longitude", "latitude", null, null, "impact_kt"),
+        mk("bar", "Fireballs per year", "Detections since 1988", 94, "ts", null, null, "count", null),
+        mk("scatter", "Speed vs altitude", "Fast entries burst higher?", 90, "velocity_kms", "altitude_km", null, null, "impact_kt"),
+        mk("histogram", "Impact energy", "Most are well under a kiloton", 86, "impact_kt", null, null),
+        mk("line", "Energy over time", "Kilotons per fireball, by date", 82, "ts", "impact_kt", null, "max"),
+      ]);
+  }
+
+  if (kind === "satellites") {
+    return finish("Satellites you can see", [
+        mk("scatter", "Perigee vs apogee", "Circular orbits sit on the diagonal", 96, "perigee_km", "apogee_km", "object_type", null, null),
+        mk("scatter", "Inclination vs period", "Orbital families", 93, "inclination", "period_min", "object_type"),
+        mk("bar", "By object type", "Payloads vs rocket bodies", 88, "object_type", null, null, "count"),
+        mk("histogram", "Launch year", "How old is the visible sky?", 84, "launch_year", null, null),
+        mk("bar", "Highest apogees", "Most eccentric visible orbits", 80, "name", "apogee_km", "object_type", "max", null, { topN: 15 }),
+      ]);
+  }
+
+  if (kind === "internet_outages") {
+    return finish("Internet outages this week", [
+        mk("bar", "Alerts by country", "Where connectivity dropped most often", 97, "country", null, "level", "count", null, { topN: 20, barStackMode: "stacked" }),
+        mk("scatter", "Drop size over time", "Each alert: % below normal", 94, "ts", "drop_pct", "datasource", null, null),
+        mk("bar", "Worst drops", "Deepest single-signal outage per country", 92, "country", "drop_pct", null, "max", null, { topN: 15 }),
+        mk("bar", "Signal mix", "BGP, active probing, Google traffic", 86, "datasource", null, "level", "count", null, { barStackMode: "stacked" }),
+        mk("line", "Alerts per day", "Global outage pressure", 82, "ts", null, null, "count", null),
+      ]);
+  }
+
+  if (kind === "faa_delays") {
+    return finish("US airport delays now", [
+        mk("bar", "Longest delays", "Max delay by airport", 97, "airport", "max_delay_min", "status_type", "max", null, { topN: 20 }),
+        mk("bar", "Problem types", "Ground stops, delays, closures", 92, "status_type", null, null, "count"),
+        mk("bar", "Airports affected", "Status entries per airport", 86, "airport", null, "status_type", "count", null, { topN: 20, barStackMode: "stacked" }),
+      ]);
+  }
+
+  if (kind === "lobbying") {
+    return finish("Federal lobbying filings", [
+        mk("bar", "Biggest clients", "Reported income or expenses", 96, "client", "amount_usd", null, "sum", null, { topN: 15 }),
+        mk("bar", "Busiest firms", "Filings per registrant", 93, "registrant", null, null, "count", null, { topN: 15 }),
+        mk("choropleth", "Clients by state", "Where lobbying clients are based", 90, "client_state", null, null, "count"),
+        mk("bar", "Issues touched", "How many issue areas per filing", 84, "n_issues", null, null, "count"),
+        mk("histogram", "Filing size", "Most filings are modest", 80, "amount_usd", null, null),
+      ]);
+  }
+
+  if (kind === "fda_recalls") {
+    return finish("FDA recalls", [
+        mk("bar", "By product and class", "Class I = could cause serious harm", 97, "product_type", null, "classification", "count", null, { barStackMode: "stacked" }),
+        mk("choropleth", "Recalling firms by state", "Where recalled products came from", 94, "state", null, null, "count"),
+        mk("bar", "Top recalling firms", "Most recalls in the latest batch", 90, "firm", null, "product_type", "count", null, { topN: 15 }),
+        mk("bar", "Recalls by week", "Reported recalls over time", 86, "report_date", null, "product_type", "count", null, { barStackMode: "stacked" }),
+        mk("bar", "Status", "Ongoing vs completed", 80, "status", null, null, "count"),
+      ]);
+  }
+
+  if (kind === "vehicle_recalls") {
+    return finish("Vehicle recalls", [
+        mk("bar", "Vehicles affected by maker", "Total units in recent recalls", 97, "manufacturer", "potentially_affected", null, "sum", null, { topN: 15 }),
+        mk("bar", "By component", "What keeps failing", 93, "component", null, null, "count", null, { topN: 15 }),
+        mk("bar", "Recalls per week", "Filed with NHTSA", 88, "report_date", null, "recall_type", "count", null, { barStackMode: "stacked" }),
+        mk("histogram", "Recall size", "Units per recall", 82, "potentially_affected", null, null),
+      ]);
+  }
+
+  if (kind === "arxiv") {
+    return finish("New arXiv papers", [
+        mk("bar", "Papers by category", "Primary category of the newest preprints", 95, "primary_category", null, "field", "count", null, { topN: 20 }),
+        mk("box", "Team size by field", "Authors per paper", 92, "field", "n_authors", null),
+        mk("bar", "Papers per hour", "When submissions land", 88, "published", null, "field", "count", null, { barStackMode: "stacked" }),
+        mk("scatter", "Authors vs cross-lists", "Big teams span more categories?", 84, "n_authors", "n_categories", "field"),
+      ]);
+  }
+
+  if (kind === "github_events") {
+    return finish("GitHub right now", [
+        mk("bar", "Event mix", "Pushes, PRs, stars, forks", 96, "event_type", null, null, "count"),
+        mk("bar", "Busiest repos", "Most events in the sample", 90, "repo", null, "event_type", "count", null, { topN: 15, barStackMode: "stacked" }),
+        mk("line", "Events per minute", "Rolling sample of the public timeline", 86, "ts", null, "event_type", "count", null),
+        mk("bar", "Org vs personal", "Who owns the active repos", 80, "is_org", null, "event_type", "count", null, { barStackMode: "percent" }),
+      ]);
+  }
+
+  if (kind === "books") {
+    return finish("Trending books", [
+        mk("bar", "Open Library today", "Most-read books, ranked", 95, "title", "editions", "site", "max", null, { topN: 20 }),
+        mk("bar", "Gutenberg downloads", "Most-downloaded public-domain books", 93, "title", "downloads", null, "max", null, { topN: 20 }),
+        mk("histogram", "First published", "Classics vs new releases", 88, "first_year", null, null),
+        mk("bar", "Authors on the lists", "Who shows up most", 82, "author", null, "site", "count", null, { topN: 15 }),
+      ]);
+  }
+
+  if (kind === "nyc_inspections") {
+    return finish("NYC restaurant inspections", [
+        mk("geoPoints", "Inspections on the map", "Sized by inspection score (higher = worse)", 97, "longitude", "latitude", "grade", null, "score"),
+        mk("bar", "Grades by borough", "A / B / C mix", 94, "borough", null, "grade", "count", null, { barStackMode: "percent" }),
+        mk("box", "Scores by cuisine", "Spread of inspection scores", 90, "cuisine", "score", null),
+        mk("bar", "Common violations", "Most frequent violation codes", 86, "violation_code", null, "critical", "count", null, { topN: 15 }),
+        mk("histogram", "Score distribution", "0–13 is an A", 80, "score", null, null),
+      ]);
+  }
+
+  if (kind === "chicago_crime") {
+    return finish("Chicago crime reports", [
+        mk("geoPoints", "Reports on the map", "Block-level locations by offense", 97, "longitude", "latitude", "primary_type", null, null),
+        mk("bar", "By offense", "Most reported types", 94, "primary_type", null, "arrest", "count", null, { topN: 15, barStackMode: "stacked" }),
+        mk("line", "Reports per hour", "Chicago local time", 88, "ts", null, null, "count", null),
+        mk("bar", "By district", "Police district totals", 84, "district", null, null, "count"),
+        mk("geoHex", "Hot spots", "Where reports cluster", 82, "longitude", "latitude", null),
+      ]);
+  }
+
+  if (kind === "nyc_parking") {
+    return finish("NYC parking tickets", [
+        mk("bar", "Top violations", "Most common tickets", 96, "violation", null, null, "count", null, { topN: 15 }),
+        mk("box", "Fines by violation", "What each ticket costs", 92, "violation", "fine_amount", null),
+        mk("bar", "Fines by county", "Total dollars written", 88, "county", "fine_amount", null, "sum"),
+        mk("bar", "Issuing agencies", "Who writes the tickets", 82, "issuing_agency", null, null, "count", null, { topN: 10 }),
+      ]);
+  }
+
+  if (kind === "powerball") {
+    return finish("Powerball draws", [
+        mk("bar", "Powerball frequency", "How often each red ball came up", 96, "powerball", null, null, "count"),
+        mk("histogram", "First white ball", "Lowest number drawn each time", 90, "n1", null, null),
+        mk("scatter", "Powerball over time", "Every draw since 2010 (matrix changed in 2015)", 88, "draw_date", "powerball", null),
+        mk("bar", "Power Play multipliers", "How often each multiplier hits", 84, "multiplier", null, null, "count"),
+        mk("bar", "Draws per year", "Schedule changes show up here", 78, "yr", null, null, "count"),
+      ]);
+  }
+
+  if (kind === "fed_spending") {
+    return finish("Federal agency spending", [
+        mk("bar", "Biggest budgets", "Budget authority this fiscal year", 97, "abbreviation", "budget_authority", null, "max", null, { topN: 15 }),
+        mk("treemap", "Share of the budget", "Agencies by % of total authority", 94, "agency", "pct_of_total", null, "sum"),
+        mk("dumbbell", "Authorized → spent", "Budget authority vs outlays", 92, "abbreviation", "budget_authority", null, "max", "outlays", { topN: 15 }),
+        mk("scatter", "Obligated vs outlays", "Committed vs paid", 86, "obligated", "outlays", null),
+      ]);
+  }
+
+  if (kind === "bikeshare") {
+    return finish("Bike share right now", [
+        mk("geoPoints", "Docks on the map", "Chicago, DC, and SF — sized by bikes", 97, "longitude", "latitude", "system", null, "bikes_available"),
+        mk("box", "How full by city", "% full across each system", 94, "system", "pct_full", null),
+        mk("bar", "Bikes vs e-bikes", "Fleet available by system", 90, "system", "bikes_available", null, "sum", null),
+        mk("scatter", "Capacity vs bikes", "Big docks running empty or full", 86, "capacity", "bikes_available", "system"),
+        mk("histogram", "Dock fullness", "Share of each dock filled", 82, "pct_full", null, null),
+      ]);
+  }
+
+  if (kind === "bluesky") {
+    return finish("Bluesky pulse", [
+        mk("bar", "Languages", "Posts by language in recent samples", 96, "key", "posts", "dimension", "sum", null, { topN: 20 }),
+        mk("line", "Posts per minute", "Sampled rate by dimension", 92, "ts", "posts_per_min", "dimension", "max"),
+        mk("bar", "Top keys", "Biggest languages and hashtags", 88, "key", "posts", null, "sum", null, { topN: 15 }),
+      ]);
+  }
+
+  if (kind === "bgp") {
+    return finish("Internet routing updates", [
+        mk("bar", "Busiest origins & lengths", "Prefixes announced in recent samples", 95, "key", "announcements", "dimension", "sum", null, { topN: 20 }),
+        mk("line", "Announcements over time", "Per-sample totals", 92, "ts", "announcements", "dimension", "max"),
+        mk("scatter", "Announce vs withdraw", "By prefix length", 86, "announcements", "withdrawals", "dimension"),
+      ]);
+  }
+
   return finish(`${kind} data`, []);
 }

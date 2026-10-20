@@ -1,0 +1,95 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns:opensearch="http://a9.com/-/spec/opensearch/1.1/" xmlns:arxiv="http://arxiv.org/schemas/atom" xmlns="http://www.w3.org/2005/Atom">
+  <id>https://arxiv.org/api/2HwYR3WCo8wJVzV3Phg+ePn5upM</id>
+  <title>arXiv Query: search_query=cat:cs.AI OR cat:cs.LG OR cat:astro-ph.GA OR cat:q-bio.NC OR cat:econ.GN&amp;id_list=&amp;start=0&amp;max_results=200</title>
+  <updated>2026-10-20T16:22:56Z</updated>
+  <link href="https://arxiv.org/api/query?search_query=cat:cs.AI+OR+(cat:cs.LG+OR+(cat:astro-ph.GA+OR+(cat:q-bio.NC+OR+cat:econ.GN)))&amp;start=0&amp;max_results=200&amp;id_list=" type="application/atom+xml"/>
+  <opensearch:itemsPerPage>200</opensearch:itemsPerPage>
+  <opensearch:totalResults>514780</opensearch:totalResults>
+  <opensearch:startIndex>0</opensearch:startIndex>
+  <entry>
+    <id>http://arxiv.org/abs/2610.26863v1</id>
+    <title>Text-to-Image Generative Modeling Without Language Pretraining</title>
+    <updated>2026-10-19T17:59:59Z</updated>
+    <link href="https://arxiv.org/abs/2610.26863v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.26863v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>(abstract omitted)</summary>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T17:59:59Z</published>
+    
+    <arxiv:primary_category term="cs.LG"/>
+    <author>
+      <name>Keshigeyan Chandrasegaran</name>
+    </author>
+    <author>
+      <name>Yue Zhao</name>
+    </author>
+    <author>
+      <name>Armin W. Thomas</name>
+    </author>
+    <author>
+      <name>Ehsan Adeli</name>
+    </author>
+    <author>
+      <name>Jiajun Wu</name>
+    </author>
+    <author>
+      <name>Juan Carlos Niebles</name>
+    </author>
+    <author>
+      <name>Li Fei-Fei</name>
+    </author>
+    <author>
+      <name>Michael Poli</name>
+    </author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2610.26860v1</id>
+    <title>OpenVLHarness: Real World Visual Agentic Tool-Use with Multimodal Memory</title>
+    <updated>2026-10-19T17:59:58Z</updated>
+    <link href="https://arxiv.org/abs/2610.26860v1" rel="alternate" type="text/html"/>
+    <link href="https://arxiv.org/pdf/2610.26860v1" rel="related" type="application/pdf" title="pdf"/>
+    <summary>(abstract omitted)</summary>
+    <category term="cs.CL" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.AI" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.CV" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.LG" scheme="http://arxiv.org/schemas/atom"/>
+    <category term="cs.MM" scheme="http://arxiv.org/schemas/atom"/>
+    <published>2026-10-19T17:59:58Z</published>
+    <arxiv:primary_category term="cs.CL"/>
+    <author>
+      <name>Yu Zhou</name>
+    </author>
+    <author>
+      <name>Cheng-Fu Yang</name>
+    </author>
+    <author>
+      <name>Rui Sun</name>
+    </author>
+    <author>
+      <name>Di Wu</name>
+    </author>
+    <author>
+      <name>Sibo Peng</name>
+    </author>
+    <author>
+      <name>Mingyang Zhang</name>
+    </author>
+    <author>
+      <name>Zhen Yang</name>
+    </author>
+    <author>
+      <name>Ruiyi Zhang</name>
+    </author>
+    <author>
+      <name>Nanyun Peng</name>
+    </author>
+    <author>
+      <name>Zhe Gan</name>
+    </author>
+    <author>
+      <name>Kai-Wei Chang</name>
+    </author>
+  </entry>
+</feed>

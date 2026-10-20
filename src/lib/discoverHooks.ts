@@ -1438,6 +1438,253 @@ function hook_wiki(
   };
 }
 
+// ---- 2026-10 keyless batch ----
+
+/** Most frequent non-empty value of a column in the sample. */
+function topValue(sample: QueryResult, col: string): { value: string; count: number } | null {
+  const counts = new Map<string, number>();
+  for (let r = 0; r < sample.rows.length; r++) {
+    const v = strAt(sample, r, col);
+    if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
+  }
+  const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best ? { value: best[0], count: best[1] } : null;
+}
+
+function hook_fireballs(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const big = maxFiniteAt(sample, "impact_kt");
+  const when = big ? strAt(sample, big.row, "ts").slice(0, 10) : "";
+  return {
+    hook: big && big.value >= 1
+      ? `A ${big.value.toFixed(1)} kt fireball${when ? ` on ${when}` : ""}`
+      : `${n} fireballs seen from orbit`,
+    blurb: chart.subtitle || "Bright meteors caught by government sensors.",
+    score: 78 + Math.min(12, (big?.value ?? 0) / 2),
+    preferKind: "geoBubbles",
+    category: "Space",
+  };
+}
+
+function hook_satellites(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  return {
+    hook: `${n} satellites bright enough to see tonight`,
+    blurb: chart.subtitle || "Orbits of the naked-eye sky.",
+    score: 74,
+    preferKind: "scatter",
+    category: "Space",
+  };
+}
+
+function hook_internet_outages(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "country");
+  const worst = maxFiniteAt(sample, "drop_pct");
+  return {
+    hook: top
+      ? `Internet outages: ${top.value} flagged ${top.count}× this week`
+      : `${n} internet outage alerts this week`,
+    blurb: worst ? `Deepest drop: ${Math.round(worst.value)}% below normal` : chart.subtitle,
+    score: 80 + Math.min(10, n / 50),
+    preferKind: "bar",
+    category: "Global",
+  };
+}
+
+function hook_faa_delays(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const worst = maxFiniteAt(sample, "max_delay_min");
+  const stops = sample.rows.filter((_, r) => strAt(sample, r, "status_type") === "Ground stop").length;
+  if (stops > 0) {
+    return { hook: `${stops} US airport ground stop${stops === 1 ? "" : "s"} right now`, blurb: chart.subtitle, score: 90, preferKind: "bar", category: "Transit" };
+  }
+  return {
+    hook: worst ? `${strAt(sample, worst.row, "airport")}: delays up to ${Math.round(worst.value)} min` : `${n} US airport status notices`,
+    blurb: chart.subtitle || "FAA airport status right now.",
+    score: n > 0 ? 76 + Math.min(10, (worst?.value ?? 0) / 15) : 50,
+    preferKind: "bar",
+    category: "Transit",
+  };
+}
+
+function hook_lobbying(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const big = maxFiniteAt(sample, "amount_usd");
+  return {
+    hook: big
+      ? `${strAt(sample, big.row, "client")}: $${Math.round(big.value).toLocaleString()} in lobbying`
+      : `${n} new lobbying filings`,
+    blurb: chart.subtitle || "Who lobbies Congress, and on what.",
+    score: 77,
+    preferKind: "bar",
+    category: "US",
+  };
+}
+
+function hook_fda_recalls(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const classOne = sample.rows.filter((_, r) => strAt(sample, r, "classification") === "Class I").length;
+  return {
+    hook: classOne ? `${classOne} serious (Class I) FDA recalls` : `${n} recent FDA recalls`,
+    blurb: chart.subtitle || "Food, drug, and device recalls.",
+    score: 78 + Math.min(10, classOne / 5),
+    preferKind: "bar",
+    category: "Health",
+  };
+}
+
+function hook_vehicle_recalls(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const big = maxFiniteAt(sample, "potentially_affected");
+  return {
+    hook: big && big.value >= 10_000
+      ? `${strAt(sample, big.row, "manufacturer")} recalls ${Math.round(big.value).toLocaleString()} vehicles`
+      : `${n} new vehicle recalls`,
+    blurb: chart.subtitle || strAt(sample, big?.row ?? 0, "subject"),
+    score: 76 + Math.min(12, Math.log10(Math.max(1, big?.value ?? 1)) * 2),
+    preferKind: "bar",
+    category: "Transit",
+  };
+}
+
+function hook_arxiv(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "primary_category");
+  return {
+    hook: top ? `${top.value} leads ${n} new arXiv papers` : `${n} new arXiv papers`,
+    blurb: chart.subtitle || "What researchers just posted.",
+    score: 75,
+    preferKind: "bar",
+    category: "News",
+  };
+}
+
+function hook_github_events(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "event_type");
+  return {
+    hook: top ? `${Math.round((top.count / Math.max(1, n)) * 100)}% of GitHub activity is ${top.value}` : `${n} public GitHub events`,
+    blurb: chart.subtitle || "What developers are doing right now.",
+    score: 72,
+    preferKind: "bar",
+    category: "Culture",
+  };
+}
+
+function hook_books(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  let title = "";
+  for (let r = 0; r < sample.rows.length; r++) {
+    if (strAt(sample, r, "site") === "Open Library" && numAt(sample, r, "rank") === 1) title = strAt(sample, r, "title");
+  }
+  return {
+    hook: title ? `Most-read book today: ${title}` : `${n} trending books`,
+    blurb: chart.subtitle || "Open Library and Project Gutenberg.",
+    score: 74,
+    preferKind: "bar",
+    category: "Culture",
+  };
+}
+
+function hook_nyc_inspections(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const worst = maxFiniteAt(sample, "score");
+  return {
+    hook: worst && worst.value >= 28
+      ? `${strAt(sample, worst.row, "restaurant")} scored ${worst.value} on inspection`
+      : `${n} NYC restaurant inspection findings`,
+    blurb: chart.subtitle || "Grades, scores, and violations.",
+    score: 76,
+    preferKind: "geoPoints",
+    category: "Cities",
+  };
+}
+
+function hook_chicago_crime(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "primary_type");
+  return {
+    hook: top ? `${top.value.toLowerCase()} leads Chicago's latest ${n} reports` : `${n} Chicago crime reports`,
+    blurb: chart.subtitle || "Block-level police reports.",
+    score: 74,
+    preferKind: "geoPoints",
+    category: "Cities",
+  };
+}
+
+function hook_nyc_parking(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "violation");
+  return {
+    hook: top ? `NYC's top ticket: ${top.value.toLowerCase()}` : `${n} NYC parking tickets`,
+    blurb: chart.subtitle || "Violations and fines.",
+    score: 70,
+    preferKind: "bar",
+    category: "Cities",
+  };
+}
+
+function hook_powerball(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "powerball");
+  return {
+    hook: top ? `Powerball ${top.value} is the most-drawn red ball` : `${n} Powerball draws`,
+    blurb: chart.subtitle || "Every drawing since 2010.",
+    score: 72,
+    preferKind: "bar",
+    category: "Culture",
+  };
+}
+
+function hook_fed_spending(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const big = maxFiniteAt(sample, "pct_of_total");
+  return {
+    hook: big ? `${strAt(sample, big.row, "agency")} holds ${big.value.toFixed(1)}% of the federal budget` : `${n} federal agencies' budgets`,
+    blurb: chart.subtitle || "Budget authority, obligations, outlays.",
+    score: 78,
+    preferKind: "bar",
+    category: "Economy",
+  };
+}
+
+function hook_bikeshare(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const empty = sample.rows.filter((_, r) => numAt(sample, r, "bikes_available") === 0).length;
+  return {
+    hook: empty ? `${empty} bike share docks sit empty right now` : `${n} bike share docks in 3 cities`,
+    blurb: chart.subtitle || "Chicago, DC, and San Francisco.",
+    score: 76,
+    preferKind: "geoPoints",
+    category: "Transit",
+  };
+}
+
+function hook_bluesky(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  let tag = "";
+  let best = -1;
+  for (let r = 0; r < sample.rows.length; r++) {
+    if (strAt(sample, r, "dimension") !== "hashtag") continue;
+    const p = numAt(sample, r, "posts");
+    if (p > best) {
+      best = p;
+      tag = strAt(sample, r, "key");
+    }
+  }
+  return {
+    hook: tag ? `${tag} is trending on Bluesky` : "Bluesky posts per minute, live",
+    blurb: chart.subtitle || "Languages and hashtags, counted.",
+    score: 80,
+    preferKind: "bar",
+    category: "Culture",
+  };
+}
+
+function hook_bgp(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  let asn = "";
+  let best = -1;
+  for (let r = 0; r < sample.rows.length; r++) {
+    if (strAt(sample, r, "dimension") !== "origin_asn") continue;
+    const a = numAt(sample, r, "announcements");
+    if (a > best) {
+      best = a;
+      asn = strAt(sample, r, "key");
+    }
+  }
+  return {
+    hook: asn ? `${asn} is the noisiest network on the internet right now` : "Live internet routing updates",
+    blurb: chart.subtitle || "BGP announcements and withdrawals.",
+    score: 73,
+    preferKind: "bar",
+    category: "Global",
+  };
+}
+
 function hookDefault(
   n: number,
   sample: QueryResult,
@@ -1488,6 +1735,24 @@ export const DISCOVER_HOOKS: { [K in DiscoverKind]: DiscoverHookFn } = {
   "debt": hook_debt,
   "usafacts_states": hook_usafacts_states,
   "usafacts_nation": hook_usafacts_nation,
+  "fireballs": hook_fireballs,
+  "satellites": hook_satellites,
+  "internet_outages": hook_internet_outages,
+  "faa_delays": hook_faa_delays,
+  "lobbying": hook_lobbying,
+  "fda_recalls": hook_fda_recalls,
+  "vehicle_recalls": hook_vehicle_recalls,
+  "arxiv": hook_arxiv,
+  "github_events": hook_github_events,
+  "books": hook_books,
+  "nyc_inspections": hook_nyc_inspections,
+  "chicago_crime": hook_chicago_crime,
+  "nyc_parking": hook_nyc_parking,
+  "powerball": hook_powerball,
+  "fed_spending": hook_fed_spending,
+  "bikeshare": hook_bikeshare,
+  "bluesky": hook_bluesky,
+  "bgp": hook_bgp,
   "wiki": hook_wiki,
 };
 

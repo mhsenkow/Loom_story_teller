@@ -690,6 +690,335 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         poll_secs: 0,
         mode: WriteMode::Replace,
     },
+    // ---- 2026-10 keyless batch (parsers in sources_extra.rs) ----
+    SourceSpec {
+        kind: "fireballs",
+        table: "fireballs",
+        columns: &[
+            ("ts", TS),
+            ("latitude", D),
+            ("longitude", D),
+            ("altitude_km", D),
+            ("velocity_kms", D),
+            ("energy_e10j", D),
+            ("impact_kt", D),
+        ],
+        order_by: "ts DESC",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "satellites",
+        table: "visual_satellites",
+        columns: &[
+            ("norad_id", I),
+            ("name", V),
+            ("object_type", V),
+            ("launch_year", I),
+            ("inclination", D),
+            ("period_min", D),
+            ("apogee_km", D),
+            ("perigee_km", D),
+            ("eccentricity", D),
+            ("epoch", TS),
+        ],
+        order_by: "apogee_km DESC",
+        poll_secs: 7200,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "internet_outages",
+        table: "internet_outages",
+        columns: &[
+            ("ts", TS),
+            ("country_code", V),
+            ("country", V),
+            ("datasource", V),
+            ("level", V),
+            ("value", D),
+            ("history_value", D),
+            ("drop_pct", D),
+        ],
+        order_by: "ts DESC",
+        poll_secs: 900,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "faa_delays",
+        table: "faa_airport_status",
+        columns: &[
+            ("airport", V),
+            ("status_type", V),
+            ("reason", V),
+            ("min_delay_min", D),
+            ("max_delay_min", D),
+            ("avg_delay_min", D),
+            ("trend", V),
+            ("updated", TS),
+        ],
+        order_by: "max_delay_min DESC",
+        poll_secs: 300,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "lobbying",
+        table: "lobbying_filings",
+        columns: &[
+            ("filing_id", V),
+            ("registrant", V),
+            ("client", V),
+            ("client_state", V),
+            ("filing_type", V),
+            ("filing_year", I),
+            ("filing_period", V),
+            ("amount_usd", D),
+            ("amount_kind", V),
+            ("issue_codes", V),
+            ("n_issues", I),
+            ("posted", TS),
+        ],
+        order_by: "posted DESC",
+        poll_secs: 3600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "fda_recalls",
+        table: "fda_recalls",
+        columns: &[
+            ("recall_number", V),
+            ("product_type", V),
+            ("classification", V),
+            ("status", V),
+            ("firm", V),
+            ("state", V),
+            ("country", V),
+            ("reason", V),
+            ("product", V),
+            ("quantity", V),
+            ("voluntary", V),
+            ("report_date", DT),
+            ("initiated", DT),
+        ],
+        order_by: "report_date DESC",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "vehicle_recalls",
+        table: "vehicle_recalls",
+        columns: &[
+            ("nhtsa_id", V),
+            ("report_date", DT),
+            ("manufacturer", V),
+            ("subject", V),
+            ("component", V),
+            ("recall_type", V),
+            ("potentially_affected", BI),
+            ("park_outside", B),
+            ("do_not_drive", B),
+        ],
+        order_by: "report_date DESC",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "arxiv",
+        table: "arxiv_papers",
+        columns: &[
+            ("id", V),
+            ("title", V),
+            ("primary_category", V),
+            ("field", V),
+            ("n_categories", I),
+            ("n_authors", I),
+            ("published", TS),
+            ("updated", TS),
+        ],
+        order_by: "published DESC",
+        poll_secs: 3600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "github_events",
+        table: "github_events",
+        columns: &[
+            ("id", V),
+            ("event_type", V),
+            ("repo", V),
+            ("is_org", B),
+            ("ts", TS),
+        ],
+        order_by: "ts DESC",
+        poll_secs: 600,
+        mode: WriteMode::Upsert(&["id"]),
+    },
+    SourceSpec {
+        kind: "books",
+        table: "trending_books",
+        columns: &[
+            ("site", V),
+            ("rank", I),
+            ("title", V),
+            ("author", V),
+            ("first_year", I),
+            ("editions", I),
+            ("downloads", BI),
+            ("language", V),
+        ],
+        order_by: "site, rank",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "nyc_inspections",
+        table: "nyc_restaurant_inspections",
+        columns: &[
+            ("camis", V),
+            ("restaurant", V),
+            ("borough", V),
+            ("cuisine", V),
+            ("inspection_date", TS),
+            ("grade", V),
+            ("score", I),
+            ("critical", V),
+            ("violation_code", V),
+            ("violation", V),
+            ("latitude", D),
+            ("longitude", D),
+        ],
+        order_by: "inspection_date DESC",
+        poll_secs: 3600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "chicago_crime",
+        table: "chicago_crime",
+        columns: &[
+            ("id", V),
+            ("ts", TS),
+            ("block", V),
+            ("primary_type", V),
+            ("description", V),
+            ("location_description", V),
+            ("arrest", B),
+            ("domestic", B),
+            ("district", V),
+            ("community_area", V),
+            ("latitude", D),
+            ("longitude", D),
+        ],
+        order_by: "ts DESC",
+        poll_secs: 3600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "nyc_parking",
+        table: "nyc_parking_tickets",
+        columns: &[
+            ("summons_number", V),
+            ("issue_date", DT),
+            ("violation_time", V),
+            ("violation", V),
+            ("fine_amount", D),
+            ("penalty_amount", D),
+            ("amount_due", D),
+            ("county", V),
+            ("plate_state", V),
+            ("issuing_agency", V),
+            ("precinct", V),
+        ],
+        order_by: "issue_date DESC",
+        poll_secs: 3600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "powerball",
+        table: "powerball_draws",
+        columns: &[
+            ("draw_date", DT),
+            ("yr", I),
+            ("n1", I),
+            ("n2", I),
+            ("n3", I),
+            ("n4", I),
+            ("n5", I),
+            ("powerball", I),
+            ("multiplier", I),
+        ],
+        order_by: "draw_date DESC",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "fed_spending",
+        table: "federal_agencies",
+        columns: &[
+            ("agency", V),
+            ("abbreviation", V),
+            ("toptier_code", V),
+            ("fiscal_year", I),
+            ("budget_authority", D),
+            ("obligated", D),
+            ("outlays", D),
+            ("pct_of_total", D),
+        ],
+        order_by: "budget_authority DESC",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "bikeshare",
+        table: "bikeshare_stations",
+        columns: &[
+            ("system", V),
+            ("station_id", V),
+            ("name", V),
+            ("latitude", D),
+            ("longitude", D),
+            ("capacity", I),
+            ("bikes_available", I),
+            ("ebikes_available", I),
+            ("docks_available", I),
+            ("pct_full", D),
+            ("is_renting", B),
+            ("ts", TS),
+        ],
+        order_by: "bikes_available DESC",
+        poll_secs: 120,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "bluesky",
+        table: "bluesky_activity",
+        columns: &[
+            ("id", V),
+            ("ts", TS),
+            ("dimension", V),
+            ("key", V),
+            ("posts", I),
+            ("window_secs", D),
+            ("posts_per_min", D),
+        ],
+        order_by: "ts DESC, posts DESC",
+        poll_secs: 60,
+        mode: WriteMode::Upsert(&["id"]),
+    },
+    SourceSpec {
+        kind: "bgp",
+        table: "bgp_updates",
+        columns: &[
+            ("id", V),
+            ("ts", TS),
+            ("dimension", V),
+            ("key", V),
+            ("announcements", I),
+            ("withdrawals", I),
+            ("window_secs", D),
+        ],
+        order_by: "ts DESC, announcements DESC",
+        poll_secs: 60,
+        mode: WriteMode::Upsert(&["id"]),
+    },
 ];
 
 pub fn spec_for_kind(kind: &str) -> Option<&'static SourceSpec> {
@@ -3591,9 +3920,156 @@ pub(crate) fn debt_rows(body: &Value) -> Result<Vec<Row>, String> {
 // Fetch + poll
 // ================================================================
 
+// ---- 2026-10 keyless batch: upstream URLs (parsers in sources_extra.rs) ----
+
+#[path = "sources_extra.rs"]
+mod extra;
+use extra::*;
+
+const FIREBALLS_URL: &str = "https://ssd-api.jpl.nasa.gov/fireball.api";
+const SATELLITES_URL: &str = "https://celestrak.org/NORAD/elements/gp.php?GROUP=visual&FORMAT=json";
+const IODA_ALERTS_URL: &str = "https://api.ioda.inetintel.cc.gatech.edu/v2/outages/alerts";
+const FAA_STATUS_URL: &str = "https://nasstatus.faa.gov/api/airport-status-information";
+/// lda.senate.gov now redirects here.
+/// Anonymous pages cap at 25 rows — the newest `LDA_PAGES` pages.
+const LDA_FILINGS_URL: &str = "https://lda.gov/api/v1/filings/?ordering=-dt_posted&page_size=25";
+const LDA_PAGES: usize = 4;
+const FDA_CATEGORIES: [&str; 3] = ["food", "drug", "device"];
+fn fda_url(category: &str) -> String {
+    format!(
+        "https://api.fda.gov/{}/enforcement.json?limit=100&sort=report_date:desc",
+        category
+    )
+}
+const NHTSA_RECALLS_URL: &str =
+    "https://data.transportation.gov/resource/6axg-epim.json?$limit=400&$order=report_received_date%20DESC";
+/// One query per field (mirrors ARXIV_QUERIES); arXiv asks for ~1 request at a time.
+const ARXIV_QUERIES: [&str; 5] = [
+    "cat:cs.AI",
+    "cat:cs.LG",
+    "cat:astro-ph*",
+    "cat:q-bio*",
+    "cat:econ*",
+];
+const ARXIV_PER_QUERY: usize = 60;
+fn arxiv_url(q: &str) -> String {
+    format!(
+        "https://export.arxiv.org/api/query?search_query={}&sortBy=submittedDate&sortOrder=descending&max_results={}",
+        q.replace(':', "%3A").replace('*', "%2A"),
+        ARXIV_PER_QUERY
+    )
+}
+const GITHUB_EVENTS_URL: &str = "https://api.github.com/events?per_page=100";
+const OPEN_LIBRARY_TRENDING_URL: &str = "https://openlibrary.org/trending/daily.json?limit=50";
+const GUTENDEX_POPULAR_URL: &str = "https://gutendex.com/books/?sort=popular";
+const NYC_INSPECTIONS_URL: &str = "https://data.cityofnewyork.us/resource/43nn-pn8j.json?$limit=1000&$order=inspection_date%20DESC&$where=inspection_date%3E%272001-01-01%27";
+const CHICAGO_CRIME_URL: &str =
+    "https://data.cityofchicago.org/resource/ijzp-q8t2.json?$limit=1000&$order=date%20DESC";
+/// `$select` leaves the plate column out entirely.
+/// issue_date is text upstream with typos like "2097-12-11" — capped at tomorrow.
+fn nyc_parking_url(today: i64) -> String {
+    format!(
+        "https://data.cityofnewyork.us/resource/nc67-uf89.json?$limit=1000&$order=issue_date%20DESC&$select=summons_number,issue_date,violation_time,violation,fine_amount,penalty_amount,amount_due,county,state,issuing_agency,precinct&$where=issue_date%20between%20%272000-01-01%27%20and%20%27{}%27",
+        fmt_date(today + 1)
+    )
+}
+const POWERBALL_URL: &str =
+    "https://data.ny.gov/resource/d6yy-54nr.json?$limit=5000&$order=draw_date%20DESC";
+const USASPENDING_AGENCIES_URL: &str =
+    "https://api.usaspending.gov/api/v2/references/toptier_agencies/";
+/// Mirrors BIKESHARE_SYSTEMS in workers/catalog-proxy.ts.
+const BIKESHARE_SYSTEMS: [(&str, &str); 3] = [
+    ("Divvy (Chicago)", "https://gbfs.divvybikes.com/gbfs/en/"),
+    (
+        "Capital Bikeshare (DC)",
+        "https://gbfs.capitalbikeshare.com/gbfs/en/",
+    ),
+    ("Bay Wheels (SF)", "https://gbfs.lyftbikes.com/gbfs/en/"),
+];
+/// WebSocket-sampled feeds (bluesky, bgp) come from the Worker's aggregate.
+const LOOM_WORKER_ORIGIN: &str = "https://loom.ibm.io";
+
+async fn fetch_bikeshare(ctx: &mut PollCtx) -> Result<Vec<Row>, String> {
+    let mut rows = Vec::new();
+    let mut errors = Vec::new();
+    for (system, base) in BIKESHARE_SYSTEMS {
+        if !ctx.bikeshare_info.contains_key(system) {
+            match get_json(&ctx.client, &format!("{}station_information.json", base))
+                .await
+                .and_then(|b| citibike_info(&b))
+            {
+                Ok(info) => {
+                    ctx.bikeshare_info.insert(system.to_string(), info);
+                }
+                Err(e) => {
+                    errors.push(e);
+                    continue;
+                }
+            }
+        }
+        let status = match get_json(&ctx.client, &format!("{}station_status.json", base)).await {
+            Ok(s) => s,
+            Err(e) => {
+                errors.push(e);
+                continue;
+            }
+        };
+        if let Some(info) = ctx.bikeshare_info.get(system) {
+            rows.extend(bikeshare_rows(system, &status, info)?);
+        }
+    }
+    if rows.is_empty() && !errors.is_empty() {
+        return Err(errors.join("; "));
+    }
+    Ok(rows)
+}
+
+async fn fetch_arxiv(client: &reqwest::Client) -> Result<Vec<Row>, String> {
+    let mut feeds = Vec::new();
+    let mut last_err = None;
+    for (i, q) in ARXIV_QUERIES.iter().enumerate() {
+        if i > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+        }
+        match get_text(client, &arxiv_url(q)).await {
+            Ok(t) => feeds.push(t),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if feeds.is_empty() {
+        return Err(last_err.unwrap_or_else(|| "arXiv: no feeds".into()));
+    }
+    arxiv_rows(&feeds)
+}
+
+async fn fetch_books(client: &reqwest::Client) -> Result<Vec<Row>, String> {
+    let ol = get_json(client, OPEN_LIBRARY_TRENDING_URL).await;
+    let gut = get_json(client, GUTENDEX_POPULAR_URL).await;
+    if let (Err(a), Err(b)) = (&ol, &gut) {
+        return Err(format!("{}; {}", a, b));
+    }
+    books_rows(ol.as_ref().ok(), gut.as_ref().ok())
+}
+
+async fn fetch_fda(client: &reqwest::Client) -> Result<Vec<Row>, String> {
+    let mut bodies = Vec::new();
+    let mut last_err = None;
+    for c in FDA_CATEGORIES {
+        match get_json(client, &fda_url(c)).await {
+            Ok(b) => bodies.push(b),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if bodies.is_empty() {
+        return Err(last_err.unwrap_or_else(|| "openFDA: no feeds".into()));
+    }
+    fda_rows(&bodies)
+}
+
 /// Per-run state carried between polls.
 struct PollCtx {
     client: reqwest::Client,
+    bikeshare_info: HashMap<String, HashMap<String, CitiStation>>,
     citibike_info: Option<HashMap<String, CitiStation>>,
     iss_seeded: bool,
     opensky_retry_at: i64,
@@ -4313,6 +4789,74 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
             countries_rows(&body, &pop)
         }
         "world_bank" => fetch_world_bank(&c).await,
+        "fireballs" => fireballs_rows(&get_json(&c, FIREBALLS_URL).await?),
+        "satellites" => {
+            let text = get_text(&c, SATELLITES_URL).await?;
+            if text.trim_start().starts_with("GP data has not updated") {
+                return Err("CelesTrak: GP not updated yet".into());
+            }
+            let body: Value =
+                serde_json::from_str(&text).map_err(|e| format!("CelesTrak JSON: {}", e))?;
+            satellites_rows(&body)
+        }
+        "internet_outages" => {
+            let (from, until) = ioda_window(now_secs());
+            let url = format!(
+                "{}?from={}&until={}&entityType=country&limit={}",
+                IODA_ALERTS_URL, from, until, IODA_MAX_ROWS
+            );
+            match get_json(&c, &url).await {
+                Ok(body) => ioda_rows(&body),
+                Err(e) => {
+                    // IODA's chain ends at an emSign cross-signed root rustls may not build a
+                    // path to — fall back to the Worker's copy (same columns).
+                    log::warn!(target: "loom", "IODA direct: {e}; using Worker");
+                    let url = format!("{}/api/source/internet_outages", LOOM_WORKER_ORIGIN);
+                    columnar_rows(&get_json(&c, &url).await?, spec)
+                }
+            }
+        }
+        "faa_delays" => faa_rows(&get_text(&c, FAA_STATUS_URL).await?),
+        "lobbying" => {
+            let mut results = Vec::new();
+            let mut last_err = None;
+            for page in 1..=LDA_PAGES {
+                // Paging needs a filter: filing_year of 30 days ago (mirrors the Worker).
+                let (year, _, _) = civil_from_days(today - 30);
+                let url = format!("{}&filing_year={}&page={}", LDA_FILINGS_URL, year, page);
+                match get_json(&c, &url).await {
+                    Ok(b) => results.extend(
+                        b.get("results")
+                            .and_then(Value::as_array)
+                            .cloned()
+                            .unwrap_or_default(),
+                    ),
+                    Err(e) => {
+                        last_err = Some(e);
+                        break;
+                    }
+                }
+            }
+            if results.is_empty() {
+                return Err(last_err.unwrap_or_else(|| "LDA: no filings".into()));
+            }
+            lobbying_rows(&serde_json::json!({ "results": results }))
+        }
+        "fda_recalls" => fetch_fda(&c).await,
+        "vehicle_recalls" => vehicle_recalls_rows(&get_json(&c, NHTSA_RECALLS_URL).await?),
+        "arxiv" => fetch_arxiv(&c).await,
+        "github_events" => github_events_rows(&get_json(&c, GITHUB_EVENTS_URL).await?),
+        "books" => fetch_books(&c).await,
+        "nyc_inspections" => nyc_inspections_rows(&get_json(&c, NYC_INSPECTIONS_URL).await?),
+        "chicago_crime" => chicago_crime_rows(&get_json(&c, CHICAGO_CRIME_URL).await?),
+        "nyc_parking" => nyc_parking_rows(&get_json(&c, &nyc_parking_url(today)).await?),
+        "powerball" => powerball_rows(&get_json(&c, POWERBALL_URL).await?),
+        "fed_spending" => fed_spending_rows(&get_json(&c, USASPENDING_AGENCIES_URL).await?),
+        "bikeshare" => fetch_bikeshare(ctx).await,
+        "bluesky" | "bgp" => {
+            let url = format!("{}/api/source/{}", LOOM_WORKER_ORIGIN, spec.kind);
+            columnar_rows(&get_json(&c, &url).await?, spec)
+        }
         other => Err(format!("Unknown source kind {}", other)),
     }
 }
@@ -4359,6 +4903,7 @@ pub async fn source_start(
     let handle = tokio::spawn(async move {
         let mut ctx = PollCtx {
             client,
+            bikeshare_info: HashMap::new(),
             citibike_info: None,
             iss_seeded: false,
             opensky_retry_at: 0,

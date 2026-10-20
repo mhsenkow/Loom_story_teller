@@ -1,0 +1,130 @@
+{
+ "results": [
+  {
+   "status": "Ongoing",
+   "city": "Brampton",
+   "state": "",
+   "country": "Canada",
+   "classification": "Class II",
+   "openfda": {},
+   "product_type": "Drugs",
+   "event_id": "99866",
+   "recalling_firm": "SV Labs Toronto Corporation",
+   "address_1": "296 Orenda Rd",
+   "address_2": "",
+   "postal_code": "N/A",
+   "voluntary_mandated": "Voluntary: Firm initiated",
+   "initial_firm_notification": "E-Mail",
+   "distribution_pattern": "IL only",
+   "recall_number": "D-0879-2026",
+   "product_description": "Benzoyl Peroxide Wash, USP, 10%, packaged in a)5 FL OZ (148mL) bottles (NDC 0536-1261-63), and b) 8.5 FL OZ (237 mL) bottles (NDC 0536-1351-42), Distributed by: Rugby Laboratories, 17177 N. Laurel Park Drive, Suite 233, Livonia, MI 48152.",
+   "product_quantity": "",
+   "reason_for_recall": "Microbial contamination of topical product.",
+   "recall_initiation_date": "20260901",
+   "center_classification_date": "20260930",
+   "report_date": "20261007",
+   "code_info": "a) Lot #: 0575-01-366, Exp. Date Jan-27; 0565-02-336, Exp. Date FEB-27;  b) Lot #: 0645-02-355,  0575-02-336, Exp. Date Feb-27;  0565-12-317, Exp. Date Dec-26",
+   "more_code_info": ""
+  },
+  {
+   "status": "Ongoing",
+   "city": "Bridgewater",
+   "state": "NJ",
+   "country": "United States",
+   "classification": "Class II",
+   "openfda": {
+    "application_number": [
+     "ANDA216055"
+    ],
+    "brand_name": [
+     "ESTRADIOL"
+    ],
+    "generic_name": [
+     "ESTRADIOL TRANSDERMAL"
+    ],
+    "manufacturer_name": [
+     "Amneal Pharmaceuticals NY LLC"
+    ],
+    "product_ndc": [
+     "69238-2448",
+     "69238-2452",
+     "69238-2451",
+     "69238-2450",
+     "69238-2449"
+    ],
+    "product_type": [
+     "HUMAN PRESCRIPTION DRUG"
+    ],
+    "route": [
+     "TOPICAL"
+    ],
+    "substance_name": [
+     "ESTRADIOL"
+    ],
+    "rxcui": [
+     "2619677",
+     "2619679",
+     "2619681",
+     "2619683",
+     "2619685"
+    ],
+    "spl_id": [
+     "cebb61d3-34b7-44a7-aae7-d23e21651713"
+    ],
+    "spl_set_id": [
+     "9669a0e3-27e2-4f6c-961c-7a67e9f84cc8"
+    ],
+    "package_ndc": [
+     "69238-2452-1",
+     "69238-2452-3",
+     "69238-2451-1",
+     "69238-2451-3",
+     "69238-2450-1",
+     "69238-2450-3",
+     "69238-2449-1",
+     "69238-2449-3",
+     "69238-2448-1",
+     "69238-2448-3"
+    ],
+    "is_original_packager": [
+     true
+    ],
+    "nui": [
+     "M0447348",
+     "N0000175825",
+     "N0000000100"
+    ],
+    "pharm_class_cs": [
+     "Estradiol Congeners [CS]"
+    ],
+    "pharm_class_epc": [
+     "Estrogen [EPC]"
+    ],
+    "pharm_class_moa": [
+     "Estrogen Receptor Agonists [MoA]"
+    ],
+    "unii": [
+     "4TI98Z838E"
+    ]
+   },
+   "product_type": "Drugs",
+   "event_id": "99742",
+   "recalling_firm": "Amneal Pharmaceuticals, LLC",
+   "address_1": "400 Crossing Blvd Fl 3",
+   "address_2": "",
+   "postal_code": "08807-2863",
+   "voluntary_mandated": "Voluntary: Firm initiated",
+   "initial_firm_notification": "Letter",
+   "distribution_pattern": "Nationwide in the USA.",
+   "recall_number": "D-0873-2026",
+   "product_description": "Estradiol Gel, 0.1%, 0.25 mg, 30-packets per carton, Rx only, Distributed by: Amneal Pharmaceuticals LLC, Bridgewater, NJ 08907, NDC 69238-2452-3.",
+   "product_quantity": "2,592 30-count cartons",
+   "reason_for_recall": "Defective Container; packets were found to be either empty or partially full.",
+   "recall_initiation_date": "20260908",
+   "center_classification_date": "20260928",
+   "report_date": "20261007",
+   "code_info": "Lot # 245226005B, Exp Date: 04/30/2028.",
+   "more_code_info": ""
+  }
+ ]
+}
