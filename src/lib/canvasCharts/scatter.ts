@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Canvas 2D scatter renderer.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -33,8 +34,8 @@ export function renderFullScatter(
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const [dataXMin, dataXMax] = numRange(rows, xi);
   const [dataYMin, dataYMax] = numRange(rows, yi);
-  const xs = rows.map((r) => Number(r[xi]));
-  const ysRaw = rows.map((r) => Number(r[yi]));
+  const xs = rows.map((r) => chartNumber(r[xi]));
+  const ysRaw = rows.map((r) => chartNumber(r[yi]));
   const fit = opts?.residualOverlay ? residualYs(xs, ysRaw) : null;
   const plotYs = fit
     ? ysRaw.map((y, i) => (Number.isFinite(y) ? fit.residuals[i]! : NaN))
@@ -50,12 +51,18 @@ export function renderFullScatter(
       dataYMax2 += 1;
     }
   }
-  const sharedBounds = viewBounds ?? opts?.sharedScatterBounds;
+  const sharedBounds = fit ? undefined : viewBounds ?? opts?.sharedScatterBounds;
   const xMin = sharedBounds?.xMin ?? dataXMin;
   const xMax = sharedBounds?.xMax ?? dataXMax;
   let yMin = sharedBounds?.yMin ?? dataYMin2;
   let yMax = sharedBounds?.yMax ?? dataYMax2;
   const yScaleKind = (opts?.yScale ?? "linear") as YScaleKind;
+  if (yScaleKind === "log" && !fit && !sharedBounds) {
+    const positive = plotYs.filter(v => v > 0);
+    if (!positive.length) return;
+    yMin = Math.min(...positive);
+    yMax = Math.max(...positive);
+  }
   if (yScaleKind !== "linear" && !fit) {
     const d = scaleDomain(yMin, yMax, yScaleKind);
     yMin = d.min;
@@ -82,7 +89,7 @@ export function renderFullScatter(
   const plotH = Math.max(1, rect.bottom - rect.top);
   let nValid = 0;
   for (let i = 0; i < rows.length; i++) {
-    const x = Number(rows[i]![xi]);
+    const x = chartNumber(rows[i]![xi]);
     const y = plotYs[i]!;
     if (!isNaN(x) && Number.isFinite(y)) nValid++;
   }
@@ -131,9 +138,9 @@ export function renderFullScatter(
   let pointIdx = 0;
   for (let ri = 0; ri < rows.length; ri++) {
     const r = rows[ri]!;
-    const x = Number(r[xi]);
+    const x = chartNumber(r[xi]);
     const y = plotYs[ri]!;
-    if (isNaN(x) || !Number.isFinite(y)) continue;
+    if (isNaN(x) || !Number.isFinite(y) || (yScaleKind === "log" && !fit && y <= 0)) continue;
     let cat = 0;
     if (ci >= 0) {
       const k = String(r[ci]);
@@ -142,7 +149,7 @@ export function renderFullScatter(
     }
     let radius = baseRadius;
     if (sizeIdx >= 0) {
-      const s = Number(r[sizeIdx]);
+      const s = chartNumber(r[sizeIdx]);
       if (!isNaN(s)) {
         const t = directedUnit((s - sizeMin) / sizeRange, opts?.channelInvert?.size);
         radius = baseRadius + Math.sqrt(t) * (maxSizeRadius - baseRadius);
@@ -182,7 +189,7 @@ export function renderFullScatter(
     } else {
       drawMark(ctx, symbol.shape, sx, sy, radius, fillColor, baseAlpha, opts, pointOverrides);
     }
-    if (anom?.has(sampleIdxOf(ri))) {
+    if (anom?.has(ri)) {
       ctx.strokeStyle = fillColor ?? cols[0]!;
       ctx.lineWidth = 1.5;
       ctx.globalAlpha = 0.9;

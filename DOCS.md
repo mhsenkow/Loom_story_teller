@@ -91,6 +91,8 @@ Adding a new command:
 
 ## Chart pipeline
 
+Chart refinements share numeric parsing in `chartNumbers.ts`: null, blank, boolean, and nonfinite values are missing observations, while zero and finite numeric strings remain valid. `canvasCharts/densityCells.ts` accumulates count and numeric measures for heatmap/hexbin cells; previews and full renderers share aggregation and color domains. Hexbins aggregate all loaded chart rows without the point-density display subsampling used for scatter/bubble. Facet value domains use per-panel aggregation and transforms; local hit indices map back to source rows. `editActiveChart` checkpoints encoding changes and carries chart-owned titles, annotations, reference lines, and channel inversions to the edited recommendation ID. These frontend paths are shared by desktop, web, and iOS.
+
 ### Editing history and personal looks
 
 `chartSlice.ts` owns bounded Undo/Redo (20 snapshots per direction); `chartEditHistory.ts` captures the active recommendation, visual overrides, bar/scatter display modes, titles, annotations, reference lines, and AI explanation. Restoration mirrors the recommendation's spec to `vegaSpec`, keeping rendering, export and the spec editor consistent. `editChartVisualOverrides(patch, groupKey?)` records atomic multi-key edits; same-key numeric adjustments within 600 ms coalesce. A new edit invalidates redo, and opening a dataset clears history. Text inputs retain native text undo; chart keyboard shortcuts apply in Chart view. History is session-only and never captures dataset rows.

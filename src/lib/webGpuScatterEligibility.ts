@@ -17,7 +17,7 @@ export interface WebGpuScatterEligibilityInput {
   customRefLineCount: number;
   chart: Pick<
     ChartRecommendation,
-    "id" | "glowField" | "outlineField" | "opacityField" | "shapeField" | "emojiField"
+    "id" | "glowField" | "outlineField" | "opacityField" | "shapeField" | "emojiField" | "rowField" | "residualOverlay" | "anomalyHighlight"
   > | null;
   overrides: Pick<
     ChartVisualOverrides,
@@ -35,6 +35,7 @@ export interface WebGpuScatterEligibilityInput {
     | "markStroke"
     | "markJitter"
     | "glowEnabled"
+    | "blendMode"
   >;
 }
 
@@ -54,10 +55,14 @@ export function canUseWebGpuScatter(input: WebGpuScatterEligibilityInput): boole
     !input.overrides.markStroke &&
     !(input.overrides.markJitter ?? 0) &&
     !input.overrides.glowEnabled &&
+    (!input.overrides.blendMode || input.overrides.blendMode === "source-over") &&
     !chart?.glowField &&
     !chart?.outlineField &&
     !chart?.opacityField &&
     !chart?.shapeField &&
-    !chart?.emojiField
+    !chart?.emojiField &&
+    !chart?.rowField &&
+    !chart?.residualOverlay &&
+    !chart?.anomalyHighlight
   );
 }

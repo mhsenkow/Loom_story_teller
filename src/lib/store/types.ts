@@ -373,6 +373,7 @@ export interface LoomState extends MonitorState {
   setVegaSpec: (spec: object | null) => void;
   setChartRecs: (recs: ChartRecommendation[]) => void;
   setActiveChart: (chart: ChartRecommendation | null, opts?: { fromAI?: boolean; aiReason?: string | null }) => void;
+  editActiveChart: (chart: ChartRecommendation) => void;
   setChartVisualOverrides: (overrides: ChartVisualOverrides | ((prev: ChartVisualOverrides) => ChartVisualOverrides)) => void;
   setAISuggestionReason: (reason: string | null) => void;
   setWebFileCache: (cache: Record<string, { stats: ColumnInfo[]; sample: QueryResult }>) => void;

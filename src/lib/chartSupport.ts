@@ -240,8 +240,12 @@ export function formatChartAggregationSummary(chart: ChartRecommendation): strin
   ]);
   if (!kindsWithAgg.has(chart.kind)) {
     if (chart.kind === "histogram") return "Y axis: count per bin";
-    if (chart.kind === "heatmap") return "Color: count per cell";
-    if (chart.kind === "hexbin") return "Color: count per hex cell";
+    if (chart.kind === "heatmap" || chart.kind === "hexbin") {
+      const measure = chart.colorField && chart.yAggregate !== "count"
+        ? `${AGG_LABEL[chart.yAggregate ?? "mean"]} of ${chart.colorField}`
+        : "row count";
+      return `Heat: ${measure} per ${chart.kind === "hexbin" ? "hex" : "cell"}`;
+    }
     if (chart.kind === "sankey") return chart.yField ? `Flow width: ${chart.yField}` : "Flow width: row count";
     if (chart.kind === "network" || chart.kind === "arcDiagram") {
       return chart.yField ? `Link weight: ${chart.yField}` : "Link weight: row count";
@@ -398,7 +402,7 @@ export function encodingPanelHints(
     }
   }
 
-  if (chart.colorField) {
+  if (chart.colorField && chart.kind !== "heatmap" && chart.kind !== "hexbin") {
     const cCol = byName.get(chart.colorField);
     const distinct = cCol?.distinct_count ?? 0;
     if (distinct > 24) {
@@ -459,11 +463,16 @@ export function encodingDropAllowed(
   if (!col) return { ok: false, reason: "Column not found in this table." };
   const t = inferType(col.data_type, col.name, col.min_value, col.max_value);
   const needsNumericY = new Set<ChartKind>([
-    "scatter", "bubble", "heatmap", "hexbin", "strip", "box", "violin",
-    "dumbbell", "ridgeline", "beeswarm", "voronoi", "isoScatter", "contour",
-    "pyramid", "slope", "bump", "stream", "horizon", "dataCube", "line", "area",
+    "scatter", "bubble", "hexbin", "box", "violin",
+    "dumbbell", "beeswarm", "voronoi", "isoScatter", "contour",
+    "pyramid", "slope", "bump", "stream", "horizon", "line", "area",
+    "bar", "pareto", "pie", "lollipop", "waterfall", "treemap", "sunburst", "forceBubble", "funnel",
   ]);
-  const needsNumericX = new Set<ChartKind>(["scatter", "bubble", "hexbin", "histogram", "isoScatter", "contour", "voronoi"]);
+  const needsNumericX = new Set<ChartKind>(["scatter", "bubble", "hexbin", "histogram", "isoScatter", "contour", "voronoi", "strip", "ridgeline"]);
+
+  if (slot === "color" && (kind === "heatmap" || kind === "hexbin") && t !== "quantitative") {
+    return { ok: false, reason: `Heat needs a numeric measure — “${col.name}” is ${t}.` };
+  }
 
   if (slot === "size" || (slot === "z" && (kind === "scatter3d" || kind === "quakeTerrain"))) {
     if (t !== "quantitative") {
@@ -585,7 +594,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     zChannel: kind === "scatter3d" || kind === "dataCube" || kind === "quakeTerrain",
     // Show Color only when the canvas reads colorField / cIdx for this kind
     colorChannel: ![
-      "histogram", "pie", "heatmap", "hexbin", "box", "waterfall", "choropleth", "ridgeline", "dataCube",
+      "histogram", "pie", "box", "waterfall", "choropleth", "ridgeline", "dataCube",
       "corrMatrix", "pareto",
       // Canvas ignores color for these
       "dumbbell", "funnel",
@@ -609,7 +618,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       kind === "globe" ||
       kind === "globeTrail" ||
       (gpu && kind !== "quakeTerrain"),
-    aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid"].includes(kind),
+    aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid", "heatmap", "hexbin"].includes(kind),
     facetRow: kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble",
     // Only kinds whose canvas path actually ranks/caps categories (see ChartView / oddCharts).
     topN: kind === "bar" || kind === "pareto" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle" || kind === "isotype" || kind === "radialBar" || kind === "isoBars" || kind === "pyramid",
@@ -629,8 +638,8 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     // lineStrokeStyle / smooth / width — line + area canvas only
     lineMarks: kind === "line" || kind === "area",
     // Kinds that check opts.showDataLabels (or odd env.opts.showDataLabels)
-    dataLabels: ["bar", "pareto", "pie", "lollipop", "radialBar", "pyramid", "isoBars", "corrMatrix", "dumbbell", "slope"].includes(kind),
-    legend: (cartesian && !["histogram", "heatmap", "hexbin", "corrMatrix"].includes(kind)) || (isGeoMapKind(kind) && kind !== "geoHex") || kind === "radar" || kind === "pie" || kind === "sankey" || kind === "network" || kind === "arcDiagram" || kind === "parallel" || kind === "funnel" || kind === "pareto" || odd || gpu,
+    dataLabels: ["bar", "pareto", "pie", "lollipop", "radialBar", "pyramid", "isoBars", "corrMatrix", "dumbbell", "slope", "heatmap", "hexbin"].includes(kind),
+    legend: (cartesian && !["histogram", "corrMatrix"].includes(kind)) || (isGeoMapKind(kind) && kind !== "geoHex") || kind === "radar" || kind === "pie" || kind === "sankey" || kind === "network" || kind === "arcDiagram" || kind === "parallel" || kind === "funnel" || kind === "pareto" || odd || gpu,
     // Reference lines need ropts.scales from the main cartesian path — not odd/GPU/geo
     referenceLines: cartesian && !odd && !["heatmap", "hexbin", "box", "violin", "ridgeline", "contour", "voronoi", "corrMatrix"].includes(kind) && !gpu,
     // Trail + marginals only in renderFullScatter
@@ -673,7 +682,7 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
     case "heatmap":
       return base("Column", "Row", "Heat");
     case "hexbin":
-      return base("X", "Y", "Density");
+      return base("X", "Y", "Heat");
     case "sankey":
     case "network":
     case "arcDiagram":

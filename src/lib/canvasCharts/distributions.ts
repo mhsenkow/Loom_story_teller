@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Canvas 2D strip, box and area renderers.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -8,10 +9,10 @@ import { buildXModel, classifyKeys, linear, niceTicks, niceZeroScale } from "../
 import { type PlotRect, drawAxisFrame, drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks } from "../chartLooks";
 import { type ChartRenderOpts } from "../chartRenderTypes";
 import { formatTooltipNumber } from "../chartTooltip";
-import { type SeriesNormalize, type YScaleKind, normalizeSeriesValues, rollingMean, scaleDomain, scaleY } from "../dsTransforms";
+import { type SeriesNormalize, type YScaleKind, normalizeSeriesValues, rollingMean, scaleDomain, scaleY, stackSignedSeries } from "../dsTransforms";
 import { type YAggregateOption } from "../recommendations";
 import { drawXModelAxis, drawZeroLine, labelGutter, timeBuckets } from "./axisHelpers";
-import { encodingNorm, jitter, numRange } from "./primitives";
+import { applyLineDash, drawSmoothLine, encodingNorm, jitter, numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
 
 export function renderFullStrip(
@@ -67,7 +68,7 @@ export function renderFullStrip(
   const yName = fieldLabel(opts, yi);
   let pointIdx = 0;
   rows.forEach((r) => {
-    const x = Number(r[xi]);
+    const x = chartNumber(r[xi]);
     if (isNaN(x)) return;
     const yiL = bandOf.get(String(r[yi]));
     if (yiL == null) return;
@@ -116,7 +117,7 @@ export function quartiles(sorted: number[]): { q1: number; q2: number; q3: numbe
 export function groupedDistributions(rows: unknown[][], gi: number, vi: number, limit: number) {
   const groups = new Map<string, number[]>();
   for (const r of rows) {
-    const v = Number(r[vi]);
+    const v = chartNumber(r[vi]);
     if (isNaN(v)) continue;
     const k = String(r[gi]);
     if (!groups.has(k)) groups.set(k, []);
@@ -254,9 +255,9 @@ export function renderFullArea(
     const si = series.indexOf(ci >= 0 ? String(r[ci]) : "");
     const ki = keyIndex.get(tb.keyOf(r));
     if (si < 0 || ki == null) continue;
-    if (yi < 0) buckets[si]![ki]!.push(1);
+    if (yi < 0 || agg === "count") buckets[si]![ki]!.push(1);
     else {
-      const v = Number(r[yi]);
+      const v = chartNumber(r[yi]);
       if (!isNaN(v)) buckets[si]![ki]!.push(v);
     }
   }
@@ -271,14 +272,10 @@ export function renderFullArea(
       return v;
     });
   }
-  const tops: number[][] = [];
-  let maxStack = 0;
-  let minVal = 0;
-  values.forEach((vals, si) => {
-    tops.push(vals.map((v, ki) => (si === 0 ? 0 : tops[si - 1]![ki]!) + Math.max(0, v)));
-    for (const v of vals) minVal = Math.min(minVal, v);
-  });
-  for (const t of tops[tops.length - 1] ?? []) maxStack = Math.max(maxStack, t);
+  const stacked = stackSignedSeries(values);
+  const tops = stacked.tops;
+  let maxStack = stacked.max;
+  let minVal = stacked.min;
 
   // Optional Y2 / earlier-half overlays — extend the value scale
   const overlayPts: { label: string; pts: { ki: number; v: number }[] }[] = [];
@@ -287,10 +284,13 @@ export function renderFullArea(
     for (const r of rows) {
       const ki = keyIndex.get(tb.keyOf(r));
       if (ki == null) continue;
-      const v = Number(r[y2Idx]);
+      const v = agg === "count" ? 1 : chartNumber(r[y2Idx]);
       if (!isNaN(v)) byX[ki]!.push(v);
     }
-    const pts = model.keys.map((_, ki) => ({ ki, v: byX[ki]!.length ? aggregateValues(byX[ki]!, agg) : NaN })).filter((p) => !isNaN(p.v));
+    let overlayValues = byX.map(vals => vals.length ? aggregateValues(vals, agg) : 0);
+    if (rollW) overlayValues = rollingMean(overlayValues, rollW);
+    if (normMode) overlayValues = normalizeSeriesValues(overlayValues, normMode);
+    const pts = model.keys.map((_, ki) => ({ ki, v: overlayValues[ki]! })).filter((p) => byX[p.ki]!.length);
     for (const p of pts) {
       minVal = Math.min(minVal, p.v);
       maxStack = Math.max(maxStack, p.v);
@@ -306,7 +306,7 @@ export function renderFullArea(
   }
 
   // A single series may dip below zero; stacked series stack their positive parts
-  let yLo = series.length === 1 ? minVal : 0;
+  let yLo = minVal;
   let yHi = maxStack;
   if (opts?.sharedValueDomain) {
     yLo = opts.sharedValueDomain.min;
@@ -314,18 +314,23 @@ export function renderFullArea(
   }
   const yScaleKind = (opts?.yScale ?? "linear") as YScaleKind;
   if (yScaleKind !== "linear") {
+    if (yScaleKind === "log") {
+      const positives = [...values.flat(), ...tops.flat(), ...overlayPts.flatMap(s => s.pts.map(p => p.v))].filter(v => v > 0);
+      if (!positives.length) return;
+      yLo = Math.min(...positives);
+    }
     const d = scaleDomain(yLo, yHi, yScaleKind);
     yLo = d.min;
     yHi = d.max;
   }
-  const ys = niceZeroScale(yLo, yHi, opts?.tickCount ?? 5);
+  const ys = yScaleKind === "linear" ? niceZeroScale(yLo, yHi, opts?.tickCount ?? 5) : { min: yLo, max: yHi };
   const Ylin = linear(ys.min, ys.max, rect.bottom, rect.top);
   const Y = (v: number) => {
     if (yScaleKind === "linear") return Ylin(v);
-    const t = scaleY(v, ys.min, ys.max, yScaleKind);
+    const t = scaleY(yScaleKind === "log" ? Math.max(ys.min, v) : v, ys.min, ys.max, yScaleKind);
     return rect.bottom - t * (rect.bottom - rect.top);
   };
-  if (opts) opts.scales = { y: Y, valueAxis: "y", rect };
+  if (opts) opts.scales = { y: Y, x: model.domain ? (v: number) => rect.left + (v - model.domain![0]) / (model.domain![1] - model.domain![0] || 1) * span : undefined, valueAxis: "y", rect };
   const X = (ki: number) => rect.left + model.pos[ki]! * span;
   drawChartGrid(ctx, w, h, rect, opts, { x: model.kind === "number" ? model.domain : null, y: [ys.min, ys.max] });
 
@@ -335,21 +340,31 @@ export function renderFullArea(
   series.forEach((_, si) => {
     const color = cols[si % cols.length]!;
     const top = single ? values[0]! : tops[si]!;
-    const base = single ? model.keys.map(() => 0) : si === 0 ? model.keys.map(() => 0) : tops[si - 1]!;
+    const base = stacked.bases[si]!;
+    const upper = model.keys.map((_, ki) => ({ x: X(ki), y: Y(top[ki]!) }));
+    const lower = model.keys.map((_, ki) => ({ x: X(ki), y: Y(base[ki]!) })).reverse();
     ctx.fillStyle = color;
-    ctx.globalAlpha = single ? 0.3 : Math.min(0.85, opts?.opacity ?? 0.75);
+    ctx.globalAlpha = single ? (opts?.opacity ?? 0.75) * 0.4 : (opts?.opacity ?? 0.75);
     ctx.beginPath();
-    model.keys.forEach((_, ki) => (ki === 0 ? ctx.moveTo(X(ki), Y(top[ki]!)) : ctx.lineTo(X(ki), Y(top[ki]!))));
-    for (let ki = model.keys.length - 1; ki >= 0; ki--) ctx.lineTo(X(ki), Y(base[ki]!));
+    if (opts?.lineCurveSmooth && upper.length >= 2) {
+      drawSmoothLine(ctx, upper);
+      drawSmoothLine(ctx, lower, true);
+    } else {
+      upper.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+      lower.forEach(p => ctx.lineTo(p.x, p.y));
+    }
     ctx.closePath();
     ctx.fill();
     // Crisp top edge so each layer reads as a line, not just a blob
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = opts?.opacity ?? 1;
     ctx.strokeStyle = single ? color : (opts?.themeBg ?? "#111114");
-    ctx.lineWidth = single ? (opts?.lineWidth ?? 2) : 0.75;
+    ctx.lineWidth = opts?.lineWidth ?? (single ? 2 : 0.75);
+    applyLineDash(ctx, opts?.lineStrokeStyle);
     ctx.beginPath();
-    model.keys.forEach((_, ki) => (ki === 0 ? ctx.moveTo(X(ki), Y(top[ki]!)) : ctx.lineTo(X(ki), Y(top[ki]!))));
+    if (opts?.lineCurveSmooth && upper.length >= 2) drawSmoothLine(ctx, upper);
+    else upper.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
     ctx.stroke();
+    ctx.setLineDash([]);
   });
 
   overlayPts.forEach((ov, oi) => {

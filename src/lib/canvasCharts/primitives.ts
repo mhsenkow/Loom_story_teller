@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Mark drawing primitives, smart overlays and grid helpers shared by every renderer.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -31,6 +32,8 @@ export function drawMark(
   opts?: ChartRenderOpts,
   pointOverrides?: PointVisualOverrides,
 ) {
+  const previousBlend = ctx.globalCompositeOperation;
+  ctx.globalCompositeOperation = (opts?.blendMode as GlobalCompositeOperation) ?? "source-over";
   const useAlpha = pointOverrides?.alpha ?? alpha;
   const useGlow = pointOverrides?.glow !== undefined
     ? pointOverrides.glow > 0
@@ -68,6 +71,7 @@ export function drawMark(
     ctx.shadowColor = "transparent";
     ctx.shadowBlur = 0;
   }
+  ctx.globalCompositeOperation = previousBlend;
 }
 
 export function drawEmojiMark(
@@ -130,8 +134,8 @@ export function drawSmartOverlays(
     ctx.setLineDash([4, 3]);
     rows.forEach((r, ri) => {
       const sampleIdx = rowSource?.[ri] ?? ri;
-      const x = Number(r[xIdx]);
-      const y = Number(r[yIdx]);
+      const x = chartNumber(r[xIdx]);
+      const y = chartNumber(r[yIdx]);
       if (!isNaN(x) && !isNaN(y) && set.has(sampleIdx)) {
         ctx.beginPath();
         ctx.arc(toSx(x), toSy(y), 12, 0, Math.PI * 2);
@@ -212,10 +216,11 @@ export function applyLineDash(ctx: CanvasRenderingContext2D, style?: string) {
 
 // --- Monotone cubic interpolation (Fritsch–Carlson) ---
 // Smooth, but never overshoots the data: no dips below zero or false peaks between points.
-export function drawSmoothLine(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[]) {
+export function drawSmoothLine(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[], connect = false) {
   const n = pts.length;
   if (n < 2) return;
-  ctx.moveTo(pts[0]!.x, pts[0]!.y);
+  if (connect) ctx.lineTo(pts[0]!.x, pts[0]!.y);
+  else ctx.moveTo(pts[0]!.x, pts[0]!.y);
   if (n === 2) {
     ctx.lineTo(pts[1]!.x, pts[1]!.y);
     return;
@@ -249,19 +254,20 @@ export function drawSmoothLine(ctx: CanvasRenderingContext2D, pts: { x: number; 
 
 export function numRange(rows: unknown[][], idx: number): [number, number] {
   let min = Infinity, max = -Infinity;
-  for (const r of rows) { const v = Number(r[idx]); if (!isNaN(v)) { min = Math.min(min, v); max = Math.max(max, v); } }
+  for (const r of rows) { const v = chartNumber(r[idx]); if (!isNaN(v)) { min = Math.min(min, v); max = Math.max(max, v); } }
+  if (!Number.isFinite(min)) return [0, 1];
   if (min === max) { min -= 1; max += 1; }
   return [min, max];
 }
 
 /** Normalize a column to 0–1 for encoding (numeric: min-max, nominal: category index / count). */
 export function encodingNorm(rows: unknown[][], idx: number): (row: unknown[]) => number {
-  const firstNum = rows.some(r => typeof r[idx] === "number" || !isNaN(Number(r[idx])));
+  const firstNum = rows.some(r => Number.isFinite(chartNumber(r[idx])));
   if (firstNum) {
     const [min, max] = numRange(rows, idx);
     const range = max - min || 1;
     return (row: unknown[]) => {
-      const v = Number(row[idx]);
+      const v = chartNumber(row[idx]);
       return isNaN(v) ? 0.5 : (v - min) / range;
     };
   }

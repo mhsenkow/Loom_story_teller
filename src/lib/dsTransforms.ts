@@ -1,3 +1,4 @@
+import { chartNumber } from "./chartNumbers";
 // =================================================================
 // Loom — Data-science chart transforms (roll, rebase, residual, corr…)
 // =================================================================
@@ -8,6 +9,25 @@
 export type YScaleKind = "linear" | "log" | "symlog";
 export type SeriesNormalize = "index100" | "zscore";
 
+/** Stack positive and negative contributions independently around zero. */
+export function stackSignedSeries(values: number[][]) {
+  const positive = new Array<number>(values[0]?.length ?? 0).fill(0);
+  const negative = [...positive];
+  const bases: number[][] = [], tops: number[][] = [];
+  values.forEach((series) => {
+    const base: number[] = [], top: number[] = [];
+    series.forEach((value, i) => {
+      const v = Number.isFinite(value) ? value : 0;
+      const total = v < 0 ? negative : positive;
+      base.push(total[i]!);
+      total[i] += v;
+      top.push(total[i]!);
+    });
+    bases.push(base);
+    tops.push(top);
+  });
+  return { bases, tops, min: Math.min(0, ...negative), max: Math.max(0, ...positive) };
+}
 /** Rolling mean over the last `window` points (inclusive). */
 export function rollingMean(values: number[], window: number): number[] {
   const w = Math.max(1, Math.floor(window));
@@ -80,7 +100,7 @@ export function buildCorrMatrix(
   if (colIndices.length < 2 || labels.length !== colIndices.length) return null;
   const series = colIndices.map((ci) =>
     rows.map((r) => {
-      const v = Number(r[ci]);
+      const v = chartNumber(r[ci]);
       return Number.isFinite(v) ? v : NaN;
     }),
   );
@@ -195,7 +215,7 @@ export function scaleDomain(min: number, max: number, kind: YScaleKind): { min: 
 export function anomalyRowIndices(rows: unknown[][], colIdx: number, threshold = 2.5): number[] {
   const vals: { i: number; v: number }[] = [];
   for (let i = 0; i < rows.length; i++) {
-    const v = Number(rows[i]![colIdx]);
+    const v = chartNumber(rows[i]![colIdx]);
     if (Number.isFinite(v)) vals.push({ i, v });
   }
   if (vals.length < 5) return [];

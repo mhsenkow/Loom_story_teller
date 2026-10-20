@@ -1,3 +1,5 @@
+import { addDensityCell, densityDomain, densityFraction, densityMeasure, densityPlot, densityValue, type DensityCell } from "./densityCells";
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Canvas 2D line and heatmap renderers.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -34,8 +36,8 @@ export function renderFullLine(
   y2Idx = -1,
 ) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
-  const alpha = Math.max(0.85, opts?.opacity ?? 0.9);
-  const lineW = Math.max(1.5, opts?.lineWidth ?? 2);
+  const alpha = opts?.opacity ?? 0.9;
+  const lineW = opts?.lineWidth ?? 2;
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "mean");
   const rect = plotOf(w, h, pad, opts);
   const span = rect.right - rect.left;
@@ -60,33 +62,50 @@ export function renderFullLine(
   const posOf = new Map(model.keys.map((k, i) => [k, model.pos[i]!]));
 
   const seriesFrom = (measureIdx: number, nameSuffix = "") =>
-    series.map(([name, gRows]) => {
+    series.map(([name, gRows], seriesIndex) => {
       const byX = new Map<string, number[]>();
       for (const r of gRows) {
         const k = tb.keyOf(r);
         if (!posOf.has(k)) continue;
         if (!byX.has(k)) byX.set(k, []);
-        if (measureIdx < 0) byX.get(k)!.push(1);
+        if (measureIdx < 0 || agg === "count") byX.get(k)!.push(1);
         else {
-          const v = Number(r[measureIdx]);
+          const v = chartNumber(r[measureIdx]);
           if (r[measureIdx] != null && r[measureIdx] !== "" && Number.isFinite(v)) byX.get(k)!.push(v);
         }
       }
       const pts = model.keys
         .filter((k) => byX.has(k) && (measureIdx < 0 || byX.get(k)!.length > 0))
         .map((k) => ({ key: k, t: posOf.get(k)!, v: aggregateValues(byX.get(k)!, agg) }));
-      return { name: nameSuffix ? `${name || "series"}${nameSuffix}` : name, pts, compare: !!nameSuffix };
+      return { name: nameSuffix ? `${name || "series"}${nameSuffix}` : name, pts, compare: !!nameSuffix, colorIndex: seriesIndex + (nameSuffix ? series.length : 0), measureIdx };
     }).filter((s) => s.pts.length > 0);
 
   let data = seriesFrom(yi);
   if (data.length === 0) return;
+
+  if (y2Idx >= 0 && y2Idx !== yi) {
+    const y2 = seriesFrom(y2Idx, ` · ${opts?.fieldNames?.[y2Idx] ?? "Y2"}`).map((s) => ({ ...s, compare: true }));
+    data = [...data, ...y2];
+  }
+
+  // Rolling mean / rebase on primary series (not compare overlays)
+  const rollW = opts?.rollingWindow ?? null;
+  const normMode = (opts?.seriesNormalize ?? null) as SeriesNormalize | null;
+  if (rollW || normMode) {
+    data = data.map((s) => {
+      let vals = s.pts.map((p) => p.v);
+      if (rollW) vals = rollingMean(vals, rollW);
+      if (normMode) vals = normalizeSeriesValues(vals, normMode);
+      return { ...s, pts: s.pts.map((p, i) => ({ ...p, v: vals[i]! })) };
+    });
+  }
 
   // Earlier half of the X domain as a dashed overlay (same series, first 50% of keys)
   if (comparePrev && model.keys.length >= 4) {
     const mid = Math.floor(model.keys.length / 2);
     const earlierKeys = model.keys.slice(0, mid);
     const laterKeys = model.keys.slice(mid);
-    const prevOverlay = data
+    const prevOverlay = data.filter(s => !s.compare)
       .map((s) => ({
         name: `${s.name || "series"} (earlier)`,
         pts: earlierKeys
@@ -101,27 +120,11 @@ export function renderFullLine(
           })
           .filter((p): p is NonNullable<typeof p> => p != null),
         compare: true as const,
+        colorIndex: s.colorIndex,
+        measureIdx: s.measureIdx,
       }))
       .filter((s) => s.pts.length >= 2);
     data = [...prevOverlay, ...data];
-  }
-
-  if (y2Idx >= 0 && y2Idx !== yi) {
-    const y2 = seriesFrom(y2Idx, ` · ${opts?.fieldNames?.[y2Idx] ?? "Y2"}`).map((s) => ({ ...s, compare: true }));
-    data = [...data, ...y2];
-  }
-
-  // Rolling mean / rebase on primary series (not compare overlays)
-  const rollW = opts?.rollingWindow ?? null;
-  const normMode = (opts?.seriesNormalize ?? null) as SeriesNormalize | null;
-  if (rollW || normMode) {
-    data = data.map((s) => {
-      if (s.compare) return s;
-      let vals = s.pts.map((p) => p.v);
-      if (rollW) vals = rollingMean(vals, rollW);
-      if (normMode) vals = normalizeSeriesValues(vals, normMode);
-      return { ...s, pts: s.pts.map((p, i) => ({ ...p, v: vals[i]! })) };
-    });
   }
 
   const originalDomain = model.domain ? [...model.domain] as [number, number] : null;
@@ -134,6 +137,10 @@ export function renderFullLine(
     model.pos = model.pos.map(t => t * domainFraction);
   }
 
+  if (opts?.yScale === "log") {
+    data = data.map(s => ({ ...s, pts: s.pts.filter(p => p.v > 0) })).filter(s => s.pts.length);
+    if (!data.length) return;
+  }
   let yMin = Infinity;
   let yMax = -Infinity;
   for (const s of data) for (const p of s.pts) { yMin = Math.min(yMin, p.v); yMax = Math.max(yMax, p.v); }
@@ -141,14 +148,14 @@ export function renderFullLine(
   if (opts?.sharedValueDomain) {
     yMin = opts.sharedValueDomain.min;
     yMax = opts.sharedValueDomain.max;
-  } else if (!normMode && (agg === "count" || (agg === "sum" && yMin >= 0))) yMin = Math.min(0, yMin);
+  } else if (opts?.yScale !== "log" && !normMode && (agg === "count" || (agg === "sum" && yMin >= 0))) yMin = Math.min(0, yMin);
   const yScaleKind = (opts?.yScale ?? "linear") as YScaleKind;
   if (yScaleKind !== "linear") {
     const d = scaleDomain(yMin, yMax, yScaleKind);
     yMin = d.min;
     yMax = d.max;
   }
-  const ys = niceTicks(yMin, yMax, opts?.tickCount ?? 5, true);
+  const ys = yScaleKind === "linear" ? niceTicks(yMin, yMax, opts?.tickCount ?? 5, true) : { min: yMin, max: yMax };
   const Y = (v: number) => {
     if (yScaleKind === "linear") return linear(ys.min, ys.max, rect.bottom, rect.top)(v);
     const t = scaleY(v, ys.min, ys.max, yScaleKind);
@@ -179,7 +186,7 @@ export function renderFullLine(
   const markR = Math.max(3, (opts?.pointSize ?? 10) * 0.45);
   applyLineDash(ctx, opts?.lineStrokeStyle);
   data.forEach((s, si) => {
-    const color = cols[si % cols.length]!;
+    const color = cols[s.colorIndex % cols.length]!;
     const pts = s.pts.map((p) => ({ x: X(p.t), y: Y(p.v) }));
     ctx.strokeStyle = color;
     ctx.lineWidth = s.compare ? Math.max(1.25, lineW * 0.9) : lineW;
@@ -219,14 +226,15 @@ export function renderFullLine(
       });
     }
     s.pts.forEach((p, i) => {
+      const measureTitle = valueTitle(opts, s.measureIdx, "mean");
       pushHit(opts, {
         shape: "circle", cx: pts[i]!.x, cy: pts[i]!.y, r: hitR,
         // Bucketed keys aren't raw values — identify the bucket by its first row
         match: tb.unit ? [] : ci >= 0 ? [[xi, p.key], [ci, s.name]] : [[xi, p.key]],
         rowIndex: tb.unit ? tb.firstRow.get(p.key) : undefined,
         summary: ci >= 0
-          ? { columns: [xName, cName, vTitle], row: [p.key, s.name, formatTooltipNumber(p.v)] }
-          : { columns: [xName, vTitle], row: [p.key, formatTooltipNumber(p.v)] },
+          ? { columns: [xName, cName, measureTitle], row: [p.key, s.name, formatTooltipNumber(p.v)] }
+          : { columns: [xName, measureTitle], row: [p.key, formatTooltipNumber(p.v)] },
       });
     });
   });
@@ -239,7 +247,7 @@ export function renderFullLine(
       const label = s.name || "series";
       return {
         label: symbol?.glyph && opts?.emojiField === opts?.fieldNames?.[ci] ? chartEmojiLabel(label, opts?.emojiField, opts?.emojiMap) : label,
-        color: cols[si % cols.length]!,
+        color: cols[s.colorIndex % cols.length]!,
         ...(symbol?.glyph ? { glyph: symbol.glyph } : symbol ? { shape: symbol.shape } : {}),
       };
     }));
@@ -260,19 +268,24 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
   const stops = densityStops(opts?.continuousStops?.length ? opts.continuousStops : (opts?.colors ?? DEFAULT_COLORS), opts?.themeBg);
   const xName = fieldLabel(opts, xi);
   const yName = fieldLabel(opts, yi);
-  // Color key lives in the right gutter
-  const rampX = w - pad + 10;
+  const measure = densityMeasure(opts);
+  const alpha = opts?.opacity ?? 1;
+  setLegend(opts, []);
+  const ramp = (domain: { min: number; max: number }, rect: PlotRect) => {
+    if (opts?.mini || opts?.legendPosition === "none") return;
+    drawColorRamp(ctx, stops, sampleContinuous, Math.min(w - 38, rect.right + 10), rect.top + 14, Math.min(140, (rect.bottom - rect.top) * 0.5), formatDataValue(domain.min), formatDataValue(domain.max), opts, measure.title);
+  };
 
   // Prefer quantitative density bins when both axes look numeric
   let numericHits = 0;
   const probe = Math.min(rows.length, 40);
   for (let i = 0; i < probe; i++) {
-    const x = Number(rows[i]![xi]);
-    const y = Number(rows[i]![yi]);
+    const x = chartNumber(rows[i]![xi]);
+    const y = chartNumber(rows[i]![yi]);
     if (!isNaN(x) && !isNaN(y)) numericHits++;
   }
   if (probe > 0 && numericHits / probe >= 0.7) {
-    const rect = plotOf(w, h, pad, opts);
+    const rect = densityPlot(w, h, pad, opts);
     const plotW = rect.right - rect.left;
     const plotH = rect.bottom - rect.top;
     const [xMin, xMax] = numRange(rows, xi);
@@ -281,38 +294,47 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
     const yRange = yMax - yMin || 1;
     const binsX = Math.min(36, Math.max(12, Math.floor(plotW / 18)));
     const binsY = Math.min(28, Math.max(10, Math.floor(plotH / 18)));
-    const grid = new Float32Array(binsX * binsY);
-    const firstRow = new Int32Array(binsX * binsY).fill(-1);
+    const cells = new Map<number, DensityCell>();
     rows.forEach((r, ri) => {
-      const x = Number(r[xi]);
-      const y = Number(r[yi]);
+      const x = chartNumber(r[xi]);
+      const y = chartNumber(r[yi]);
       if (isNaN(x) || isNaN(y)) return;
       const bx = Math.min(binsX - 1, Math.max(0, Math.floor(((x - xMin) / xRange) * binsX)));
       const by = Math.min(binsY - 1, Math.max(0, Math.floor(((y - yMin) / yRange) * binsY)));
-      grid[by * binsX + bx]! += 1;
-      if (firstRow[by * binsX + bx]! < 0) firstRow[by * binsX + bx] = ri;
+      addDensityCell(cells, by * binsX + bx, r[measure.index], ri);
     });
-    let maxC = 1;
-    for (let i = 0; i < grid.length; i++) maxC = Math.max(maxC, grid[i]!);
+    const domain = densityDomain(cells.values(), measure.aggregate);
     const cellW = plotW / binsX;
     const cellH = plotH / binsY;
     for (let by = 0; by < binsY; by++) {
       for (let bx = 0; bx < binsX; bx++) {
-        const c = grid[by * binsX + bx]!;
-        if (c <= 0) continue;
-        const t = Math.sqrt(c / maxC);
-        ctx.fillStyle = sampleContinuous(stops, 0.08 + t * 0.92);
+        const cell = cells.get(by * binsX + bx);
+        const c = densityValue(cell, measure.aggregate);
+        if (c === null) continue;
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = sampleContinuous(stops, densityFraction(c, domain));
         const px = rect.left + bx * cellW;
         const py = rect.top + (binsY - 1 - by) * cellH;
         ctx.fillRect(px, py, Math.max(1, cellW - 0.5), Math.max(1, cellH - 0.5));
+        if (!opts?.mini && opts?.showDataLabels && cellH >= chartTypeRamp(opts.axisFontSize).cell + 4) {
+          const label = formatDataValue(c);
+          ctx.font = axisFont(opts, chartTypeRamp(opts.axisFontSize).cell);
+          if (ctx.measureText(label).width <= cellW - 4) {
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = contrastingInk(sampleContinuous(stops, densityFraction(c, domain)));
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(label, px + cellW / 2, py + cellH / 2);
+          }
+        }
         const x0 = xMin + (bx / binsX) * xRange;
         const y0 = yMin + (by / binsY) * yRange;
         pushHit(opts, {
           shape: "rect", x: px, y: py, w: cellW, h: cellH,
           match: [],
-          rowIndex: firstRow[by * binsX + bx]!,
+          rowIndex: cell!.row,
           summary: {
-            columns: [xName, yName, "Rows"],
+            columns: [xName, yName, measure.title],
             row: [
               `${formatDataValue(x0)} – ${formatDataValue(x0 + xRange / binsX)}`,
               `${formatDataValue(y0)} – ${formatDataValue(y0 + yRange / binsY)}`,
@@ -322,8 +344,10 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
         });
       }
     }
-    drawChartTicks(ctx, xMin, xMax, yMin, yMax, w, h, rect, opts);
-    drawColorRamp(ctx, stops, (s, t) => sampleContinuous(s, 0.08 + Math.sqrt(t) * 0.92), rampX, rect.top + 14, Math.min(140, plotH * 0.5), "0", formatDataValue(maxC), opts, "Rows");
+    ctx.globalAlpha = 1;
+    if (!opts?.mini) drawChartTicks(ctx, xMin, xMax, yMin, yMax, w, h, rect, opts);
+    if (opts) opts.scales = { rect };
+    ramp(domain, rect);
     return;
   }
 
@@ -332,7 +356,7 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
   // listing the first 20 raw values with a count of 1 each.
   const axisKeys = (idx: number, numericHighFirst: boolean) => {
     const freq = new Map<string, number>();
-    for (const r of rows) freq.set(String(r[idx]), (freq.get(String(r[idx])) ?? 0) + 1);
+    for (const r of rows) if (r[idx] != null && r[idx] !== "") freq.set(String(r[idx]), (freq.get(String(r[idx])) ?? 0) + 1);
     const cls = classifyKeys([...freq.keys()]);
     if (cls.kind === "number" && cls.values.length > 20) {
       const lo = cls.values[0]!;
@@ -343,7 +367,7 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
       if (edges[edges.length - 1]! < hi) edges.push(hi);
       const labels = edges.slice(0, -1).map((e, i) => `${formatDataValue(e)} – ${formatDataValue(edges[i + 1]!)}`);
       const keyOf = (r: unknown[]) => {
-        const v = Number(r[idx]);
+        const v = chartNumber(r[idx]);
         if (!Number.isFinite(v)) return "";
         let b = edges.findIndex((e, i) => i > 0 && v < e) - 1;
         if (b < 0) b = labels.length - 1;
@@ -364,33 +388,33 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
   const xLabels = xAxis.labels;
   const yLabels = yAxis.labels;
   if (xLabels.length === 0 || yLabels.length === 0) return;
-  const counts = new Map<string, number>();
-  const firstRow = new Map<string, number>();
+  const cells = new Map<string, DensityCell>();
+  const xSet = new Set(xLabels), ySet = new Set(yLabels);
   rows.forEach((r, ri) => {
-    const k = `${xAxis.keyOf(r)}\u0000${yAxis.keyOf(r)}`;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
-    if (!firstRow.has(k)) firstRow.set(k, ri);
+    const x = xAxis.keyOf(r), y = yAxis.keyOf(r);
+    if (xSet.has(x) && ySet.has(y)) addDensityCell(cells, JSON.stringify([x, y]), r[measure.index], ri);
   });
-  let maxC = 1;
-  for (const xL of xLabels) for (const yL of yLabels) maxC = Math.max(maxC, counts.get(`${xL}\u0000${yL}`) ?? 0);
-
-  const gutter = labelGutter(ctx, yLabels, w, pad, opts);
-  const rect: PlotRect = { left: pad + gutter, top: pad, right: w - pad, bottom: h - pad };
+  const domain = densityDomain(cells.values(), measure.aggregate);
+  const gutter = opts?.mini || opts?.plotBounds ? 0 : labelGutter(ctx, yLabels, w, pad, opts);
+  const rect = densityPlot(w, h, pad, opts);
+  rect.left += gutter;
+  if (opts) opts.scales = { rect };
   const cellW = (rect.right - rect.left) / xLabels.length;
   const cellH = (rect.bottom - rect.top) / yLabels.length;
-  const showValues = cellW >= 26 && cellH >= 16;
+  const showValues = !opts?.mini && opts?.showDataLabels === true && cellW >= 26 && cellH >= chartTypeRamp(opts?.axisFontSize).cell + 6;
   const emptyFill = opts?.themeBorder ?? "#2a2a30";
   xLabels.forEach((xL, xi2) => {
     yLabels.forEach((yL, yi2) => {
-      const c = counts.get(`${xL}\u0000${yL}`) ?? 0;
+      const cell = cells.get(JSON.stringify([xL, yL]));
+      const c = densityValue(cell, measure.aggregate);
       const px = rect.left + xi2 * cellW;
       const py = rect.top + yi2 * cellH;
-      const fill = c > 0 ? sampleContinuous(stops, 0.08 + (c / maxC) * 0.92) : emptyFill;
-      ctx.globalAlpha = c > 0 ? 1 : 0.25;
+      const fill = c !== null ? sampleContinuous(stops, densityFraction(c, domain)) : emptyFill;
+      ctx.globalAlpha = c !== null ? alpha : 0.16;
       ctx.fillStyle = fill;
       ctx.fillRect(px + 0.5, py + 0.5, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
       ctx.globalAlpha = 1;
-      if (showValues && c > 0) {
+      if (showValues && c !== null) {
         ctx.fillStyle = contrastingInk(fill);
         ctx.font = axisFont(opts, chartTypeRamp(opts?.axisFontSize).cell);
         ctx.textAlign = "center";
@@ -399,18 +423,19 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
         if (ctx.measureText(label).width <= cellW - 6)
           ctx.fillText(label, px + cellW / 2, py + cellH / 2);
       }
+      if (c === null) return;
       const binned = xAxis.binned || yAxis.binned;
       pushHit(opts, {
         shape: "rect", x: px, y: py, w: cellW, h: cellH,
         // Range buckets aren't raw values — identify the cell by its first row
-        match: c > 0 && !binned ? [[xi, xL], [yi, yL]] : [],
-        rowIndex: c > 0 && binned ? firstRow.get(`${xL}\u0000${yL}`) : undefined,
-        summary: { columns: [xName, yName, "Rows"], row: [xL, yL, formatTooltipNumber(c)] },
+        match: !binned ? [[xi, xL], [yi, yL]] : [],
+        rowIndex: binned ? cell!.row : undefined,
+        summary: { columns: [xName, yName, measure.title], row: [xL, yL, formatTooltipNumber(c)] },
       });
     });
   });
   ctx.textBaseline = "alphabetic";
-  drawBandAxisX(ctx, xLabels, xLabels.map((_, i) => rect.left + (i + 0.5) * cellW), cellW, w, h, rect, opts, "nominal");
-  drawBandAxisY(ctx, yLabels, yLabels.map((_, i) => rect.top + (i + 0.5) * cellH), cellH, rect.left - 8, gutter - 10, opts);
-  drawColorRamp(ctx, stops, (s, t) => sampleContinuous(s, 0.08 + t * 0.92), rampX, rect.top + 14, Math.min(140, (rect.bottom - rect.top) * 0.5), "0", formatDataValue(maxC), opts, "Rows");
+  if (!opts?.mini) drawBandAxisX(ctx, xLabels, xLabels.map((_, i) => rect.left + (i + 0.5) * cellW), cellW, w, h, rect, opts, "nominal");
+  if (!opts?.mini) drawBandAxisY(ctx, yLabels, yLabels.map((_, i) => rect.top + (i + 0.5) * cellH), cellH, rect.left - 8, gutter - 10, opts);
+  ramp(domain, rect);
 }

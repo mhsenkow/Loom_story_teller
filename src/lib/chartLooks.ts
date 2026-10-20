@@ -15,7 +15,7 @@ import {
   titlePreferCenter,
 } from "./chartLayout";
 import { titleArrangementRect } from "./canvasArrangement";
-import { formatAxisValue, layoutBandLabels, niceTicks } from "./chartAxes";
+import { formatAxisValue, layoutBandLabels, magnitudeTicks, niceTicks } from "./chartAxes";
 import {
   CHART_LABEL_FALLBACK,
   CHART_TEXT_FALLBACK,
@@ -55,6 +55,7 @@ export interface ChartLookOpts {
   gridOpacity?: number;
   tickCount?: number;
   tickRotation?: number;
+  yScale?: "linear" | "log" | "symlog" | null;
   fontFamily?: string;
   /** A source footnote owns the bottom band — X field title sits above it. */
   sourceFootnote?: boolean;
@@ -369,7 +370,7 @@ export function drawChartGrid(
   const horizontalOnly = axis === "mercury" || axis === "tape" || axis === "spine";
   if (domains?.y !== null) {
     if (domains?.y && yMap) {
-      for (const v of niceTicks(domains.y[0], domains.y[1], n, false).ticks) {
+      for (const v of magnitudeTicks(domains.y[0], domains.y[1], opts?.yScale ?? "linear", n).ticks) {
         const y = Math.round(yMap(v)) + 0.5;
         if (y < top - 0.5 || y > bottom + 0.5) continue;
         ctx.beginPath();
@@ -458,7 +459,7 @@ export function drawChartTicks(
     const span = xMax - xMin || 1;
     ctx.textAlign = "center";
     let lastRight = -Infinity;
-    for (const v of xs.ticks) {
+    for (const v of [...xs.ticks].sort((a, b) => xMap ? xMap(a) - xMap(b) : a - b)) {
       const x = xMap ? xMap(v) : left + ((v - xMin) / span) * (right - left);
       if (x < left - 0.5 || x > right + 0.5) continue;
       // stub downward from baseline
@@ -489,11 +490,11 @@ export function drawChartTicks(
 
   // Y ticks
   if (show.y !== false && Number.isFinite(yMin) && Number.isFinite(yMax)) {
-    const ys = niceTicks(yMin, yMax, Math.min(n, Math.max(2, Math.floor((bottom - top) / (fontSize + 8)))), false);
+    const ys = magnitudeTicks(yMin, yMax, opts?.yScale ?? "linear", Math.min(n, Math.max(2, Math.floor((bottom - top) / (fontSize + 8)))));
     const span = yMax - yMin || 1;
     ctx.textAlign = "right";
     let lastLabelY = Infinity;
-    for (const v of ys.ticks) {
+    for (const v of [...ys.ticks].sort((a, b) => yMap ? yMap(b) - yMap(a) : a - b)) {
       const y = yMap ? yMap(v) : bottom - ((v - yMin) / span) * (bottom - top);
       if (y < top - 0.5 || y > bottom + 0.5) continue;
       if (axis !== "mercury") {

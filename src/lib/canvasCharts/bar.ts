@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 import { fillMaterialPath } from "./material";
 // =================================================================
 // Canvas 2D bar and histogram renderers.
@@ -12,6 +13,7 @@ import { type ChartRenderOpts } from "../chartRenderTypes";
 import { type BarFacetHitPayload, formatTooltipNumber } from "../chartTooltip";
 import { type YAggregateOption } from "../recommendations";
 import { axisFont, barPath, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
+import { contrastingInk } from "../chartLayout";
 import { DEFAULT_COLORS } from "./shared";
 
 export type BarModel = { entries: [string, number][]; rowCounts: Map<string, number>; ordered: boolean };
@@ -25,9 +27,9 @@ export function computeBarModel(rows: unknown[][], xi: number, yi: number, agg: 
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, []);
     rowCounts.set(k, (rowCounts.get(k) ?? 0) + 1);
-    if (yi < 0) groups.get(k)!.push(1);
+    if (yi < 0 || agg === "count") groups.get(k)!.push(1);
     else {
-      const v = Number(r[yi]);
+      const v = chartNumber(r[yi]);
       if (!isNaN(v)) groups.get(k)!.push(v);
     }
   }
@@ -83,106 +85,92 @@ export function renderFullBar(
     const { xLabels, subLabels, grid, stackMode } = facet;
     const nx = xLabels.length;
     const ns = subLabels.length;
-    const band = chartW / nx;
+    const gutter = horizontal && !opts?.plotBounds ? labelGutter(ctx, xLabels, w, pad, opts) : 0;
+    const bounds = { ...rect, left: rect.left + gutter };
+    const band = (horizontal ? bounds.bottom - bounds.top : bounds.right - bounds.left) / nx;
     const cName = fieldLabel(opts, ci, "group");
-    setLegend(opts, subLabels.map((label, si) => ({ label, color: cols[si % cols.length]! })));
-
-    let lo = 0;
-    let hi = 0;
-    if (stackMode === "grouped") {
-      for (const row of grid) for (const v of row) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
-    } else if (stackMode === "stacked") {
-      for (const row of grid) hi = Math.max(hi, row.reduce((s, v) => s + Math.max(0, v), 0));
-    } else {
-      hi = 100;
+    const colorOf = (i: number) => cols[i % cols.length]!;
+    setLegend(opts, subLabels.map((label, si) => ({ label, color: colorOf(si) })));
+    const plotted = stackMode === "percent" ? grid.map(row => {
+      const total = row.reduce((sum, v) => sum + Math.abs(v), 0) || 1;
+      return row.map(v => v / total * 100);
+    }) : grid;
+    let lo = 0, hi = 0;
+    for (const row of plotted) {
+      if (stackMode === "grouped") for (const v of row) { lo = Math.min(lo, v); hi = Math.max(hi, v); }
+      else {
+        lo = Math.min(lo, row.reduce((sum, v) => sum + Math.min(0, v), 0));
+        hi = Math.max(hi, row.reduce((sum, v) => sum + Math.max(0, v), 0));
+      }
     }
-    const scale = stackMode === "percent" ? niceTicks(0, 100, opts?.tickCount ?? 5, true) : niceZeroScale(lo, hi, opts?.tickCount ?? 5);
-    const Y = reverse
-      ? linear(scale.min, scale.max, rect.top, rect.bottom)
-      : linear(scale.min, scale.max, rect.bottom, rect.top);
-    if (opts) opts.scales = { y: Y, valueAxis: "y", rect };
-    drawChartGrid(ctx, w, h, rect, opts, { x: null, y: [scale.min, scale.max] });
-
+    if (opts?.sharedValueDomain && stackMode !== "percent") { lo = opts.sharedValueDomain.min; hi = opts.sharedValueDomain.max; }
+    const scale = niceZeroScale(lo, hi, opts?.tickCount ?? 5);
+    const start = horizontal ? bounds.left : bounds.bottom;
+    const end = horizontal ? bounds.right : bounds.top;
+    const M = linear(scale.min, scale.max, reverse ? end : start, reverse ? start : end);
+    if (opts) opts.scales = { ...(horizontal ? { x: M } : { y: M }), valueAxis: horizontal ? "x" : "y", rect: bounds };
+    drawChartGrid(ctx, w, h, bounds, opts, horizontal ? { x: [scale.min, scale.max], y: null } : { x: null, y: [scale.min, scale.max] });
     const centers: number[] = [];
     for (let gi = 0; gi < nx; gi++) {
       const xk = xLabels[gi]!;
-      const gx = rect.left + gi * band;
-      centers.push(gx + band / 2);
-      if (stackMode === "grouped") {
-        const inner = band * 0.8;
-        const innerW = inner / ns;
-        for (let si = 0; si < ns; si++) {
-          const val = grid[gi]![si]!;
-          const x = gx + (band - inner) / 2 + si * innerW;
-          const y0 = Y(0);
-          const y1 = Y(val);
-          const top = Math.min(y0, y1);
-          const bh = Math.max(val === 0 ? 0 : 1, Math.abs(y1 - y0));
-          ctx.fillStyle = cols[si % cols.length]!;
-          ctx.globalAlpha = alpha;
-          ctx.beginPath();
-          barPath(ctx, x + 0.5, top, Math.max(1, innerW - 1), bh, cornerR, vBarDir(val));
-          fillMaterialPath(ctx, rect.top, rect.bottom, opts);
-          if (showDataLabels && innerW >= 18 && bh > 0) {
+      const center = (horizontal ? bounds.top : bounds.left) + (gi + 0.5) * band;
+      centers.push(center);
+      const breadth = stackMode === "grouped" ? band * 0.8 / ns : Math.min(band * 0.72, 96);
+      let positive = 0, negative = 0;
+      const total = grid[gi]!.reduce((sum, v) => sum + Math.abs(v), 0) || 1;
+      for (let si = 0; si < ns; si++) {
+        const raw = grid[gi]![si]!;
+        const val = plotted[gi]![si]!;
+        const base = stackMode === "grouped" ? 0 : val < 0 ? negative : positive;
+        if (val < 0) negative += val; else positive += val;
+        const cross = stackMode === "grouped" ? center - band * 0.4 + si * breadth : center - breadth / 2;
+        const p0 = M(base), p1 = M(base + val);
+        const length = Math.abs(p1 - p0);
+        if (length < 0.25) continue;
+        const x = horizontal ? Math.min(p0, p1) : cross + 0.5;
+        const y = horizontal ? cross + 0.5 : Math.min(p0, p1);
+        const bw = horizontal ? length : Math.max(1, breadth - 1);
+        const bh = horizontal ? Math.max(1, breadth - 1) : length;
+        ctx.fillStyle = colorOf(si);
+        ctx.globalAlpha = alpha;
+        ctx.beginPath();
+        if (stackMode === "grouped") barPath(ctx, x, y, bw, bh, cornerR, horizontal ? hBarDir(val) : vBarDir(val));
+        else ctx.rect(x, y, bw, bh);
+        fillMaterialPath(ctx, bounds.top, bounds.bottom, opts);
+        if (showDataLabels && bw >= 24 && bh >= 16) {
+          const text = stackMode === "percent" ? `${Math.round(val)}%` : formatDataValue(raw);
+          ctx.font = axisFont(opts);
+          if (ctx.measureText(text).width + 8 <= bw) {
             ctx.globalAlpha = 1;
-            ctx.fillStyle = axisLabelColor;
-            ctx.font = axisFont(opts, 10);
+            ctx.fillStyle = contrastingInk(colorOf(si));
             ctx.textAlign = "center";
-            const tipAtLow = (val >= 0) !== reverse;
-            ctx.textBaseline = tipAtLow ? "bottom" : "top";
-            ctx.fillText(formatDataValue(val), x + innerW / 2, tipAtLow ? top - 3 : top + bh + 3);
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, x + bw / 2, y + bh / 2);
           }
-          pushHit(opts, {
-            shape: "rect", x, y: rect.top, w: innerW, h: rect.bottom - rect.top,
-            match: [[xi, xk], [ci, subLabels[si]!]],
-            summary: { columns: [xName, cName, vTitle], row: [xk, subLabels[si]!, formatTooltipNumber(val)] },
-          });
         }
-      } else {
-        const bw = Math.min(band * 0.72, 96);
-        const x0 = gx + (band - bw) / 2;
-        const total = grid[gi]!.reduce((s, v) => s + Math.max(0, v), 0) || 1;
-        let acc = 0;
-        for (let si = 0; si < ns; si++) {
-          const v = Math.max(0, grid[gi]![si]!);
-          const share = (v / total) * 100;
-          const a = stackMode === "percent" ? acc / total * 100 : acc;
-          const b = stackMode === "percent" ? (acc + v) / total * 100 : acc + v;
-          acc += v;
-          const yTop = Y(b);
-          const yBot = Y(a);
-          if (yBot - yTop < 0.25) continue;
-          ctx.fillStyle = cols[si % cols.length]!;
-          ctx.globalAlpha = alpha;
-          ctx.beginPath();
-          ctx.rect(x0, yTop, bw, yBot - yTop);
-          fillMaterialPath(ctx, rect.top, rect.bottom, opts);
-          // Hairline separator between stacked segments
-          ctx.globalAlpha = 1;
-          ctx.strokeStyle = opts?.themeBg ?? "#111114";
-          ctx.lineWidth = 0.75;
-          ctx.beginPath();
-          ctx.moveTo(x0, yTop);
-          ctx.lineTo(x0 + bw, yTop);
-          ctx.stroke();
-          pushHit(opts, {
-            shape: "rect", x: x0, y: yTop, w: bw, h: yBot - yTop,
-            match: [[xi, xk], [ci, subLabels[si]!]],
-            summary: {
-              columns: [xName, cName, vTitle, "Share"],
-              row: [xk, subLabels[si]!, formatTooltipNumber(v), `${share.toFixed(share < 10 ? 1 : 0)}%`],
-            },
-          });
-        }
+        pushHit(opts, {
+          shape: "rect", x, y, w: bw, h: bh,
+          match: [[xi, xk], [ci, subLabels[si]!]],
+          summary: {
+            columns: [xName, cName, vTitle, ...(stackMode === "percent" ? ["Share of magnitude"] : [])],
+            row: [xk, subLabels[si]!, formatTooltipNumber(raw), ...(stackMode === "percent" ? [`${(raw / total * 100).toFixed(1)}%`] : [])],
+          },
+        });
       }
     }
     ctx.globalAlpha = 1;
-    if (scale.min < 0) drawZeroLine(ctx, rect.left, Y(0), rect.right, Y(0), opts);
-    drawChartTicks(ctx, 0, 1, scale.min, scale.max, w, h, rect, opts, {
-      x: false,
-      yFormat: stackMode === "percent" ? (v) => `${Math.round(v)}%` : undefined,
-    });
-    drawBandAxisX(ctx, xLabels, centers, band, w, h, rect, opts, "nominal");
+    if (scale.min < 0) {
+      if (horizontal) drawZeroLine(ctx, M(0), bounds.top, M(0), bounds.bottom, opts);
+      else drawZeroLine(ctx, bounds.left, M(0), bounds.right, M(0), opts);
+    }
+    const percent = stackMode === "percent" ? (v: number) => `${Math.round(v)}%` : undefined;
+    if (horizontal) {
+      drawChartTicks(ctx, scale.min, scale.max, 0, 1, w, h, bounds, opts, { y: false, xFormat: percent });
+      drawBandAxisY(ctx, xLabels, centers, band, bounds.left - 8, Math.max(30, bounds.left - 24), opts);
+    } else {
+      drawChartTicks(ctx, 0, 1, scale.min, scale.max, w, h, bounds, opts, { x: false, yFormat: percent });
+      drawBandAxisX(ctx, xLabels, centers, band, w, h, bounds, opts, "nominal");
+    }
     return;
   }
 
@@ -347,7 +335,7 @@ export function renderFullBar(
 export function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const alpha = opts?.opacity ?? 0.85;
-  const values = rows.map((r) => Number(r[xi]));
+  const values = rows.map((r) => chartNumber(r[xi]));
   const bins = histogramBins(values);
   if (!bins) return;
   const rect = plotOf(w, h, pad, opts);

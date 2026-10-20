@@ -34,6 +34,7 @@ import { useIsMobile, useMobileLiveEdit, useShellMode } from "@/lib/useMediaQuer
 import { aspectLabel, fitChartFrame } from "@/lib/chartViewport";
 import { automaticPlotBounds, chartSpacePadding, chartStageGutter } from "@/lib/chartSpace";
 import { type ChartRecommendation, createChartRec, getBestSuggestion, getRecommendationReason, getTopSuggestions, recommend, recommendStorySequence, tryBuildRandomChartRec, type YAggregateOption } from "@/lib/recommendations";
+import { chartNumber } from "@/lib/chartNumbers";
 import { chartCapabilities, encodingChannelLabels, formatChartAggregationSummary, getChartRenderIssue, resolveLayoutDirection, svgExportMode } from "@/lib/chartSupport";
 import { canUseWebGpuScatter } from "@/lib/webGpuScatterEligibility";
 import { notifyChartPainted } from "@/lib/chartPaintSignal";
@@ -589,18 +590,13 @@ export function ChartView() {
       chartVisualOverrides.showDataLabels ?? (detail === "deep");
     const caps = activeChart ? chartCapabilities(activeChart.kind) : null;
     const showGrid =
-      !caps?.cartesian || isCompact
+      !caps?.cartesian || (isCompact && chartVisualOverrides.showGrid == null)
         ? false
         : chartVisualOverrides.showGrid !== false &&
           (chartVisualOverrides.gridStyle ?? axisFromStyle.gridStyle ?? "solid") !== "none" &&
-          detail !== "plain";
+          (chartVisualOverrides.showGrid === true || detail !== "plain");
 
-    // Never use screen/multiply blends as defaults — they wreck light themes
-    const rawBlend = chartVisualOverrides.blendMode ?? "source-over";
-    const blendMode =
-      rawBlend === "screen" || rawBlend === "multiply" || rawBlend === "color-dodge"
-        ? "source-over"
-        : rawBlend;
+    const blendMode = chartVisualOverrides.blendMode ?? "source-over";
 
     return {
       titleX: chartVisualOverrides.titleX,
@@ -651,7 +647,7 @@ export function ChartView() {
       legendHeight: chartVisualOverrides.legendHeight,
       plotX: chartVisualOverrides.plotX, plotY: chartVisualOverrides.plotY, plotWidth: chartVisualOverrides.plotWidth, plotHeight: chartVisualOverrides.plotHeight,
       legendPosition: !caps?.legend ? "none" : (chartVisualOverrides.legendPosition ?? "auto"),
-      showDataLabels: detail === "plain" ? false : showDataLabels,
+      showDataLabels,
       backgroundStyle: chartVisualOverrides.backgroundStyle ?? "default",
       blendMode,
       glowEnabled: caps?.markPoints ? (chartVisualOverrides.glowEnabled ?? false) : false,
@@ -2386,7 +2382,7 @@ export function ChartView() {
     let sizeMin = Infinity, sizeMax = -Infinity;
     if (sizeIdx >= 0) {
       for (const row of chartSampleRows.rows) {
-        const v = Number(row[sizeIdx]);
+        const v = chartNumber(row[sizeIdx]);
         if (!isNaN(v)) { sizeMin = Math.min(sizeMin, v); sizeMax = Math.max(sizeMax, v); }
       }
       if (sizeMin === sizeMax) { sizeMin = sizeMin - 1; sizeMax = sizeMax + 1; }
@@ -2402,8 +2398,8 @@ export function ChartView() {
 
     const rowSource = chartSampleRows.rowSourceIndices;
     chartSampleRows.rows.forEach((row, rowIndex) => {
-      const x = Number(row[xIdx]), y = Number(row[yIdx]);
-      if (isNaN(x) || isNaN(y)) return;
+      const x = chartNumber(row[xIdx]), y = chartNumber(row[yIdx]);
+      if (isNaN(x) || isNaN(y) || (activeChart.yScale === "log" && y <= 0)) return;
       let cat = 0;
       if (cIdx >= 0) {
         const k = String(row[cIdx]);
@@ -2415,7 +2411,7 @@ export function ChartView() {
       }
       let size: number | undefined;
       if (sizeIdx >= 0) {
-        const s = Number(row[sizeIdx]);
+        const s = chartNumber(row[sizeIdx]);
         size = isNaN(s) ? undefined : (activeChart.channelInvert?.size ? 1 - (s - sizeMin) / sizeRange : (s - sizeMin) / sizeRange);
       }
       points.push({ x, y, category: cat, size });
@@ -2662,7 +2658,7 @@ export function ChartView() {
 
     const zoomScale = activeChart.kind === "scatter" ? scatterView.scale : 1;
     const densityKinds =
-      activeChart.kind === "scatter" || activeChart.kind === "bubble" || activeChart.kind === "hexbin" || activeChart.kind === "parallel";
+      activeChart.kind === "scatter" || activeChart.kind === "bubble" || activeChart.kind === "parallel";
     const sourceIndices = chartSampleRows?.rowSourceIndices;
     const sub = densityKinds
       ? subsampleRowsForDensity(rowsAll, densityPointBudget(isMobile), zoomScale, sourceIndices)
@@ -2739,7 +2735,7 @@ export function ChartView() {
           ctx.rect(0, 0, w * clipProgress, hFull);
           ctx.clip();
         }
-        ctx.globalCompositeOperation = (opts.blendMode as GlobalCompositeOperation) ?? "source-over";
+        ctx.globalCompositeOperation = "source-over";
 
         // Per-paint scratch: renderers register hover targets + the series they colored
         const hits: HitTarget[] = [];
@@ -2748,6 +2744,7 @@ export function ChartView() {
           hits,
           analysis: !analysisUnavailable(activeChart) && smartResults?.analysis?.scope === analysisScope(activeChart) ? smartResults.analysis : undefined,
           fieldNames: cols,
+          colorField: activeChart.colorField,
           legend: null,
           scales: null,
           connectTrail: connectScatterTrail,
@@ -2845,9 +2842,10 @@ export function ChartView() {
         }
 
         if (useFacets) {
+          const sourceIndexOf = new Map<unknown[], number>(rows.map((row, index) => [row, sub.sourceIndices?.[index] ?? index]));
           const titleBand = Math.min(56, h * 0.12);
           const facetAgg: YAggregateOption = yIdx < 0 ? "count" : (ropts.yAggregate ?? (kind === "line" ? "mean" : "sum"));
-          const sharedValueDomain = computeFacetSharedValueDomain(kind, rows, xIdx, yIdx, facetAgg) ?? undefined;
+          const sharedValueDomain = computeFacetSharedValueDomain(kind, rows, xIdx, yIdx, facetAgg, rowIdx, cIdx, ropts) ?? undefined;
           const sharedScatterBounds =
             kind === "scatter" || kind === "bubble"
               ? computeFacetSharedScatterBounds(rows, xIdx, yIdx) ?? undefined
@@ -2869,6 +2867,8 @@ export function ChartView() {
             const cellHits: HitTarget[] = [];
             const cellOpts: ChartRenderOpts = {
               ...ropts,
+              plotBounds: undefined,
+              rowSourceIndices: undefined,
               hits: cellHits,
               legend: null,
               scales: null,
@@ -2911,6 +2911,10 @@ export function ChartView() {
               }, undefined, sharedScatterBounds);
             }
             ctx.restore();
+            for (const hit of cellHits) {
+              if (hit.rowIndex != null) hit.rowIndex = sourceIndexOf.get(panel.rows[hit.rowIndex]!) ?? hit.rowIndex;
+              if (hit.match.length && rowIdx >= 0) hit.match.push([rowIdx, panel.key]);
+            }
             offsetHitTargets(cellHits, cell.x, cell.y + labelH);
             hits.push(...cellHits);
             if (fi === 0 && cellOpts.legend) ropts.legend = cellOpts.legend;

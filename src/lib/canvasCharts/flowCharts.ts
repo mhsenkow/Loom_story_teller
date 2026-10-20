@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Canvas 2D treemap, force bubble, sankey, network and arc-diagram renderers.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -65,7 +66,7 @@ export function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[]
   for (const r of rows) {
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "" });
-    const v = yi >= 0 ? Number(r[yi]) : 1;
+    const v = yi >= 0 ? chartNumber(r[yi]) : 1;
     if (!isNaN(v)) groups.get(k)!.vals.push(v);
   }
   const entries = [...groups.entries()]
@@ -152,7 +153,7 @@ export function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unkno
   for (const r of rows) {
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "" });
-    const v = yi >= 0 ? Number(r[yi]) : 1;
+    const v = yi >= 0 ? chartNumber(r[yi]) : 1;
     if (!isNaN(v)) groups.get(k)!.vals.push(v);
   }
 
@@ -262,7 +263,7 @@ export function renderFullSankey(ctx: CanvasRenderingContext2D, rows: unknown[][
   for (const r of rows) {
     const src = String(r[xi]);
     const tgt = String(r[targetIdx]);
-    const v = yi >= 0 && targetIdx !== yi ? Number(r[yi]) : 1;
+    const v = yi >= 0 && targetIdx !== yi ? chartNumber(r[yi]) : 1;
     const val = isNaN(v) ? 1 : Math.abs(v);
     const key = `${src}\0${tgt}`;
     flows.set(key, (flows.get(key) ?? 0) + val);

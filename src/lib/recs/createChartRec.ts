@@ -249,6 +249,9 @@ export function fitEncodingToKind(
     colorField = null;
   }
 
+  if (kind === "heatmap" || kind === "hexbin") {
+    return { xField, yField, colorField: isNumeric(colorField) ? colorField : null };
+  }
   // Color must be a small set of groups; required kinds get the next-best category
   // Locked color is allowed a wider cardinality so “color by site” survives mark switches.
   if (colorField && colorField !== xField && !isCategory(colorField, colorField === lockedColor ? 80 : 12)) {
@@ -496,14 +499,17 @@ export function createChartRec(
       }
       break;
     }
-    case "heatmap":
+    case "heatmap": {
       if (!yField) return null;
+      if (colorField && !numCols.some(c => c.name === colorField)) colorField = null;
+      const agg = colorField ? yAggregate ?? "mean" : "count";
       enc.x = { field: xField, type: "nominal" };
       enc.y = { field: yField, type: "nominal" };
-      enc.color = { aggregate: "count", type: "quantitative", scale: { scheme: "purples" } };
+      enc.color = { ...(colorField && agg !== "count" ? { field: colorField } : {}), aggregate: agg, type: "quantitative", scale: { scheme: "viridis" } };
       title = `${xField} × ${yField}`;
-      subtitle = "count heatmap";
+      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per cell` : "row count per cell";
       break;
+    }
     case "strip":
       if (!yField) return null;
       // Canvas strip ignores size — keep encoding honest
@@ -635,11 +641,13 @@ export function createChartRec(
     }
     case "hexbin": {
       if (!yField) return null;
+      if (colorField && !numCols.some(c => c.name === colorField)) colorField = null;
+      const agg = colorField ? yAggregate ?? "mean" : "count";
       enc.x = { field: xField, type: "quantitative", bin: { maxbins: 20 } };
       enc.y = { field: yField, type: "quantitative", bin: { maxbins: 20 } };
-      enc.color = { aggregate: "count", type: "quantitative", scale: { scheme: "viridis" } };
+      enc.color = { ...(colorField && agg !== "count" ? { field: colorField } : {}), aggregate: agg, type: "quantitative", scale: { scheme: "viridis" } };
       title = `${xField} × ${yField}`;
-      subtitle = "hexbin — density tiles";
+      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per hex` : "row count per hex";
       break;
     }
     case "funnel": {
@@ -842,6 +850,7 @@ export function createChartRec(
     "rect";
 
   const effectiveYAggregate: YAggregateOption | undefined =
+    kind === "heatmap" || kind === "hexbin" ? (colorField ? yAggregate ?? "mean" : "count") :
     kind === "bar" ||
     kind === "pareto" ||
     kind === "line" ||

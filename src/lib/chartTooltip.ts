@@ -1,3 +1,4 @@
+import { chartNumber } from "./chartNumbers";
 // =================================================================
 // chartTooltip — Canvas hit-testing + tooltip column projection
 // =================================================================
@@ -39,9 +40,9 @@ export function buildBarFacetGrid(
     if (!nested.has(xk)) nested.set(xk, new Map());
     const m = nested.get(xk)!;
     if (!m.has(sk)) m.set(sk, []);
-    if (yi < 0) m.get(sk)!.push(1);
+    if (yi < 0 || agg === "count") m.get(sk)!.push(1);
     else {
-      const v = Number(r[yi]);
+      const v = chartNumber(r[yi]);
       if (!isNaN(v)) m.get(sk)!.push(v);
     }
   }
@@ -214,7 +215,7 @@ function numRange(rows: unknown[][], xi: number): [number, number] {
   let min = Infinity;
   let max = -Infinity;
   for (const r of rows) {
-    const v = Number(r[xi]);
+    const v = chartNumber(r[xi]);
     if (!isNaN(v)) {
       min = Math.min(min, v);
       max = Math.max(max, v);
@@ -462,8 +463,8 @@ function pickLineLikeNearestFixed(
   let yMax = -Infinity;
   for (let i = 0; i < rows.length; i++) {
     if (!inAllowed(i, allowed)) continue;
-    const x = Number(rows[i]![xIdx]);
-    const y = Number(rows[i]![yIdx]);
+    const x = chartNumber(rows[i]![xIdx]);
+    const y = chartNumber(rows[i]![yIdx]);
     if (!isNaN(x)) {
       xMin = Math.min(xMin, x);
       xMax = Math.max(xMax, x);
@@ -482,8 +483,8 @@ function pickLineLikeNearestFixed(
   let bestDist = Infinity;
   for (let i = 0; i < rows.length; i++) {
     if (!inAllowed(i, allowed)) continue;
-    const x = Number(rows[i]![xIdx]);
-    const y = Number(rows[i]![yIdx]);
+    const x = chartNumber(rows[i]![xIdx]);
+    const y = chartNumber(rows[i]![yIdx]);
     if (isNaN(x) || isNaN(y)) continue;
     const d = (x - dataX) ** 2 + (y - dataY) ** 2;
     if (d < bestDist) {
@@ -525,7 +526,7 @@ function pickFallbackNominalBands(
   let best = candidates[0]!;
   let bestD = Infinity;
   for (const i of candidates) {
-    const y = Number(rows[i]![yIdx]);
+    const y = chartNumber(rows[i]![yIdx]);
     if (isNaN(y)) continue;
     const d = Math.abs(y - dataY);
     if (d < bestD) {
@@ -562,12 +563,12 @@ function pickBubbleNearest(
   let bestScore = Infinity;
   for (let i = 0; i < rows.length; i++) {
     if (!inAllowed(i, allowed)) continue;
-    const x = Number(rows[i]![xi]);
-    const y = Number(rows[i]![yi]);
+    const x = chartNumber(rows[i]![xi]);
+    const y = chartNumber(rows[i]![yi]);
     if (isNaN(x) || isNaN(y)) continue;
     let radius = (minR + maxR) / 2;
     if (sizeIdx >= 0) {
-      const s = Number(rows[i]![sizeIdx]);
+      const s = chartNumber(rows[i]![sizeIdx]);
       if (!isNaN(s)) {
         const t = (s - sizeMin) / sizeRange;
         radius = minR + Math.sqrt(Math.max(0, Math.min(1, t))) * (maxR - minR);
@@ -606,8 +607,8 @@ function pickScatterCanvasNearest(
   let bestDist = 24;
   for (let i = 0; i < rows.length; i++) {
     if (!inAllowed(i, allowed)) continue;
-    const x = Number(rows[i]![xi]);
-    const y = Number(rows[i]![yi]);
+    const x = chartNumber(rows[i]![xi]);
+    const y = chartNumber(rows[i]![yi]);
     if (isNaN(x) || isNaN(y)) continue;
     const px = pad + ((x - xMin) / xRange) * chartW;
     const py = pad + (1 - (y - yMin) / yRange) * chartH;
@@ -661,7 +662,7 @@ export function pickCanvasTooltipRowIndex(
     case "histogram": {
       // Fallback when hit targets weren't recorded — match renderFullHistogram bins
       if (xIdx < 0) return null;
-      const values = rows.map((r) => Number(r[xIdx]));
+      const values = rows.map((r) => chartNumber(r[xIdx]));
       const bins = histogramBins(values);
       if (!bins) return null;
       const n = bins.counts.length;
@@ -670,7 +671,7 @@ export function pickCanvasTooltipRowIndex(
       const hi = lo + bins.step;
       for (let i = 0; i < rows.length; i++) {
         if (!inAllowed(i, allowed)) continue;
-        const v = Number(rows[i]![xIdx]);
+        const v = chartNumber(rows[i]![xIdx]);
         if (!Number.isFinite(v)) continue;
         if (v >= lo && (bi === n - 1 ? v <= hi : v < hi)) return i;
       }
@@ -707,7 +708,7 @@ export function pickCanvasTooltipRowIndex(
       for (let i = 0; i < rows.length; i++) {
         if (!inAllowed(i, allowed)) continue;
         if (String(rows[i]![yIdx]) !== yLab) continue;
-        const x = Number(rows[i]![xIdx]);
+        const x = chartNumber(rows[i]![xIdx]);
         if (isNaN(x)) continue;
         const dx = Math.abs(x - dataX);
         if (dx < bestDx) {
@@ -721,7 +722,7 @@ export function pickCanvasTooltipRowIndex(
       if (xIdx < 0 || yIdx < 0) return null;
       const groups = new Map<string, number[]>();
       for (const r of rows) {
-        const v = Number(r[yIdx]);
+        const v = chartNumber(r[yIdx]);
         if (isNaN(v)) continue;
         const k = String(r[xIdx]);
         if (!groups.has(k)) groups.set(k, []);
@@ -766,7 +767,7 @@ export function pickCanvasTooltipRowIndex(
       for (const r of rows) {
         const k = String(r[xIdx]);
         if (!groups.has(k)) groups.set(k, []);
-        groups.get(k)!.push(yIdx >= 0 ? Number(r[yIdx]) : 1);
+        groups.get(k)!.push(yIdx >= 0 ? chartNumber(r[yIdx]) : 1);
       }
       const pieEntries = [...groups.entries()]
         .map(([label, vals]) => [label, aggregateValues(vals.filter((v) => !isNaN(v)), agg) || (yIdx < 0 ? vals.length : 0)] as [string, number])
@@ -796,7 +797,7 @@ export function pickCanvasTooltipRowIndex(
       const groups = new Map<string, number[]>();
       for (const r of rows) {
         const k = String(r[xIdx]);
-        const v = Number(r[yIdx]);
+        const v = chartNumber(r[yIdx]);
         if (isNaN(v)) continue;
         if (!groups.has(k)) groups.set(k, []);
         groups.get(k)!.push(v);
@@ -806,7 +807,7 @@ export function pickCanvasTooltipRowIndex(
       const bandW = chartWidth / ventries.length;
       const gi = Math.max(0, Math.min(ventries.length - 1, Math.floor((chartX - pad) / bandW)));
       const label = ventries[gi]!;
-      const allVals = rows.filter((_, ri) => inAllowed(ri, allowed) && String(rows[ri]![xIdx]) === label).map((r) => Number(r[yIdx])).filter((v) => !isNaN(v));
+      const allVals = rows.filter((_, ri) => inAllowed(ri, allowed) && String(rows[ri]![xIdx]) === label).map((r) => chartNumber(r[yIdx])).filter((v) => !isNaN(v));
       const gMin = allVals.length ? Math.min(...allVals) : 0;
       const gMax = allVals.length ? Math.max(...allVals) : 1;
       const range = gMax - gMin || 1;
@@ -834,7 +835,7 @@ export function pickCanvasTooltipRowIndex(
       for (const r of rows) {
         const k = String(r[xIdx]);
         if (!groups.has(k)) groups.set(k, []);
-        groups.get(k)!.push(yIdx >= 0 ? Number(r[yIdx]) : 1);
+        groups.get(k)!.push(yIdx >= 0 ? chartNumber(r[yIdx]) : 1);
       }
       const wfEntries = [...groups.entries()]
         .map(([label, vals]) => [label, aggregateValues(vals.filter((v) => !isNaN(v)), agg)] as [string, number])
@@ -853,7 +854,7 @@ export function pickCanvasTooltipRowIndex(
       for (const r of rows) {
         const k = String(r[xIdx]);
         if (!groups.has(k)) groups.set(k, { vals: [], cat: cIdx >= 0 ? String(r[cIdx]) : "" });
-        groups.get(k)!.vals.push(yIdx >= 0 ? Number(r[yIdx]) : 1);
+        groups.get(k)!.vals.push(yIdx >= 0 ? chartNumber(r[yIdx]) : 1);
       }
       const lolli = [...groups.entries()]
         .map(([label, g]) => ({ label, value: aggregateValues(g.vals.filter((v) => !isNaN(v)), agg) }))
@@ -895,7 +896,7 @@ export function pickCanvasTooltipRowIndex(
       for (const r of rows) {
         const k = String(r[xIdx]);
         if (!groups.has(k)) groups.set(k, []);
-        groups.get(k)!.push(yIdx >= 0 ? Number(r[yIdx]) : 1);
+        groups.get(k)!.push(yIdx >= 0 ? chartNumber(r[yIdx]) : 1);
       }
       const funnel = [...groups.entries()]
         .map(([label, vals]) => [label, aggregateValues(vals.filter((v) => !isNaN(v)), agg)] as [string, number])

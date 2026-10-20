@@ -44,6 +44,8 @@ import { ensureChartFontLoaded, resolveChartFontFamily } from "@/lib/fontCatalog
 import { fitTextEllipsis } from "@/lib/chartLayout";
 import { aggregateThumbnailRows } from "@/lib/chartThumbnailAggregation";
 import { renderFullScatter } from "@/lib/canvasCharts/scatter";
+import { renderFullHeatmap } from "@/lib/canvasCharts/lineHeatmap";
+import { renderFullHexbin } from "@/lib/canvasCharts/statCharts";
 
 const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
 
@@ -182,7 +184,7 @@ export function ChartCard({
       rec.kind === "corrMatrix" || rec.kind === "radar" || rec.kind === "parallel";
     if (xIdx === -1 && !xOptional) return;
 
-    const pointPreview = ["scatter", "bubble", "hexbin", "strip"].includes(rec.kind)
+    const pointPreview = ["scatter", "bubble", "strip"].includes(rec.kind)
       || isGeoFamilyKind(rec.kind) || isGpuSceneKind(rec.kind);
     const rows = downsampledRowsForThumb(data, rec, pointPreview ? 1500 : Infinity);
     if (!rows.length) return;
@@ -598,7 +600,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
   } else if (kind === "line") {
     drawLine(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS, y2Idx, a.comparePrevious, a.rollingWindow, a.seriesNormalize, a.yAggregate, a.yScale, a.themeStyle.lineWidth, a.themeStyle.lineCap, a.themeStyle.lineJoin);
   } else if (kind === "heatmap" && yIdx >= 0) {
-    drawHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
+    renderFullHeatmap(ctx, rows, xIdx, yIdx, w, h, pad, { mini: true, colors: SEQ, continuousStops: SEQ, opacity: 1, pointSize: 5, fieldNames: a.columns, colorField: a.columns[cIdx], yAggregate: a.yAggregate, themeBg: ui.bg, themeBorder: ui.border });
   } else if (kind === "strip" && yIdx >= 0) {
     drawStrip(ctx, rows, xIdx, yIdx, cIdx, w, h, pad, COLORS);
   } else if (kind === "box" && yIdx >= 0) {
@@ -622,7 +624,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
   } else if (kind === "ridgeline" && yIdx >= 0) {
     drawRidgeline(ctx, rows, xIdx, yIdx, w, h, pad, COLORS);
   } else if (kind === "hexbin" && yIdx >= 0) {
-    drawHexbin(ctx, rows, xIdx, yIdx, w, h, pad, SEQ);
+    renderFullHexbin(ctx, rows, xIdx, yIdx, w, h, pad, { mini: true, colors: SEQ, continuousStops: SEQ, opacity: 1, pointSize: 5, fieldNames: a.columns, colorField: a.columns[cIdx], yAggregate: a.yAggregate, themeBg: ui.bg });
   } else if (kind === "funnel") {
     drawFunnel(ctx, rows, xIdx, yIdx, w, h, pad, COLORS, a.topN);
   } else if (kind === "parallel") {

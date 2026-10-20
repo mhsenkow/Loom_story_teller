@@ -22,6 +22,7 @@ export type ChartSlice = Pick<
   | "setVegaSpec"
   | "setChartRecs"
   | "setActiveChart"
+  | "editActiveChart"
   | "setChartVisualOverrides"
   | "setAISuggestionReason"
   | "setChartTitleOverride"
@@ -122,6 +123,28 @@ export function createChartSliceFactory(
         chartVisualOverrides:
           typeof overrides === "function" ? overrides(s.chartVisualOverrides) : overrides,
       })),
+    editActiveChart: (chart) =>
+      set((s) => {
+        const previous = s.activeChart;
+        const edited = { ...chart, channelInvert: chart.channelInvert ?? previous?.channelInvert };
+        const carry = <T,>(entries: Record<string, T>): Record<string, T> =>
+          previous && previous.id !== edited.id && entries[previous.id] !== undefined
+            ? { ...entries, [edited.id]: entries[previous.id] }
+            : entries;
+        const maps = {
+          chartTitleOverrides: carry(s.chartTitleOverrides),
+          chartAnnotations: carry(s.chartAnnotations),
+          customRefLines: carry(s.customRefLines),
+        };
+        return {
+          ...chartHistoryCheckpoint(s),
+          activeChart: edited,
+          vegaSpec: edited.spec,
+          aiSuggestionReason: null,
+          ...prunedChartMaps({ ...s, ...maps }, { activeChart: edited }),
+          ...(edited.kind === "bar" ? { barStackMode: edited.barStackMode ?? "grouped" } : {}),
+        };
+      }),
     setAISuggestionReason: (reason) => set({ aiSuggestionReason: reason }),
     setChartTitleOverride: (chartId, title) =>
       set((s) => ({

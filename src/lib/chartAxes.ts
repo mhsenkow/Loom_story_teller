@@ -17,6 +17,38 @@ export type NiceScale = {
   ticks: number[];
 };
 
+/** Readable ticks in data units for transformed magnitude axes. */
+export function magnitudeTicks(min: number, max: number, kind: "linear" | "log" | "symlog" = "linear", target = 5): NiceScale {
+  if (kind === "linear") return niceTicks(min, max, target, false);
+  if (!(max > min) || !Number.isFinite(min) || !Number.isFinite(max)) return niceTicks(min, max, target, false);
+  const ticks: number[] = [];
+  if (kind === "log" && min > 0) {
+    const first = Math.floor(Math.log10(min));
+    const last = Math.ceil(Math.log10(max));
+    const multiples = last - first <= 2 ? [1, 2, 5] : [1];
+    const stride = Math.max(1, Math.ceil((last - first) / Math.max(2, target - 1)));
+    for (let exp = first; exp <= last; exp += stride) {
+      for (const m of multiples) {
+        const value = m * 10 ** exp;
+        if (value >= min * (1 - 1e-10) && value <= max * (1 + 1e-10)) ticks.push(value);
+      }
+    }
+  } else if (kind === "symlog") {
+    if (min <= 0 && max >= 0) ticks.push(0);
+    const bound = Math.max(Math.abs(min), Math.abs(max));
+    if (bound <= 2) return niceTicks(min, max, target, false);
+    for (let exp = 0; exp <= Math.ceil(Math.log10(bound)); exp++) {
+      for (const sign of [-1, 1]) {
+        const value = sign * 10 ** exp;
+        if (value >= min && value <= max) ticks.push(value);
+      }
+    }
+  }
+  if (ticks.length < 2) return niceTicks(min, max, target, false);
+  ticks.sort((a, b) => a - b);
+  return { min, max, ticks, step: Math.min(...ticks.slice(1).map((v, i) => v - ticks[i]!)) };
+}
+
 /** Round a raw step to 1 / 2 / 2.5 / 5 × 10^k. */
 function niceStep(raw: number): number {
   if (!(raw > 0) || !Number.isFinite(raw)) return 1;

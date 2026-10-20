@@ -104,6 +104,8 @@ export interface ChartRenderOpts {
   deltaDisplay?: "off" | "diff" | "pct" | null;
   hits?: HitTarget[];
   fieldNames?: string[];
+  /** Numeric heat measure for heatmap / hexbin; absent means row count. */
+  colorField?: string | null;
   legend?: { label: string; color: string; shape?: string; glyph?: string }[] | null;
   scales?: { x?: (v: number) => number; y?: (v: number) => number; valueAxis?: "x" | "y"; rect: PlotRect } | null;
   connectTrail?: boolean;

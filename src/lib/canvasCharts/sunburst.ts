@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Sunburst canvas renderer (extracted from ChartView — LOOM-142 / LOOM-118)
 // =================================================================
@@ -42,7 +43,7 @@ export function renderFullSunburst(
     const node = innerMap.get(inner)!;
     if (yi < 0) node.vals.push(1);
     else {
-      const v = Number(r[yi]);
+      const v = chartNumber(r[yi]);
       if (!isNaN(v)) node.vals.push(v);
     }
   }

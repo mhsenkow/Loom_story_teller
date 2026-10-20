@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Axis, gutter, reference-line and scatter-extra helpers shared by renderers.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -147,8 +148,8 @@ export function drawScatterTrail(
   const cols = opts?.colors ?? DEFAULT_COLORS;
   const paths = new Map<string, { x: number; y: number }[]>();
   for (const r of rows) {
-    const x = Number(r[xi]);
-    const y = Number(r[yi]);
+    const x = chartNumber(r[xi]);
+    const y = chartNumber(r[yi]);
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     const k = ci >= 0 ? String(r[ci]) : "";
     if (!paths.has(k)) paths.set(k, []);
@@ -188,8 +189,8 @@ export function drawScatterMarginals(
   const cx = new Array<number>(bins).fill(0);
   const cy = new Array<number>(bins).fill(0);
   for (const r of rows) {
-    const x = Number(r[xi]);
-    const y = Number(r[yi]);
+    const x = chartNumber(r[xi]);
+    const y = chartNumber(r[yi]);
     if (Number.isFinite(x) && x >= xMin && x <= xMax) cx[Math.min(bins - 1, Math.floor(((x - xMin) / (xMax - xMin || 1)) * bins))]! += 1;
     if (Number.isFinite(y) && y >= yMin && y <= yMax) cy[Math.min(bins - 1, Math.floor(((y - yMin) / (yMax - yMin || 1)) * bins))]! += 1;
   }

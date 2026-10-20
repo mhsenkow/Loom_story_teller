@@ -9,21 +9,17 @@ import type { HitTarget } from "../chartTooltip";
 import type { ChartRenderOpts } from "../chartRenderTypes";
 
 export function aggregateValues(values: number[], agg: YAggregateOption): number {
-  if (values.length === 0) return 0;
   if (agg === "count") return values.length;
-  if (agg === "sum") return values.reduce((a, b) => a + b, 0);
-  if (agg === "mean") return values.reduce((a, b) => a + b, 0) / values.length;
-  if (agg === "min") {
-    let m = values[0]!;
-    for (let i = 1; i < values.length; i++) m = Math.min(m, values[i]!);
-    return m;
+  let count = 0, sum = 0, min = Infinity, max = -Infinity;
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    count++;
+    sum += value;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
   }
-  if (agg === "max") {
-    let m = values[0]!;
-    for (let i = 1; i < values.length; i++) m = Math.max(m, values[i]!);
-    return m;
-  }
-  return values.reduce((a, b) => a + b, 0);
+  if (!count) return 0;
+  return agg === "mean" ? sum / count : agg === "min" ? min : agg === "max" ? max : sum;
 }
 
 export function pushHit(opts: ChartRenderOpts | undefined, t: HitTarget) {
@@ -35,6 +31,8 @@ export function fieldLabel(opts: ChartRenderOpts | undefined, idx: number, fallb
 }
 
 export function valueTitle(opts: ChartRenderOpts | undefined, yi: number, fallbackAgg: YAggregateOption = "sum"): string {
+  if (opts?.seriesNormalize === "index100") return "Index (first non-zero = 100)";
+  if (opts?.seriesNormalize === "zscore") return "Standard deviations from mean";
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? fallbackAgg);
   return aggregateAxisTitle(agg, yi >= 0 ? fieldLabel(opts, yi) : null);
 }

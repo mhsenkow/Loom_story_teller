@@ -45,7 +45,7 @@ test("phone canvas title can be moved and restored with Undo", async ({ page }) 
   await page.goto(`/#chart=${encoded}`);
   await dismissReleaseNotes(page);
   await page.getByRole("dialog", { name: "Detail panel", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
-  await page.getByRole("button", { name: "Arrange", exact: true }).click();
+  await page.getByRole("button", { name: "Arrange chart layout", exact: true }).click();
   const title = page.getByRole("button", { name: "Move Title & subtitle", exact: true });
   await expect(title).toBeVisible();
   const before = (await title.boundingBox())!;
@@ -54,5 +54,5 @@ test("phone canvas title can be moved and restored with Undo", async ({ page }) 
   await title.press("Control+z");
   await expect.poll(async () => (await title.boundingBox())!.y).toBeCloseTo(before.y, 0);
   await page.getByRole("button", { name: "Done arranging", exact: true }).click();
-  await expect(page.getByRole("button", { name: "Arrange", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Arrange chart layout", exact: true })).toBeVisible();
 });

@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Canvas 2D violin, radar, waterfall and lollipop renderers.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -128,7 +129,7 @@ export function renderFullRadar(
   for (let c = 0; c < columnNames.length; c++) {
     if (c === ci) continue;
     const sample = rows.slice(0, 20);
-    const numCount = sample.filter(r => !isNaN(Number(r[c])) && r[c] !== null && r[c] !== "" && typeof r[c] !== "boolean").length;
+    const numCount = sample.filter(r => !isNaN(chartNumber(r[c])) && r[c] !== null && r[c] !== "" && typeof r[c] !== "boolean").length;
     if (numCount >= sample.length * 0.5) {
       numericAxes.push({ idx: c, name: columnNames[c] });
     }
@@ -152,7 +153,7 @@ export function renderFullRadar(
   const groupEntries = [...groups.entries()].slice(0, 6);
   const groupAvgs = groupEntries.map(([, gRows]) =>
     axes.map((a) => {
-      const vals = gRows.map(r => Number(r[a.idx])).filter(v => !isNaN(v));
+      const vals = gRows.map(r => chartNumber(r[a.idx])).filter(v => !isNaN(v));
       return vals.length ? vals.reduce((s, v) => s + v, 0) / vals.length : 0;
     }),
   );
@@ -293,7 +294,7 @@ export function renderFullWaterfall(ctx: CanvasRenderingContext2D, rows: unknown
   for (const r of rows) {
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? Number(r[yi]) : 1);
+    groups.get(k)!.push(yi >= 0 ? chartNumber(r[yi]) : 1);
   }
   // Steps run in natural order for numbers / dates, otherwise first appearance
   const cls = classifyKeys([...groups.keys()]);
@@ -402,7 +403,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
   for (const r of rows) {
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "", row: r });
-    groups.get(k)!.vals.push(yi >= 0 ? Number(r[yi]) : 1);
+    groups.get(k)!.vals.push(yi >= 0 ? chartNumber(r[yi]) : 1);
   }
   const symbols = markSymbols(opts, opts?.fieldNames, rows);
   const drawHead = (row: unknown[], x: number, y: number, r: number, color: string) => {

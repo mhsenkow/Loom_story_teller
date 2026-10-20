@@ -1,3 +1,5 @@
+import { addDensityCell, densityDomain, densityFraction, densityMeasure, densityPlot, densityValue, type DensityCell } from "./densityCells";
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Canvas 2D pareto, correlation matrix, dumbbell, ridgeline, hexbin, funnel and parallel renderers.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -42,7 +44,7 @@ export function renderFullPareto(
     if (!byCat.has(k)) byCat.set(k, []);
     if (yi < 0) byCat.get(k)!.push(1);
     else {
-      const v = Number(r[yi]);
+      const v = chartNumber(r[yi]);
       if (!isNaN(v)) byCat.get(k)!.push(v);
     }
   }
@@ -166,7 +168,7 @@ export function renderFullCorrMatrix(
       let lo = Infinity;
       let hi = -Infinity;
       for (const row of rows) {
-        const v = Number(row[i]);
+        const v = chartNumber(row[i]);
         if (!Number.isFinite(v)) continue;
         if (v < lo) lo = v;
         if (v > hi) hi = v;
@@ -273,8 +275,8 @@ export function renderFullDumbbell(
   const groups = new Map<string, { start: number[]; end: number[] }>();
   for (const r of rows) {
     const k = String(r[xi]);
-    const a = Number(r[yi]);
-    const b = Number(r[si]);
+    const a = chartNumber(r[yi]);
+    const b = chartNumber(r[si]);
     if (isNaN(a) || isNaN(b)) continue;
     if (!groups.has(k)) groups.set(k, { start: [], end: [] });
     const g = groups.get(k)!;
@@ -452,54 +454,56 @@ export function renderFullHexbin(
   const stops = densityStops(opts?.continuousStops?.length ? opts.continuousStops : (opts?.colors ?? DEFAULT_COLORS), opts?.themeBg);
   const [xMin, xMax] = numRange(rows, xi);
   const [yMin, yMax] = numRange(rows, yi);
-  const plotW = w - 2 * pad;
-  const plotH = h - 2 * pad;
+  const rect = densityPlot(w, h, pad, opts);
+  const plotW = rect.right - rect.left;
+  const plotH = rect.bottom - rect.top;
+  const measure = densityMeasure(opts);
+  setLegend(opts, []);
   const targetHex = Math.max(8, Math.min(28, Math.round(Math.sqrt(rows.length) / 2)));
   const hexR = Math.min(plotW, plotH) / (targetHex * 1.75);
   const hexW = hexR * Math.sqrt(3);
   const hexH = hexR * 1.5;
 
-  const counts = new Map<string, { n: number; row: number }>();
-  let maxC = 0;
+  const counts = new Map<string, DensityCell>();
   rows.forEach((r, ri) => {
-    const xv = Number(r[xi]);
-    const yv = Number(r[yi]);
+    const xv = chartNumber(r[xi]);
+    const yv = chartNumber(r[yi]);
     if (isNaN(xv) || isNaN(yv)) return;
-    const px = pad + ((xv - xMin) / (xMax - xMin || 1)) * plotW;
-    const py = h - pad - ((yv - yMin) / (yMax - yMin || 1)) * plotH;
-    const row = Math.round((py - pad) / hexH);
-    const col = Math.round((px - pad - (row % 2 === 0 ? 0 : hexW / 2)) / hexW);
+    const px = rect.left + ((xv - xMin) / (xMax - xMin || 1)) * plotW;
+    const py = rect.bottom - ((yv - yMin) / (yMax - yMin || 1)) * plotH;
+    const row = Math.round((py - rect.top) / hexH);
+    const col = Math.round((px - rect.left - (row % 2 === 0 ? 0 : hexW / 2)) / hexW);
     const key = `${col},${row}`;
-    const cur = counts.get(key);
-    const n = (cur?.n ?? 0) + 1;
-    counts.set(key, { n, row: cur?.row ?? ri });
-    if (n > maxC) maxC = n;
+    addDensityCell(counts, key, r[measure.index], ri);
   });
   if (counts.size === 0) return;
 
-  drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
+  const domain = densityDomain(counts.values(), measure.aggregate);
+  if (!opts?.mini) drawChartGrid(ctx, w, h, rect, opts, { x: [xMin, xMax], y: [yMin, yMax] });
   if (opts) {
     opts.scales = {
-      x: (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad),
-      y: (v: number) => h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad),
+      x: (v: number) => rect.left + ((v - xMin) / (xMax - xMin || 1)) * plotW,
+      y: (v: number) => rect.bottom - ((v - yMin) / (yMax - yMin || 1)) * plotH,
       valueAxis: "y",
-      rect: plotOf(w, h, pad, opts),
+      rect,
     };
   }
 
   ctx.save();
   ctx.beginPath();
-  ctx.rect(pad, pad, plotW, plotH);
+  ctx.rect(rect.left, rect.top, plotW, plotH);
   ctx.clip();
   for (const [key, cell] of counts) {
     const [cs, rs] = key.split(",");
     const col = Number(cs);
     const row = Number(rs);
-    const cx = pad + col * hexW + (Math.abs(row) % 2 === 0 ? 0 : hexW / 2);
-    const cy = pad + row * hexH;
-    const t = Math.sqrt(cell.n / maxC);
-    ctx.fillStyle = sampleContinuous(stops, 0.12 + t * 0.88);
-    ctx.globalAlpha = 1;
+    const cx = rect.left + col * hexW + (Math.abs(row) % 2 === 0 ? 0 : hexW / 2);
+    const cy = rect.top + row * hexH;
+    const value = densityValue(cell, measure.aggregate);
+    if (value === null) continue;
+    const fill = sampleContinuous(stops, densityFraction(value, domain));
+    ctx.fillStyle = fill;
+    ctx.globalAlpha = opts?.opacity ?? 1;
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
       const ang = (Math.PI / 180) * (60 * i - 30);
@@ -510,17 +514,28 @@ export function renderFullHexbin(
     }
     ctx.closePath();
     ctx.fill();
+    if (!opts?.mini && opts?.showDataLabels && hexR * 1.2 >= chartTypeRamp(opts.axisFontSize).cell) {
+      ctx.font = axisFont(opts, chartTypeRamp(opts.axisFontSize).cell);
+      const text = formatDataValue(value);
+      if (ctx.measureText(text).width < hexW - 6) {
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = contrastingInk(fill);
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, cx, cy);
+      }
+    }
     pushHit(opts, {
       shape: "circle", cx, cy, r: hexR * 0.9,
       match: [],
       rowIndex: cell.row,
-      summary: { columns: ["Rows here"], row: [formatTooltipNumber(cell.n)] },
+      summary: { columns: [measure.title, ...(measure.aggregate === "count" ? [] : ["Rows here"])], row: [formatTooltipNumber(value), ...(measure.aggregate === "count" ? [] : [formatTooltipNumber(cell.count)])] },
     });
   }
   ctx.restore();
   ctx.globalAlpha = 1;
-  drawAxisTicks(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
-  drawColorRamp(ctx, stops, (s, t) => sampleContinuous(s, 0.12 + Math.sqrt(t) * 0.88), w - pad + 10, pad + 14, Math.min(140, plotH * 0.5), "1", formatDataValue(maxC), opts, "Rows");
+  if (!opts?.mini) drawChartTicks(ctx, xMin, xMax, yMin, yMax, w, h, rect, opts);
+  if (!opts?.mini && opts?.legendPosition !== "none") drawColorRamp(ctx, stops, sampleContinuous, Math.min(w - 38, rect.right + 10), rect.top + 14, Math.min(140, plotH * 0.5), formatDataValue(domain.min), formatDataValue(domain.max), opts, measure.title);
 }
 
 // --- Funnel stages ---
@@ -546,7 +561,7 @@ export function renderFullFunnel(
   for (const r of rows) {
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? Number(r[yi]) : 1);
+    groups.get(k)!.push(yi >= 0 ? chartNumber(r[yi]) : 1);
   }
   const entries = [...groups.entries()]
     .map(([label, vals]) => ({ label, value: aggregateValues(vals.filter(v => !isNaN(v)), agg) }))
@@ -635,7 +650,7 @@ export function renderFullParallel(
     if (c === ci) continue;
     const [min, max] = numRange(rows, c);
     const sampleN = rows.slice(0, 40).filter(r => {
-      const v = Number(r[c]);
+      const v = chartNumber(r[c]);
       return r[c] !== null && r[c] !== "" && typeof r[c] !== "boolean" && !isNaN(v);
     }).length;
     if (sampleN < Math.min(12, rows.length * 0.3)) continue;
@@ -670,7 +685,7 @@ export function renderFullParallel(
     ctx.beginPath();
     let started = false;
     axes.forEach((ax, i) => {
-      const v = Number(r[ax.idx]);
+      const v = chartNumber(r[ax.idx]);
       if (isNaN(v)) return;
       const t = (v - ax.min) / (ax.max - ax.min || 1);
       const y = plotBot - t * (plotBot - plotTop);

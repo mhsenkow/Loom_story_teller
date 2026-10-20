@@ -461,19 +461,19 @@ function IconToggleGroup<T extends string | number>({
         onKeyDown={(e) => {
           const i = options.findIndex((o) => o.value === value);
           if (i < 0) return;
+          let next = i;
           if (e.key === "ArrowRight" || e.key === "ArrowDown") {
-            e.preventDefault();
-            onChange(options[(i + 1) % options.length]!.value);
+            next = (i + 1) % options.length;
           } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
-            e.preventDefault();
-            onChange(options[(i - 1 + options.length) % options.length]!.value);
+            next = (i - 1 + options.length) % options.length;
           } else if (e.key === "Home") {
-            e.preventDefault();
-            onChange(options[0]!.value);
+            next = 0;
           } else if (e.key === "End") {
-            e.preventDefault();
-            onChange(options[options.length - 1]!.value);
-          }
+            next = options.length - 1;
+          } else return;
+          e.preventDefault();
+          onChange(options[next]!.value);
+          e.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
         }}
       >
         {options.map((opt) => {
@@ -489,7 +489,7 @@ function IconToggleGroup<T extends string | number>({
               tabIndex={active ? 0 : -1}
               onClick={() => onChange(opt.value)}
               className={`
-                min-h-9 min-w-9 px-2 rounded-md border flex items-center justify-center transition-colors
+                min-h-11 min-w-11 px-2 py-1.5 rounded-md border flex flex-col gap-1 items-center justify-center transition-colors
                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent/50
                 ${active
                   ? "border-loom-accent bg-loom-accent/15 text-loom-text"
@@ -497,6 +497,7 @@ function IconToggleGroup<T extends string | number>({
               `}
             >
               {opt.icon}
+              <span className="text-2xs leading-tight">{opt.label}</span>
             </button>
           );
         })}
@@ -995,6 +996,7 @@ export default function ChartPanelTab() {
     setChartVisualOverrides,
     editChartVisualOverrides,
     setActiveChart,
+    editActiveChart,
     selectedFile,
     aiSuggestionReason,
     chartAnnotations,
@@ -1030,6 +1032,7 @@ export default function ChartPanelTab() {
       setChartVisualOverrides: s.setChartVisualOverrides,
       editChartVisualOverrides: s.editChartVisualOverrides,
       setActiveChart: s.setActiveChart,
+      editActiveChart: s.editActiveChart,
       selectedFile: s.selectedFile,
       aiSuggestionReason: s.aiSuggestionReason,
       chartAnnotations: s.chartAnnotations,
@@ -1188,11 +1191,10 @@ export default function ChartPanelTab() {
 
   const commitRec = useCallback(
     (rec: NonNullable<ReturnType<typeof createChartRec>>, toastMsg?: string) => {
-      pushChartEditUndo();
-      setActiveChart(rec);
+      editActiveChart(rec);
       if (toastMsg) setToast(toastMsg, { undo: true });
     },
-    [pushChartEditUndo, setActiveChart, setToast],
+    [editActiveChart, setToast],
   );
 
   const handleDragEnter = useCallback((slot: "x" | "y" | "color" | "size" | "z") => () => setDragOverSlot(slot), []);
@@ -1238,7 +1240,9 @@ export default function ChartPanelTab() {
       const newY = slot === "y" ? resolved : activeChart.yField;
       const newColor = slot === "color" ? resolved : activeChart.colorField;
       if (slot === "x" && !resolved) return;
-      const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extraFromChart());
+      const extra = extraFromChart();
+      if (slot === "color" && (activeChart.kind === "heatmap" || activeChart.kind === "hexbin") && !activeChart.colorField && newColor) extra.yAggregate = "mean";
+      const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extra);
       if (rec) commitRec(rec);
     },
     [activeChart, columnStats, tableName, extraFromChart, setToast, commitRec],
@@ -1253,8 +1257,9 @@ export default function ChartPanelTab() {
       const glowField = slot === "glow" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.glowField ?? null);
       const outlineField = slot === "outline" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.outlineField ?? null);
       const opacityField = slot === "opacity" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.opacityField ?? null);
-      const shapeField = slot === "shape" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.shapeField ?? null);
-      const emojiField = slot === "emoji" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.emojiField ?? null);
+      const selectedSymbol = colName === "__none__" || colName === "" ? null : colName;
+      const shapeField = slot === "shape" ? selectedSymbol : slot === "emoji" && selectedSymbol ? null : (activeChart.shapeField ?? null);
+      const emojiField = slot === "emoji" ? selectedSymbol : slot === "shape" && selectedSymbol ? null : (activeChart.emojiField ?? null);
       const y2Field = slot === "y2" ? (colName === "__none__" || colName === "" ? null : colName) : (activeChart.y2Field ?? null);
       // Dual-measure kinds need two distinct numeric ends
       if (
@@ -1757,9 +1762,11 @@ export default function ChartPanelTab() {
     activeChart.kind === "quakeTerrain" ? "Height" : isDataCube ? "Depth" : "Z";
   const cubeAggregate: YAggregateOption = activeChart.sizeField ? (activeChart.yAggregate ?? "sum") : "count";
   const showAggregate = caps.aggregate;
-  const effectiveAggregate: YAggregateOption = !activeChart.yField
+  const isHeat = activeChart.kind === "heatmap" || activeChart.kind === "hexbin";
+  const aggregateField = isHeat ? activeChart.colorField : activeChart.yField;
+  const effectiveAggregate: YAggregateOption = !aggregateField
     ? "count"
-    : (activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum"));
+    : (activeChart.yAggregate ?? (activeChart.kind === "line" || isHeat ? "mean" : "sum"));
   const showRow = caps.facetRow;
   const showTopN = caps.topN;
   const showCompareY = caps.compareY;
@@ -2027,7 +2034,7 @@ export default function ChartPanelTab() {
                     onChromeEnter={focusChromeFromPanel}
                     onChromeLeave={clearChromeFromPanel}
                   />
-                  {showAggregate && (
+                  {showAggregate && !isHeat && (
                     <EncodingSelectSlot label="Agg" htmlFor="loom-y-agg" title="Aggregate">
                       <select
                         id="loom-y-agg"
@@ -2055,9 +2062,9 @@ export default function ChartPanelTab() {
                 <EncodingSlot
                   label={channelLabels.color}
                   value={activeChart.colorField ?? ""}
-                  options={allColOptions}
+                  options={gateOptions("color", isHeat ? numericOptions : allColOptions)}
                   allowEmpty
-                  emptyLabel="None"
+                  emptyLabel={isHeat ? "Row count" : "None"}
                   typeHint={activeChart.colorField ? colType(activeChart.colorField) : undefined}
                   isDropActive={dragOverSlot === "color"}
                   onDragEnter={handleDragEnter("color")}
@@ -2119,6 +2126,13 @@ export default function ChartPanelTab() {
                     ) : undefined
                   }
                 />
+              )}
+              {isHeat && (
+                <EncodingSelectSlot label="Heat agg" htmlFor="loom-heat-agg" title="How each cell summarizes its heat measure">
+                  <select id="loom-heat-agg" value={effectiveAggregate} onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)} className="loom-input flex-1 w-full text-xs py-1.5 min-h-9 px-2">
+                    {Y_AGGREGATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value} disabled={!aggregateField && opt.value !== "count"}>{opt.label}</option>)}
+                  </select>
+                </EncodingSelectSlot>
               )}
               {showRow && (
                 <EncodingSlot
@@ -3937,7 +3951,7 @@ export default function ChartPanelTab() {
               >
                 <input
                   type="checkbox"
-                  checked={chartVisualOverrides.showGrid ?? true}
+                  checked={chartVisualOverrides.showGrid ?? (chartVisualOverrides.chartDetail !== "plain")}
                   onChange={(e) => updateOverride("showGrid", e.target.checked)}
                   className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
                 />
@@ -4006,7 +4020,7 @@ export default function ChartPanelTab() {
                   className="loom-input w-full text-xs py-1.5"
                   disabled={!caps.legend}
                 >
-                  {[
+                  {(isHeat ? [["auto", "Show color scale"], ["none", "Hide color scale"]] : [
                     ["auto", "Auto (emptiest corner)"],
                     ["custom", "Custom (drag on chart)"],
                     ["top-right", "Top right"],
@@ -4014,7 +4028,7 @@ export default function ChartPanelTab() {
                     ["bottom-right", "Bottom right"],
                     ["bottom-left", "Bottom left"],
                     ["none", "None"],
-                  ].map(([value, label]) => (
+                  ]).map(([value, label]) => (
                     <option key={value} value={value}>{label}</option>
                   ))}
                 </select>
@@ -4043,7 +4057,7 @@ export default function ChartPanelTab() {
                 <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={chartVisualOverrides.showDataLabels ?? false}
+                    checked={chartVisualOverrides.showDataLabels ?? (chartVisualOverrides.chartDetail === "deep")}
                     onChange={(e) => updateOverride("showDataLabels", e.target.checked)}
                     className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
                   />
@@ -4078,7 +4092,7 @@ export default function ChartPanelTab() {
                   ))}
                 </select>
               </div>
-              <div>
+              {(activeChart.kind === "scatter" || activeChart.kind === "bubble") && <div>
                 <label className="block text-2xs text-loom-muted mb-1">Blend mode</label>
                 <select aria-label="Blend mode"
                   value={chartVisualOverrides.blendMode ?? "source-over"}
@@ -4089,7 +4103,7 @@ export default function ChartPanelTab() {
                     <option key={m.value} value={m.value}>{m.label}</option>
                   ))}
                 </select>
-              </div>
+              </div>}
               {caps.markPoints && (
                 <>
                   <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">

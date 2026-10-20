@@ -1,3 +1,4 @@
+import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Canvas 2D pie and bubble renderers.
 // (extracted from ChartView.tsx — LOOM-141 / LOOM-142)
@@ -23,10 +24,10 @@ export function pieSlices(rows: unknown[][], xi: number, yi: number, agg: YAggre
   for (const r of rows) {
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? Number(r[yi]) : 1);
+    groups.get(k)!.push(yi >= 0 ? chartNumber(r[yi]) : 1);
   }
   const all = [...groups.entries()]
-    .map(([label, vals]) => ({ label, value: Math.max(0, aggregateValues(vals.filter((v) => !isNaN(v)), agg)), other: [] as string[] }))
+    .map(([label, vals]) => ({ label, value: Math.max(0, aggregateValues(vals, agg)), other: [] as string[] }))
     .filter((e) => e.value > 0)
     .sort((a, b) => b.value - a.value);
   if (all.length <= 8) return all;
@@ -37,7 +38,7 @@ export function pieSlices(rows: unknown[][], xi: number, yi: number, agg: YAggre
 
 export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {
   const cols = opts?.colors ?? DEFAULT_COLORS;
-  const alpha = Math.max(0.85, opts?.opacity ?? 0.9);
+  const alpha = opts?.opacity ?? 0.9;
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
   const entries = pieSlices(rows, xi, yi, agg);
   const total = entries.reduce((s, e) => s + e.value, 0);
@@ -56,11 +57,12 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   const legendTexts = entries.map((e) => `${e.label}  ${pct(e.value)}`);
   const textW = widestText(ctx, legendTexts, legendFont);
   const portrait = plotH > plotW * 1.1;
-  const rowH = 18;
-  const legendW = portrait ? plotW : Math.min(plotW * 0.42, textW + 22);
-  const legendH = portrait ? Math.ceil(entries.length / 2) * rowH + 6 : entries.length * rowH;
-  const pieW = portrait ? plotW : plotW - legendW - 16;
-  const pieH = portrait ? plotH - legendH - 8 : plotH;
+  const inlineLegend = !opts?.legendPosition || opts.legendPosition === "auto";
+  const rowH = chartTypeRamp(opts?.axisFontSize).legend + 10;
+  const legendW = inlineLegend ? (portrait ? plotW : Math.min(plotW * 0.42, textW + 22)) : 0;
+  const legendH = inlineLegend ? (portrait ? Math.ceil(entries.length / 2) * rowH + 6 : entries.length * rowH) : 0;
+  const pieW = portrait || !inlineLegend ? plotW : plotW - legendW - 16;
+  const pieH = portrait && inlineLegend ? plotH - legendH - 8 : plotH;
   const cx = rect.left + pieW / 2;
   const cy = rect.top + pieH / 2;
   const radius = Math.max(24, Math.min(pieW, pieH) / 2 - 4);
@@ -84,7 +86,7 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
     ctx.globalAlpha = 1;
     ctx.stroke();
     // Percent on wedges big enough to hold it
-    if (sweep > 0.32 && opts?.showDataLabels !== false && opts?.chartDetail !== "plain") {
+    if (sweep > 0.32 && (opts?.showDataLabels ?? opts?.chartDetail !== "plain")) {
       const mid = start + sweep / 2;
       const r2 = (radius + innerR) / 2;
       ctx.fillStyle = contrastingInk(fill);
@@ -120,7 +122,7 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   ctx.font = legendFont;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  entries.forEach((e, i) => {
+  if (inlineLegend) entries.forEach((e, i) => {
     const colW = portrait ? plotW / 2 : legendW;
     const lx = portrait ? rect.left + (i % 2) * colW : rect.right - legendW;
     const ly = portrait
@@ -141,7 +143,7 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   });
   ctx.textBaseline = "alphabetic";
   ctx.globalAlpha = 1;
-  setLegend(opts, []);
+  setLegend(opts, inlineLegend || opts?.legendPosition === "none" ? [] : entries.map((e, i) => ({ label: `${e.label} · ${pct(e.value)}`, color: cols[i % cols.length]! })));
 }
 
 // --- Bubble (scatter with size) ---
@@ -168,13 +170,14 @@ export function renderFullBubble(
   const sizeRange = sizeMax - sizeMin || 1;
   const xRange = xMax - xMin || 1;
   const yRange = yMax - yMin || 1;
-  const plotW = Math.max(1, w - 2 * pad);
-  const plotH = Math.max(1, h - 2 * pad);
+  const rect = plotOf(w, h, pad, opts);
+  const plotW = Math.max(1, rect.right - rect.left);
+  const plotH = Math.max(1, rect.bottom - rect.top);
 
   // Count valid points cheaply for density (same filter as draw loop)
   let nValid = 0;
   for (const r of rows) {
-    const x = Number(r[xi]), y = Number(r[yi]);
+    const x = chartNumber(r[xi]), y = chartNumber(r[yi]);
     if (!isNaN(x) && !isNaN(y)) nValid++;
   }
   const marks = densityAwarePointMarks({
@@ -192,8 +195,8 @@ export function renderFullBubble(
   drawGridLines(ctx, xMin, xMax, yMin, yMax, w, h, pad, opts);
   if (opts) {
     opts.scales = {
-      x: (v: number) => pad + ((v - xMin) / (xMax - xMin || 1)) * (w - 2 * pad),
-      y: (v: number) => h - pad - ((v - yMin) / (yMax - yMin || 1)) * (h - 2 * pad),
+      x: (v: number) => rect.left + ((v - xMin) / (xMax - xMin || 1)) * plotW,
+      y: (v: number) => rect.bottom - ((v - yMin) / (yMax - yMin || 1)) * plotH,
       valueAxis: "y",
       rect: plotOf(w, h, pad, opts),
     };
@@ -208,7 +211,7 @@ export function renderFullBubble(
   type Bubble = { sx: number; sy: number; r: number; cat: number; row: unknown[] };
   const bubbles: Bubble[] = [];
   for (const r of rows) {
-    const x = Number(r[xi]), y = Number(r[yi]);
+    const x = chartNumber(r[xi]), y = chartNumber(r[yi]);
     if (isNaN(x) || isNaN(y)) continue;
     let cat = 0;
     if (ci >= 0) {
@@ -218,14 +221,14 @@ export function renderFullBubble(
     }
     let radius = (minR + maxR) / 2;
     if (sizeIdx >= 0) {
-      const s = Number(r[sizeIdx]);
+      const s = chartNumber(r[sizeIdx]);
       if (!isNaN(s)) {
         const t = directedUnit((s - sizeMin) / sizeRange, opts?.channelInvert?.size);
         radius = minR + Math.sqrt(t) * (maxR - minR);
       }
     }
-    const sx = pad + ((x - xMin) / xRange) * plotW;
-    const sy = h - pad - ((y - yMin) / yRange) * plotH;
+    const sx = rect.left + ((x - xMin) / xRange) * plotW;
+    const sy = rect.bottom - ((y - yMin) / yRange) * plotH;
     bubbles.push({ sx, sy, r: radius, cat, row: r });
   }
 
@@ -241,11 +244,7 @@ export function renderFullBubble(
     } else if (symbol.shape !== "circle") {
       drawMark(ctx, symbol.shape, b.sx, b.sy, b.r, color, alpha, opts);
     } else {
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.arc(b.sx, b.sy, b.r, 0, Math.PI * 2);
-      ctx.fill();
+      drawMark(ctx, "circle", b.sx, b.sy, b.r, color, alpha, opts);
     }
     if (drawStroke && !symbol.glyph && symbol.shape === "circle") {
       ctx.globalAlpha = Math.min(alpha + 0.25, 0.85);
@@ -271,7 +270,7 @@ export function renderFullBubble(
   else if (ci >= 0) setLegend(opts, [...catMap.entries()].map(([label, i]) => ({ label, color: palette[i % palette.length]! })));
 
   // Size key: three nested reference circles, bottom-right inside the plot
-  if (sizeIdx >= 0 && maxR >= 4) {
+  if (sizeIdx >= 0 && maxR >= 4 && opts?.legendPosition !== "none") {
     const steps = [0.1, 0.5, 1.0];
     const font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily);
     const labels = steps.map((t) => formatDataValue(sizeMin + t * sizeRange));

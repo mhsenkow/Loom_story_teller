@@ -30,6 +30,7 @@ export const CHANGELOG: ChangelogRelease[] = [
     title: "Watch it so you don't have to",
     summary: "Monitor any live feed on a schedule, and hear about it only when it matters.",
     items: [
+      { title: "Charts that follow your choices", detail: "Heatmaps and hexbins can show a numeric measure as well as counts. Signed stacks, reversed bars, log axes, and facet scales read more faithfully; visual controls honor explicit choices. Encoding edits keep your headline, notes, and reference lines, with Undo and Redo." },
       { title: "See the line you're watching", detail: "The monitor editor charts your number over the feed's recent history with the rule drawn on top. Drag the limit and it tells you how often it would have alerted. Limits also appear on matching charts, and Monitor suggests watches for whatever feed you have open." },
       { title: "Monitor this chart", detail: "Tap the bell beside any live-feed chart, or \"Alert me when this happens\" in Analyze → Anomaly detection. The monitor watches the same measure and lookback, and every card and alert opens that chart again." },
       { title: "Monitors tied to a decision", detail: "Open Monitor (key 5), pick a feed and a number, and say what you'll do when it fires. Start from examples like a big earthquake, a dirty grid hour, or city heat health." },

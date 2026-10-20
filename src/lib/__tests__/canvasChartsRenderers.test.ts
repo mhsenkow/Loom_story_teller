@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ChartRenderOpts } from "../chartRenderTypes";
-import type { HitTarget } from "../chartTooltip";
+import { buildBarFacetGrid, type HitTarget } from "../chartTooltip";
 import { renderFullBar, renderFullHistogram } from "../canvasCharts/bar";
 import { renderFullScatter } from "../canvasCharts/scatter";
 import { renderFullLine, renderFullHeatmap } from "../canvasCharts/lineHeatmap";
@@ -85,6 +85,56 @@ function opts(): ChartRenderOpts {
     themeBorder: "#2a2a30",
   };
 }
+
+describe("chart refinement regressions", () => {
+  it.each(["heatmap", "hexbin"] as const)("%s aggregates signed measures instead of counting observations", kind => {
+    const { ctx } = fakeCtx();
+    const o: ChartRenderOpts = { ...opts(), fieldNames: ["x", "y", "value"], colorField: "value", yAggregate: "mean" };
+    const data = kind === "heatmap" ? [["a", "r", -10], ["a", "r", 10], ["b", "r", null]] : [[1, 2, -10], [1, 2, 10], [5, 6, null]];
+    (kind === "heatmap" ? renderFullHeatmap : renderFullHexbin)(ctx, data, 0, 1, W, H, PAD, o);
+    expect(o.hits).toHaveLength(1);
+    expect(o.hits![0]!.summary!.row).toContain("0");
+    expect(o.hits![0]!.summary!.columns.join(" ")).toMatch(/average/i);
+  });
+
+  it.each(["grouped", "stacked", "percent"] as const)("%s bars retain signed segments in reversed horizontal layouts", mode => {
+    const { ctx } = fakeCtx();
+    const data = [["a", 10, "gain"], ["a", -5, "loss"], ["b", 20, "gain"], ["b", -10, "loss"]];
+    const o: ChartRenderOpts = { ...opts(), fieldNames: ["category", "value", "series"], plotBounds: { left: 100, top: 40, right: 600, bottom: 340 } };
+    const facet = buildBarFacetGrid(data, 0, 1, 2, "sum", mode);
+    renderFullBar(ctx, data, 0, 1, 2, W, H, PAD, o, facet, true, undefined, false, true);
+    expect(o.hits).toHaveLength(4);
+    for (const hit of o.hits!) {
+      expect(hit.shape).toBe("rect");
+      if (hit.shape !== "rect") continue;
+      expect(hit.x).toBeGreaterThanOrEqual(100);
+      expect(hit.x + hit.w).toBeLessThanOrEqual(600.001);
+      const positive = Number(hit.summary!.row[2]) > 0;
+      const zero = o.scales!.x!(0);
+      if (positive) expect(hit.x + hit.w).toBeCloseTo(zero);
+      else expect(hit.x).toBeCloseTo(zero);
+    }
+  });
+
+  it("positions bubble marks inside authored plot bounds", () => {
+    const { ctx } = fakeCtx();
+    const o: ChartRenderOpts = { ...opts(), plotBounds: { left: 180, top: 90, right: 480, bottom: 280 }, legendPosition: "none" };
+    renderFullBubble(ctx, [[0, 0], [10, 10]], ["x", "y"], 0, 1, -1, -1, W, H, PAD, o);
+    expect(o.hits).toEqual(expect.arrayContaining([
+      expect.objectContaining({ cx: 180, cy: 280 }),
+      expect.objectContaining({ cx: 480, cy: 90 }),
+    ]));
+  });
+
+  it("hides the pie legend while honoring an explicit label choice in plain detail", () => {
+    const { ctx, calls } = fakeCtx();
+    const o: ChartRenderOpts = { ...opts(), legendPosition: "none", chartDetail: "plain", showDataLabels: true };
+    renderFullPie(ctx, [["First category", 1], ["Second category", 1]], 0, 1, W, H, PAD, o);
+    expect(calls.labels.some(l => l.text.includes("category"))).toBe(false);
+    expect(calls.labels.filter(l => l.text === "50%")).toHaveLength(2);
+    expect(o.legend).toEqual([]);
+  });
+});
 
 it("renders mapped emoji in miniature scatter previews and keeps unknown codes geometric", () => {
   const { ctx, calls } = fakeCtx();
