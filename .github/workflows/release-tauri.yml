@@ -38,6 +38,7 @@ jobs:
           npx tsc --noEmit
           npm run check:worker
           npm run test:run
+          npm run build
           cd src-tauri && cargo check
 
       - name: Build app and upload to release

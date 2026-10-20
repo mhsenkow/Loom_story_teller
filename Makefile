@@ -230,7 +230,7 @@ check: check-ts check-worker check-rust test ## ✅ TS + Worker + Rust + Vitest 
 	@echo "$(GREEN)✓ All checks passed$(RESET)"
 
 .PHONY: ci
-ci: preflight check-ts check-worker check-mcp test build bundle-budget check-rust ## ✅ Full gate (mirrors GitHub CI + Workers + MCP)
+ci: preflight check-ts check-worker check-mcp build test bundle-budget check-rust ## ✅ Full gate (mirrors GitHub CI + Workers + MCP)
 	@echo "$(GREEN)✓ CI gate passed$(RESET)"
 
 .PHONY: build
