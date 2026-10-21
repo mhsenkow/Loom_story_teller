@@ -73,7 +73,7 @@ export const AIRCRAFT_FETCH_BUDGET_MS = 20_000;
 
 type JsonRecord = Record<string, unknown>;
 
-function rowCountFromPayload(data: unknown): number | null {
+export function rowCountFromPayload(data: unknown): number | null {
   if (Array.isArray(data)) return data.length;
   if (!data || typeof data !== "object") return null;
   const o = data as JsonRecord;

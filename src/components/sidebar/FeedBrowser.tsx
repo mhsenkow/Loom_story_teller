@@ -28,6 +28,7 @@ import {
   type FeedSort,
   type FeedWhere,
 } from "@/lib/feedBrowser";
+import { isFeedResting, loadFeedHealth } from "@/lib/sourceHealth";
 import { SourceCard } from "./SourceCard";
 import { WikiStreamSection } from "./WikiStreamSection";
 
@@ -70,6 +71,7 @@ export function FeedBrowser({
 }) {
   const prefs = useLoomStore((s) => s.sourcePrefs);
   const statuses = useLoomStore((s) => s.sourceStatuses);
+  const feedHealth = useLoomStore((s) => s.feedHealth);
   const [state, setState] = useState<FeedBrowserState>(DEFAULT_FEED_BROWSER_STATE);
   const [topicsOpen, setTopicsOpen] = useState(false);
   const [view, setView] = useState<FeedView>(expanded ? "digest" : "directory");
@@ -82,6 +84,10 @@ export function FeedBrowser({
     setView(expanded ? "digest" : "directory");
   }, [expanded]);
 
+  useEffect(() => {
+    void loadFeedHealth();
+  }, []);
+
   const lastUpdated = (e: CatalogEntry) => {
     const kind = feedKindFromRef(e.ref);
     const st = kind ? statuses[kind] : undefined;
@@ -93,8 +99,18 @@ export function FeedBrowser({
     [state, query, prefs, statuses],
   );
   const leads = useMemo(
-    () => digestEntries(sourceCatalog(), prefs, { fromBrowse: result, lastUpdated, limit: expanded ? 6 : 4 }),
-    [result, prefs, statuses, expanded],
+    () =>
+      digestEntries(sourceCatalog(), prefs, {
+        fromBrowse: result,
+        lastUpdated,
+        limit: expanded ? 6 : 4,
+        // Leads are “worth opening now” — never a feed that's been down for hours.
+        skip: (e) => {
+          const kind = feedKindFromRef(e.ref);
+          return !!kind && isFeedResting(kind, feedHealth);
+        },
+      }),
+    [result, prefs, statuses, expanded, feedHealth],
   );
   const active = filtersActive(state);
   const clear = () => setState((s) => ({ ...DEFAULT_FEED_BROWSER_STATE, sort: s.sort }));

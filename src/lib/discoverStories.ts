@@ -464,6 +464,8 @@ export interface DiscoverScanSummary {
   failedKinds: SourceKind[];
   emptyKinds: SourceKind[];
   timedOutKinds: SourceKind[];
+  /** Feeds the Worker reports as down for hours — skipped instead of probed. */
+  restingKinds: SourceKind[];
   wikiFailed: boolean;
   wikiTimedOut: boolean;
 }
@@ -472,6 +474,7 @@ let lastDiscoverScanSummary: DiscoverScanSummary = {
   failedKinds: [],
   emptyKinds: [],
   timedOutKinds: [],
+  restingKinds: [],
   wikiFailed: false,
   wikiTimedOut: false,
 };
@@ -512,6 +515,7 @@ export async function scanDiscoverStories(
     failedKinds: [],
     emptyKinds: [],
     timedOutKinds: [],
+    restingKinds: [],
     wikiFailed: false,
     wikiTimedOut: false,
   };
@@ -543,8 +547,19 @@ export async function scanDiscoverStories(
     setTimeout(flushPending, collected.length ? 150 : 16);
   };
 
+  // Skip feeds that have been failing for hours: each would only burn a 10 s
+  // probe slot and a timeout. Health is advisory — unreachable means scan all.
+  const { loadFeedHealth, isFeedResting } = await import("./sourceHealth");
+  const health = await loadFeedHealth({ timeoutMs: 2_500 });
   const priority: readonly SourceKind[] = ["usgs", "hn", "meteo", "crypto", "spaceweather", "countries"];
-  const orderedKinds = [...SCAN_KINDS].filter((kind) => !opts.kinds || opts.kinds.includes(kind)).sort((a, b) => {
+  const orderedKinds = [...SCAN_KINDS].filter((kind) => {
+    if (opts.kinds && !opts.kinds.includes(kind)) return false;
+    if (isFeedResting(kind, health)) {
+      summary.restingKinds.push(kind);
+      return false;
+    }
+    return true;
+  }).sort((a, b) => {
     const order = (kind: SourceKind) => { const index = priority.indexOf(kind); return index < 0 ? priority.length : index; };
     return (affinity[b] ?? 0) - (affinity[a] ?? 0) || order(a) - order(b);
   });

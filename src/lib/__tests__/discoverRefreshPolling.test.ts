@@ -10,6 +10,11 @@ import {
 } from "../tauri";
 import { recommendSourceStory } from "../recommendations";
 
+// Feed health is advisory network I/O — keep scans hermetic.
+vi.mock("../sourceHealth", async (original) => ({
+  ...(await original<typeof import("../sourceHealth")>()),
+  loadFeedHealth: vi.fn(async () => ({})),
+}));
 vi.mock("../tauri", async (original) => ({
   ...(await original<typeof import("../tauri")>()),
   ALL_SOURCE_KINDS: ["climate"],

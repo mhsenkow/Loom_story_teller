@@ -37,6 +37,11 @@ vi.mock("../tauri", async (original) => ({
     },
   })),
 }));
+const health = vi.hoisted(() => ({ current: {} as Record<string, { state: "ok" | "degraded" | "resting" | "unknown" }> }));
+vi.mock("../sourceHealth", async (original) => ({
+  ...(await original<typeof import("../sourceHealth")>()),
+  loadFeedHealth: vi.fn(async () => health.current),
+}));
 vi.mock("../recommendations", () => ({
   recommendSourceStory: (kind: string) => ({
     charts: Array.from({ length: 40 }, (_, i) => ({
@@ -64,6 +69,7 @@ vi.mock("../discoverHooks", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  health.current = {};
   clearDiscoverStoryCache();
   vi.mocked(sourceStart).mockImplementation(async () => {});
   vi.mocked(sourceStatus).mockResolvedValue({
@@ -98,6 +104,15 @@ describe("discovery scan", () => {
     expect(new Set(stories.map((story) => story.kind)).size).toBe(3);
     expect(sourceSnapshot).toHaveBeenCalledWith("usgs", SOURCE_EXPLORE_ROWS);
     expect(sourceStop).toHaveBeenCalledTimes(3);
+  });
+
+  it("skips feeds the Worker reports as resting instead of probing them", async () => {
+    health.current = { crypto: { state: "resting" }, meteo: { state: "degraded" } };
+    const stories = await scanDiscoverStories({ limit: 10, includeWiki: false, commitCache: false });
+    expect(sourceStart).not.toHaveBeenCalledWith("crypto");
+    expect(new Set(stories.map((s) => s.kind))).toEqual(new Set(["usgs", "meteo"]));
+    const { getDiscoverScanSummary } = await import("../discoverStories");
+    expect(getDiscoverScanSummary().restingKinds).toEqual(["crypto"]);
   });
 
   it("cleans up a source that finishes starting after its scan was cancelled", async () => {

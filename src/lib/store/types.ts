@@ -320,6 +320,9 @@ export interface LoomState extends MonitorState {
     }
   >;
 
+  /** Worker-reported feed health (sourceHealth.ts); resting feeds are hidden from Digest / discover. */
+  feedHealth: Record<string, import("../sourceHealth").FeedHealth>;
+
   /** Per-source ♥ / 👎 / Hide / 🔖 + implicit opens (sourcePreferences.ts). */
   sourcePrefs: SourcePreferences;
 
@@ -503,6 +506,7 @@ export interface LoomState extends MonitorState {
   applyQuerySnapshot: (id: string) => void;
   setPromptDialog: (config: PromptDialogConfig | null) => void;
   setStreamStatus: (status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; wikis_seen: number; started_at: number | null }) => void;
+  setFeedHealth: (health: Record<string, import("../sourceHealth").FeedHealth>) => void;
   setSourceStatus: (
     kind: string,
     status: {

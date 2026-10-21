@@ -23,6 +23,7 @@
     "extraSources.ts",
     "../src/lib/sourceParsers.ts",
     "__tests__/*.test.ts",
+    "sourceHealth.ts",
     "../src/lib/openDataCatalog.ts",
     "../src/lib/ssrfGuard.ts",
     "../src/lib/securityHeaders.ts",

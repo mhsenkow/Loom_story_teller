@@ -103,6 +103,7 @@ import {
 } from "./extraSources";
 import { assertHttpUrlAllowed, fetchWithSsrfGuard } from "../src/lib/ssrfGuard";
 import { applyBaselineSecurityHeaders, baselineSecurityHeaderRecord } from "../src/lib/securityHeaders";
+import { noteSourceOutcome, readSourceHealth } from "./sourceHealth";
 import {
   AIRCRAFT_FETCH_BUDGET_MS,
   CATALOG_SEARCH_DEADLINE_MS,
@@ -111,6 +112,7 @@ import {
   clampWorkerCatalogRows,
   FETCH_CSV_CACHE_TTL_SECS,
   fetchCsvCacheKey,
+  rowCountFromPayload,
   sourceCacheKey,
   sourcePayloadCacheable,
   utf8ByteLength,
@@ -1234,13 +1236,18 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     ),
 
   trivia: async () => {
-    const settled = await settleLimited(
-      Array.from({ length: 10 }, () => () =>
-        upstreamJson("Open Trivia DB", "https://opentdb.com/api.php?amount=50", 15_000),
-      ),
-      4,
-    );
-    const bodies = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    // Open Trivia DB allows one request per 5 s per IP — parallel pages came back
+    // 429 (cold fetches failed outright). Three spaced pages → up to 150 questions.
+    const bodies: unknown[] = [];
+    for (let i = 0; i < 3; i++) {
+      if (i) await new Promise((r) => setTimeout(r, 5_200));
+      try {
+        const body = await upstreamJson<{ response_code?: number }>("Open Trivia DB", "https://opentdb.com/api.php?amount=50", 15_000);
+        if (body?.response_code === 0) bodies.push(body);
+      } catch {
+        /* keep the pages we have */
+      }
+    }
     if (!bodies.length) throw new UpstreamError("Open Trivia DB: no pages returned");
     return JSON.stringify(triviaRows(bodies));
   },
@@ -1292,7 +1299,7 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
     // European paintings, modern, Asian, Egyptian, Greek & Roman, medieval.
     // The Met's bot shield 403s bursts, so keep the fan-out small and slow.
-    // Workers cap a request at 50 subrequests: 3 listings + 45 objects.
+    // Workers cap a request at 50 subrequests: 3 listings + 39 objects, with headroom.
     const departments = [11, 6, 10];
     const lists = await settleLimited(
       departments.map((id) => () => upstreamJson<{ objectIDs?: number[] }>("Met Museum", `${MET}/objects?departmentIds=${id}`, 20_000)),
@@ -1302,7 +1309,7 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     for (const r of lists) {
       if (r.status !== "fulfilled") continue;
       const all = Array.isArray(r.value.objectIDs) ? r.value.objectIDs : [];
-      const take = 15;
+      const take = 13;
       const step = Math.max(1, Math.floor(all.length / take));
       for (let i = 0; i < all.length && ids.length < departments.length * take; i += step) {
         if (i / step >= take) break;
@@ -1445,6 +1452,7 @@ async function refreshSourceCache(
   key: string,
   ttl: number,
   stale: number,
+  kv?: KVNamespace,
 ): Promise<void> {
   const lockKey = `${key}:refresh`;
   const inflight = await cache.match(lockKey).catch(() => undefined);
@@ -1458,6 +1466,7 @@ async function refreshSourceCache(
     const text = await fetcher(ctx);
     if (!sourcePayloadCacheable(kind, text)) {
       logSourceRequest({ kind, cache: "SKIP-EMPTY", ms: Date.now() - started });
+      await noteSourceOutcome(kv, kind, { ok: false, error: "Upstream returned empty payload" });
       return;
     }
     const now = Date.now();
@@ -1472,6 +1481,7 @@ async function refreshSourceCache(
       }),
     );
     logSourceRequest({ kind, cache: "REFRESH", ms: Date.now() - started, status: 200 });
+    await noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) });
   } catch (e) {
     logSourceRequest({
       kind,
@@ -1479,12 +1489,21 @@ async function refreshSourceCache(
       ms: Date.now() - started,
       error: e instanceof Error ? e.message : String(e),
     });
+    await noteSourceOutcome(kv, kind, { ok: false, error: e instanceof Error ? e.message : String(e) });
   } finally {
     await cache.delete(lockKey).catch(() => {});
   }
 }
 
-export async function handleSource(kind: string, request: Request, ctx: WaitUntil): Promise<Response> {
+function payloadRows(text: string): number | null {
+  try {
+    return rowCountFromPayload(JSON.parse(text));
+  } catch {
+    return null;
+  }
+}
+
+export async function handleSource(kind: string, request: Request, ctx: WaitUntil, kv?: KVNamespace): Promise<Response> {
   const fetcher = Object.prototype.hasOwnProperty.call(SOURCE_FETCHERS, kind) ? SOURCE_FETCHERS[kind] : undefined;
   if (!fetcher) return jsonFor(request, { error: "Unknown source" }, 404);
 
@@ -1505,7 +1524,7 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
   }
 
   if (cached && ageMs <= (ttl + stale) * 1000) {
-    ctx.waitUntil(refreshSourceCache(kind, fetcher, ctx, cache, key, ttl, stale));
+    ctx.waitUntil(refreshSourceCache(kind, fetcher, ctx, cache, key, ttl, stale, kv));
     logSourceRequest({ kind, cache: "STALE-REVALIDATING", ms: Date.now() - started });
     return sourceResponse(cached.body, "STALE-REVALIDATING", cachedAt, request, ttl, stale);
   }
@@ -1533,8 +1552,10 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
     );
     cached?.body?.cancel().catch(() => {});
     logSourceRequest({ kind, cache: "MISS", ms: Date.now() - started, status: 200 });
+    ctx.waitUntil(noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) }));
     return sourceResponse(text, "MISS", fetchedAt, request, ttl, stale);
   } catch (e) {
+    ctx.waitUntil(noteSourceOutcome(kv, kind, { ok: false, error: e instanceof Error ? e.message : String(e) }));
     if (cached && ageMs <= (ttl + stale) * 1000) {
       logSourceRequest({
         kind,
@@ -2088,8 +2109,23 @@ async function handlePublicMonitors(url: URL, env: Env): Promise<Response> {
   return new Response(publicPageHtml(bundle, id, origin), { headers });
 }
 
-async function cronSourceBody(kind: string, ctx: WaitUntil): Promise<unknown> {
-  const res = await handleSource(kind, new Request(`https://loom.internal/api/source/${kind}`), ctx);
+/** Feed health for the app (hide resting feeds) and the nightly probe. Cached briefly. */
+async function handleHealth(request: Request, env: Env, ctx: WaitUntil): Promise<Response> {
+  const cache = caches.default;
+  const key = "https://loom-source.internal/health/v1";
+  const hit = await cache.match(key).catch(() => undefined);
+  if (hit) return jsonFor(request, await hit.json());
+  const body = { generatedAt: Date.now(), sources: await readSourceHealth(env.LOOM_STORIES, Object.keys(SOURCE_FETCHERS)) };
+  ctx.waitUntil(
+    cache
+      .put(key, new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=120" } }))
+      .catch(() => {}),
+  );
+  return jsonFor(request, body);
+}
+
+async function cronSourceBody(kind: string, ctx: WaitUntil, kv?: KVNamespace): Promise<unknown> {
+  const res = await handleSource(kind, new Request(`https://loom.internal/api/source/${kind}`), ctx, kv);
   if (!res.ok) throw new Error(`Feed ${kind} returned ${res.status}`);
   return res.json();
 }
@@ -2125,7 +2161,10 @@ export default {
       }
       if (url.pathname.startsWith("/api/source/")) {
         const kind = url.pathname.replace("/api/source/", "").replace(/\/$/, "");
-        return await handleSource(kind, request, ctx);
+        return await handleSource(kind, request, ctx, env.LOOM_STORIES);
+      }
+      if (url.pathname === "/api/health") {
+        return await handleHealth(request, env, ctx);
       }
       if (url.pathname === "/api/monitors/push-key" && request.method === "GET") {
         const vapid = vapidFromEnv(env);
@@ -2179,7 +2218,7 @@ export default {
     if (!env.LOOM_STORIES) return;
     const kv = env.LOOM_STORIES;
     ctx.waitUntil(
-      runMonitorCron(kv, Date.now(), (kind) => cronSourceBody(kind, ctx), parseSourceRows, makeNotifier(vapidFromEnv(env))).then((r) => {
+      runMonitorCron(kv, Date.now(), (kind) => cronSourceBody(kind, ctx, kv), parseSourceRows, makeNotifier(vapidFromEnv(env))).then((r) => {
         console.log(JSON.stringify({ event: "monitor_cron", ...r }));
       }),
     );

@@ -59,6 +59,7 @@ export function uiInitialState() {
     streamWikisSeen: 0,
     streamStartedAt: null as number | null,
     sourceStatuses: {} as LoomState["sourceStatuses"],
+    feedHealth: {} as LoomState["feedHealth"],
     sourcePrefs: emptySourcePreferences(),
     // Viz swipe
     vizPreferences: emptyVizPreferenceModel(),
@@ -117,6 +118,7 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
     setWhatsNewOpen: (v: boolean) => set({ whatsNewOpen: v }),
     setStreamStatus: (status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; wikis_seen: number; started_at: number | null }) =>
       set({ streamRunning: status.running, streamTotalEvents: status.total_events, streamEventsPerSec: status.events_per_sec, streamBufferRows: status.buffer_rows, streamWikisSeen: status.wikis_seen, streamStartedAt: status.started_at }),
+    setFeedHealth: (health: LoomState["feedHealth"]) => set({ feedHealth: health }),
     setSourceStatus: (kind: string, status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; last_error?: string | null; last_success_at?: number | null; snapshot_stale?: boolean; snapshot_captured_at?: number | null }) =>
       set((s) => {
         const prev = s.sourceStatuses[kind];

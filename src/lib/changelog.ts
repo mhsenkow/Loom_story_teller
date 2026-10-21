@@ -25,6 +25,14 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-21e",
+    date: "2026-10-21",
+    title: "Feeds that take a rest",
+    items: [
+      { title: "No more dead-end feeds", detail: "When a data provider has been down for hours, Loom marks its feed Resting: What's interesting and the Digest skip it, and its card says when it last worked instead of spinning into an error. You can still Try anyway." },
+    ],
+  },
+  {
     id: "2026-10-21d",
     date: "2026-10-21",
     title: "A sharper mix of ideas",

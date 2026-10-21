@@ -141,6 +141,8 @@ export function digestEntries(
     limit?: number;
     /** Already-filtered browse result; when set, Digest respects the same filters. */
     fromBrowse?: FeedBrowseResult;
+    /** Leave out entries that shouldn't lead right now (e.g. resting feeds). */
+    skip?: (entry: CatalogEntry) => boolean;
   } = {},
 ): CatalogEntry[] {
   const now = opts.now ?? Date.now();
@@ -150,6 +152,7 @@ export function digestEntries(
     : entries.filter((e) => !isHidden(e.ref, prefs));
   const seen = new Set<string>();
   const unique = pool.filter((e) => {
+    if (opts.skip?.(e)) return false;
     if (seen.has(e.ref)) return false;
     seen.add(e.ref);
     return true;

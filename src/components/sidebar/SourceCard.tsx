@@ -6,11 +6,15 @@ import { activateDataset } from "@/lib/datasetPipeline";
 import { isDesktop, openExternalUrl, sourceClear, sourceSnapshot, sourceStart, sourceStatus, sourceStop } from "@/lib/tauri";
 import { SOURCE_EXPLORE_ROWS, sourceStreamPath, type SourceDef } from "@/lib/sourceRegistry";
 import { feedRef } from "@/lib/sourceRef";
+import { feedHealthNote } from "@/lib/sourceHealth";
 import { LoveButton, SaveButton, SourcePrefMenu } from "@/components/SourcePrefControls";
 import { ipcErrorMessage, leaveSourcesShowChart } from "./shared";
 
 export function SourceCard({ def }: { def: SourceDef }) {
   const status = useLoomStore((s) => s.sourceStatuses[def.kind]);
+  const health = useLoomStore((s) => s.feedHealth[def.kind]);
+  const healthNote = feedHealthNote(health);
+  const resting = health?.state === "resting";
   const setSourceStatus = useLoomStore((s) => s.setSourceStatus);
   const setToast = useLoomStore((s) => s.setToast);
   const addRecentFile = useLoomStore((s) => s.addRecentFile);
@@ -117,13 +121,26 @@ export function SourceCard({ def }: { def: SourceDef }) {
         <span className={`w-2 h-2 mt-1.5 rounded-full shrink-0 ${running ? "bg-loom-accent animate-pulse" : "bg-loom-muted"}`} aria-hidden />
         <span className="sr-only">{running ? "Live" : "Stopped"}</span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-loom-text leading-tight">{def.label}</p>
+          <p className="text-sm font-medium text-loom-text leading-tight">
+            {def.label}
+            {healthNote && !running && (
+              <span
+                title={healthNote}
+                className={`ml-1.5 align-middle text-2xs font-normal px-1.5 py-px rounded-full border ${
+                  resting ? "border-loom-border text-loom-muted" : "border-loom-warning/40 text-loom-warning"
+                }`}
+              >
+                {resting ? "Resting" : "Patchy"}
+              </span>
+            )}
+          </p>
+          {healthNote && !running && <p className="sr-only">{healthNote}</p>}
           <p className="text-2xs text-loom-muted mt-0.5 leading-snug">{def.description}</p>
         </div>
         {!running ? (
           <button type="button" onClick={handleConnect} disabled={connecting}
             className="text-2xs py-1 px-2.5 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50 shrink-0">
-            {connecting ? "Loading…" : "Connect"}
+            {connecting ? "Loading…" : resting ? "Try anyway" : "Connect"}
           </button>
         ) : (
           <button type="button" onClick={handleDisconnect}
