@@ -125,8 +125,10 @@ describe("full discovery consideration", () => {
       const first = enumerateDiscoverCharts(stats, [base], "meteo");
       const second = enumerateDiscoverCharts(stats, [base], "meteo");
       expect(first).toEqual(second);
+      // Map trails need a physically moving entity (vehicle, flight id); weather
+      // cities never qualify — every other kind is visited.
       expect(new Set(first.map((c) => c.kind))).toEqual(
-        new Set(CHART_KIND_OPTIONS.map((c) => c.value)),
+        new Set(CHART_KIND_OPTIONS.map((c) => c.value).filter((k) => k !== "globeTrail" && k !== "arcMap")),
       );
       expect(new Set(Object.keys(DISCOVER_CHART_FAMILY))).toEqual(
         new Set(CHART_KIND_OPTIONS.map((c) => c.value)),

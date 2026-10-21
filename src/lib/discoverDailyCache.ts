@@ -60,7 +60,7 @@ export function packDiscoverCache(
       return { ...idea, feed };
     },
   );
-  return { version: 1, algorithm: 3, savedAt, feeds, ideas };
+  return { version: 1, algorithm: 4, savedAt, feeds, ideas };
 }
 
 /** Reject incompatible/corrupt caches and keep every variant on its own feed. */
@@ -196,7 +196,7 @@ export function unpackDiscoverCache(
   // Old picks stay visible while the expanded catalog refreshes in the background.
   const startOfDay = new Date(now).setHours(0, 0, 0, 0);
   const savedAt =
-    entry.algorithm === 3
+    entry.algorithm === 4
       ? entry.savedAt
       : Math.min(entry.savedAt, startOfDay - 1);
   return stories.length ? { stories, savedAt } : null;

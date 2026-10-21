@@ -65,6 +65,28 @@ export function enumerateDiscoverCharts(
   );
   const lon = columns.find((c) => isLonField(c.name));
   const lat = columns.find((c) => isLatField(c.name));
+  // Trails connect one entity's rows through time — only an identity-like column
+  // (callsign, vehicle id, …) with several rows each; coarse groups (airline,
+  // region) would join unrelated points into invented journeys.
+  // Without a sample, the most distinct column is a floor on the row count.
+  const totalRows = sample?.rows.length ?? Math.max(0, ...columns.map((c) => c.distinct_count + c.null_count));
+  const trailCandidates = time && totalRows
+    ? columns
+        .filter((c) => {
+          if (type(c) !== "nominal" || c.distinct_count < 2) return false;
+          if (totalRows / c.distinct_count < 3) return false;
+          // Only names that denote one tracked thing; cardinality alone admits
+          // groupings like a quake's seismic network or an inspection's violation.
+          return /(^|_)(id|icao|icao24|callsign|vehicle|flight|tail|mmsi|imo|craft|ship|train|bus|device|satellite|norad|object|name|label|state|state_abbr|country|iso|iso3|symbol|ticker|quote|pair|station|site|route|team|player|city)($|\d)/i.test(c.name);
+        })
+        .sort((a, b) => b.distinct_count - a.distinct_count || a.name.localeCompare(b.name))
+    : [];
+  // Metric trails (a state's income × poverty over years) accept any identity;
+  // map paths need a thing that physically moves — not a city or a station.
+  const trailEntity = trailCandidates[0];
+  const movingEntity = trailCandidates.find((c) =>
+    /(^|_)(id|icao|icao24|callsign|vehicle|flight|tail|mmsi|imo|craft|ship|train|bus|device|satellite|norad|object)($|\d)/i.test(c.name),
+  );
   const seeds = [...curated];
   const smallCategories = categories.filter((c) => c.distinct_count <= 20);
   const units = SOURCE_BY_KIND[source as SourceKind]?.units;
@@ -115,6 +137,8 @@ export function enumerateDiscoverCharts(
       } else if (isGeoMapKind(kind)) {
         x = lon?.name;
         y = lat?.name ?? null;
+        // The ISS feed is one craft with no id column; its rows already form a path.
+        if ((kind === "globeTrail" || kind === "arcMap") && !movingEntity && source !== "iss") continue;
         size = ["geoBubbles", "globe"].includes(kind)
           ? (m?.name ?? null)
           : null;
@@ -140,8 +164,17 @@ export function enumerateDiscoverCharts(
       } else if (kind === "firefly") {
         // Flat field: a third measure drives glow (Size); Z would be ignored.
         size = measures.find((c) => c !== m && c !== n)?.name ?? null;
+      } else if (kind === "trailRibbon") {
+        if (!trailEntity) continue;
+        // Map paths when coordinates exist (moving things only); otherwise two
+        // measures traced through time.
+        if (lon && lat && movingEntity) {
+          x = lon.name;
+          y = lat.name;
+        } else if (!m || !n) continue;
+        size = measures.find((c) => c.name !== x && c.name !== y)?.name ?? null;
       } else if (
-        ["scatter3d", "quakeTerrain", "trailRibbon"].includes(kind)
+        ["scatter3d", "quakeTerrain"].includes(kind)
       ) {
         z = measures.find((c) => c !== m && c !== n)?.name ?? null;
       }
@@ -180,7 +213,12 @@ export function enumerateDiscoverCharts(
           sizeField: size,
           zField: z,
           timeField: time?.name,
-          trailId: kind === "trailRibbon" ? cat?.name : undefined,
+          trailId:
+            kind === "globeTrail" || kind === "arcMap" || (kind === "trailRibbon" && lon && lat && movingEntity)
+              ? movingEntity?.name
+              : kind === "trailRibbon"
+                ? trailEntity?.name
+                : undefined,
           yAggregate: aggregate,
           topN: TOP_N_RANDOM_KINDS.has(kind) ? 15 : null,
         },

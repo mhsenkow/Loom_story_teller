@@ -25,6 +25,15 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-21d",
+    date: "2026-10-21",
+    title: "A sharper mix of ideas",
+    items: [
+      { title: "Every chart type in the mix", detail: "What's interesting right now can now reach all 60 chart types when the data fits — including globe trails, arc maps and trail ribbons, which follow one moving thing (a flight, the ISS, a state over the years) instead of joining unrelated points." },
+      { title: "No more squashed charts", detail: "When one giant value (say, Bitcoin's market cap) would crush every other point into a corner, that chart is skipped. Relationship notes now say when a correlation is driven by a few extreme values." },
+    ],
+  },
+  {
     id: "2026-10-21c",
     date: "2026-10-21",
     title: "Fireflies in daylight",

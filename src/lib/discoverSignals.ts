@@ -210,6 +210,57 @@ export function createDiscoverAssessor(
           return null;
         quality -= Math.round(20 * (1 - p.values.length / rows.length));
       }
+      // A few extreme values (one coin's market cap) squash every other mark into
+      // one edge of a linear axis — the plot shows a wall, not a distribution.
+      const squashed = (field: string | null | undefined) => {
+        if (!field || !isNum(field)) return false;
+        const p = profile(field, key, rows);
+        if (p.values.length < 8 || p.max <= p.min) return false;
+        const span = p.max - p.min;
+        let low = 0,
+          high = 0;
+        for (const v of p.values) {
+          if ((v - p.min) / span < 0.05) low++;
+          else if ((p.max - v) / span < 0.05) high++;
+        }
+        return Math.max(low, high) / p.values.length >= 0.85;
+      };
+      const logY = chart.yScale === "log" || chart.yScale === "symlog";
+      const numericPlane =
+        yi >= 0 &&
+        (NUMERIC_XY_KINDS.has(chart.kind) ||
+          ((family === "relationship" || family === "dimensional") &&
+            isNum(chart.xField) &&
+            isNum(chart.yField!)));
+      // Share of points crammed into one corner cell of a 20 × 20 grid.
+      const cornered = () => {
+        const px = profile(chart.xField, key, rows);
+        const py = profile(chart.yField!, key, rows);
+        if (px.max <= px.min || py.max <= py.min) return 0;
+        let n = 0,
+          hit = 0;
+        for (const row of rows) {
+          const x = numeric(row[xi]),
+            y = numeric(row[yi]);
+          if (x == null || y == null) continue;
+          n++;
+          const fx = (x - px.min) / (px.max - px.min);
+          const fy = (y - py.min) / (py.max - py.min);
+          if ((fx < 0.05 || fx > 0.95) && (fy < 0.05 || fy > 0.95)) hit++;
+        }
+        return n >= 8 ? hit / n : 0;
+      };
+      if (numericPlane) {
+        if (squashed(chart.xField) || (!logY && squashed(chart.yField))) return null;
+        if (!logY && cornered() >= 0.7) return null;
+      } else if (family === "distribution") {
+        // Whichever axis carries the values (strip / box put categories on either side).
+        const valueField = isNum(chart.xField) ? chart.xField : chart.yField;
+        const valueOnY = valueField === chart.yField;
+        if (!(valueOnY && logY) && squashed(valueField)) return null;
+      } else if (["dumbbell", "slope"].includes(chart.kind)) {
+        if (!logY && (squashed(chart.yField) || squashed(chart.sizeField))) return null;
+      }
       if (chart.yField && chart.yScale === "log") {
         const p = profile(chart.yField, key, rows);
         if (p.min <= 0 || p.max / p.min < 10) return null;
@@ -275,6 +326,21 @@ export function createDiscoverAssessor(
             3
         )
           return null;
+        // A trail of a fixed station is a dot: most entities must actually move.
+        const ti = chart.trailId ? (indices.get(chart.trailId) ?? -1) : -1;
+        if (ti >= 0 && yi >= 0) {
+          const spots = new Map<string, Set<string>>();
+          for (const row of rows) {
+            const id = String(row[ti] ?? "");
+            const at = `${row[xi]}|${row[yi]}`;
+            const set = spots.get(id) ?? new Set<string>();
+            set.add(at);
+            spots.set(id, set);
+          }
+          let moving = 0;
+          for (const set of spots.values()) if (set.size >= 3) moving++;
+          if (moving < Math.max(1, spots.size * 0.5)) return null;
+        }
       }
       if (
         chart.kind === "scatter3d" &&
@@ -328,14 +394,43 @@ export function createDiscoverAssessor(
         }
         if (n < 3 || !xx || !yy) return null;
         const r = Math.max(-1, Math.min(1, xy / Math.sqrt(xx * yy)));
+        const pairs: [number, number][] = [];
+        for (const row of rows) {
+          const x = numeric(row[xi]),
+            y = numeric(row[yi]);
+          if (x != null && y != null) pairs.push([x, y]);
+        }
+        // Rank correlation is robust to that outlier; trust the weaker of the two.
+        const ranks = (vals: number[]) => {
+          const order = vals.map((v, i) => [v, i] as const).sort((a, b) => a[0] - b[0]);
+          const out = new Array<number>(vals.length);
+          order.forEach(([, i], rank) => (out[i] = rank));
+          return out;
+        };
+        const rx = ranks(pairs.map((p) => p[0]));
+        const ry = ranks(pairs.map((p) => p[1]));
+        const mean = (pairs.length - 1) / 2;
+        let sxy = 0,
+          sxx = 0,
+          syy = 0;
+        for (let i = 0; i < pairs.length; i++) {
+          sxy += (rx[i]! - mean) * (ry[i]! - mean);
+          sxx += (rx[i]! - mean) ** 2;
+          syy += (ry[i]! - mean) ** 2;
+        }
+        const rho = sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+        const outlierDriven = Math.abs(r) - Math.abs(rho) > 0.3;
+        const shown = outlierDriven ? rho : r;
         if (n >= 8)
           insight = {
             label:
-              Math.abs(r) >= 0.65
+              Math.min(Math.abs(r), Math.abs(rho)) >= 0.65
                 ? "Clear relationship"
                 : "Explore the relationship",
-            detail: `${discoverFieldLabel(chart.xField)} × ${discoverFieldLabel(chart.yField!)}: r = ${r.toFixed(2)} across ${n.toLocaleString()} paired observations.`,
-            strength: Math.abs(r) * Math.min(1, n / 30),
+            detail: outlierDriven
+              ? `${discoverFieldLabel(chart.xField)} × ${discoverFieldLabel(chart.yField!)}: rank correlation ${shown.toFixed(2)} across ${n.toLocaleString()} pairs (r = ${r.toFixed(2)} is driven by a few extreme values).`
+              : `${discoverFieldLabel(chart.xField)} × ${discoverFieldLabel(chart.yField!)}: r = ${r.toFixed(2)} across ${n.toLocaleString()} paired observations.`,
+            strength: Math.min(Math.abs(r), Math.abs(rho)) * Math.min(1, n / 30),
           };
       } else if (chart.anomalyHighlight && measure) {
         insight = {

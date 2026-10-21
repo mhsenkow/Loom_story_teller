@@ -782,6 +782,9 @@ export function createChartRec(
         if (!geo) return null;
         return {
           ...geo,
+          // Trails / arcs connect one entity's rows in time order — keep those picks.
+          trailId: extra?.trailId ?? geo.trailId,
+          timeField: extra?.timeField ?? geo.timeField,
           shapeField: shapeField || undefined,
           emojiField: emojiField || undefined,
       emojiMap,

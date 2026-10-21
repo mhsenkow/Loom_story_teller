@@ -34,8 +34,10 @@ export function defaultLineAreaAggregate(yField: string | null, columns: ColumnI
 export function isMeasureColumn(c: ColumnInfo, rowCount?: number): boolean {
   if (inferType(c.data_type, c.name, c.min_value, c.max_value) !== "quantitative") return false;
   const n = c.name.toLowerCase();
-  if (/^(id|uuid|guid|objectid|fid|fips|zip|zipcode|postal|rank|rownum|seq|index)$/.test(n)) return false;
+  if (/^(id|uuid|guid|objectid|fid|fips|zip|zipcode|postal|rank|rownum|seq|index|namespace|ns|status|status_code|type_code|category_id|cat|weekday|dow)$/.test(n)) return false;
   if (/(^|_)(id|code|key|ref|rank|fips|zipcode)($|_)/.test(n)) return false;
+  // "disaster_number", "case_no": identifiers, not quantities ("number_of_x" stays a measure).
+  if (/_(number|num|no|nbr)$/.test(n)) return false;
   if (rowCount != null && rowCount > 0 && c.distinct_count >= Math.max(20, Math.floor(rowCount * 0.92))) {
     if (/id|code|key|num|no|index|rank|fips|zip/i.test(n)) return false;
   }
