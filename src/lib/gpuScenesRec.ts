@@ -217,6 +217,9 @@ function num(v: unknown): number {
     const asDate = Date.parse(v);
     if (Number.isFinite(asDate)) return asDate;
   }
+  // DuckDB BIGINT / HUGEINT arrive as bigint; timestamps can arrive as Date.
+  if (typeof v === "bigint") return Number(v);
+  if (v instanceof Date) return v.getTime();
   return NaN;
 }
 

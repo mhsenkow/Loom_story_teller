@@ -182,7 +182,8 @@ export function fireflyDensity(n: number, plotW: number, plotH: number): { alpha
   const area = Math.max(1, plotW * plotH);
   const perPoint = area / Math.max(1, n);
   return {
-    alpha: Math.max(0.12, Math.min(1, perPoint / 1400)),
+    // Source-over halos (no additive bloom) can stay brighter when crowded.
+    alpha: Math.max(0.4, Math.min(1, perPoint / 600)),
     size: Math.max(0.35, Math.min(1, Math.sqrt(perPoint / 600))),
   };
 }

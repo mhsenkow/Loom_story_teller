@@ -803,8 +803,6 @@ export function ChartView() {
   const [sceneOrbit, setSceneOrbit] = useState({ yaw: 0.55, pitch: 0.35, zoom: 1 });
   const sceneOrbitDragRef = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
   const scenePinchRef = useRef<{ dist: number; zoom: number } | null>(null);
-  // Firefly twinkle clock — a ref, so the loop redraws the GPU pass without re-rendering React.
-  const sceneTimeRef = useRef(0);
   const hasSmartOverlays =
     smartResults &&
     ((smartResults.anomaly?.rowIndices?.length ?? 0) > 0 ||
@@ -2635,10 +2633,8 @@ export function ChartView() {
           pitch: sceneOrbit.pitch,
           zoom: sceneOrbit.zoom,
           mode,
-          time: sceneTimeRef.current,
         });
         sceneRendererRef.current.setCamera(sceneOrbit.yaw, sceneOrbit.pitch, sceneOrbit.zoom);
-        sceneRendererRef.current.setTime(sceneTimeRef.current);
         sceneRendererRef.current.render(w, h);
       }
       notifyChartPainted();

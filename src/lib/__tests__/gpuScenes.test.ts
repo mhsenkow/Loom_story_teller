@@ -127,6 +127,15 @@ describe("firefly field", () => {
       }
     }
   });
+  it("reads bigint and Date cells (DuckDB BIGINT / TIMESTAMP)", () => {
+    const packed = extractGpuScenePoints(
+      [[BigInt(1), BigInt(10), new Date(1000)], [BigInt(2), BigInt(20), new Date(2000)]],
+      ["x", "y", "ts"],
+      { xField: "x", yField: "y", timeField: "ts" },
+    )!;
+    expect(packed.points).toHaveLength(2);
+    expect(packed.tRange).toEqual([1000, 2000]);
+  });
   it("maps into a flat plot rect on nice domains", () => {
     const packed = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y" })!;
     const lay = fireflyLayout(packed, 400, 300, 40);

@@ -229,12 +229,6 @@ export class LoomSceneRenderer {
     this.config.time = t;
   }
 
-  /** Re-draw with a new clock without re-uploading points (firefly twinkle loop). */
-  tick(t: number, width: number, height: number) {
-    this.config.time = t;
-    this.render(width, height);
-  }
-
   render(width: number, height: number) {
     if (
       !this.device ||
