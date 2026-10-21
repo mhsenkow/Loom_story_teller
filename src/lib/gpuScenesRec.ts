@@ -158,8 +158,17 @@ export function getGpuRandomEncoding(
   };
 }
 
-export interface GpuSceneRenderOpts extends Pick<import("./chartLooks").ChartLookOpts,
-  "axisStyle" | "axisLineColor" | "axisLineWidth" | "axisLabelColor" | "showGrid" | "gridStyle" | "gridOpacity" | "tickCount" | "tickRotation"> {
+export interface GpuSceneRenderOpts {
+  // Keep this module DOM-independent: recommendations also run in the MCP Worker.
+  axisStyle?: string;
+  axisLineColor?: string;
+  axisLineWidth?: number;
+  axisLabelColor?: string;
+  showGrid?: boolean;
+  gridStyle?: string;
+  gridOpacity?: number;
+  tickCount?: number;
+  tickRotation?: number;
   lineCap?: CanvasLineCap;
   lineJoin?: CanvasLineJoin;
   colors: string[];
