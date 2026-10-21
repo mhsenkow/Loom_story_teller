@@ -1088,7 +1088,9 @@ pub(crate) fn openfood_rows(bodies: &[Value]) -> Result<Vec<Row>, String> {
                 nutriscore,
                 off_tag(p.get("countries_tags"), "en:"),
                 off_tag(p.get("categories_tags"), "en:"),
-                jf(nut.and_then(|n| n.get("energy-kcal_100g")).or_else(|| nut.and_then(|n| n.get("energy_kcal_100g")))),
+                jf(nut
+                    .and_then(|n| n.get("energy-kcal_100g"))
+                    .or_else(|| nut.and_then(|n| n.get("energy_kcal_100g")))),
                 jf(nut.and_then(|n| n.get("fat_100g"))),
                 jf(nut.and_then(|n| n.get("sugars_100g"))),
                 jf(nut.and_then(|n| n.get("proteins_100g"))),

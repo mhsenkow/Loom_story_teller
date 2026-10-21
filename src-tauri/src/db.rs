@@ -262,6 +262,9 @@ impl LoomDb {
             .unwrap_or_else(|| "db".to_string());
 
         let conn = Connection::open_in_memory().map_err(|e| e.to_string())?;
+        // ATTACH autoloads sqlite_scanner — on a fresh connection that would download an
+        // unsigned extension, which Gatekeeper flags as malware (Mac App Store rejection).
+        disable_extension_auto_fetch(&conn).map_err(|e| e.to_string())?;
         let escaped = escape_path_for_sql(&path_str);
         conn.execute_batch(&format!("ATTACH '{}' AS sqlite_probe;", escaped))
             .map_err(|e| e.to_string())?;
@@ -553,6 +556,22 @@ mod tests {
         );
         assert!(msg.contains("CSV"), "got: {msg}");
         assert!(!msg.to_lowercase().contains("catalog error"));
+    }
+
+    #[test]
+    fn every_connection_disables_extension_fetch() {
+        // A fresh DuckDB connection autoinstalls unsigned extensions on first use
+        // (e.g. ATTACH → sqlite_scanner); Gatekeeper reports that as malware.
+        let src = include_str!("db.rs");
+        let body = src.split("#[cfg(test)]").next().unwrap();
+        for (i, _) in body.match_indices("Connection::open") {
+            let window = &body[i..(i + 700).min(body.len())];
+            assert!(
+                window.contains("disable_extension_auto_fetch"),
+                "connection opened without disable_extension_auto_fetch: {}",
+                &body[i..(i + 80).min(body.len())]
+            );
+        }
     }
 
     #[test]
