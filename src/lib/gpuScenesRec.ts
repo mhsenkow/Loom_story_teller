@@ -49,7 +49,7 @@ export function gpuSceneRecommendationReason(kind: GpuSceneKind): string {
     scatter3d: "True x·y·z point cloud — drag to orbit, scroll to zoom",
     trailRibbon: "Each entity leaves a fading GPU trail through space/time",
     quakeTerrain: "Heightfield mesh — peaks rise where magnitude piles up",
-    firefly: "Soft additive sprites; brightness from size / recency / anomaly",
+    firefly: "Glowing x × y field — brightness from Size, or recency when Size is empty; dense clusters bloom",
     loomWeave: "Warp = categories, weft = time; thread thickness = value",
     dataCube: "Rows × columns × depth — each voxel is one cell; size + color = value",
   };
@@ -195,6 +195,8 @@ export interface GpuScenePoint {
   trail: number;
   /** Normalized time 0–1 when available. */
   t: number;
+  /** Source row index (hover / tooltip lookup). */
+  row?: number;
 }
 
 function num(v: unknown): number {
@@ -305,7 +307,7 @@ export function extractGpuScenePoints(
     return id;
   };
 
-  const raw: { x: number; y: number; z: number; category: number; size: number; trail: number; t: number }[] = [];
+  const raw: { x: number; y: number; z: number; category: number; size: number; trail: number; t: number; row: number }[] = [];
   let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity, zMin = Infinity, zMax = -Infinity;
   let tMin = Infinity, tMax = -Infinity;
   const stride = Math.max(1, Math.ceil(rows.length / maxPoints));
@@ -327,6 +329,7 @@ export function extractGpuScenePoints(
       size: Number.isFinite(sizeRaw) ? sizeRaw : 1,
       trail,
       t: Number.isFinite(tRaw) ? tRaw : r,
+      row: r,
     });
     xMin = Math.min(xMin, x); xMax = Math.max(xMax, x);
     yMin = Math.min(yMin, y); yMax = Math.max(yMax, y);
@@ -430,7 +433,7 @@ export function buildGpuSceneRec(
     },
     firefly: {
       title: `Fireflies · ${xField} × ${yField}`,
-      subtitle: sizeField ? `glow by ${sizeField}` : "soft additive spark field",
+      subtitle: sizeField ? `glow by ${sizeField}` : "newest rows glow brightest",
     },
     loomWeave: {
       title: timeField ? `Weave · ${xField} × ${timeField}` : `Weave · ${xField}`,

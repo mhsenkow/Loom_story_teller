@@ -646,7 +646,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     scatterExtras: scatterLike,
     emphasis: false,
     // GPU particle scenes and lon/lat maps lack hover; dataCube has its own picker
-    tooltipHover: kind === "dataCube" || (!gpu && !isGeoMapKind(kind)),
+    tooltipHover: kind === "dataCube" || kind === "firefly" || (!gpu && !isGeoMapKind(kind)),
     // Bar family: grow direction. Iso / terrain: rotate or flip the fake-3D floor.
     layoutDirection: ["bar", "pareto", "lollipop", "waterfall", "isoBars", "isoScatter", "quakeTerrain"].includes(kind),
     // Canvas applies opts.yScale in scatter / line / area paths today

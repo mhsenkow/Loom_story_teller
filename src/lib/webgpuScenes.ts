@@ -36,6 +36,8 @@ export interface SceneConfig {
   zoom?: number;
   mode?: SceneMode;
   time?: number;
+  /** Flat plot rect in CSS px (firefly) — matches the Canvas axes overlay. */
+  plotRect?: { left: number; top: number; right: number; bottom: number };
 }
 
 const MODE_INDEX: Record<string, number> = {
@@ -96,7 +98,7 @@ export class LoomSceneRenderer {
     if (!this.device) return;
     this.ensurePipelinesForMode(this.config.mode ?? "scatter3d", format);
     this.uniformBuffer = this.device.createBuffer({
-      size: 64,
+      size: 80,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.paletteBuffer = this.device.createBuffer({
@@ -226,6 +228,12 @@ export class LoomSceneRenderer {
     this.config.time = t;
   }
 
+  /** Re-draw with a new clock without re-uploading points (firefly twinkle loop). */
+  tick(t: number, width: number, height: number) {
+    this.config.time = t;
+    this.render(width, height);
+  }
+
   render(width: number, height: number) {
     if (
       !this.device ||
@@ -240,7 +248,7 @@ export class LoomSceneRenderer {
       return;
     }
 
-    const u = new Float32Array(16);
+    const u = new Float32Array(20);
     u[0] = width;
     u[1] = height;
     u[2] = this.bounds.xMin;
@@ -257,6 +265,11 @@ export class LoomSceneRenderer {
     u[13] = this.config.zoom ?? 1;
     u[14] = MODE_INDEX[this.config.mode ?? "scatter3d"] ?? 0;
     u[15] = this.config.time ?? 0;
+    const rect = this.config.plotRect ?? { left: 0, top: 0, right: width, bottom: height };
+    u[16] = rect.left;
+    u[17] = rect.top;
+    u[18] = rect.right;
+    u[19] = rect.bottom;
     this.device.queue.writeBuffer(this.uniformBuffer, 0, u);
 
     const encoder = this.device.createCommandEncoder();

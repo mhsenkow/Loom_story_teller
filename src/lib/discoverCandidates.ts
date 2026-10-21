@@ -137,8 +137,11 @@ export function enumerateDiscoverCharts(
         color = null;
       } else if (kind === "bubble") {
         size = measures.find((c) => c !== m && c !== n)?.name ?? null;
+      } else if (kind === "firefly") {
+        // Flat field: a third measure drives glow (Size); Z would be ignored.
+        size = measures.find((c) => c !== m && c !== n)?.name ?? null;
       } else if (
-        ["scatter3d", "quakeTerrain", "firefly", "trailRibbon"].includes(kind)
+        ["scatter3d", "quakeTerrain", "trailRibbon"].includes(kind)
       ) {
         z = measures.find((c) => c !== m && c !== n)?.name ?? null;
       }

@@ -9,6 +9,8 @@ import {
   extractGpuScenePoints,
   buildGpuSceneRec,
   gpuSceneRecommendationReason,
+  fireflyGlowPoints,
+  fireflyLayout,
 } from "../gpuScenes";
 import type { ColumnInfo } from "../store";
 
@@ -87,5 +89,33 @@ describe("gpuScenes shortlist", () => {
     });
     expect(viaLegacySize?.zField).toBe("magnitude");
     expect(viaLegacySize?.sizeField).toBeUndefined();
+  });
+});
+
+describe("firefly field", () => {
+  const rows = [
+    [0, 0, 1],
+    [5, 10, 2],
+    [10, 20, 3],
+  ];
+  it("keeps the source row for hover lookups", () => {
+    const packed = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y" })!;
+    expect(packed.points.map((p) => p.row)).toEqual([0, 1, 2]);
+  });
+  it("glows by recency when Size is empty, by Size when set", () => {
+    const plain = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y" })!;
+    const glow = fireflyGlowPoints(plain).map((p) => p.size);
+    expect(glow[0]).toBeLessThan(glow[2]!);
+    expect(new Set(glow).size).toBe(3);
+    const sized = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y", sizeField: "s" })!;
+    expect(fireflyGlowPoints(sized)).toBe(sized.points);
+  });
+  it("maps into a flat plot rect on nice domains", () => {
+    const packed = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y" })!;
+    const lay = fireflyLayout(packed, 400, 300, 40);
+    expect(lay.sx(lay.xs.min)).toBe(40);
+    expect(lay.sx(lay.xs.max)).toBe(360);
+    expect(lay.sy(lay.ys.min)).toBe(260);
+    expect(lay.sy(lay.ys.max)).toBe(40);
   });
 });

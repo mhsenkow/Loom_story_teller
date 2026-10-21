@@ -47,7 +47,7 @@ import { type AtlasBundle, type AtlasKind, loadAtlas } from "@/lib/geoAtlas";
 import { resolveTooltipPresentation } from "@/lib/chartTooltipMode";
 import { ChartTooltipCard } from "@/components/ChartTooltipCard";
 import { isOddChartKind, renderOddChart } from "@/lib/oddCharts";
-import { extractGpuScenePoints, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
+import { drawFireflyChrome, extractGpuScenePoints, fireflyDensity, fireflyGlowPoints, fireflyLayout, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
 import { globeCameraForData, isGeoFamilyKind, isGeoMapKind, isWebGpuGlobeKind, pickAtlasKind, renderGeoMapCanvas } from "@/lib/geoMaps";
 import { type CubeAxisSlot, type CubeHoverCell, DataCubePivotBar, DataCubePivotTable } from "@/components/DataCubePivot";
 import { buildDataCube, buildPivotTable, cubeCellCenter, cubeCellKey, cubeCellTooltip, dataCubeChartView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
@@ -802,7 +802,8 @@ export function ChartView() {
   const [sceneOrbit, setSceneOrbit] = useState({ yaw: 0.55, pitch: 0.35, zoom: 1 });
   const sceneOrbitDragRef = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
   const scenePinchRef = useRef<{ dist: number; zoom: number } | null>(null);
-  const [sceneTime, setSceneTime] = useState(0);
+  // Firefly twinkle clock — a ref, so the loop redraws the GPU pass without re-rendering React.
+  const sceneTimeRef = useRef(0);
   const hasSmartOverlays =
     smartResults &&
     ((smartResults.anomaly?.rowIndices?.length ?? 0) > 0 ||
@@ -1002,7 +1003,6 @@ export function ChartView() {
     !!activeChart &&
     (activeChart.kind === "scatter3d" ||
       activeChart.kind === "dataCube" ||
-      activeChart.kind === "firefly" ||
       activeChart.kind === "globe" ||
       activeChart.kind === "globeTrail");
   const [canvasSized, setCanvasSized] = useState(false);
@@ -1556,14 +1556,22 @@ export function ChartView() {
   useEffect(() => {
     if (activeChart?.kind !== "firefly" || !useWebGpuScene) return;
     if (reducedMotion) {
-      setSceneTime(0);
+      sceneTimeRef.current = 0;
       return;
     }
     let raf = 0;
-    const start = performance.now();
+    let last = 0;
+    const start = performance.now() - sceneTimeRef.current * 1000;
     const tick = (now: number) => {
-      setSceneTime((now - start) / 1000);
       raf = requestAnimationFrame(tick);
+      // ~30fps is plenty for a slow twinkle; skip hidden tabs entirely.
+      if (now - last < 33 || document.hidden) return;
+      last = now;
+      sceneTimeRef.current = (now - start) / 1000;
+      const canvas = canvasRef.current;
+      if (!canvas || !canvas.width) return;
+      const dpr = stageDpr();
+      sceneRendererRef.current?.tick(sceneTimeRef.current, canvas.width / dpr, canvas.height / dpr);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -2610,9 +2618,37 @@ export function ChartView() {
         const mode = isWebGpuGlobeKind(activeChart.kind)
           ? "globe"
           : (activeChart.kind as GpuSceneKind);
-        sceneRendererRef.current.uploadData(packed.points, packed, {
-          pointSize: pointSize * (activeChart.kind === "firefly" ? 1.4 : activeChart.kind === "globe" ? 1.6 : 1),
-          opacity,
+        // Firefly is a flat x × y field: map into the same nice-domain plot rect the
+        // overlay frames with axes (drawFireflyChrome), and glow by size or recency.
+        let points = packed.points;
+        let bounds: { xMin: number; xMax: number; yMin: number; yMax: number; zMin: number; zMax: number } = packed;
+        let plotRect: { left: number; top: number; right: number; bottom: number } | undefined;
+        let crowd = { alpha: 1, size: 1 };
+        if (activeChart.kind === "firefly") {
+          const ffPad = resolveChartPad({
+            kind: activeChart.kind,
+            width: w,
+            height: h,
+            basePad: chartRenderOpts.chartPadding ?? DEFAULT_PAD,
+            titleLayout: chartRenderOpts.titleLayout,
+            tickRotation: chartRenderOpts.tickRotation,
+            chartFrame: chartRenderOpts.chartFrame,
+            isCompact,
+            legendPosition: chartRenderOpts.legendPosition,
+            axisFontSize: chartRenderOpts.axisFontSize,
+            sourceFootnote: chartRenderOpts.sourceFootnote,
+            chromeInfoBand: chartRenderOpts.chromeInfoBand,
+          });
+          const lay = fireflyLayout(packed, w, h, ffPad);
+          points = fireflyGlowPoints(packed);
+          bounds = { xMin: lay.xs.min, xMax: lay.xs.max, yMin: lay.ys.min, yMax: lay.ys.max, zMin: 0, zMax: 1 };
+          plotRect = { left: lay.left, top: lay.top, right: lay.right, bottom: lay.bottom };
+          crowd = fireflyDensity(points.length, lay.right - lay.left, lay.bottom - lay.top);
+        }
+        sceneRendererRef.current.uploadData(points, bounds, {
+          plotRect,
+          pointSize: pointSize * (activeChart.kind === "firefly" ? 1.4 * crowd.size : activeChart.kind === "globe" ? 1.6 : 1),
+          opacity: opacity * crowd.alpha,
           sizeScale: chartVisualOverrides.sizeScale ?? 1,
           palette: colors,
           clearColor: hexToRgb01(themeUi.bg),
@@ -2620,10 +2656,10 @@ export function ChartView() {
           pitch: sceneOrbit.pitch,
           zoom: sceneOrbit.zoom,
           mode,
-          time: sceneTime,
+          time: sceneTimeRef.current,
         });
         sceneRendererRef.current.setCamera(sceneOrbit.yaw, sceneOrbit.pitch, sceneOrbit.zoom);
-        sceneRendererRef.current.setTime(sceneTime);
+        sceneRendererRef.current.setTime(sceneTimeRef.current);
         sceneRendererRef.current.render(w, h);
       }
       notifyChartPainted();
@@ -3299,7 +3335,7 @@ export function ChartView() {
     }
     notifyChartPainted();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- LOOM-617: omit hover/export-only fields so crosshair moves do not rerun the full draw/GPU path.
-  }, [canvasSized, activeChart, chartSampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, isMobile, containerSize.w, containerSize.h, sceneOrbit, sceneTime, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines, monitorLines, geoAtlasBundle, reducedMotion, fontEpoch]);
+  }, [canvasSized, activeChart, chartSampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, isMobile, containerSize.w, containerSize.h, sceneOrbit, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines, monitorLines, geoAtlasBundle, reducedMotion, fontEpoch]);
 
   // WebGPU scatter: upload packed points when data/zoom scale changes (not pan).
   useEffect(() => {
@@ -3483,6 +3519,25 @@ export function ChartView() {
       });
       const ui = getThemeUiColors(effectiveTheme);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      if (activeChart.kind === "firefly" && sampleRows) {
+        const packed = extractGpuScenePoints(chartSampleRows?.rows ?? sampleRows.rows, sampleRows.columns, {
+          xField: activeChart.xField,
+          yField: activeChart.yField,
+          colorField: activeChart.colorField,
+          sizeField: activeChart.sizeField,
+          timeField: activeChart.timeField,
+        });
+        if (packed) {
+          drawFireflyChrome(ctx, packed, w, h, scenePad, {
+            fontFamily: chartRenderOpts.fontFamily,
+            axisFontSize: chartRenderOpts.axisFontSize,
+            themeText: ui.text,
+            themeMuted: ui.label,
+            themeBorder: ui.border,
+            themeBg: ui.bg,
+          });
+        }
+      }
       const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
       drawChartTitleBlock(ctx, w, h, scenePad, titleText, activeChart.subtitle, {
         titleX: chartRenderOpts.titleX, titleY: chartRenderOpts.titleY, titleWidth: chartRenderOpts.titleWidth, titleScale: chartRenderOpts.titleScale,
@@ -3594,7 +3649,7 @@ export function ChartView() {
       );
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, refreshKey, effectiveTheme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h, selectedFile, sampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, fontEpoch]);
+  }, [canvasSized, activeChart, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, refreshKey, effectiveTheme, isCompact, chartTitleOverrides, containerSize.w, containerSize.h, selectedFile, sampleRows, chartSampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, fontEpoch]);
 
   useEffect(() => {
     if (activeChart?.kind === "scatter") setScatterView({ scale: 1, panX: 0, panY: 0 });

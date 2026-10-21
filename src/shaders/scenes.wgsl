@@ -3,7 +3,7 @@
 // =================================================================
 // Modes (uniforms.mode):
 //   0 = scatter3d (orbit projected points)
-//   1 = firefly (additive soft sprites)
+//   1 = firefly (flat x × y field, additive soft sprites)
 //   2 = trailRibbon (line segments via point sprites along trails)
 // Workgroup 256 — Apple Silicon friendly.
 // =================================================================
@@ -25,6 +25,11 @@ struct Uniforms {
   zoom: f32,
   mode: f32,
   time: f32,
+  // Plot rect in CSS px (firefly is a flat x × y field framed by Canvas axes).
+  plot_left: f32,
+  plot_top: f32,
+  plot_right: f32,
+  plot_bottom: f32,
 }
 
 struct DataPoint {
@@ -100,7 +105,16 @@ fn compute_positions(@builtin(global_invocation_id) gid: vec3<u32>) {
   var depth: f32 = 0.0;
   let mode = i32(uniforms.mode);
 
-  if (mode == 2) {
+  if (mode == 1) {
+    // firefly — flat x × y inside the plot rect so sparks line up with the axes overlay
+    let w = uniforms.viewport_width;
+    let h = uniforms.viewport_height;
+    let sx = uniforms.plot_left + (nx * 0.5 + 0.5) * (uniforms.plot_right - uniforms.plot_left);
+    let sy = uniforms.plot_bottom - (ny * 0.5 + 0.5) * (uniforms.plot_bottom - uniforms.plot_top);
+    px = (sx / w) * 2.0 - 1.0;
+    py = 1.0 - (sy / h) * 2.0;
+    depth = 1.0 - dp.size_norm;
+  } else if (mode == 2) {
     // trailRibbon — flat 2D map (trails drawn as ordered points; CPU also draws lines)
     px = ((dp.x - uniforms.x_min) / x_range) * 2.0 - 1.0;
     py = ((dp.y - uniforms.y_min) / y_range) * 2.0 - 1.0;
@@ -118,9 +132,13 @@ fn compute_positions(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   if (mode == 1) {
     // firefly — larger soft sprites, brightness from size + time pulse
-    let pulse = 0.75 + 0.25 * sin(uniforms.time * 3.0 + dp.t * 6.28318 + f32(dp.category));
-    pixel_size = uniforms.point_size * (1.2 + dp.size_norm * 3.5) * uniforms.size_scale * pulse;
-    alpha = uniforms.opacity * (0.25 + 0.75 * dp.size_norm) * pulse;
+    // Each spark twinkles on its own phase / rate (hashed from its index) — a shared
+    // pulse made the whole field breathe in lockstep.
+    let h1 = fract(sin(f32(idx) * 12.9898) * 43758.5453);
+    let h2 = fract(sin(f32(idx) * 78.233) * 12345.678);
+    let pulse = 0.8 + 0.2 * sin(uniforms.time * (1.2 + 1.6 * h2) + h1 * 6.28318);
+    pixel_size = uniforms.point_size * (1.6 + dp.size_norm * 3.0) * uniforms.size_scale * (0.9 + 0.1 * pulse);
+    alpha = uniforms.opacity * (0.22 + 0.78 * dp.size_norm) * pulse;
   }
 
   screen_points[idx] = ScreenPoint(
@@ -175,9 +193,12 @@ fn fragment_main(in: VertexOutput) -> @location(0) vec4<f32> {
   let mode = i32(in.mode_f);
   if (mode == 1) {
     // Soft additive firefly falloff
-    let soft = exp(-d * d * 2.8);
+    // Gaussian halo + hot core: bright sparks bloom toward white at the center.
+    let soft = exp(-d * d * 3.2);
     if (soft < 0.02) { discard; }
-    return vec4<f32>(in.color.rgb * soft, in.color.a * soft);
+    let core = exp(-d * d * 28.0) * in.color.a;
+    let rgb = mix(in.color.rgb, vec3<f32>(1.0, 1.0, 1.0), core * 0.35);
+    return vec4<f32>(rgb, in.color.a * soft);
   }
   // Hard circle with AA edge
   let alpha = 1.0 - smoothstep(0.85, 1.0, d);
