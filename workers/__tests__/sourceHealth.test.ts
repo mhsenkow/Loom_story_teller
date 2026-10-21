@@ -26,6 +26,9 @@ describe("feed health", () => {
     const e = nextSourceHealth(d.record, { ok: true, rows: 5 }, 5_000);
     expect(e.persist).toBe(true);
     expect(e.record.streak).toBe(0);
+    expect(c.record.failingSince).toBe(3_000);
+    expect(d.record.failingSince).toBe(3_000);
+    expect(e.record.failingSince).toBeUndefined();
     expect(e.record.error).toBeUndefined();
   });
 

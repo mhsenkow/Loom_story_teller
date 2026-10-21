@@ -17,6 +17,8 @@ export interface SourceHealthRecord {
   error?: string;
   /** Consecutive failed attempts (0 = currently healthy). */
   streak: number;
+  /** When the current failing run began (ms); cleared on success. */
+  failingSince?: number;
   /** Row count of the last good payload. */
   rows?: number;
   /** When this record was last persisted (ms). */
@@ -46,8 +48,14 @@ export function nextSourceHealth(
 ): { record: SourceHealthRecord; persist: boolean } {
   const base: SourceHealthRecord = prev ?? { streak: 0, written: 0 };
   const record: SourceHealthRecord = outcome.ok
-    ? { ...base, lastOk: now, streak: 0, rows: outcome.rows ?? base.rows, error: undefined }
-    : { ...base, lastFail: now, streak: base.streak + 1, error: outcome.error.slice(0, 200) };
+    ? { ...base, lastOk: now, streak: 0, rows: outcome.rows ?? base.rows, error: undefined, failingSince: undefined }
+    : {
+        ...base,
+        lastFail: now,
+        streak: base.streak + 1,
+        error: outcome.error.slice(0, 200),
+        failingSince: base.streak > 0 ? (base.failingSince ?? now) : now,
+      };
   const flipped = !prev || (outcome.ok ? prev.streak > 0 : prev.streak === 0);
   const persist = flipped || now - base.written >= WRITE_EVERY_MS;
   if (persist) record.written = now;
