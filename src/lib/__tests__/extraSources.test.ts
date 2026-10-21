@@ -21,8 +21,14 @@ import {
   lobbyingRows,
   nycInspectionRows,
   nycParkingRows,
+  metRows,
+  nobelRows,
+  openfoodRows,
+  pokemonRows,
   powerballRows,
+  radioRows,
   satelliteRows,
+  triviaRows,
   vehicleRecallRows,
   type Columnar,
 } from "../../../workers/extraSources";
@@ -130,6 +136,32 @@ describe("extraSources transforms", () => {
     const [t] = parsed("fed_spending", fedSpendingRows(fx("usaspending.json")));
     expect(t).toMatchObject({ abbreviation: "TREAS", fiscal_year: 2026 });
     expect(t!.pct_of_total).toBeCloseTo(24.609, 2);
+  });
+
+  it("nobel, trivia, pokemon, met, openfood, radio", () => {
+    const nobel = parsed("nobel", nobelRows(fx("nobel.json")));
+    expect(nobel).toHaveLength(3);
+    expect(nobel[0]).toMatchObject({ name: "Wilhelm Conrad Röntgen", award_year: 1901, category: "Physics", birth_country: "Germany" });
+    expect(nobel.filter((r) => r.name === "Marie Curie")).toHaveLength(2);
+
+    const trivia = parsed("trivia", triviaRows([fx("trivia.json")]));
+    expect(trivia[0]).toMatchObject({ category: "Science: Computers", difficulty: "easy", incorrect_count: 3 });
+    expect(trivia[1]!.question).toContain("2001: A Space Odyssey");
+
+    const poke = parsed("pokemon", pokemonRows(fx("pokemon.json")));
+    expect(poke[0]).toMatchObject({ id: 1, name: "bulbasaur", type1: "grass", type2: "poison", height_m: 0.7, total: 318 });
+    expect(poke[1]).toMatchObject({ name: "pikachu", type1: "electric", type2: null, speed: 90 });
+
+    const met = parsed("met", metRows(fx("met.json")));
+    expect(met[0]).toMatchObject({ object_id: 436535, title: "Wheat Field with Cypresses", is_public_domain: true });
+    expect(met[1]).toMatchObject({ department: "Egyptian Art", culture: "Egyptian" });
+
+    const food = parsed("openfood", openfoodRows([fx("openfood.json")]));
+    expect(food[0]).toMatchObject({ product_name: "Nutella", nutriscore: "E", energy_kcal_100g: 539 });
+    expect(food[1]).toMatchObject({ product_name: "Oat drink", brands: "Oatly", nutriscore: "B" });
+
+    const radio = parsed("radio", radioRows(fx("radio.json")));
+    expect(radio[0]).toMatchObject({ name: "SomaFM Groove Salad", country_code: "US", votes: 4200, bitrate: 128 });
   });
 
   it("bluesky: counts by language and hashtag, never text or DIDs", () => {

@@ -6,10 +6,11 @@
 // One search box over `sourceCatalog()`, facet chips (Topic · Where ·
 // Freshness · Saved), sort (For you / Freshest / A–Z), a Saved group
 // above the registry groups, and a reversible "N hidden · Show" toggle.
+// Digest = newspaper leads; Directory = the full grouped listing.
 // Ordering lives in lib/feedBrowser.ts.
 // =================================================================
 
-import { useDeferredValue, useId, useMemo, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { useLoomStore } from "@/lib/store";
 import { sourceCatalog, type CatalogEntry, type CatalogFreshness } from "@/lib/sourceCatalog";
 import { SOURCE_BY_KIND, SOURCE_TOPICS, SOURCE_TOPIC_LABELS, type SourceTopic } from "@/lib/sourceRegistry";
@@ -18,6 +19,7 @@ import { CURATED_OPEN_PACKS, type CuratedPack } from "@/lib/curatedPacks";
 import {
   browseFeeds,
   DEFAULT_FEED_BROWSER_STATE,
+  digestEntries,
   FEED_FRESHNESS_LABELS,
   FEED_WHERE_LABELS,
   feedSortLabel,
@@ -30,6 +32,8 @@ import { SourceCard } from "./SourceCard";
 import { WikiStreamSection } from "./WikiStreamSection";
 
 const PACK_BY_ID = new Map(CURATED_OPEN_PACKS.map((p) => [p.id, p]));
+
+type FeedView = "digest" | "directory";
 
 function Chip({ on, onClick, children, label }: { on: boolean; onClick: () => void; children: ReactNode; label?: string }) {
   return (
@@ -51,44 +55,83 @@ function toggle<T>(list: T[], v: T): T[] {
   return list.includes(v) ? list.filter((x) => x !== v) : [...list, v];
 }
 
-export function FeedBrowser({ renderPack }: { renderPack: (pack: CuratedPack) => ReactNode }) {
+function digestKicker(entry: CatalogEntry): string {
+  const t = entry.topics[0];
+  return t ? SOURCE_TOPIC_LABELS[t] : entry.type === "pack" ? "Pack" : "Feed";
+}
+
+export function FeedBrowser({
+  renderPack,
+  expanded = false,
+}: {
+  renderPack: (pack: CuratedPack) => ReactNode;
+  /** Wide Data region → default Digest; narrow rail → Directory. */
+  expanded?: boolean;
+}) {
   const prefs = useLoomStore((s) => s.sourcePrefs);
   const statuses = useLoomStore((s) => s.sourceStatuses);
   const [state, setState] = useState<FeedBrowserState>(DEFAULT_FEED_BROWSER_STATE);
   const [topicsOpen, setTopicsOpen] = useState(false);
+  const [view, setView] = useState<FeedView>(expanded ? "digest" : "directory");
   const query = useDeferredValue(state.query);
   const searchId = useId();
   const sortId = useId();
   const patch = (p: Partial<FeedBrowserState>) => setState((s) => ({ ...s, ...p }));
 
+  useEffect(() => {
+    setView(expanded ? "digest" : "directory");
+  }, [expanded]);
+
+  const lastUpdated = (e: CatalogEntry) => {
+    const kind = feedKindFromRef(e.ref);
+    const st = kind ? statuses[kind] : undefined;
+    return st?.last_success_at ?? st?.snapshot_captured_at ?? null;
+  };
+
   const result = useMemo(
-    () =>
-      browseFeeds(sourceCatalog(), { ...state, query }, prefs, {
-        lastUpdated: (e: CatalogEntry) => {
-          const kind = feedKindFromRef(e.ref);
-          const st = kind ? statuses[kind] : undefined;
-          return st?.last_success_at ?? st?.snapshot_captured_at ?? null;
-        },
-      }),
+    () => browseFeeds(sourceCatalog(), { ...state, query }, prefs, { lastUpdated }),
     [state, query, prefs, statuses],
+  );
+  const leads = useMemo(
+    () => digestEntries(sourceCatalog(), prefs, { fromBrowse: result, lastUpdated, limit: expanded ? 6 : 4 }),
+    [result, prefs, statuses, expanded],
   );
   const active = filtersActive(state);
   const clear = () => setState((s) => ({ ...DEFAULT_FEED_BROWSER_STATE, sort: s.sort }));
 
-  const renderEntry = (e: CatalogEntry) => {
+  const renderEntry = (e: CatalogEntry, digest = false) => {
     const p = parseSourceRef(e.ref);
     if (!p) return null;
     if (p.scheme === "pack") {
       const pack = PACK_BY_ID.get(p.id);
-      return pack ? <div key={e.ref}>{renderPack(pack)}</div> : null;
+      if (!pack) return null;
+      return (
+        <div key={e.ref} className={digest ? "feed-digest-item space-y-1" : undefined}>
+          {digest && <p className="discover-kicker">{digestKicker(e)}</p>}
+          {renderPack(pack)}
+        </div>
+      );
     }
-    if (p.id === "wiki") return <WikiStreamSection key={e.ref} />;
+    if (p.id === "wiki") {
+      return (
+        <div key={e.ref} className={digest ? "feed-digest-item space-y-1" : undefined}>
+          {digest && <p className="discover-kicker">{digestKicker(e)}</p>}
+          <WikiStreamSection />
+        </div>
+      );
+    }
     const def = SOURCE_BY_KIND[p.id as keyof typeof SOURCE_BY_KIND];
-    return def ? <SourceCard key={e.ref} def={def} /> : null;
+    if (!def) return null;
+    return (
+      <div key={e.ref} className={digest ? "feed-digest-item space-y-1" : undefined}>
+        {digest && <p className="discover-kicker">{digestKicker(e)}</p>}
+        <SourceCard def={def} />
+      </div>
+    );
   };
 
   return (
-    <div className="space-y-2.5" data-testid="feed-browser">
+    <div className="space-y-2.5" data-testid="feed-browser" data-feed-view={view}>
       <div className="space-y-2">
         <div className="flex gap-1.5 items-end">
           <div className="flex-1 min-w-0">
@@ -122,6 +165,14 @@ export function FeedBrowser({ renderPack }: { renderPack: (pack: CuratedPack) =>
               </option>
             ))}
           </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Feed view">
+          <Chip on={view === "digest"} onClick={() => setView("digest")} label="Digest view">
+            Digest
+          </Chip>
+          <Chip on={view === "directory"} onClick={() => setView("directory")} label="Directory view">
+            Directory
+          </Chip>
         </div>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter feeds">
           <Chip on={topicsOpen || state.topics.length > 0} onClick={() => setTopicsOpen((o) => !o)} label="Topic filters">
@@ -172,23 +223,50 @@ export function FeedBrowser({ renderPack }: { renderPack: (pack: CuratedPack) =>
           </p>
         )}
       </div>
-      {result.groups.map((g) => (
-        <div key={g.id} className="space-y-2.5" data-feed-group={g.id}>
-          <h4 className="text-2xs font-medium uppercase tracking-wide text-loom-muted pt-1">
-            {g.label}
-          </h4>
-          {g.entries.map(renderEntry)}
-        </div>
-      ))}
-      {result.total === 0 && (
-        <p className="text-2xs text-loom-muted py-2">
-          No feeds or packs match.{" "}
-          {active && (
-            <button type="button" onClick={clear} className="underline underline-offset-2 hover:text-loom-accent">
-              Clear filters
+
+      {view === "digest" ? (
+        <div className="feed-digest space-y-3" data-testid="feed-digest">
+          <p className="text-xs text-loom-muted leading-snug">Worth opening — then switch to Directory for the full list.</p>
+          {leads.map((e) => renderEntry(e, true))}
+          {leads.length === 0 && (
+            <p className="text-2xs text-loom-muted py-2">
+              No feeds match.{" "}
+              {active && (
+                <button type="button" onClick={clear} className="underline underline-offset-2 hover:text-loom-accent">
+                  Clear filters
+                </button>
+              )}
+            </p>
+          )}
+          {leads.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setView("directory")}
+              className="text-2xs text-loom-accent underline underline-offset-2 hover:text-loom-text max-md:min-h-9"
+            >
+              Browse all {result.total} in Directory
             </button>
           )}
-        </p>
+        </div>
+      ) : (
+        <>
+          {result.groups.map((g) => (
+            <div key={g.id} className="space-y-2.5" data-feed-group={g.id}>
+              <h4 className="text-2xs font-medium uppercase tracking-wide text-loom-muted pt-1">{g.label}</h4>
+              {g.entries.map((e) => renderEntry(e))}
+            </div>
+          ))}
+          {result.total === 0 && (
+            <p className="text-2xs text-loom-muted py-2">
+              No feeds or packs match.{" "}
+              {active && (
+                <button type="button" onClick={clear} className="underline underline-offset-2 hover:text-loom-accent">
+                  Clear filters
+                </button>
+              )}
+            </p>
+          )}
+        </>
       )}
     </div>
   );

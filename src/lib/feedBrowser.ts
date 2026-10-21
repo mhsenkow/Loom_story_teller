@@ -116,3 +116,51 @@ export function browseFeeds(
   if (packs.length) groups.push({ id: "packs", label: "Curated open packs", entries: packs.sort(order) });
   return { groups, hiddenCount, total: kept.length };
 }
+
+/** Topics that read well as “worth opening” leads in the Digest view. */
+const DIGEST_TOPIC_BONUS: Partial<Record<SourceTopic, number>> = {
+  culture: 6,
+  people: 5,
+  space: 3,
+  tech: 2,
+  cities: 2,
+};
+
+const DIGEST_DEFAULT_LIMIT = 6;
+
+/**
+ * Compact “newspaper” leads: loved/saved first, then culture/people-ish feeds,
+ * then affinity / freshness. Packs are included; hidden sources are skipped.
+ */
+export function digestEntries(
+  entries: CatalogEntry[],
+  prefs: SourcePreferences,
+  opts: {
+    lastUpdated?: (entry: CatalogEntry) => number | null | undefined;
+    now?: number;
+    limit?: number;
+    /** Already-filtered browse result; when set, Digest respects the same filters. */
+    fromBrowse?: FeedBrowseResult;
+  } = {},
+): CatalogEntry[] {
+  const now = opts.now ?? Date.now();
+  const limit = opts.limit ?? DIGEST_DEFAULT_LIMIT;
+  const pool = opts.fromBrowse
+    ? opts.fromBrowse.groups.flatMap((g) => g.entries)
+    : entries.filter((e) => !isHidden(e.ref, prefs));
+  const seen = new Set<string>();
+  const unique = pool.filter((e) => {
+    if (seen.has(e.ref)) return false;
+    seen.add(e.ref);
+    return true;
+  });
+  const topicBonus = (e: CatalogEntry) =>
+    e.topics.reduce((best, t) => Math.max(best, DIGEST_TOPIC_BONUS[t] ?? 0), 0);
+  const rank = (e: CatalogEntry) => {
+    const loved = prefs.entries[e.ref]?.reaction === "love" ? 100 : 0;
+    const saved = isSourceSaved(e.ref, prefs) ? 40 : 0;
+    const fresh = opts.lastUpdated?.(e) ?? 0;
+    return loved + saved + topicBonus(e) * 10 + sourceAffinity(e.ref, prefs, now) + fresh / 1e15;
+  };
+  return [...unique].sort((a, b) => rank(b) - rank(a) || a.label.localeCompare(b.label)).slice(0, limit);
+}

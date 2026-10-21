@@ -114,4 +114,20 @@ export const SOURCE_ENDPOINTS: Record<SourceKind, SourceEndpointContract> = {
     desktop: "worker-only",
     note: "WebSocket sampled ~5 s in the Worker; desktop reads /api/source/bgp",
   },
+  nobel: { primary: ["api.nobelprize.org"], fallbacks: none, desktop: "same", note: "laureates JSON; one row per prize" },
+  trivia: { primary: ["opentdb.com"], fallbacks: none, desktop: "same", note: "10×50 question fetches" },
+  pokemon: {
+    primary: ["pokeapi.co"],
+    fallbacks: none,
+    desktop: "worker-only",
+    note: "Gen 1 detail fan-out in the Worker; desktop reads /api/source/pokemon",
+  },
+  met: {
+    primary: ["collectionapi.metmuseum.org"],
+    fallbacks: none,
+    desktop: "worker-only",
+    note: "highlight search + object fan-out in the Worker; desktop reads /api/source/met",
+  },
+  openfood: { primary: ["world.openfoodfacts.org"], fallbacks: none, desktop: "same", note: "top scanned products, capped" },
+  radio: { primary: ["de1.api.radio-browser.info"], fallbacks: none, desktop: "same", note: "topvote/500" },
 };

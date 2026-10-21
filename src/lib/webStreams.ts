@@ -356,6 +356,12 @@ const SOURCE_MERGE: Record<SourceKind, { mode: "replace" | "append"; key?: numbe
   bikeshare: { mode: "replace" },
   bluesky: { mode: "append", key: 0 }, // per-minute counts — id = ts|dimension|key
   bgp: { mode: "append", key: 0 },
+  nobel: { mode: "replace", key: 0 },
+  trivia: { mode: "replace" },
+  pokemon: { mode: "replace", key: 0 },
+  met: { mode: "replace", key: 0 },
+  openfood: { mode: "replace", key: 0 },
+  radio: { mode: "replace", key: 0 },
 };
 
 

@@ -5,9 +5,10 @@
 // for fireballs, satellites, internet_outages, faa_delays, lobbying,
 // fda_recalls, vehicle_recalls, arxiv, github_events, books,
 // nyc_inspections, chicago_crime, nyc_parking, powerball, fed_spending,
-// bikeshare, bluesky and bgp. The browser reads them with
-// `parseColumnar` (webStreams.ts); desktop mirrors each in sources.rs
-// (bluesky / bgp: desktop reads this Worker's output — see DOCS.md).
+// bikeshare, bluesky, bgp, nobel, trivia, pokemon, met, openfood and
+// radio. The browser reads them with `parseColumnar` (webStreams.ts);
+// desktop mirrors each in sources.rs (bluesky / bgp / pokemon / met:
+// desktop reads this Worker's output — see DOCS.md).
 //
 // Privacy: GitHub drops actor logins, lobbying drops lobbyist names and
 // filer contacts, parking never selects plates, Bluesky keeps counts by
@@ -713,4 +714,294 @@ export function bgpRows(messages: string[], windowSecs: number, nowMs: number): 
   for (const [k, v] of wdLen) bump(lens, k, v);
   for (const [k] of topN(lens, 20)) out.push(row("prefix_len", k, annLen.get(k) ?? 0, wdLen.get(k) ?? 0));
   return columnar(BGP_COLUMNS, out);
+}
+
+// ---- Nobel Prize laureates (one row per prize) ----
+
+export const NOBEL_COLUMNS = [
+  "laureate_id",
+  "name",
+  "gender",
+  "birth_year",
+  "birth_country",
+  "award_year",
+  "category",
+  "portion",
+  "motivation",
+];
+
+export function nobelRows(body: unknown): Columnar {
+  const out: Json[] = [];
+  for (const raw of arr(obj(body).laureates)) {
+    const L = obj(raw);
+    const id = str(L.id);
+    const name =
+      str(obj(L.knownName).en) ||
+      [str(obj(L.givenName).en), str(obj(L.familyName).en)].filter(Boolean).join(" ") ||
+      str(obj(L.orgName).en);
+    const gender = str(L.gender);
+    const birth = obj(L.birth);
+    const birthYear = (() => {
+      const d = str(birth.date);
+      return d && /^\d{4}/.test(d) ? Number(d.slice(0, 4)) : null;
+    })();
+    const birthCountry = str(obj(obj(birth.place).countryNow).en) || str(obj(obj(birth.place).country).en);
+    for (const pRaw of arr(L.nobelPrizes)) {
+      const p = obj(pRaw);
+      const awardYear = num(p.awardYear);
+      if (!id || !name || awardYear == null) continue;
+      out.push({
+        laureate_id: id,
+        name: clip(name, 200),
+        gender,
+        birth_year: birthYear,
+        birth_country: birthCountry,
+        award_year: awardYear,
+        category: str(obj(p.category).en) || str(p.category),
+        portion: str(p.portion),
+        motivation: clip(str(obj(p.motivation).en) || str(p.motivation), 280),
+      });
+    }
+  }
+  return columnar(NOBEL_COLUMNS, out);
+}
+
+// ---- Open Trivia DB (merged multi-page bodies) ----
+
+export const TRIVIA_COLUMNS = ["category", "difficulty", "question_type", "question", "correct_answer", "incorrect_count"];
+
+/** Decode common HTML entities from OpenTDB (questions arrive entity-encoded). */
+export function triviaDecode(s: string | null): string | null {
+  if (!s) return null;
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&eacute;/g, "é")
+    .replace(/&ouml;/g, "ö")
+    .replace(/&uuml;/g, "ü")
+    .replace(/&auml;/g, "ä");
+}
+
+export function triviaRows(bodies: unknown[]): Columnar {
+  const out: Json[] = [];
+  const seen = new Set<string>();
+  for (const body of bodies) {
+    for (const raw of arr(obj(body).results)) {
+      const q = obj(raw);
+      const question = triviaDecode(clip(q.question, 400));
+      if (!question || seen.has(question)) continue;
+      seen.add(question);
+      out.push({
+        category: triviaDecode(str(q.category)),
+        difficulty: str(q.difficulty),
+        question_type: str(q.type),
+        question,
+        correct_answer: triviaDecode(clip(q.correct_answer, 200)),
+        incorrect_count: arr(q.incorrect_answers).length,
+      });
+      if (out.length >= 500) return columnar(TRIVIA_COLUMNS, out);
+    }
+  }
+  return columnar(TRIVIA_COLUMNS, out);
+}
+
+// ---- PokéAPI Gen 1 detail objects ----
+
+export const POKEMON_COLUMNS = [
+  "id",
+  "name",
+  "type1",
+  "type2",
+  "height_m",
+  "weight_kg",
+  "hp",
+  "attack",
+  "defense",
+  "sp_attack",
+  "sp_defense",
+  "speed",
+  "total",
+];
+
+function pokemonStat(stats: unknown[], name: string): number | null {
+  for (const raw of stats) {
+    const s = obj(raw);
+    if (str(obj(s.stat).name) === name) return num(s.base_stat);
+  }
+  return null;
+}
+
+export function pokemonRows(details: unknown[]): Columnar {
+  const out: Json[] = [];
+  for (const raw of details) {
+    const p = obj(raw);
+    const id = num(p.id);
+    const name = str(p.name);
+    if (id == null || !name || id > 151) continue;
+    const types = arr(p.types)
+      .slice()
+      .sort((a, b) => (num(obj(a).slot) ?? 0) - (num(obj(b).slot) ?? 0))
+      .map((t) => str(obj(obj(t).type).name));
+    const stats = arr(p.stats);
+    const hp = pokemonStat(stats, "hp");
+    const attack = pokemonStat(stats, "attack");
+    const defense = pokemonStat(stats, "defense");
+    const spAttack = pokemonStat(stats, "special-attack");
+    const spDefense = pokemonStat(stats, "special-defense");
+    const speed = pokemonStat(stats, "speed");
+    const parts = [hp, attack, defense, spAttack, spDefense, speed];
+    const total = parts.every((n) => n != null) ? parts.reduce((a, b) => (a ?? 0) + (b ?? 0), 0) : null;
+    const height = num(p.height);
+    const weight = num(p.weight);
+    out.push({
+      id,
+      name,
+      type1: types[0] ?? null,
+      type2: types[1] ?? null,
+      height_m: height == null ? null : round(height / 10, 2),
+      weight_kg: weight == null ? null : round(weight / 10, 1),
+      hp,
+      attack,
+      defense,
+      sp_attack: spAttack,
+      sp_defense: spDefense,
+      speed,
+      total,
+    });
+  }
+  out.sort((a, b) => (num(a.id) ?? 0) - (num(b.id) ?? 0));
+  return columnar(POKEMON_COLUMNS, out.slice(0, 151));
+}
+
+// ---- Met Museum object detail records ----
+
+export const MET_COLUMNS = [
+  "object_id",
+  "title",
+  "artist",
+  "department",
+  "culture",
+  "object_date",
+  "object_begin_year",
+  "medium",
+  "is_public_domain",
+  "is_highlight",
+];
+
+export function metRows(details: unknown[]): Columnar {
+  const out: Json[] = [];
+  for (const raw of details) {
+    const o = obj(raw);
+    const objectId = num(o.objectID);
+    const title = clip(o.title, 200);
+    if (objectId == null || !title) continue;
+    out.push({
+      object_id: objectId,
+      title,
+      artist: clip(o.artistDisplayName, 160),
+      department: str(o.department),
+      culture: str(o.culture),
+      object_date: str(o.objectDate),
+      object_begin_year: num(o.objectBeginDate),
+      medium: clip(o.medium, 160),
+      is_public_domain: typeof o.isPublicDomain === "boolean" ? o.isPublicDomain : null,
+      is_highlight: typeof o.isHighlight === "boolean" ? o.isHighlight : null,
+    });
+    if (out.length >= 200) break;
+  }
+  return columnar(MET_COLUMNS, out);
+}
+
+// ---- Open Food Facts search pages ----
+
+export const OPENFOOD_COLUMNS = [
+  "code",
+  "product_name",
+  "brands",
+  "nutriscore",
+  "countries",
+  "category",
+  "energy_kcal_100g",
+  "fat_100g",
+  "sugars_100g",
+  "proteins_100g",
+];
+
+function offTag(tags: unknown[], prefix: string): string | null {
+  for (const t of tags) {
+    const s = str(t);
+    if (s?.startsWith(prefix)) return s.slice(prefix.length).replace(/-/g, " ");
+  }
+  return str(tags[0])?.replace(/^[^:]+:/, "").replace(/-/g, " ") ?? null;
+}
+
+export function openfoodRows(bodies: unknown[]): Columnar {
+  const out: Json[] = [];
+  const seen = new Set<string>();
+  for (const body of bodies) {
+    for (const raw of arr(obj(body).products)) {
+      const p = obj(raw);
+      const code = str(p.code);
+      const name = clip(p.product_name || p.product_name_en, 200);
+      if (!code || !name || seen.has(code)) continue;
+      seen.add(code);
+      const nut = obj(p.nutriments);
+      out.push({
+        code,
+        product_name: name,
+        brands: clip(p.brands, 120),
+        nutriscore: str(p.nutriscore_grade)?.toUpperCase() ?? null,
+        countries: clip(offTag(arr(p.countries_tags), "en:"), 120),
+        category: clip(offTag(arr(p.categories_tags), "en:"), 120),
+        energy_kcal_100g: num(nut["energy-kcal_100g"]) ?? num(nut.energy_kcal_100g),
+        fat_100g: num(nut.fat_100g),
+        sugars_100g: num(nut.sugars_100g),
+        proteins_100g: num(nut.proteins_100g),
+      });
+      if (out.length >= 1000) return columnar(OPENFOOD_COLUMNS, out);
+    }
+  }
+  return columnar(OPENFOOD_COLUMNS, out);
+}
+
+// ---- radio-browser topvote ----
+
+export const RADIO_COLUMNS = [
+  "station_uuid",
+  "name",
+  "country",
+  "country_code",
+  "language",
+  "codec",
+  "bitrate",
+  "votes",
+  "click_count",
+  "homepage",
+];
+
+export function radioRows(body: unknown): Columnar {
+  const out: Json[] = [];
+  for (const raw of arr(body)) {
+    const s = obj(raw);
+    const uuid = str(s.stationuuid);
+    const name = clip(s.name, 160);
+    if (!uuid || !name) continue;
+    out.push({
+      station_uuid: uuid,
+      name,
+      country: str(s.country),
+      country_code: str(s.countrycode),
+      language: clip(s.language, 80),
+      codec: str(s.codec),
+      bitrate: num(s.bitrate),
+      votes: num(s.votes),
+      click_count: num(s.clickcount),
+      homepage: clip(s.homepage, 200),
+    });
+    if (out.length >= 500) break;
+  }
+  return columnar(RADIO_COLUMNS, out);
 }

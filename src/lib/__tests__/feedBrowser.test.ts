@@ -1,6 +1,6 @@
-// Feed browser: search, facets, Saved group, affinity order, hidden toggle.
+// Feed browser: search, facets, Saved group, affinity order, hidden toggle, Digest leads.
 import { describe, expect, it } from "vitest";
-import { browseFeeds, DEFAULT_FEED_BROWSER_STATE, feedSortLabel } from "../feedBrowser";
+import { browseFeeds, DEFAULT_FEED_BROWSER_STATE, digestEntries, feedSortLabel } from "../feedBrowser";
 import { sourceCatalog } from "../sourceCatalog";
 import { emptySourcePreferences, setSourceReaction, toggleSourceSaved } from "../sourcePreferences";
 
@@ -49,5 +49,29 @@ describe("browseFeeds", () => {
     const all = space.groups.flatMap((g) => g.entries);
     expect(all.length).toBeGreaterThan(0);
     expect(all.every((e) => e.topics.includes("space") && e.freshness === "live")).toBe(true);
+  });
+});
+
+describe("digestEntries", () => {
+  const catalog = sourceCatalog();
+
+  it("prefers loved feeds, then culture/people topics, and respects a limit", () => {
+    const loved = setSourceReaction(emptySourcePreferences(), "feed:usgs", "love");
+    const leads = digestEntries(catalog, loved, { limit: 6 });
+    expect(leads).toHaveLength(6);
+    expect(leads[0]!.ref).toBe("feed:usgs");
+    const plain = digestEntries(catalog, emptySourcePreferences(), { limit: 4 });
+    expect(plain).toHaveLength(4);
+    expect(plain.some((e) => e.topics.includes("culture") || e.topics.includes("people"))).toBe(true);
+  });
+
+  it("skips hidden sources and can reuse a filtered browse result", () => {
+    const prefs = setSourceReaction(emptySourcePreferences(), "feed:books", "hide");
+    const leads = digestEntries(catalog, prefs, { limit: 20 });
+    expect(leads.every((e) => e.ref !== "feed:books")).toBe(true);
+    const browsed = browseFeeds(catalog, { ...DEFAULT_FEED_BROWSER_STATE, topics: ["space"] }, emptySourcePreferences());
+    const fromBrowse = digestEntries(catalog, emptySourcePreferences(), { fromBrowse: browsed, limit: 10 });
+    expect(fromBrowse.length).toBeGreaterThan(0);
+    expect(fromBrowse.every((e) => e.topics.includes("space"))).toBe(true);
   });
 });

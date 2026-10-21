@@ -65,6 +65,9 @@
 .discover-icon-button:focus-visible { outline: 2px solid var(--loom-accent); outline-offset: 2px; }
 .discover-kicker { font-size: .625rem; text-transform: uppercase; letter-spacing: .15em; font-weight: 600; color: var(--loom-accent); }
 
+/* Data region feed Digest — newspaper leads over the same SourceCard connect path */
+.feed-digest-item .discover-kicker { margin-bottom: .15rem; padding-left: .15rem; }
+
 /* Inline sentence filters — reads like editorial masthead copy */
 .discover-sentence {
   grid-area: filters;

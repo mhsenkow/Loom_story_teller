@@ -40,6 +40,16 @@ export const CHANGELOG: ChangelogRelease[] = [
     items: [{ title: "Readable, meaningful glow", detail: "Firefly charts now stay legible in light themes, with clearer axes and separated labels. Steady glow follows Size or an actual time field; arbitrary twinkling and row-order brightness are gone." }],
   },
   {
+    id: "2026-10-21b",
+    date: "2026-10-21",
+    title: "Six more feeds to pick apart",
+    summary: "Nobel prizes, trivia, Pokémon, the Met collection, food labels, and radio — plus a Digest view in Data & sources.",
+    items: [
+      { title: "Culture & learning feeds", detail: "Connect Nobel laureates, Open Trivia questions, Gen‑1 Pokémon stats, a daily sample of the Met collection, Open Food Facts products, and top internet radio stations. Same Connect → Explore path as every other live feed." },
+      { title: "Digest or Directory", detail: "In Data & sources, Digest shows a short newspaper-style shortlist of feeds worth opening; Directory keeps the full searchable listing." },
+    ],
+  },
+  {
     id: "2026-10-21",
     date: "2026-10-21",
     title: "Moments worth sharing",

@@ -1019,6 +1019,118 @@ pub const SOURCE_SPECS: &[SourceSpec] = &[
         poll_secs: 60,
         mode: WriteMode::Upsert(&["id"]),
     },
+    SourceSpec {
+        kind: "nobel",
+        table: "nobel_laureates",
+        columns: &[
+            ("laureate_id", V),
+            ("name", V),
+            ("gender", V),
+            ("birth_year", I),
+            ("birth_country", V),
+            ("award_year", I),
+            ("category", V),
+            ("portion", V),
+            ("motivation", V),
+        ],
+        order_by: "award_year DESC, category, name",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "trivia",
+        table: "trivia_questions",
+        columns: &[
+            ("category", V),
+            ("difficulty", V),
+            ("question_type", V),
+            ("question", V),
+            ("correct_answer", V),
+            ("incorrect_count", I),
+        ],
+        order_by: "category, difficulty",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "pokemon",
+        table: "pokemon",
+        columns: &[
+            ("id", I),
+            ("name", V),
+            ("type1", V),
+            ("type2", V),
+            ("height_m", D),
+            ("weight_kg", D),
+            ("hp", I),
+            ("attack", I),
+            ("defense", I),
+            ("sp_attack", I),
+            ("sp_defense", I),
+            ("speed", I),
+            ("total", I),
+        ],
+        order_by: "id",
+        poll_secs: 86_400,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "met",
+        table: "met_highlights",
+        columns: &[
+            ("object_id", I),
+            ("title", V),
+            ("artist", V),
+            ("department", V),
+            ("culture", V),
+            ("object_date", V),
+            ("object_begin_year", I),
+            ("medium", V),
+            ("is_public_domain", B),
+            ("is_highlight", B),
+        ],
+        order_by: "department, title",
+        poll_secs: 86_400,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "openfood",
+        table: "open_food_facts",
+        columns: &[
+            ("code", V),
+            ("product_name", V),
+            ("brands", V),
+            ("nutriscore", V),
+            ("countries", V),
+            ("category", V),
+            ("energy_kcal_100g", D),
+            ("fat_100g", D),
+            ("sugars_100g", D),
+            ("proteins_100g", D),
+        ],
+        order_by: "nutriscore, product_name",
+        poll_secs: 21_600,
+        mode: WriteMode::Replace,
+    },
+    SourceSpec {
+        kind: "radio",
+        table: "radio_stations",
+        columns: &[
+            ("station_uuid", V),
+            ("name", V),
+            ("country", V),
+            ("country_code", V),
+            ("language", V),
+            ("codec", V),
+            ("bitrate", I),
+            ("votes", I),
+            ("click_count", I),
+            ("homepage", V),
+        ],
+        order_by: "votes DESC",
+        poll_secs: 86_400,
+        mode: WriteMode::Replace,
+    },
 ];
 
 pub fn spec_for_kind(kind: &str) -> Option<&'static SourceSpec> {
@@ -3986,8 +4098,17 @@ const BIKESHARE_SYSTEMS: [(&str, &str); 3] = [
     ),
     ("Bay Wheels (SF)", "https://gbfs.lyftbikes.com/gbfs/en/"),
 ];
-/// WebSocket-sampled feeds (bluesky, bgp) come from the Worker's aggregate.
+/// WebSocket-sampled / fan-out feeds (bluesky, bgp, pokemon, met) come from the Worker.
 const LOOM_WORKER_ORIGIN: &str = "https://loom.ibm.io";
+const NOBEL_LAUREATES_URL: &str = "https://api.nobelprize.org/2.1/laureates?limit=1500&format=json";
+const RADIO_TOPVOTE_URL: &str = "https://de1.api.radio-browser.info/json/stations/topvote/500";
+const TRIVIA_PAGE_URL: &str = "https://opentdb.com/api.php?amount=50";
+fn openfood_page_url(page: u32) -> String {
+    format!(
+        "https://world.openfoodfacts.org/cgi/search.pl?action=process&json=true&page_size=100&page={}&sort_by=unique_scans_n&fields=code,product_name,product_name_en,brands,nutriscore_grade,countries_tags,categories_tags,nutriments",
+        page
+    )
+}
 
 async fn fetch_bikeshare(ctx: &mut PollCtx) -> Result<Vec<Row>, String> {
     let mut rows = Vec::new();
@@ -4064,6 +4185,39 @@ async fn fetch_fda(client: &reqwest::Client) -> Result<Vec<Row>, String> {
         return Err(last_err.unwrap_or_else(|| "openFDA: no feeds".into()));
     }
     fda_rows(&bodies)
+}
+
+async fn fetch_trivia(client: &reqwest::Client) -> Result<Vec<Row>, String> {
+    let mut bodies = Vec::new();
+    let mut last_err = None;
+    for i in 0..10 {
+        if i > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+        match get_json(client, TRIVIA_PAGE_URL).await {
+            Ok(b) => bodies.push(b),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if bodies.is_empty() {
+        return Err(last_err.unwrap_or_else(|| "Open Trivia DB: no pages".into()));
+    }
+    trivia_rows(&bodies)
+}
+
+async fn fetch_openfood(client: &reqwest::Client) -> Result<Vec<Row>, String> {
+    let mut bodies = Vec::new();
+    let mut last_err = None;
+    for page in 1u32..=10 {
+        match get_json(client, &openfood_page_url(page)).await {
+            Ok(b) => bodies.push(b),
+            Err(e) => last_err = Some(e),
+        }
+    }
+    if bodies.is_empty() {
+        return Err(last_err.unwrap_or_else(|| "Open Food Facts: no pages".into()));
+    }
+    openfood_rows(&bodies)
 }
 
 /// Per-run state carried between polls.
@@ -4853,7 +5007,11 @@ async fn fetch_rows(spec: &SourceSpec, ctx: &mut PollCtx, db: &LoomDb) -> Result
         "powerball" => powerball_rows(&get_json(&c, POWERBALL_URL).await?),
         "fed_spending" => fed_spending_rows(&get_json(&c, USASPENDING_AGENCIES_URL).await?),
         "bikeshare" => fetch_bikeshare(ctx).await,
-        "bluesky" | "bgp" => {
+        "nobel" => nobel_rows(&get_json(&c, NOBEL_LAUREATES_URL).await?),
+        "trivia" => fetch_trivia(&c).await,
+        "openfood" => fetch_openfood(&c).await,
+        "radio" => radio_rows(&get_json(&c, RADIO_TOPVOTE_URL).await?),
+        "bluesky" | "bgp" | "pokemon" | "met" => {
             let url = format!("{}/api/source/{}", LOOM_WORKER_ORIGIN, spec.kind);
             columnar_rows(&get_json(&c, &url).await?, spec)
         }

@@ -4,13 +4,13 @@
 // Rust mirror of workers/extraSources.ts: fireballs, satellites,
 // internet_outages, faa_delays, lobbying, fda_recalls, vehicle_recalls,
 // arxiv, github_events, books, nyc_inspections, chicago_crime,
-// nyc_parking, powerball, fed_spending, bikeshare. Upstream URLs live in
-// sources.rs (the endpoint parity test reads that file).
+// nyc_parking, powerball, fed_spending, bikeshare, nobel, trivia, openfood,
+// radio. Upstream URLs live in sources.rs (the endpoint parity test reads
+// that file).
 //
-// bluesky / bgp are WebSocket samples: the desktop app reads the Worker's
+// bluesky / bgp / pokemon / met: the desktop app reads the Worker's
 // aggregated `{ columns, rows }` (`columnar_rows`) instead of holding its
-// own socket, so there is no tungstenite dependency and the privacy
-// filtering (counts only) lives in one place.
+// own socket / N+1 fan-out.
 //
 // Privacy: GitHub actor logins, lobbyist names / filer contacts and
 // parking plates are never read into rows.
@@ -895,7 +895,243 @@ pub(crate) fn bikeshare_rows(
         .collect())
 }
 
-// ---- Worker `{ columns, rows }` (bluesky, bgp) ----
+// ---- Nobel Prize laureates ----
+
+pub(crate) fn nobel_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let list = body
+        .get("laureates")
+        .and_then(Value::as_array)
+        .ok_or("Nobel: no laureates")?;
+    let mut out = Vec::new();
+    for laureate in list {
+        let id = match js(laureate.get("id")) {
+            Cell::Str(s) => s,
+            _ => continue,
+        };
+        let name = match (
+            js(laureate.pointer("/knownName/en")),
+            js(laureate.pointer("/givenName/en")),
+            js(laureate.pointer("/familyName/en")),
+            js(laureate.pointer("/orgName/en")),
+        ) {
+            (Cell::Str(n), _, _, _) => n,
+            (_, Cell::Str(g), Cell::Str(f), _) => format!("{} {}", g, f),
+            (_, Cell::Str(g), _, _) => g,
+            (_, _, Cell::Str(f), _) => f,
+            (_, _, _, Cell::Str(o)) => o,
+            _ => continue,
+        };
+        let gender = js(laureate.get("gender"));
+        let birth_year = laureate
+            .pointer("/birth/date")
+            .and_then(Value::as_str)
+            .and_then(|d| d.get(0..4)?.parse::<i64>().ok());
+        let birth_country = match (
+            js(laureate.pointer("/birth/place/countryNow/en")),
+            js(laureate.pointer("/birth/place/country/en")),
+        ) {
+            (Cell::Str(c), _) | (_, Cell::Str(c)) => Cell::Str(c),
+            _ => Cell::Null,
+        };
+        let prizes = laureate.get("nobelPrizes").and_then(Value::as_array);
+        let Some(prizes) = prizes else { continue };
+        for p in prizes {
+            let award_year = match ji(p.get("awardYear")) {
+                Cell::I64(y) => y,
+                _ => continue,
+            };
+            out.push(vec![
+                Cell::Str(id.clone()),
+                clip(Some(&Value::String(name.clone())), 200),
+                gender.clone(),
+                Cell::opt_i64(birth_year),
+                birth_country.clone(),
+                Cell::I64(award_year),
+                js(p.pointer("/category/en")),
+                js(p.get("portion")),
+                clip(p.pointer("/motivation/en"), 280),
+            ]);
+        }
+    }
+    Ok(out)
+}
+
+fn trivia_decode(s: &str) -> String {
+    s.replace("&quot;", "\"")
+        .replace("&#039;", "'")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&eacute;", "é")
+        .replace("&ouml;", "ö")
+        .replace("&uuml;", "ü")
+        .replace("&auml;", "ä")
+}
+
+pub(crate) fn trivia_rows(bodies: &[Value]) -> Result<Vec<Row>, String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for body in bodies {
+        let Some(results) = body.get("results").and_then(Value::as_array) else {
+            continue;
+        };
+        for q in results {
+            let question = match q.get("question").and_then(Value::as_str) {
+                Some(s) => {
+                    let d = trivia_decode(s);
+                    let clipped = if d.chars().count() > 400 {
+                        format!("{}…", d.chars().take(399).collect::<String>())
+                    } else {
+                        d
+                    };
+                    clipped
+                }
+                None => continue,
+            };
+            if !seen.insert(question.clone()) {
+                continue;
+            }
+            let answer = q
+                .get("correct_answer")
+                .and_then(Value::as_str)
+                .map(trivia_decode);
+            let incorrect = q
+                .get("incorrect_answers")
+                .and_then(Value::as_array)
+                .map(|a| a.len() as i64)
+                .unwrap_or(0);
+            let category = q
+                .get("category")
+                .and_then(Value::as_str)
+                .map(trivia_decode)
+                .map(Cell::Str)
+                .unwrap_or(Cell::Null);
+            let correct = match answer {
+                Some(a) if a.chars().count() > 200 => {
+                    Cell::Str(format!("{}…", a.chars().take(199).collect::<String>()))
+                }
+                Some(a) => Cell::Str(a),
+                None => Cell::Null,
+            };
+            out.push(vec![
+                category,
+                js(q.get("difficulty")),
+                js(q.get("type")),
+                Cell::Str(question),
+                correct,
+                Cell::I64(incorrect),
+            ]);
+            if out.len() >= 500 {
+                return Ok(out);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn off_tag(tags: Option<&Value>, prefix: &str) -> Cell {
+    let Some(arr) = tags.and_then(Value::as_array) else {
+        return Cell::Null;
+    };
+    for t in arr {
+        if let Some(s) = t.as_str() {
+            if let Some(rest) = s.strip_prefix(prefix) {
+                return clip(Some(&Value::String(rest.replace('-', " "))), 120);
+            }
+        }
+    }
+    arr.first()
+        .and_then(Value::as_str)
+        .map(|s| {
+            let cleaned = s
+                .split_once(':')
+                .map(|(_, r)| r)
+                .unwrap_or(s)
+                .replace('-', " ");
+            clip(Some(&Value::String(cleaned)), 120)
+        })
+        .unwrap_or(Cell::Null)
+}
+
+pub(crate) fn openfood_rows(bodies: &[Value]) -> Result<Vec<Row>, String> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for body in bodies {
+        let Some(products) = body.get("products").and_then(Value::as_array) else {
+            continue;
+        };
+        for p in products {
+            let code = match js(p.get("code")) {
+                Cell::Str(c) => c,
+                _ => continue,
+            };
+            if !seen.insert(code.clone()) {
+                continue;
+            }
+            let name = match (
+                clip(p.get("product_name"), 200),
+                clip(p.get("product_name_en"), 200),
+            ) {
+                (Cell::Str(n), _) | (_, Cell::Str(n)) => n,
+                _ => continue,
+            };
+            let nut = p.get("nutriments");
+            let nutriscore = p
+                .get("nutriscore_grade")
+                .and_then(Value::as_str)
+                .map(|s| Cell::Str(s.to_uppercase()))
+                .unwrap_or(Cell::Null);
+            out.push(vec![
+                Cell::Str(code),
+                Cell::Str(name),
+                clip(p.get("brands"), 120),
+                nutriscore,
+                off_tag(p.get("countries_tags"), "en:"),
+                off_tag(p.get("categories_tags"), "en:"),
+                jf(nut.and_then(|n| n.get("energy-kcal_100g")).or_else(|| nut.and_then(|n| n.get("energy_kcal_100g")))),
+                jf(nut.and_then(|n| n.get("fat_100g"))),
+                jf(nut.and_then(|n| n.get("sugars_100g"))),
+                jf(nut.and_then(|n| n.get("proteins_100g"))),
+            ]);
+            if out.len() >= 1000 {
+                return Ok(out);
+            }
+        }
+    }
+    Ok(out)
+}
+
+pub(crate) fn radio_rows(body: &Value) -> Result<Vec<Row>, String> {
+    let list = body.as_array().ok_or("radio-browser: expected an array")?;
+    Ok(list
+        .iter()
+        .filter_map(|s| {
+            let uuid = match js(s.get("stationuuid")) {
+                Cell::Str(u) => u,
+                _ => return None,
+            };
+            let name = match clip(s.get("name"), 160) {
+                Cell::Str(n) => n,
+                _ => return None,
+            };
+            Some(vec![
+                Cell::Str(uuid),
+                Cell::Str(name),
+                js(s.get("country")),
+                js(s.get("countrycode")),
+                clip(s.get("language"), 80),
+                js(s.get("codec")),
+                ji(s.get("bitrate")),
+                ji(s.get("votes")),
+                ji(s.get("clickcount")),
+                clip(s.get("homepage"), 200),
+            ])
+        })
+        .take(500)
+        .collect())
+}
+
+// ---- Worker `{ columns, rows }` (bluesky, bgp, pokemon, met) ----
 
 /// Map a Worker columnar body onto `spec` column order, coercing by type.
 pub(crate) fn columnar_rows(body: &Value, spec: &SourceSpec) -> Result<Vec<Row>, String> {

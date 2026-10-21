@@ -7,7 +7,7 @@
 | DuckDB / folder SQL | Yes (CSV built-in; no unsigned extension autoinstall) | No — web data path | No — mock query | No |
 | Own-data import | CSV (Parquet/JSON/XLSX await signed helpers — Gatekeeper) | CSV/TSV/JSON/Parquet/XLSX via picker | Same as iOS | Same; FS Access API varies |
 | Linked folder (FS Access) | N/A | Limited | Chrome/Edge | Safari 17.4+ partial |
-| Live feeds (54 kinds) | Rust poll → DuckDB (bluesky / bgp via Worker) | Worker `/api/source/*` → buffer | Worker | Worker |
+| Live feeds (60 kinds) | Rust poll → DuckDB (bluesky / bgp / pokemon / met via Worker) | Worker `/api/source/*` → buffer | Worker | Worker |
 | Monitors (in-app schedule) | Yes, while app open | Yes, while app open | Yes; hidden tabs throttle timers | Same |
 | Monitor notifications | Tauri notification plugin | Tauri notification plugin | Web Notifications | Web Notifications (16.4+; home-screen app on iOS) |
 | Always-on monitors | Worker cron → webhook / ntfy | Same | Same + Web Push | Same + Web Push (16.4+, Home Screen app on iOS) |

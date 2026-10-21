@@ -1685,6 +1685,72 @@ function hook_bgp(n: number, sample: QueryResult, chart: ChartRecommendation): D
   };
 }
 
+function hook_nobel(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "category");
+  return {
+    hook: top ? `${top.value} leads the Nobel prize count` : `${n} Nobel Prize laureates`,
+    blurb: chart.subtitle || "Every award since 1901.",
+    score: 78,
+    preferKind: "bar",
+    category: "Culture",
+  };
+}
+
+function hook_trivia(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "category");
+  return {
+    hook: top ? `Quiz night: ${top.count} questions on ${top.value}` : `${n} trivia questions ready`,
+    blurb: chart.subtitle || "Categories, difficulty, and types.",
+    score: 74,
+    preferKind: "bar",
+    category: "Culture",
+  };
+}
+
+function hook_pokemon(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const best = maxFiniteAt(sample, "total");
+  return {
+    hook: best ? `${strAt(sample, best.row, "name")} has the highest Gen‑1 base stats` : `${n} Pokémon from Gen 1`,
+    blurb: chart.subtitle || "Types, size, and battle stats.",
+    score: 82,
+    preferKind: "scatter",
+    category: "Culture",
+  };
+}
+
+function hook_met(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "department");
+  return {
+    hook: top ? `${top.value} holds the most of today's Met sample` : `${n} objects from the Met collection`,
+    blurb: chart.subtitle || "Departments, cultures, and public-domain art.",
+    score: 76,
+    preferKind: "bar",
+    category: "Culture",
+  };
+}
+
+function hook_openfood(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const top = topValue(sample, "nutriscore");
+  return {
+    hook: top ? `Nutri-Score ${top.value} is the most common grade` : `${n} packaged foods`,
+    blurb: chart.subtitle || "Brands, Nutri-Score, and nutrition per 100 g.",
+    score: 75,
+    preferKind: "bar",
+    category: "Health",
+  };
+}
+
+function hook_radio(n: number, sample: QueryResult, chart: ChartRecommendation): DiscoverHookResult {
+  const best = maxFiniteAt(sample, "votes");
+  return {
+    hook: best ? `${strAt(sample, best.row, "name")} leads the radio vote` : `${n} internet radio stations`,
+    blurb: chart.subtitle || "Countries, codecs, and popularity.",
+    score: 73,
+    preferKind: "bar",
+    category: "Culture",
+  };
+}
+
 function hookDefault(
   n: number,
   sample: QueryResult,
@@ -1753,6 +1819,12 @@ export const DISCOVER_HOOKS: { [K in DiscoverKind]: DiscoverHookFn } = {
   "bikeshare": hook_bikeshare,
   "bluesky": hook_bluesky,
   "bgp": hook_bgp,
+  "nobel": hook_nobel,
+  "trivia": hook_trivia,
+  "pokemon": hook_pokemon,
+  "met": hook_met,
+  "openfood": hook_openfood,
+  "radio": hook_radio,
   "wiki": hook_wiki,
 };
 

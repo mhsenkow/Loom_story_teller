@@ -253,6 +253,36 @@ export const SOURCE_SQL_SNIPPETS = {
     { name: "Noisiest origin networks", sql: "SELECT key AS origin, SUM(announcements) AS announced FROM bgp_updates WHERE dimension = 'origin_asn' GROUP BY 1 ORDER BY announced DESC LIMIT 20" },
     { name: "By prefix length", sql: "SELECT key AS prefix_length, SUM(announcements) AS announced, SUM(withdrawals) AS withdrawn FROM bgp_updates WHERE dimension = 'prefix_len' GROUP BY 1 ORDER BY announced DESC" },
   ],
+  nobel: [
+    { name: "By category", sql: "SELECT category, COUNT(*) AS prizes FROM nobel_laureates GROUP BY category ORDER BY prizes DESC" },
+    { name: "Prizes per year", sql: "SELECT award_year, COUNT(*) AS prizes FROM nobel_laureates GROUP BY award_year ORDER BY award_year" },
+    { name: "Top birth countries", sql: "SELECT birth_country, COUNT(*) AS laureates FROM nobel_laureates WHERE birth_country IS NOT NULL GROUP BY 1 ORDER BY laureates DESC LIMIT 20" },
+  ],
+  trivia: [
+    { name: "By category", sql: "SELECT category, COUNT(*) AS questions FROM trivia_questions GROUP BY category ORDER BY questions DESC" },
+    { name: "Difficulty mix", sql: "SELECT difficulty, question_type, COUNT(*) AS questions FROM trivia_questions GROUP BY 1, 2 ORDER BY questions DESC" },
+    { name: "Sample questions", sql: "SELECT category, difficulty, question, correct_answer FROM trivia_questions ORDER BY category LIMIT 25" },
+  ],
+  pokemon: [
+    { name: "Strongest overall", sql: "SELECT name, type1, type2, total, hp, attack, defense, speed FROM pokemon ORDER BY total DESC LIMIT 20" },
+    { name: "By type", sql: "SELECT type1, COUNT(*) AS n, ROUND(AVG(total), 1) AS avg_total FROM pokemon GROUP BY type1 ORDER BY n DESC" },
+    { name: "Attack vs defense", sql: "SELECT name, attack, defense, type1 FROM pokemon ORDER BY attack DESC" },
+  ],
+  met: [
+    { name: "By department", sql: "SELECT department, COUNT(*) AS objects, SUM(CASE WHEN is_public_domain THEN 1 ELSE 0 END) AS public_domain FROM met_highlights GROUP BY department ORDER BY objects DESC" },
+    { name: "Cultures", sql: "SELECT culture, COUNT(*) AS objects FROM met_highlights WHERE culture IS NOT NULL AND culture <> '' GROUP BY culture ORDER BY objects DESC LIMIT 20" },
+    { name: "Public domain works", sql: "SELECT title, artist, department, object_date FROM met_highlights WHERE is_public_domain ORDER BY title LIMIT 30" },
+  ],
+  openfood: [
+    { name: "Nutri-Score mix", sql: "SELECT nutriscore, COUNT(*) AS products FROM open_food_facts WHERE nutriscore IS NOT NULL GROUP BY nutriscore ORDER BY nutriscore" },
+    { name: "Highest sugar", sql: "SELECT product_name, brands, sugars_100g, nutriscore FROM open_food_facts WHERE sugars_100g IS NOT NULL ORDER BY sugars_100g DESC LIMIT 20" },
+    { name: "By brand", sql: "SELECT brands, COUNT(*) AS products, ROUND(AVG(energy_kcal_100g), 1) AS avg_kcal FROM open_food_facts WHERE brands IS NOT NULL GROUP BY brands ORDER BY products DESC LIMIT 20" },
+  ],
+  radio: [
+    { name: "Top stations", sql: "SELECT name, country, codec, bitrate, votes, click_count FROM radio_stations ORDER BY votes DESC LIMIT 25" },
+    { name: "By country", sql: "SELECT country, COUNT(*) AS stations, SUM(votes) AS votes FROM radio_stations GROUP BY country ORDER BY stations DESC LIMIT 20" },
+    { name: "Codecs", sql: "SELECT codec, COUNT(*) AS stations, ROUND(AVG(bitrate), 0) AS avg_bitrate FROM radio_stations GROUP BY codec ORDER BY stations DESC" },
+  ],
 } satisfies Record<SourceKind, { name: string; sql: string }[]>;
 
 /** SQL queries that work well with the wiki_stream table for the Query view. */

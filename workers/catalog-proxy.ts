@@ -91,8 +91,14 @@ import {
   lobbyingRows,
   nycInspectionRows,
   nycParkingRows,
+  metRows,
+  nobelRows,
+  openfoodRows,
+  pokemonRows,
   powerballRows,
+  radioRows,
   satelliteRows,
+  triviaRows,
   vehicleRecallRows,
 } from "./extraSources";
 import { assertHttpUrlAllowed, fetchWithSsrfGuard } from "../src/lib/ssrfGuard";
@@ -1221,6 +1227,97 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     );
     return JSON.stringify(bgpRows(msgs.messages, msgs.secs, Date.now()));
   },
+
+  nobel: async () =>
+    JSON.stringify(
+      nobelRows(await upstreamJson("Nobel Prize", "https://api.nobelprize.org/2.1/laureates?limit=1500&format=json", 25_000)),
+    ),
+
+  trivia: async () => {
+    const settled = await settleLimited(
+      Array.from({ length: 10 }, () => () =>
+        upstreamJson("Open Trivia DB", "https://opentdb.com/api.php?amount=50", 15_000),
+      ),
+      4,
+    );
+    const bodies = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (!bodies.length) throw new UpstreamError("Open Trivia DB: no pages returned");
+    return JSON.stringify(triviaRows(bodies));
+  },
+
+  pokemon: async () => {
+    const list = await upstreamJson<{ results?: { url?: string }[] }>(
+      "PokéAPI",
+      "https://pokeapi.co/api/v2/pokemon?limit=151",
+      20_000,
+    );
+    const urls = (Array.isArray(list.results) ? list.results : [])
+      .map((r) => (typeof r?.url === "string" ? r.url : null))
+      .filter((u): u is string => !!u)
+      .slice(0, 151);
+    const settled = await settleLimited(
+      urls.map((url) => () => upstreamJson("PokéAPI", url, 15_000)),
+      12,
+    );
+    const details = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (!details.length) throw new UpstreamError("PokéAPI: no Pokémon details returned");
+    return JSON.stringify(pokemonRows(details));
+  },
+
+  met: async () => {
+    // The Met retired /search (410 Gone for every query); department listings and
+    // object lookups still work. Sample evenly across major departments, then lead
+    // with the museum's own highlights.
+    const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
+    // European paintings, modern, Asian, Egyptian, Greek & Roman, medieval.
+    // The Met's bot shield 403s bursts, so keep the fan-out small and slow.
+    const departments = [11, 21, 6, 10, 13, 17];
+    const lists = await settleLimited(
+      departments.map((id) => () => upstreamJson<{ objectIDs?: number[] }>("Met Museum", `${MET}/objects?departmentIds=${id}`, 20_000)),
+      1,
+    );
+    const ids: number[] = [];
+    for (const r of lists) {
+      if (r.status !== "fulfilled") continue;
+      const all = Array.isArray(r.value.objectIDs) ? r.value.objectIDs : [];
+      const take = 20;
+      const step = Math.max(1, Math.floor(all.length / take));
+      for (let i = 0; i < all.length && ids.length < departments.length * take; i += step) {
+        if (i / step >= take) break;
+        ids.push(all[i]!);
+      }
+    }
+    if (!ids.length) throw new UpstreamError("Met Museum: no object IDs");
+    const settled = await settleLimited(
+      ids.map((id) => () => upstreamJson("Met Museum", `${MET}/objects/${id}`, 15_000)),
+      4,
+    );
+    const details = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (!details.length) throw new UpstreamError("Met Museum: no object details returned");
+    const highlight = (d: unknown) => ((d as { isHighlight?: boolean })?.isHighlight ? 0 : 1);
+    return JSON.stringify(metRows([...details].sort((a, b) => highlight(a) - highlight(b))));
+  },
+
+  openfood: async () => {
+    const settled = await settleLimited(
+      Array.from({ length: 10 }, (_, i) => () =>
+        upstreamJson(
+          "Open Food Facts",
+          `https://world.openfoodfacts.org/cgi/search.pl?action=process&json=true&page_size=100&page=${i + 1}&sort_by=unique_scans_n&fields=code,product_name,product_name_en,brands,nutriscore_grade,countries_tags,categories_tags,nutriments`,
+          20_000,
+        ),
+      ),
+      3,
+    );
+    const bodies = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (!bodies.length) throw new UpstreamError("Open Food Facts: no pages returned");
+    return JSON.stringify(openfoodRows(bodies));
+  },
+
+  radio: async () =>
+    JSON.stringify(
+      radioRows(await upstreamJson("radio-browser", "https://de1.api.radio-browser.info/json/stations/topvote/500", 20_000)),
+    ),
 };
 
 /** Fresh-for seconds per kind (roughly the upstream's own update cadence). */
@@ -1280,6 +1377,12 @@ export const SOURCE_TTL_SECS: Record<string, number> = {
   bikeshare: 120,
   bluesky: 60,
   bgp: 60,
+  nobel: 21_600,
+  trivia: 21_600,
+  pokemon: 86_400,
+  met: 86_400,
+  openfood: 21_600,
+  radio: 86_400,
 };
 
 /** How long past its TTL a cached copy may still be served when the upstream fails. */

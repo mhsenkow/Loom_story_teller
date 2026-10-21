@@ -773,6 +773,12 @@ const SOURCE_PARSERS: Record<SourceKind, SourceParser> = {
   bikeshare: parseColumnar("bikeshare"),
   bluesky: parseColumnar("bluesky"),
   bgp: parseColumnar("bgp"),
+  nobel: parseColumnar("nobel"),
+  trivia: parseColumnar("trivia"),
+  pokemon: parseColumnar("pokemon"),
+  met: parseColumnar("met"),
+  openfood: parseColumnar("openfood"),
+  radio: parseColumnar("radio"),
 };
 
 /** Parse a `/api/source/<kind>` body into rows in registry column order. */

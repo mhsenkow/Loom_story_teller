@@ -1137,5 +1137,62 @@ export function recommendSourceStory(
       ]);
   }
 
+  if (kind === "nobel") {
+    return finish("Nobel Prize laureates", [
+        mk("bar", "Prizes by category", "How many awards in each field", 96, "category", null, null, "count"),
+        mk("line", "Laureates over time", "Awards each year since 1901", 92, "award_year", null, null, "count"),
+        mk("bar", "Birth countries", "Where laureates were born", 88, "birth_country", null, null, "count", null, { topN: 15 }),
+        mk("bar", "By gender", "Prize shares by gender", 82, "gender", null, null, "count"),
+      ]);
+  }
+
+  if (kind === "trivia") {
+    return finish("Open Trivia questions", [
+        mk("bar", "By category", "How many questions in each topic", 96, "category", null, null, "count", null, { topN: 15 }),
+        mk("bar", "Difficulty mix", "Easy vs medium vs hard", 92, "difficulty", null, null, "count"),
+        mk("bar", "Question types", "True/false vs multiple choice", 88, "question_type", null, null, "count"),
+        mk("histogram", "Wrong answers offered", "How many incorrect options each question has", 80, "incorrect_count", null, null),
+      ]);
+  }
+
+  if (kind === "pokemon") {
+    return finish("Pokémon Gen 1", [
+        mk("scatter", "Attack vs Defense", "Offensive vs tanky", 96, "attack", "defense", "type1"),
+        mk("bar", "Types", "Primary type counts", 94, "type1", null, null, "count"),
+        mk("histogram", "Total base stats", "How strong is each Pokémon overall", 90, "total", null, null),
+        mk("scatter", "Height vs weight", "Size of the original 151", 84, "height_m", "weight_kg", "type1"),
+        mk("bar", "Fastest", "Top Speed stats", 80, "name", "speed", null, "max", null, { topN: 15 }),
+      ]);
+  }
+
+  if (kind === "met") {
+    return finish("Met Museum collection", [
+        mk("bar", "By department", "Where highlights live", 96, "department", null, null, "count", null, { topN: 15 }),
+        mk("bar", "Public domain share", "Open images vs rights-restricted", 92, "is_public_domain", null, null, "count"),
+        mk("bar", "Cultures", "Object cultures in the highlight set", 88, "culture", null, null, "count", null, { topN: 15 }),
+        mk("histogram", "Object begin years", "When works were made", 82, "object_begin_year", null, null),
+      ]);
+  }
+
+  if (kind === "openfood") {
+    return finish("Open Food Facts", [
+        mk("bar", "Nutri-Score", "How many products at each grade", 96, "nutriscore", null, null, "count"),
+        mk("scatter", "Fat vs sugars", "Per 100 g", 92, "fat_100g", "sugars_100g", "nutriscore"),
+        mk("bar", "Top brands", "Most common brands in the slice", 88, "brands", null, null, "count", null, { topN: 15 }),
+        mk("histogram", "Calories", "Energy per 100 g", 84, "energy_kcal_100g", null, null),
+        mk("box", "Protein by Nutri-Score", "Protein grams at each grade", 80, "nutriscore", "proteins_100g", null),
+      ]);
+  }
+
+  if (kind === "radio") {
+    return finish("Radio stations", [
+        mk("bar", "By country", "Where top stations broadcast from", 96, "country", null, null, "count", null, { topN: 15 }),
+        mk("bar", "Codecs", "Stream formats", 92, "codec", null, null, "count"),
+        mk("scatter", "Votes vs clicks", "Popularity signals", 88, "votes", "click_count", "codec"),
+        mk("histogram", "Bitrate", "Stream quality in kbps", 84, "bitrate", null, null),
+        mk("bar", "Top stations", "Most voted stations", 80, "name", "votes", null, "max", null, { topN: 15 }),
+      ]);
+  }
+
   return finish(`${kind} data`, []);
 }

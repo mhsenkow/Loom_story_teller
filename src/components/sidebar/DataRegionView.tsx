@@ -560,9 +560,10 @@ export function DataRegionView({
         <section className="space-y-2.5" style={{ order: isWeb ? 1 : 6 }}>
           <SectionHeading
             title="Live feeds & open packs"
-            lede="Search or filter, ♥ what you like. Connect a feed, let it fill, then Explore into Chart."
+            lede="Connect a feed. Pick it apart. Digest for leads; Directory for the full catalog."
           />
           <FeedBrowser
+            expanded={expanded}
             renderPack={(pack) => (
               <div
                 className="relative border border-loom-border rounded-lg p-2.5 bg-loom-surface/50 space-y-1.5"

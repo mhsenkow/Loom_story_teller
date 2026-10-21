@@ -1835,6 +1835,42 @@ fn extra_us_and_city_parse() {
     assert_eq!(bikes[0][0], s("Divvy (Chicago)"));
     assert_eq!(bikes[0].len(), spec("bikeshare").columns.len());
 
+    let nobel = nobel_rows(&fixture("nobel.json")).unwrap();
+    assert_eq!(nobel.len(), 3);
+    assert_eq!(nobel[0][1], s("Wilhelm Conrad Röntgen"));
+    assert_eq!(nobel[0][5], Cell::I64(1901));
+    assert_eq!(nobel[0][6], s("Physics"));
+
+    let trivia = trivia_rows(&[fixture("trivia.json")]).unwrap();
+    assert_eq!(trivia[0][0], s("Science: Computers"));
+    assert_eq!(trivia[0][5], Cell::I64(3));
+    assert!(matches!(&trivia[1][3], Cell::Str(q) if q.contains("2001: A Space Odyssey")));
+
+    let food = openfood_rows(&[fixture("openfood.json")]).unwrap();
+    assert_eq!(food[0][1], s("Nutella"));
+    assert_eq!(food[0][3], s("E"));
+    assert_eq!(food[0][6], Cell::F64(539.0));
+
+    let radio = radio_rows(&fixture("radio.json")).unwrap();
+    assert_eq!(radio[0][1], s("SomaFM Groove Salad"));
+    assert_eq!(radio[0][7], Cell::I64(4200));
+
+    let poke_body = serde_json::json!({
+        "columns": ["id", "name", "type1", "type2", "height_m", "weight_kg", "hp", "attack", "defense", "sp_attack", "sp_defense", "speed", "total"],
+        "rows": [[1, "bulbasaur", "grass", "poison", 0.7, 6.9, 45, 49, 49, 65, 65, 45, 318]]
+    });
+    let poke = columnar_rows(&poke_body, spec("pokemon")).unwrap();
+    assert_eq!(poke[0][1], s("bulbasaur"));
+    assert_eq!(poke[0][12], Cell::I64(318));
+
+    let met_body = serde_json::json!({
+        "columns": ["object_id", "title", "artist", "department", "culture", "object_date", "object_begin_year", "medium", "is_public_domain", "is_highlight"],
+        "rows": [[436535, "Wheat Field with Cypresses", "Vincent van Gogh", "European Paintings", null, "1889", 1889, "Oil on canvas", true, true]]
+    });
+    let met = columnar_rows(&met_body, spec("met")).unwrap();
+    assert_eq!(met[0][0], Cell::I64(436535));
+    assert_eq!(met[0][8], Cell::Bool(true));
+
     let db = test_db();
     for (kind, rows) in [
         ("lobbying", &lda),
@@ -1846,6 +1882,12 @@ fn extra_us_and_city_parse() {
         ("powerball", &pb),
         ("fed_spending", &fed),
         ("bikeshare", &bikes),
+        ("nobel", &nobel),
+        ("trivia", &trivia),
+        ("openfood", &food),
+        ("radio", &radio),
+        ("pokemon", &poke),
+        ("met", &met),
     ] {
         assert_eq!(
             write_rows(&db, spec(kind), rows).unwrap() as usize,
