@@ -32,7 +32,7 @@ export type SourceOutcome =
   | { ok: false; error: string };
 
 export const WRITE_EVERY_MS = 30 * 60_000;
-/** No success for this long (and repeated failures) → hide the feed ("resting"). */
+/** Failing continuously for this long (repeated failures) → hide the feed ("resting"). */
 export const RESTING_AFTER_MS = 3 * 3_600_000;
 const KEY_PREFIX = "srch:";
 
@@ -65,8 +65,10 @@ export function nextSourceHealth(
 export function classifySourceHealth(rec: SourceHealthRecord | null, now: number): SourceHealthState {
   if (!rec) return "unknown";
   if (rec.streak === 0) return "ok";
-  // Two+ failures in a row with no success in the last few hours (or ever) → resting.
-  const longDown = !rec.lastOk || now - rec.lastOk >= RESTING_AFTER_MS;
+  // Two+ failures in a row and the current failing run began hours ago → resting.
+  // Measured from failingSince, not lastOk: long-TTL feeds succeed rarely by design.
+  const since = rec.failingSince ?? rec.lastFail ?? now;
+  const longDown = now - since >= RESTING_AFTER_MS;
   return rec.streak >= 2 && longDown ? "resting" : "degraded";
 }
 

@@ -50,6 +50,11 @@ describe("workerCatalogPolicy", () => {
     expect(sourcePayloadCacheable("firms", "[]")).toBe(false);
   });
 
+  it("rejects non-JSON upstream error pages for cache write", () => {
+    const page = "<!doctype html><html><head><title>Down for maintenance</title></head><body>maintenance page, back soon</body></html>";
+    expect(sourcePayloadCacheable("usgs", page)).toBe(false);
+  });
+
   it("counts rows in columnar transforms (FIRMS / GDACS / ADSB)", () => {
     const columnar = (rows: unknown[][]) => JSON.stringify({ columns: ["a", "b"], rows });
     for (const kind of ["firms", "gdacs", "opensky"]) {

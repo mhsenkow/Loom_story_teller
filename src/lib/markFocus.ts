@@ -92,6 +92,18 @@ export function sameMark(a: MarkRef | null | undefined, b: MarkRef | null | unde
   return a.fields.every(([k, v], i) => b.fields[i]![0] === k && b.fields[i]![1] === v);
 }
 
+/** Where a press began; `brush` marks a press that started a brush/lasso/crosshair gesture. */
+export interface PressStart {
+  x: number;
+  y: number;
+  brush: boolean;
+}
+
+/** True when the click ending this press should not pin: no recorded press, a brush, or movement past 4px. */
+export function pressWasDrag(start: PressStart | null, x: number, y: number): boolean {
+  return !start || start.brush || Math.hypot(x - start.x, y - start.y) > 4;
+}
+
 /** Re-find a pinned mark among freshly painted hits (topmost wins, like picking). */
 export function findHitForMark(
   hits: HitTarget[],

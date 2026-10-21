@@ -268,6 +268,31 @@ describe("handleSource", () => {
     expect(cc).toContain("stale-while-revalidate");
     expect(res.headers.get("X-Loom-Cache")).toBe("MISS");
   });
+
+  it("registers the cache write under waitUntil so a disconnect can't cancel it", async () => {
+    const { handleSource } = await importHandlers();
+    const geoJson = JSON.stringify({ type: "FeatureCollection", features: [{ type: "Feature", properties: { mag: 1 } }] });
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(geoJson, { status: 200 }));
+    const pending: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p) };
+    const res = await handleSource("usgs", makeRequest("https://loom.ibm.io/api/source/usgs"), ctx);
+    expect(res.status).toBe(200);
+    await Promise.all(pending);
+    expect(mockCachePut).toHaveBeenCalledTimes(1);
+  });
+
+  it("never caches a non-JSON upstream error page", async () => {
+    const { handleSource } = await importHandlers();
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      new Response("<!doctype html><html><body>Down for maintenance, back soon</body></html>", { status: 200 }),
+    );
+    const pending: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p) };
+    const res = await handleSource("usgs", makeRequest("https://loom.ibm.io/api/source/usgs"), ctx);
+    expect(res.status).not.toBe(200);
+    await Promise.all(pending);
+    expect(mockCachePut).not.toHaveBeenCalled();
+  });
 });
 
 // ===================================================================

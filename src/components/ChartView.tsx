@@ -26,13 +26,13 @@ import { buildChartA11ySummary } from "@/lib/chartA11ySummary";
 import { chartEntranceKey, markChartEntrancePlayed, shouldPlayChartEntrance } from "@/lib/chartEntranceOnce";
 import { dataTableRowsFromHits } from "@/lib/chartDataTableFromHits";
 import { keyboardNavigableHits, nextMarkIndex } from "@/lib/chartMarkKeyboard";
-import { calloutLines, drawMarkFocus, drawPinnedCallout, findHitForMark, markFocusStyle, markRefForHit, markRefForRow, sameMark, type CalloutBox, type MarkRef } from "@/lib/markFocus";
+import { calloutLines, drawMarkFocus, drawPinnedCallout, findHitForMark, markFocusStyle, markRefForHit, markRefForRow, pressWasDrag, sameMark, type CalloutBox, type PressStart, type MarkRef } from "@/lib/markFocus";
 import { analysisScope, analysisUnavailable } from "@/lib/timeSeriesAnalysis";
 import { smartOverlayPalette } from "@/lib/chartSmartOverlayStyle";
 import { chartStageLiveMessage, chartStageStatus } from "@/lib/chartStageStatus";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { describeChartColorStatus, discreteSeriesColors, getThemeUiColors, hexToRgb01, resolveChartColors } from "@/lib/chartPalettes";
-import { useIsMobile, useMobileLiveEdit, useShellMode } from "@/lib/useMediaQuery";
+import { useIsMobile, useMediaQuery, useMobileLiveEdit, useShellMode } from "@/lib/useMediaQuery";
 import { aspectLabel, fitChartFrame } from "@/lib/chartViewport";
 import { automaticPlotBounds, chartSpacePadding, chartStageGutter } from "@/lib/chartSpace";
 import { type ChartRecommendation, createChartRec, getBestSuggestion, getRecommendationReason, getTopSuggestions, recommend, recommendStorySequence, tryBuildRandomChartRec, type YAggregateOption } from "@/lib/recommendations";
@@ -255,6 +255,8 @@ export function ChartView() {
   const reducedMotion = useReducedMotion();
   const effectiveTheme = useChartTheme();
   const isMobile = useIsMobile();
+  /** Touch tablets (iPad) can't hover-click to pin, so Auto readouts use the glass sheet there too. */
+  const coarsePointer = useMediaQuery("(pointer: coarse)");
   const panelOpen = useLoomStore((s) => s.panelOpen);
   const readoutsObscured = isMobile && panelOpen;
   const [arranging, setArranging] = useState(false);
@@ -804,6 +806,8 @@ export function ChartView() {
   const [sceneOrbit, setSceneOrbit] = useState({ yaw: 0.55, pitch: 0.35, zoom: 1 });
   const sceneOrbitDragRef = useRef<{ x: number; y: number; yaw: number; pitch: number } | null>(null);
   const scenePinchRef = useRef<{ dist: number; zoom: number } | null>(null);
+  /** Where the current press began; a click that ends a drag/brush/orbit must not pin. */
+  const pointerDownAtRef = useRef<PressStart | null>(null);
   const hasSmartOverlays =
     smartResults &&
     ((smartResults.anomaly?.rowIndices?.length ?? 0) > 0 ||
@@ -1086,6 +1090,8 @@ export function ChartView() {
   const chartTooltipRef = useRef(chartTooltip);
   chartTooltipRef.current = chartTooltip;
   const [scatterView, setScatterView] = useState({ scale: 1, panX: 0, panY: 0 });
+  /** Zoomed/panned scatter shows "Reset view" bottom-right; the pinned chip lifts above it. */
+  const scatterViewMoved = activeChart?.kind === "scatter" && (scatterView.scale !== 1 || scatterView.panX !== 0 || scatterView.panY !== 0);
   const [brushRect, setBrushRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const brushStartRef = useRef<{ x: number; y: number } | null>(null);
   const brushRectRef = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
@@ -1870,7 +1876,7 @@ export function ChartView() {
 
   const tooltipPresentation = resolveTooltipPresentation(
     chartVisualOverrides.tooltipMode,
-    isMobile,
+    isMobile || coarsePointer,
   );
   /** Glass / dock stay put on touch — finger leave shouldn't wipe the readout. */
   const stickyTooltip = tooltipPresentation === "glass" || tooltipPresentation === "dock";
@@ -1943,6 +1949,22 @@ export function ChartView() {
       togglePinnedTooltip({ chartId: activeChart.id, ref, rowIndex: tip.rowIndex, row: tip.row, columns: tip.columns });
     },
     [activeChart, markIdentity, togglePinnedTooltip],
+  );
+  /** Value identity of the hovered mark — compared by value, since scatter hits are rebuilt per lookup. */
+  const hoverRef = useMemo(() => {
+    if (!hoverMark || !activeChart) return null;
+    if (activeChart.kind === "scatter") {
+      const st = useLoomStore.getState().sampleRows;
+      return st && hoverMark.rowIndex != null ? markRefForRow(hoverMark.rowIndex, st.columns, st.rows, markIdentity) : null;
+    }
+    const sr = sampleRowsRef.current;
+    return sr ? markRefForHit(hoverMark, sr.columns, sr.rows, markIdentity) : null;
+  }, [hoverMark, activeChart, markIdentity]);
+  /** This chart's pins resolved to on-screen hits; re-resolved only when marks repaint, not per mouse move. */
+  const resolvedPins = useMemo(
+    () => (activeChart ? pinnedTooltips.filter((t) => t.chartId === activeChart.id).map((p) => ({ p, hit: resolveMarkHit(p.ref) })) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hitsVersion/refreshKey/size signal repaints of the ref-held hits
+    [activeChart, pinnedTooltips, hitsVersion, refreshKey, containerSize.w, containerSize.h, resolveMarkHit],
   );
 
   const handleScatterPointer = useCallback(
@@ -2185,8 +2207,7 @@ export function ChartView() {
     const frame = { w: layer.width / dpr, h: layer.height / dpr };
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const ink = { accent: themeUi.accent, bg: themeUi.bg, text: themeUi.text, muted: themeUi.label, border: themeUi.border };
-    const pins = pinnedTooltips.filter((t) => t.chartId === activeChart.id);
-    const resolved = pins.map((p) => ({ p, hit: resolveMarkHit(p.ref) }));
+    const resolved = resolvedPins;
     for (const { hit } of resolved) if (hit) drawMarkFocus(ctx, hit, markFocusStyle(activeChart.kind, hit), ink, 1);
     if (hoverMark && !resolved.some((r) => r.hit === hoverMark || (r.hit && r.hit.rowIndex != null && r.hit.rowIndex === hoverMark.rowIndex && r.hit.shape === hoverMark.shape))) {
       drawMarkFocus(ctx, hoverMark, markFocusStyle(activeChart.kind, hoverMark), ink, keyboardMarkIndex >= 0 ? 1 : 0.7);
@@ -2203,7 +2224,7 @@ export function ChartView() {
       if (box) taken.push(box);
     });
     pinnedBoxesRef.current = taken;
-  }, [activeChart, canvasSized, pinnedTooltips, hoverMark, keyboardMarkIndex, hitsVersion, refreshKey, containerSize.w, containerSize.h, themeUi, chartFontFamily, chartRenderOpts.axisFontSize, resolveMarkHit]);
+  }, [activeChart, canvasSized, pinnedTooltips, hoverMark, keyboardMarkIndex, hitsVersion, refreshKey, containerSize.w, containerSize.h, themeUi, chartFontFamily, chartRenderOpts.axisFontSize, resolvedPins]);
 
   /** Arrow keys walk the marks (focus ring + readout); Enter / Space pins; Escape clears. */
   const handleMarkKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
@@ -2231,7 +2252,10 @@ export function ChartView() {
     } else if ((e.key === "Enter" || e.key === " ") && keyboardMarkIndex >= 0 && chartTooltip) {
       e.preventDefault();
       pinMark(hoverMark, chartTooltip);
-    } else if (e.key === "Escape") {
+    } else if (e.key === "Escape" && (keyboardMarkIndex >= 0 || hoverMark || chartTooltip)) {
+      // Only clear the mark — keep the brush and share-ready mode; a second Esc reaches them.
+      e.preventDefault();
+      e.stopPropagation();
       setKeyboardMarkIndex(-1);
       setHoverMark(null);
       setChartTooltip(null);
@@ -2255,6 +2279,12 @@ export function ChartView() {
   const pinchRef = useRef<{ dist: number; scale: number; midX: number; midY: number } | null>(null);
   /** Last pointer type on the scatter overlay — a finger tap shows a tooltip but never pins one. */
   const lastPointerTypeRef = useRef<string>("mouse");
+  /** Consumes the recorded press: true when this click ends a pan, brush or orbit drag. */
+  const wasDrag = (e: React.MouseEvent) => {
+    const start = pointerDownAtRef.current;
+    pointerDownAtRef.current = null;
+    return pressWasDrag(start, e.clientX, e.clientY);
+  };
 
   const touchDistance = (a: { clientX: number; clientY: number }, b: { clientX: number; clientY: number }) =>
     Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
@@ -2374,6 +2404,7 @@ export function ChartView() {
   const handleScatterMouseDown = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!activeChart || activeChart.kind !== "scatter" || e.button !== 0) return;
+      pointerDownAtRef.current = { x: e.clientX, y: e.clientY, brush: e.shiftKey || chartInteractionMode !== "pan" };
       if (chartInteractionMode === "lasso" || chartInteractionMode === "select" || e.shiftKey) {
         brushStartRef.current = { x: e.clientX, y: e.clientY };
         if (chartInteractionMode === "lasso") {
@@ -4593,8 +4624,8 @@ export function ChartView() {
               onPointerDown={(e) => {
                 lastPointerTypeRef.current = e.pointerType;
               }}
-              onClick={() => {
-                if (lastPointerTypeRef.current === "touch") return;
+              onClick={(e) => {
+                if (lastPointerTypeRef.current === "touch" || wasDrag(e)) return;
                 if (chartInteractionMode === "pan" && scatterTooltip && activeChart) {
                   pinMark(hoverMark, scatterTooltip);
                 }
@@ -4610,11 +4641,12 @@ export function ChartView() {
               onPointerMove={(e) => handleCanvas2DPointerMove(e, "move")}
               onPointerDown={(e) => {
                 lastPointerTypeRef.current = e.pointerType;
+                pointerDownAtRef.current = { x: e.clientX, y: e.clientY, brush: false };
                 handleCanvas2DPointerMove(e, "down");
               }}
-              onClick={() => {
+              onClick={(e) => {
                 // Click pins the hovered mark (touch pins from the readout's Pin button).
-                if (lastPointerTypeRef.current === "touch" || sceneOrbitDragRef.current) return;
+                if (lastPointerTypeRef.current === "touch" || wasDrag(e)) return;
                 pinMark(hoverMark, chartTooltip);
               }}
               onPointerLeave={(e) => {
@@ -4730,7 +4762,7 @@ export function ChartView() {
           )}
           {/* Pinned readouts are drawn on the focus layer; this chip clears them. */}
           {activeChart && pinnedTooltips.some((t) => t.chartId === activeChart.id) && (
-            <div className="absolute bottom-2 right-2 z-[6] flex items-center gap-1.5 text-2xs text-loom-text bg-loom-surface/90 border border-loom-border rounded-full pl-2.5 pr-1 py-0.5">
+            <div className={`absolute ${scatterViewMoved ? "bottom-10" : "bottom-2"} right-2 z-[6] flex items-center gap-1.5 text-2xs text-loom-text bg-loom-surface/90 border border-loom-border rounded-full pl-2.5 pr-1 py-0.5`}>
               <span>
                 {pinnedTooltips.filter((t) => t.chartId === activeChart.id).length} pinned
                 <span className="text-loom-muted"> · in exports &amp; links</span>
@@ -4766,7 +4798,7 @@ export function ChartView() {
               </div>
             );
           })()}
-          {activeChart?.kind === "scatter" && (scatterView.scale !== 1 || scatterView.panX !== 0 || scatterView.panY !== 0) && (
+          {scatterViewMoved && (
             <button
               type="button"
               onClick={() => setScatterView({ scale: 1, panX: 0, panY: 0 })}
@@ -4894,7 +4926,7 @@ export function ChartView() {
             presentation={tooltipPresentation}
             link={tooltipLink}
             onPin={hoverMark ? () => pinMark(hoverMark, (scatterTooltip ?? chartTooltip)!) : undefined}
-            markPinned={!!hoverMark && pinnedTooltips.some((t) => t.chartId === activeChart?.id && resolveMarkHit(t.ref) === hoverMark)}
+            markPinned={!!hoverRef && pinnedTooltips.some((t) => t.chartId === activeChart?.id && sameMark(t.ref, hoverRef))}
             stageRect={containerRef.current?.getBoundingClientRect() ?? null}
             onDismiss={
               stickyTooltip

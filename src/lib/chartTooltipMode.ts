@@ -16,7 +16,7 @@ export const CHART_TOOLTIP_MODES: {
   label: string;
   title: string;
 }[] = [
-  { value: "auto", label: "Auto", title: "Hover on desktop · glass sheet on phone" },
+  { value: "auto", label: "Auto", title: "Hover on desktop · glass sheet on touch" },
   { value: "hover", label: "Hover", title: "Float near the pointer" },
   { value: "glass", label: "Glass", title: "Frosted card over the chart" },
   { value: "dock", label: "Dock", title: "Fixed strip under the chart" },

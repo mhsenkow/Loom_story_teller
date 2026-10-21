@@ -32,14 +32,17 @@ describe("feed health", () => {
     expect(e.record.error).toBeUndefined();
   });
 
-  it("is degraded while a recent success exists, resting once down for hours", () => {
+  it("is degraded while failures are recent, resting once failing for hours", () => {
     const now = 100 * H;
     expect(classifySourceHealth(null, now)).toBe("unknown");
     expect(classifySourceHealth({ streak: 0, written: now }, now)).toBe("ok");
     expect(classifySourceHealth({ streak: 5, lastOk: now - H, written: now }, now)).toBe("degraded");
     expect(classifySourceHealth({ streak: 1, lastOk: now - RESTING_AFTER_MS, written: now }, now)).toBe("degraded");
-    expect(classifySourceHealth({ streak: 2, lastOk: now - RESTING_AFTER_MS, written: now }, now)).toBe("resting");
-    expect(classifySourceHealth({ streak: 2, written: now }, now)).toBe("resting");
+    expect(classifySourceHealth({ streak: 2, lastOk: now - RESTING_AFTER_MS, failingSince: now - RESTING_AFTER_MS, written: now }, now)).toBe("resting");
+    // A long-TTL feed whose last success is old but whose failures began recently is only degraded.
+    expect(classifySourceHealth({ streak: 2, lastOk: now - 10 * H, failingSince: now - H, written: now }, now)).toBe("degraded");
+    expect(classifySourceHealth({ streak: 2, written: now }, now)).toBe("degraded");
+    expect(classifySourceHealth({ streak: 2, failingSince: now - RESTING_AFTER_MS, written: now }, now)).toBe("resting");
   });
 
   it("round-trips through KV and never throws on storage errors", async () => {

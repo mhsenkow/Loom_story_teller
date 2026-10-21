@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { HitTarget } from "../chartTooltip";
-import { calloutLines, findHitForMark, markAnchor, markFocusStyle, markRefForHit, markRefForRow, placeCallout, sameMark } from "../markFocus";
+import { calloutLines, findHitForMark, markAnchor, markFocusStyle, markRefForHit, markRefForRow, placeCallout, pressWasDrag, sameMark } from "../markFocus";
 import { keyboardNavigableHits } from "../chartMarkKeyboard";
 
 const columns = ["city", "temp", "region"];
@@ -25,6 +25,13 @@ describe("markFocus", () => {
     const bin: HitTarget = { shape: "rect", x: 0, y: 0, w: 1, h: 1, match: [], summary: { columns: ["bin"], row: ["10–20"] } };
     expect(markRefForHit(bin, columns, rows, identity)).toEqual({ fields: [["#bin", "10–20"]] });
     expect(sameMark({ fields: [["a", "1"]] }, { fields: [["a", "2"]] })).toBe(false);
+  });
+
+  it("only a still press counts as a click that may pin", () => {
+    expect(pressWasDrag(null, 10, 10)).toBe(true);
+    expect(pressWasDrag({ x: 10, y: 10, brush: false }, 12, 13)).toBe(false);
+    expect(pressWasDrag({ x: 10, y: 10, brush: false }, 30, 10)).toBe(true);
+    expect(pressWasDrag({ x: 10, y: 10, brush: true }, 10, 10)).toBe(true);
   });
 
   it("themes focus to how each chart draws its marks", () => {

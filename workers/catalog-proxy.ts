@@ -577,8 +577,17 @@ async function cachedUpstreamJson<T = unknown>(
   const key = SUBCACHE_ORIGIN + encodeURIComponent(url);
   const cache = caches.default;
   const hit = await cache.match(key).catch(() => undefined);
-  if (hit) return (await hit.json()) as T;
+  if (hit) {
+    try {
+      return (await hit.json()) as T;
+    } catch {
+      // A bad body slipped into the cache — drop it and refetch.
+      ctx.waitUntil(cache.delete(key).catch(() => {}));
+    }
+  }
   const text = await upstreamText(label, url, timeoutMs);
+  // Parse before caching so an error page never sticks for ttlSecs.
+  const data = JSON.parse(text) as T;
   ctx.waitUntil(
     cache
       .put(key, new Response(text, {
@@ -586,7 +595,7 @@ async function cachedUpstreamJson<T = unknown>(
       }))
       .catch(() => {}),
   );
-  return JSON.parse(text) as T;
+  return data;
 }
 
 /** One USAFacts Data gateway tool call (keyless JSON-RPC POST) → the agency payload. */
@@ -1529,33 +1538,47 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
     return sourceResponse(cached.body, "STALE-REVALIDATING", cachedAt, request, ttl, stale);
   }
 
+  // The browser gives up after ~12s, and a disconnect cancels work not under waitUntil —
+  // so register the fetch, cache write and outcome before awaiting, letting slow feeds
+  // (trivia, arxiv) finish and warm the cache even when this visitor has left.
+  const job = Promise.resolve().then(() => fetcher(ctx)).then((text) => ({ text, ok: sourcePayloadCacheable(kind, text), fetchedAt: Date.now() }));
+  ctx.waitUntil(
+    job.then(
+      async ({ text, ok, fetchedAt }) => {
+        if (!ok) {
+          await noteSourceOutcome(kv, kind, { ok: false, error: "Upstream returned empty payload" });
+          return;
+        }
+        await Promise.all([
+          cache
+            .put(key, new Response(text, {
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": `public, max-age=${ttl + stale}`,
+                "X-Loom-Fetched-Ms": String(fetchedAt),
+              },
+            }))
+            .catch(() => {}),
+          noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) }),
+        ]);
+      },
+      (e: unknown) => noteSourceOutcome(kv, kind, { ok: false, error: e instanceof Error ? e.message : String(e) }),
+    ),
+  );
   try {
-    const text = await fetcher(ctx);
-    if (!sourcePayloadCacheable(kind, text)) {
+    const { text, ok, fetchedAt } = await job;
+    if (!ok) {
       if (cached && ageMs <= (ttl + stale) * 1000) {
         logSourceRequest({ kind, cache: "STALE", ms: Date.now() - started, fallback: true });
         return sourceResponse(cached.body, "STALE", cachedAt, request, ttl, stale);
       }
       throw new UpstreamError("Upstream returned empty payload");
     }
-    const fetchedAt = Date.now();
-    ctx.waitUntil(
-      cache
-        .put(key, new Response(text, {
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": `public, max-age=${ttl + stale}`,
-            "X-Loom-Fetched-Ms": String(fetchedAt),
-          },
-        }))
-        .catch(() => {}),
-    );
     cached?.body?.cancel().catch(() => {});
     logSourceRequest({ kind, cache: "MISS", ms: Date.now() - started, status: 200 });
-    ctx.waitUntil(noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) }));
     return sourceResponse(text, "MISS", fetchedAt, request, ttl, stale);
   } catch (e) {
-    ctx.waitUntil(noteSourceOutcome(kv, kind, { ok: false, error: e instanceof Error ? e.message : String(e) }));
+    // Outcome (ok or failed) is recorded by the waitUntil job above.
     if (cached && ageMs <= (ttl + stale) * 1000) {
       logSourceRequest({
         kind,
