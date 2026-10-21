@@ -11,7 +11,9 @@ import {
   gpuSceneRecommendationReason,
   fireflyGlowPoints,
   fireflyLayout,
+  fireflyPalette,
 } from "../gpuScenes";
+import { contrastRatio } from "../wcagColor";
 import type { ColumnInfo } from "../store";
 
 const cols: ColumnInfo[] = [
@@ -102,13 +104,28 @@ describe("firefly field", () => {
     const packed = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y" })!;
     expect(packed.points.map((p) => p.row)).toEqual([0, 1, 2]);
   });
-  it("glows by recency when Size is empty, by Size when set", () => {
+  it("uses equal weight without a metric, and Size when set", () => {
     const plain = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y" })!;
     const glow = fireflyGlowPoints(plain).map((p) => p.size);
-    expect(glow[0]).toBeLessThan(glow[2]!);
-    expect(new Set(glow).size).toBe(3);
+    expect(glow).toEqual([0.5, 0.5, 0.5]);
     const sized = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y", sizeField: "s" })!;
     expect(fireflyGlowPoints(sized)).toBe(sized.points);
+  });
+  it("uses actual time rather than row order and excludes missing timestamps from its range", () => {
+    const packed = extractGpuScenePoints([[0, 2, 300], [1, 3, null], [2, 4, 100], [3, 5, 200]], ["x", "y", "time"], { xField: "x", yField: "y", timeField: "time" })!;
+    expect(packed.tRange).toEqual([100, 300]);
+    expect(fireflyGlowPoints(packed).map(p => p.size)).toEqual([1, 0.5, 0.15, 0.575]);
+  });
+  it("keeps constant measures visible and missing coordinates out of the plot", () => {
+    const packed = extractGpuScenePoints([[1, 2, 4], [2, 3, 4], [null, 3, 4]], ["x", "y", "s"], { xField: "x", yField: "y", sizeField: "s" })!;
+    expect(fireflyGlowPoints(packed).map(p => p.size)).toEqual([0.5, 0.5]);
+  });
+  it("gives every palette color at least 3:1 contrast on light and dark surfaces", () => {
+    for (const background of ["#ffffff", "#f0efeb", "#0a0a0c"]) {
+      for (const color of fireflyPalette(["#ffffcc", "#ffbb88", "#111111", "#3366cc"], background)) {
+        expect(contrastRatio(color, background)).toBeGreaterThanOrEqual(3);
+      }
+    }
   });
   it("maps into a flat plot rect on nice domains", () => {
     const packed = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y" })!;

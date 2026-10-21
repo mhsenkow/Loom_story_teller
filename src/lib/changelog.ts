@@ -25,6 +25,12 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-21c",
+    date: "2026-10-21",
+    title: "Fireflies in daylight",
+    items: [{ title: "Readable, meaningful glow", detail: "Firefly charts now stay legible in light themes, with clearer axes and separated labels. Steady glow follows Size or an actual time field; arbitrary twinkling and row-order brightness are gone." }],
+  },
+  {
     id: "2026-10-21",
     date: "2026-10-21",
     title: "Moments worth sharing",

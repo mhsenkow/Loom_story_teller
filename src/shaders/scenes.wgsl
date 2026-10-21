@@ -30,6 +30,7 @@ struct Uniforms {
   plot_top: f32,
   plot_right: f32,
   plot_bottom: f32,
+  glow_density: f32,
 }
 
 struct DataPoint {
@@ -131,14 +132,10 @@ fn compute_positions(@builtin(global_invocation_id) gid: vec3<u32>) {
   var alpha = uniforms.opacity;
 
   if (mode == 1) {
-    // firefly — larger soft sprites, brightness from size + time pulse
-    // Each spark twinkles on its own phase / rate (hashed from its index) — a shared
-    // pulse made the whole field breathe in lockstep.
-    let h1 = fract(sin(f32(idx) * 12.9898) * 43758.5453);
-    let h2 = fract(sin(f32(idx) * 78.233) * 12345.678);
-    let pulse = 0.8 + 0.2 * sin(uniforms.time * (1.2 + 1.6 * h2) + h1 * 6.28318);
-    pixel_size = uniforms.point_size * (1.6 + dp.size_norm * 3.0) * uniforms.size_scale * (0.9 + 0.1 * pulse);
-    alpha = uniforms.opacity * (0.22 + 0.78 * dp.size_norm) * pulse;
+    // Steady intensity encodes the selected measure (or actual recency).
+    // No index-based twinkle: movement would imply a change in the data.
+    pixel_size = uniforms.point_size * (0.8 + dp.size_norm * 1.8) * uniforms.size_scale;
+    alpha = uniforms.opacity * uniforms.glow_density * (0.3 + 0.7 * dp.size_norm);
   }
 
   screen_points[idx] = ScreenPoint(
@@ -191,14 +188,13 @@ fn vertex_main(
 fn fragment_main(in: VertexOutput) -> @location(0) vec4<f32> {
   let d = distance(in.uv, vec2<f32>(0.5, 0.5)) * 2.0;
   let mode = i32(in.mode_f);
+  let coreWidth = max(0.12, fwidth(d));
   if (mode == 1) {
-    // Soft additive firefly falloff
-    // Gaussian halo + hot core: bright sparks bloom toward white at the center.
-    let soft = exp(-d * d * 3.2);
-    if (soft < 0.02) { discard; }
-    let core = exp(-d * d * 28.0) * in.color.a;
-    let rgb = mix(in.color.rgb, vec3<f32>(1.0, 1.0, 1.0), core * 0.35);
-    return vec4<f32>(rgb, in.color.a * soft);
+    // Source-over colored halo and crisp center remain visible on light themes.
+    if (d > 1.0) { discard; }
+    let soft = exp(-d * d * 4.5) * (1.0 - smoothstep(0.8, 1.0, d));
+    let core = 1.0 - smoothstep(coreWidth * 0.5, coreWidth * 1.5, d);
+    return vec4<f32>(in.color.rgb, max(in.color.a * soft, core * render_uniforms.opacity * 0.8));
   }
   // Hard circle with AA edge
   let alpha = 1.0 - smoothstep(0.85, 1.0, d);

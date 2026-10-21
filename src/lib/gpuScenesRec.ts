@@ -49,7 +49,7 @@ export function gpuSceneRecommendationReason(kind: GpuSceneKind): string {
     scatter3d: "True x·y·z point cloud — drag to orbit, scroll to zoom",
     trailRibbon: "Each entity leaves a fading GPU trail through space/time",
     quakeTerrain: "Heightfield mesh — peaks rise where magnitude piles up",
-    firefly: "Glowing x × y field — brightness from Size, or recency when Size is empty; dense clusters bloom",
+    firefly: "Glowing x × y field — steady brightness from Size or an encoded time field; otherwise equal weight",
     loomWeave: "Warp = categories, weft = time; thread thickness = value",
     dataCube: "Rows × columns × depth — each voxel is one cell; size + color = value",
   };
@@ -158,7 +158,8 @@ export function getGpuRandomEncoding(
   };
 }
 
-export interface GpuSceneRenderOpts {
+export interface GpuSceneRenderOpts extends Pick<import("./chartLooks").ChartLookOpts,
+  "axisStyle" | "axisLineColor" | "axisLineWidth" | "axisLabelColor" | "showGrid" | "gridStyle" | "gridOpacity" | "tickCount" | "tickRotation"> {
   lineCap?: CanvasLineCap;
   lineJoin?: CanvasLineJoin;
   colors: string[];
@@ -207,8 +208,7 @@ function num(v: unknown): number {
     const asDate = Date.parse(v);
     if (Number.isFinite(asDate)) return asDate;
   }
-  const n = Number(v);
-  return Number.isFinite(n) ? n : NaN;
+  return NaN;
 }
 
 function str(v: unknown): string {
@@ -328,14 +328,16 @@ export function extractGpuScenePoints(
       category,
       size: Number.isFinite(sizeRaw) ? sizeRaw : 1,
       trail,
-      t: Number.isFinite(tRaw) ? tRaw : r,
+      t: Number.isFinite(tRaw) ? tRaw : NaN,
       row: r,
     });
     xMin = Math.min(xMin, x); xMax = Math.max(xMax, x);
     yMin = Math.min(yMin, y); yMax = Math.max(yMax, y);
     zMin = Math.min(zMin, zz); zMax = Math.max(zMax, zz);
-    tMin = Math.min(tMin, Number.isFinite(tRaw) ? tRaw : r);
-    tMax = Math.max(tMax, Number.isFinite(tRaw) ? tRaw : r);
+    if (Number.isFinite(tRaw)) {
+      tMin = Math.min(tMin, tRaw);
+      tMax = Math.max(tMax, tRaw);
+    }
   }
   if (!raw.length || !Number.isFinite(xMin)) return null;
 
@@ -348,7 +350,7 @@ export function extractGpuScenePoints(
     ...p,
     z: encoding.invertZ ? zMin + zMax - p.z : p.z,
     size: encoding.invertSize ? 1 - (p.size - sizeMin) / sizeSpan : (p.size - sizeMin) / sizeSpan,
-    t: (p.t - tMin) / tSpan,
+    t: Number.isFinite(p.t) ? (p.t - tMin) / tSpan : -1,
   }));
 
   if (zMax - zMin < 1e-9) {
@@ -376,7 +378,7 @@ export function extractGpuScenePoints(
     colorEncoded: ci >= 0,
     xCategories: xCategorical ? [...xOrdinal.keys()] : undefined,
     sizeRange: si >= 0 ? [sizeMin, sizeMax] : null,
-    tRange: [tMin, tMax],
+    tRange: Number.isFinite(tMin) ? [tMin, tMax] : undefined,
   };
 }
 
@@ -433,7 +435,7 @@ export function buildGpuSceneRec(
     },
     firefly: {
       title: `Fireflies · ${xField} × ${yField}`,
-      subtitle: sizeField ? `glow by ${sizeField}` : "newest rows glow brightest",
+      subtitle: sizeField ? `glow by ${sizeField}` : timeField ? `recency by ${timeField}` : "equal glow · each spark is one observation",
     },
     loomWeave: {
       title: timeField ? `Weave · ${xField} × ${timeField}` : `Weave · ${xField}`,

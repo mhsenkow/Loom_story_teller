@@ -28,6 +28,7 @@ export type SceneMode = GpuSceneKind | "globe";
 export interface SceneConfig {
   pointSize: number;
   opacity: number;
+  glowDensity?: number;
   sizeScale?: number;
   palette?: string[];
   clearColor?: [number, number, number];
@@ -98,7 +99,7 @@ export class LoomSceneRenderer {
     if (!this.device) return;
     this.ensurePipelinesForMode(this.config.mode ?? "scatter3d", format);
     this.uniformBuffer = this.device.createBuffer({
-      size: 80,
+      size: 96,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this.paletteBuffer = this.device.createBuffer({
@@ -124,7 +125,7 @@ export class LoomSceneRenderer {
     const wgsl =
       shaderModule ??
       this.device.createShaderModule({ code: mode === "globe" ? globeWgsl : scenesWgsl });
-    const additive = mode === "firefly" || mode === "globe";
+    const additive = mode === "globe";
     const blend = additive
       ? {
           color: { srcFactor: "src-alpha" as const, dstFactor: "one" as const, operation: "add" as const },
@@ -248,7 +249,7 @@ export class LoomSceneRenderer {
       return;
     }
 
-    const u = new Float32Array(20);
+    const u = new Float32Array(24);
     u[0] = width;
     u[1] = height;
     u[2] = this.bounds.xMin;
@@ -270,6 +271,7 @@ export class LoomSceneRenderer {
     u[17] = rect.top;
     u[18] = rect.right;
     u[19] = rect.bottom;
+    u[20] = this.config.glowDensity ?? 1;
     this.device.queue.writeBuffer(this.uniformBuffer, 0, u);
 
     const encoder = this.device.createCommandEncoder();

@@ -9,6 +9,7 @@
 
 import type { ColumnInfo } from "./store";
 import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
+import { ensureContrast } from "./wcagColor";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
 import { formatAxisValue, formatDataValue, niceTicks } from "./chartAxes";
@@ -106,7 +107,7 @@ export function renderGpuSceneCanvas(
 ): void {
   const ink = resolveChartInk(opts);
   const font = opts.fontFamily ?? "Inter";
-  const mini = inferMini(opts, w, h, pad);
+  const mini = kind === "firefly" ? (opts.mini ?? pad < 16) : inferMini(opts, w, h, pad);
   const colors = opts.colors.length ? opts.colors : VIZ_CATEGORICAL;
   const opacity = opts.opacity ?? 0.85;
 
@@ -135,21 +136,27 @@ export function renderGpuSceneCanvas(
   ctx.restore();
 }
 
-/**
- * Firefly glow channel: Size when encoded, otherwise recency (newest rows glow
- * brightest) so a field without a Size pick still has depth instead of one flat dim.
- */
+/** A steady glow encodes a measure, real recency, or equal weight — never row order. */
 export function fireflyGlowPoints(packed: GpuScenePacked): GpuScenePoint[] {
-  if (packed.sizeRange) return packed.points;
-  return packed.points.map((p) => ({ ...p, size: 0.15 + 0.85 * p.t }));
+  if (packed.sizeRange) {
+    if (packed.sizeRange[0] !== packed.sizeRange[1]) return packed.points;
+    return packed.points.map((p) => ({ ...p, size: 0.5 }));
+  }
+  const hasTime = !!packed.fields?.time && !!packed.tRange && packed.tRange[1] > packed.tRange[0];
+  return packed.points.map((p) => ({ ...p, size: hasTime && p.t >= 0 ? 0.15 + 0.85 * p.t : 0.5 }));
+}
+
+/** Keep categorical hues readable against both paper and dark chart surfaces. */
+export function fireflyPalette(colors: string[], background: string): string[] {
+  return colors.map((color) => ensureContrast(color, background, true));
 }
 
 /** Flat x × y plot frame shared by the Canvas fallback and the WebGPU firefly pass. */
 export function fireflyLayout(packed: GpuScenePacked, w: number, h: number, pad: number, mini = false) {
   const xs = packed.xCategories
     ? { min: -0.5, max: packed.xCategories.length - 0.5, ticks: packed.xCategories.map((_, i) => i), step: 1 }
-    : niceTicks(packed.xMin, packed.xMax, 5, true);
-  const ys = niceTicks(packed.yMin, packed.yMax, 5, true);
+    : niceTicks(packed.xMin, packed.xMax, 5, false);
+  const ys = niceTicks(packed.yMin, packed.yMax, 5, false);
   const inset = mini ? 6 : pad;
   const left = inset;
   const right = w - inset;
@@ -187,22 +194,25 @@ export function drawFireflyChrome(
   w: number,
   h: number,
   pad: number,
-  opts: Pick<GpuSceneRenderOpts, "fontFamily" | "axisFontSize" | "themeText" | "themeMuted" | "themeBorder" | "themeBg">,
+  opts: Partial<GpuSceneRenderOpts>,
 ): void {
   const ink = resolveChartInk(opts);
   const font = opts.fontFamily ?? "Inter";
-  const { xs, ys } = fireflyLayout(packed, w, h, pad);
+  const { xs, ys, left, right, top, bottom } = fireflyLayout(packed, w, h, pad);
   const look: ChartLookOpts = {
     fontFamily: font,
-    axisLabelColor: ink.muted,
     themeMuted: ink.muted,
     themeBorder: ink.border,
     themeText: ink.text,
     axisFontSize: opts.axisFontSize,
+    ...opts,
+    axisLabelColor: opts.axisLabelColor ?? ink.muted,
+    plotBounds: { left, right, top, bottom },
+    sourceFootnote: false,
   };
   ctx.save();
-  drawChartGrid(ctx, w, h, pad, { ...look, themeBorder: inkTint(ink, 0.1), gridOpacity: 1 }, { x: [xs.min, xs.max], y: [ys.min, ys.max] });
-  drawAxisFrame(ctx, w, h, pad, { ...look, axisLineColor: inkTint(ink, 0.3) });
+  drawChartGrid(ctx, w, h, pad, { ...look, themeBorder: inkTint(ink, 0.15), gridOpacity: opts.gridOpacity ?? 1 }, { x: [xs.min, xs.max], y: [ys.min, ys.max] });
+  drawAxisFrame(ctx, w, h, pad, { ...look, axisLineColor: opts.axisLineColor ?? inkTint(ink, 0.65) });
   if (packed.xCategories) {
     const { sx } = fireflyLayout(packed, w, h, pad);
     ctx.font = fontOf(chartTypeRamp(opts.axisFontSize).tick, font);
@@ -232,7 +242,6 @@ function drawFireflyField(
   opacity: number,
   opts: GpuSceneRenderOpts,
 ): void {
-  if (!mini) drawFireflyChrome(ctx, packed, w, h, pad, { ...opts, fontFamily: font });
   const { sx, sy, left, right, top, bottom } = fireflyLayout(packed, w, h, pad, mini);
   const pts = fireflyGlowPoints(packed);
   const crowd = fireflyDensity(pts.length, right - left, bottom - top);
@@ -241,10 +250,14 @@ function drawFireflyField(
   // Dim sparks first so the brightest land on top.
   const order = pts.map((_, i) => i).sort((a, b) => pts[a]!.size - pts[b]!.size);
   ctx.save();
-  ctx.globalCompositeOperation = ink.light ? "multiply" : "lighter";
+  ctx.beginPath();
+  ctx.rect(left, top, right - left, bottom - top);
+  ctx.clip();
+  ctx.globalCompositeOperation = "source-over";
+  const palette = fireflyPalette(colors, ink.bg);
   for (const i of order) {
     const p = pts[i]!;
-    const col = colors[p.category % colors.length] ?? colors[0]!;
+    const col = palette[p.category % palette.length] ?? palette[0]!;
     const px = sx(p.x);
     const py = sy(p.y);
     const r = base * density * (0.8 + p.size * 1.8);
@@ -257,11 +270,17 @@ function drawFireflyField(
     ctx.beginPath();
     ctx.arc(px, py, r * 2.6, 0, Math.PI * 2);
     ctx.fill();
+    // A crisp center survives faint halos and crowded or light surfaces.
+    ctx.fillStyle = withAlpha(col, Math.min(1, opacity * (0.65 + 0.35 * p.size)));
+    ctx.beginPath();
+    ctx.arc(px, py, Math.max(0.8, r * 0.28), 0, Math.PI * 2);
+    ctx.fill();
     if (opts.hits) {
       opts.hits.push({ shape: "circle", cx: px, cy: py, r: Math.max(6, r * 1.6), match: [], rowIndex: p.row ?? p.trail });
     }
   }
   ctx.restore();
+  if (!mini) drawFireflyChrome(ctx, packed, w, h, pad, { ...opts, fontFamily: font });
 }
 
 function drawOrbitPoints(

@@ -10,6 +10,7 @@
 // =================================================================
 
 "use client";
+import { radiusFromPointSize } from "@/lib/chartInk";
 import { useChartTheme } from "@/components/useChartTheme";
 import { resolveRuntimeTheme } from "@/lib/resolveEffectiveTheme";
 import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
@@ -47,7 +48,7 @@ import { type AtlasBundle, type AtlasKind, loadAtlas } from "@/lib/geoAtlas";
 import { resolveTooltipPresentation } from "@/lib/chartTooltipMode";
 import { ChartTooltipCard } from "@/components/ChartTooltipCard";
 import { isOddChartKind, renderOddChart } from "@/lib/oddCharts";
-import { drawFireflyChrome, extractGpuScenePoints, fireflyDensity, fireflyGlowPoints, fireflyLayout, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
+import { drawFireflyChrome, extractGpuScenePoints, fireflyDensity, fireflyGlowPoints, fireflyPalette, fireflyLayout, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
 import { globeCameraForData, isGeoFamilyKind, isGeoMapKind, isWebGpuGlobeKind, pickAtlasKind, renderGeoMapCanvas } from "@/lib/geoMaps";
 import { type CubeAxisSlot, type CubeHoverCell, DataCubePivotBar, DataCubePivotTable } from "@/components/DataCubePivot";
 import { buildDataCube, buildPivotTable, cubeCellCenter, cubeCellKey, cubeCellTooltip, dataCubeChartView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
@@ -1552,31 +1553,6 @@ export function ChartView() {
     chartVisualOverrides.geoAtlas,
   ]);
 
-  // Firefly pulse clock
-  useEffect(() => {
-    if (activeChart?.kind !== "firefly" || !useWebGpuScene) return;
-    if (reducedMotion) {
-      sceneTimeRef.current = 0;
-      return;
-    }
-    let raf = 0;
-    let last = 0;
-    const start = performance.now() - sceneTimeRef.current * 1000;
-    const tick = (now: number) => {
-      raf = requestAnimationFrame(tick);
-      // ~30fps is plenty for a slow twinkle; skip hidden tabs entirely.
-      if (now - last < 33 || document.hidden) return;
-      last = now;
-      sceneTimeRef.current = (now - start) / 1000;
-      const canvas = canvasRef.current;
-      if (!canvas || !canvas.width) return;
-      const dpr = stageDpr();
-      sceneRendererRef.current?.tick(sceneTimeRef.current, canvas.width / dpr, canvas.height / dpr);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [activeChart?.kind, useWebGpuScene, reducedMotion]);
-
   // The stage only mounts once a file is selected. A shared #chart= link can
   // land in Chart view before its dataset loads, so the observers below must
   // re-attach when the stage appears (otherwise canvases stay 300×150, blank).
@@ -1733,6 +1709,7 @@ export function ChartView() {
             });
             const ui = themeUi;
             const sceneOpts = {
+              ...overrides,
               colors: exp.colors,
               lineCap: overrides.lineCap, lineJoin: overrides.lineJoin,
               opacity: exp.opacity,
@@ -2639,7 +2616,8 @@ export function ChartView() {
             sourceFootnote: chartRenderOpts.sourceFootnote,
             chromeInfoBand: chartRenderOpts.chromeInfoBand,
           });
-          const lay = fireflyLayout(packed, w, h, ffPad);
+          const ffHeight = h - ((chartFootnoteText || chartColorInfo?.stops?.length) && (chartVisualOverrides.chromeInfoBand ?? "footer") === "footer" ? FOOTNOTE_BAND_PX : 0);
+          const lay = fireflyLayout(packed, w, ffHeight, ffPad);
           points = fireflyGlowPoints(packed);
           bounds = { xMin: lay.xs.min, xMax: lay.xs.max, yMin: lay.ys.min, yMax: lay.ys.max, zMin: 0, zMax: 1 };
           plotRect = { left: lay.left, top: lay.top, right: lay.right, bottom: lay.bottom };
@@ -2647,10 +2625,11 @@ export function ChartView() {
         }
         sceneRendererRef.current.uploadData(points, bounds, {
           plotRect,
-          pointSize: pointSize * (activeChart.kind === "firefly" ? 1.4 * crowd.size : activeChart.kind === "globe" ? 1.6 : 1),
-          opacity: opacity * crowd.alpha,
+          pointSize: activeChart.kind === "firefly" ? radiusFromPointSize(pointSize, 3) * 5.2 * crowd.size : pointSize * (activeChart.kind === "globe" ? 1.6 : 1),
+          opacity,
+          glowDensity: crowd.alpha,
           sizeScale: chartVisualOverrides.sizeScale ?? 1,
-          palette: colors,
+          palette: activeChart.kind === "firefly" ? fireflyPalette(colors, themeUi.bg) : colors,
           clearColor: hexToRgb01(themeUi.bg),
           yaw: sceneOrbit.yaw,
           pitch: sceneOrbit.pitch,
@@ -3104,6 +3083,7 @@ export function ChartView() {
               );
               if (packed) {
                 renderGpuSceneCanvas(activeChart.kind, ctx, packed, w, h, pad, {
+                  ...opts,
                   colors: opts.colors,
                   lineCap: opts.lineCap, lineJoin: opts.lineJoin,
                   opacity: opts.opacity,
@@ -3528,7 +3508,8 @@ export function ChartView() {
           timeField: activeChart.timeField,
         });
         if (packed) {
-          drawFireflyChrome(ctx, packed, w, h, scenePad, {
+          drawFireflyChrome(ctx, packed, w, h - ((chartFootnoteText || chartColorInfo?.stops?.length) && (chartVisualOverrides.chromeInfoBand ?? "footer") === "footer" ? FOOTNOTE_BAND_PX : 0), scenePad, {
+            ...chartRenderOpts,
             fontFamily: chartRenderOpts.fontFamily,
             axisFontSize: chartRenderOpts.axisFontSize,
             themeText: ui.text,

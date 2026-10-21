@@ -432,3 +432,7 @@ Plot backgrounds use `--chart-bg`, mirrored by `THEME_UI.bg` for Canvas and expo
 Automatic chart palettes resolve scale before accessibility: categorical uses Okabe–Ito and magnitude uses Cividis when colorblind defaults are enabled. Explicit palette choices are preserved; the Visual panel shows the resolved palette and theme-aware swatches. Device-font mode labels named faces as fallbacks.
 
 Theme mark materials apply to Canvas bars and pies (including previews): flat, glaze, satin, ink, etched. Visual → Composition can override or restore inheritance. The fill path and hit geometry stay unchanged; density ramps remain flat. SVG material finishes remain flat approximations. Grids and title weights inherit theme defaults. Data cube wall/grid colors derive from theme ink; toolbar and Discover share a theme cycle with distinct icons.
+
+### Firefly fields
+
+Firefly plots keep observations on fixed X/Y axes. Size encodes steady glow intensity; without Size, an encoded time field supplies recency. Without either, every observation has equal weight. Missing timestamps never become row-order recency. Colored cores and source-over halos remain readable on light and dark themes. Axis and grid styling applies to the live chart and Canvas captures. No perpetual twinkle runs, so static data does not imply change and idle charts spend no animation frames.
