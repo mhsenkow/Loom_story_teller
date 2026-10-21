@@ -49,6 +49,7 @@ import {
   nwisIvWide,
   openMeteoCities,
   paprikaToGecko,
+  coinloreToGecko,
   starlinkGp,
   steamTop,
   treasuryDebt,
@@ -564,6 +565,8 @@ async function upstreamJson<T = unknown>(label: string, url: string, timeoutMs?:
   return (await upstream(label, url, { timeoutMs })).json() as Promise<T>;
 }
 
+const MEMPOOL_HOSTS = ["mempool.space", "mempool.emzy.de", "mempool.ninja"] as const;
+
 const SUBCACHE_ORIGIN = "https://loom-source.internal/upstream/";
 
 /** JSON from a slow-changing upstream, cached separately (e.g. GBFS station list, WB country list). */
@@ -865,7 +868,8 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   },
 
   crypto: async () => {
-    // CoinGecko 429s Cloudflare's shared IPs often — CoinPaprika mapped into the same shape.
+    // CoinGecko 429s Cloudflare's shared IPs and CoinPaprika answers them 402 — both
+    // stay first in case they recover; CoinLore serves CF egress. All map to Gecko shape.
     try {
       return await upstreamText(
         "CoinGecko",
@@ -873,8 +877,13 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
         6_000,
       );
     } catch {
-      const body = await upstreamJson("CoinPaprika", "https://api.coinpaprika.com/v1/tickers?limit=50");
-      return JSON.stringify(paprikaToGecko(body));
+      try {
+        const body = await upstreamJson("CoinPaprika", "https://api.coinpaprika.com/v1/tickers?limit=50", 6_000);
+        return JSON.stringify(paprikaToGecko(body));
+      } catch {
+        const body = await upstreamJson("CoinLore", "https://api.coinlore.net/api/tickers/?start=0&limit=50");
+        return JSON.stringify(coinloreToGecko(body));
+      }
     }
   },
 
@@ -1010,11 +1019,25 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     // Newest 15 blocks, then 3 older pages (~60 blocks). Heights are consecutive, so the
     // older pages' start heights are known up front — fetch them in parallel so a cold
     // cache answers well inside the browser's wait. A failed page just means fewer blocks.
-    const first = await upstreamJson("mempool.space", "https://mempool.space/api/v1/blocks", 15_000);
+    // mempool.space sometimes stalls from Cloudflare egress — fall back to public mempool
+    // instances running the same API (same block/fee/pool fields).
+    let host = "";
+    let first: unknown;
+    let lastErr: unknown;
+    for (const h of MEMPOOL_HOSTS) {
+      try {
+        first = await upstreamJson(h, `https://${h}/api/v1/blocks`, 8_000);
+        host = h;
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!host) throw lastErr instanceof Error ? lastErr : new Error("mempool: all hosts failed");
     const low = mempoolLowestHeight(first);
     const starts = low != null ? [1, 2, 3].map((k) => low - 1 - 15 * (k - 1)).filter((h) => h > 0) : [];
     const older = await Promise.allSettled(
-      starts.map((h) => upstreamJson("mempool.space", `https://mempool.space/api/v1/blocks/${h}`, 8_000)),
+      starts.map((h) => upstreamJson(host, `https://${host}/api/v1/blocks/${h}`, 8_000)),
     );
     const pages: unknown[] = [first, ...older.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []))];
     return JSON.stringify(mempoolBlocks(pages));
