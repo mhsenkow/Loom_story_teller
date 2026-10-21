@@ -88,7 +88,19 @@ export interface ChartLink {
   showMarginals?: boolean;
   chartAspect?: ChartAspectId;
   chartDevice?: ChartDeviceId;
+  /** Pinned mark readouts (markFocus.ts): identity + readout snapshot. */
+  pins?: ChartLinkPin[];
 }
+
+export interface ChartLinkPin {
+  /** MarkRef fields: column → value. */
+  f: [string, string][];
+  /** Readout columns / values as pinned. */
+  c: string[];
+  r: (string | number | boolean | null)[];
+}
+
+const MAX_LINK_PINS = 5;
 
 // ---------------------------------------------------------------------------
 // Build from app state
@@ -103,6 +115,7 @@ export interface ChartLinkState {
   connectScatterTrail?: boolean;
   showMarginals?: boolean;
   appSettings?: Pick<AppSettings, "chartAspect" | "chartDevice">;
+  pinnedTooltips?: { chartId: string; ref: { fields: [string, string][] }; columns: string[]; row: (string | number | boolean | null)[] }[];
 }
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
@@ -209,7 +222,37 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     showMarginals: s.showMarginals || undefined,
     chartAspect: s.appSettings?.chartAspect && s.appSettings.chartAspect !== "free" ? s.appSettings.chartAspect : undefined,
     chartDevice: s.appSettings?.chartDevice && s.appSettings.chartDevice !== "auto" ? s.appSettings.chartDevice : undefined,
+    pins: linkPins(s.pinnedTooltips, rec.id),
   };
+}
+
+const clip = (v: string, n = 120) => (v.length > n ? v.slice(0, n) : v);
+
+function linkPins(pins: ChartLinkState["pinnedTooltips"], chartId: string): ChartLinkPin[] | undefined {
+  const mine = (pins ?? []).filter((p) => p.chartId === chartId).slice(-MAX_LINK_PINS);
+  if (!mine.length) return undefined;
+  return mine.map((p) => ({
+    f: p.ref.fields.slice(0, 6).map(([k, v]) => [clip(k, 80), clip(v)] as [string, string]),
+    c: p.columns.slice(0, 6).map((c) => clip(c, 80)),
+    r: p.row.slice(0, 6).map((v) => (typeof v === "string" ? clip(v) : v)),
+  }));
+}
+
+function parseLinkPins(raw: unknown): ChartLinkPin[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const cell = (v: unknown) => (v === null || typeof v === "number" || typeof v === "boolean" ? v : typeof v === "string" ? clip(v) : undefined);
+  const out: ChartLinkPin[] = [];
+  for (const p of raw.slice(0, MAX_LINK_PINS)) {
+    if (!p || typeof p !== "object") continue;
+    const { f, c, r } = p as Record<string, unknown>;
+    if (!Array.isArray(f) || !Array.isArray(c) || !Array.isArray(r)) continue;
+    const fields = f.filter((e): e is [string, string] => Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "string").slice(0, 6);
+    const cols = c.filter((x): x is string => typeof x === "string").slice(0, 6);
+    const row = r.slice(0, cols.length).map(cell);
+    if (!fields.length || !cols.length || row.some((v) => v === undefined)) continue;
+    out.push({ f: fields, c: cols, r: row as ChartLinkPin["r"] });
+  }
+  return out.length ? out : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +308,7 @@ const TOP_KEYS: [Exclude<keyof ChartLink, "chart">, string][] = [
   ["showMarginals", "mg"],
   ["chartAspect", "ar"],
   ["chartDevice", "dv"],
+  ["pins", "pn"],
 ];
 
 function compact(entries: [string, unknown][]): Record<string, unknown> {
@@ -379,6 +423,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
   if (obj.mg === true) link.showMarginals = true;
   if (typeof obj.ar === "string" && ASPECTS.has(obj.ar)) link.chartAspect = obj.ar as ChartAspectId;
   if (typeof obj.dv === "string" && DEVICES.has(obj.dv)) link.chartDevice = obj.dv as ChartDeviceId;
+  const pins = parseLinkPins(obj.pn);
+  if (pins) link.pins = pins;
   return link;
 }
 

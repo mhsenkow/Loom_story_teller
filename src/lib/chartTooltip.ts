@@ -118,6 +118,11 @@ export type HitTarget = (
   match: [number, string][];
   /** Representative row when the mark isn't identified by exact values (bins, "Other"). */
   rowIndex?: number;
+  /**
+   * Drawn bounds when the hover area is padded (a bar's whole category band):
+   * focus rings hug the real shape while hovering stays forgiving.
+   */
+  mark?: { x: number; y: number; w: number; h: number };
   summary?: { columns: string[]; row: (string | number | null)[] };
 };
 

@@ -179,6 +179,15 @@ export interface AppSettings {
   chartDevice: ChartDeviceId;
 }
 
+export interface PinnedMark {
+  id: string;
+  chartId: string;
+  ref: import("../markFocus").MarkRef;
+  rowIndex: number;
+  row: (string | number | boolean | null)[];
+  columns: string[];
+}
+
 export interface LoomState extends MonitorState {
   // Folder
   mountedFolder: string | null;
@@ -254,7 +263,13 @@ export interface LoomState extends MonitorState {
   chartAnnotations: Record<string, { id: string; text: string; x: number; y: number; width?: number; fontSize?: number }[]>;
   hoveredRowIndex: number | null;
   tooltipLink: { field: string; value: string } | null;
-  pinnedTooltips: { id: string; chartId: string; x: number; y: number; rowIndex: number; row: (string | number | boolean | null)[]; columns: string[] }[];
+  /**
+   * Pinned mark readouts (markFocus.ts). Keyed by the mark's column values, so a
+   * pin re-finds its mark after resize / live refresh and rides along in exports
+   * and share links. `row`/`columns` snapshot the readout for when the mark is
+   * temporarily absent (filtered out, not yet loaded).
+   */
+  pinnedTooltips: PinnedMark[];
   customRefLines: Record<string, { id: string; axis: "x" | "y"; value: number; label: string }[]>;
   chartInteractionMode: "pan" | "crosshair" | "lasso" | "select";
   crosshairPos: { dataX: number; dataY: number; screenX: number; screenY: number } | null;
@@ -424,7 +439,9 @@ export interface LoomState extends MonitorState {
   removeChartAnnotation: (chartId: string, id: string) => void;
   setHoveredRowIndex: (idx: number | null) => void;
   setTooltipLink: (link: { field: string; value: string } | null) => void;
-  addPinnedTooltip: (tt: { chartId: string; x: number; y: number; rowIndex: number; row: (string | number | boolean | null)[]; columns: string[] }) => void;
+  /** Pin a mark (or unpin it when that mark is already pinned on this chart). */
+  togglePinnedTooltip: (pin: Omit<PinnedMark, "id">) => void;
+  setPinnedTooltips: (pins: PinnedMark[]) => void;
   removePinnedTooltip: (id: string) => void;
   clearPinnedTooltips: () => void;
   addCustomRefLine: (chartId: string, axis: "x" | "y", value: number, label: string) => void;

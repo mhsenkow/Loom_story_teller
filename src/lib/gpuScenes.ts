@@ -499,7 +499,7 @@ function drawTrailRibbons(
   opacity: number,
   baseSize: number,
   axisFontSize?: number,
-  edge: Pick<GpuSceneRenderOpts, "lineCap" | "lineJoin"> = {},
+  edge: Pick<GpuSceneRenderOpts, "lineCap" | "lineJoin" | "hits"> = {},
 ): void {
   const { points, yMin, yMax } = packed;
   const byTrail = new Map<number, GpuScenePoint[]>();
@@ -510,7 +510,7 @@ function drawTrailRibbons(
   }
 
   // Unwrap X per trail so longitude paths don't slash across the ±180° seam.
-  type Pt = { x: number; y: number; t: number; size: number; category: number };
+  type Pt = { x: number; y: number; t: number; size: number; category: number; row?: number };
   const trails: Pt[][] = [];
   let xMin = Infinity, xMax = -Infinity;
   for (const [, list] of byTrail) {
@@ -527,7 +527,7 @@ function drawTrailRibbons(
         x = p.x + offset;
       }
       prevX = x;
-      unwrapped.push({ x, y: p.y, t: p.t, size: p.size, category: p.category });
+      unwrapped.push({ x, y: p.y, t: p.t, size: p.size, category: p.category, row: p.row });
       xMin = Math.min(xMin, x);
       xMax = Math.max(xMax, x);
     }
@@ -597,6 +597,14 @@ function drawTrailRibbons(
     ctx.stroke();
   }
   ctx.restore();
+  // Every vertex along every trail is hoverable / pinnable.
+  if (edge.hits) {
+    for (const list of trails) {
+      for (const p of list) {
+        if (p.row != null) edge.hits.push({ shape: "circle", cx: sx(p.x), cy: sy(p.y), r: Math.max(4, baseSize), match: [], rowIndex: p.row });
+      }
+    }
+  }
 }
 
 function drawQuakeTerrain(
@@ -714,6 +722,25 @@ function drawQuakeTerrain(
     ctx.lineTo(x - sxStep, yTop + syStep);
     ctx.closePath();
     ctx.fill();
+    if (opts.hits) {
+      // Column footprint + extrusion; drawn back-to-front, so the nearest cell wins the pick.
+      const fx = (k: number) => formatDataValue(xMin + (k / cols) * (xMax - xMin));
+      const fy = (k: number) => formatDataValue(yMin + (k / rows) * (yMax - yMin));
+      const f = packed.fields;
+      opts.hits.push({
+        shape: "rect",
+        x: x - sxStep,
+        y: yTop,
+        w: 2 * sxStep,
+        h: yBase + 2 * syStep - yTop,
+        mark: { x: x - sxStep, y: yTop, w: 2 * sxStep, h: 2 * syStep },
+        match: [],
+        summary: {
+          columns: [f?.x ?? "x", f?.y ?? "y", f?.z ? `Mean ${f.z}` : "Height", "Rows"],
+          row: [`${fx(cell.c)} – ${fx(cell.c + 1)}`, `${fy(cell.r)} – ${fy(cell.r + 1)}`, formatDataValue(cell.v), counts[cell.r]![cell.c]!],
+        },
+      });
+    }
   }
 
   if (mini) return;
@@ -830,7 +857,7 @@ function drawLoomWeave(
   mini: boolean,
   opacity: number,
   axisFontSize?: number,
-  edge: Pick<GpuSceneRenderOpts, "lineCap" | "lineJoin"> = {},
+  edge: Pick<GpuSceneRenderOpts, "lineCap" | "lineJoin" | "hits"> = {},
 ): void {
   const { points } = packed;
   const cats = [...new Set(points.map((p) => p.category))].sort((a, b) => a - b);
@@ -891,6 +918,28 @@ function drawLoomWeave(
     ctx.moveTo(xa, y);
     ctx.lineTo(xb, y);
     ctx.stroke();
+    if (edge.hits) {
+      const thick = Math.max(1.2, (val / (maxV || 1)) * maxThick);
+      const tr = packed.tRange;
+      const isTime = !!packed.fields?.time;
+      const span = tr ? tr[1] - tr[0] : 0;
+      const when = tr
+        ? `${formatTimeEnd(tr[0] + (we / wefts) * span, span, isTime)} – ${formatTimeEnd(tr[0] + ((we + 1) / wefts) * span, span, isTime)}`
+        : `slice ${we + 1} of ${wefts}`;
+      edge.hits.push({
+        shape: "rect",
+        x: xa,
+        y: y - gapY / 2,
+        w: xb - xa,
+        h: gapY,
+        mark: { x: xa, y: y - thick / 2, w: xb - xa, h: thick },
+        match: [],
+        summary: {
+          columns: [packed.fields?.color ?? "Warp", packed.fields?.time ?? "When", "Rows"],
+          row: [packed.categories?.[v.cat] ?? `#${wi + 1}`, when, v.n],
+        },
+      });
+    }
   }
 
   if (mini) return;

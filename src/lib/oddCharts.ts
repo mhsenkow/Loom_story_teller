@@ -60,6 +60,7 @@ import { resolvePyramidScaleMode } from "./pyramidScale";
 import { formatDeltaLabel } from "./deltaCompare";
 import { chartFont, chartTypeRamp } from "./chartType";
 import { type MarkSymbols, drawMarkSymbol, markSymbols } from "./markSymbols";
+import type { HitTarget } from "./chartTooltip";
 
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,8 @@ interface OddEnv {
   columns: string[];
   opts: OddRenderOpts;
   symbols: MarkSymbols;
+  /** opts.hits length when this render started (per-renderer cap). */
+  hitStart: number;
 }
 
 function oddFont(env: OddEnv, size: number, weight: number | string = 400): string {
@@ -136,6 +139,7 @@ export function renderOddChart(
     columns,
     opts,
     symbols: markSymbols(opts, columns, rows),
+    hitStart: opts.hits?.length ?? 0,
     look: {
       fontFamily: font,
       axisLabelColor: ink.muted,
@@ -154,62 +158,87 @@ export function renderOddChart(
     ctx.restore();
   }
   if (message) drawEmptyMessage(ctx, w, h, message, ink, font, mini, opts.axisFontSize);
-  // Pyramid registers its own bar hits; generic X/Y scatter hits are wrong here.
-  if (opts.hits && xi >= 0 && yi >= 0 && rows.length && kind !== "pyramid") {
-    appendOddChartPointHits(rows, xi, yi, ci, w, h, pad, opts);
-  }
 }
 
-function appendOddChartPointHits(
-  rows: unknown[][],
-  xi: number,
-  yi: number,
-  ci: number,
+/** Per-renderer cap so dense kinds stay cheap to hit-test. */
+const ODD_HIT_CAP = 2000;
+
+type OddSummary = NonNullable<HitTarget["summary"]>;
+
+function canHit(env: OddEnv): HitTarget[] | null {
+  const hits = env.opts.hits;
+  if (!hits || hits.length - env.hitStart >= ODD_HIT_CAP) return null;
+  return hits;
+}
+
+function hitCircle(
+  env: OddEnv,
+  cx: number,
+  cy: number,
+  r: number,
+  match: [number, string][],
+  rowIndex?: number,
+  summary?: OddSummary,
+): void {
+  const hits = canHit(env);
+  if (!hits || !Number.isFinite(cx) || !Number.isFinite(cy)) return;
+  // Keep the focus ring on-canvas for marks hugging the edge (stream ends, mini cards).
+  const fit = Math.min(r, cx, env.w - cx, cy, env.h - cy);
+  hits.push({ shape: "circle", cx, cy, r: Math.max(1, fit), match, rowIndex, summary });
+}
+
+function hitRect(
+  env: OddEnv,
+  x: number,
+  y: number,
   w: number,
   h: number,
-  pad: number,
-  opts: OddRenderOpts,
+  match: [number, string][],
+  rowIndex?: number,
+  summary?: OddSummary,
+  markRect?: { x: number; y: number; w: number; h: number },
 ): void {
-  const hits = opts.hits;
+  const hits = canHit(env);
+  if (!hits || !(w > 0) || !(h > 0)) return;
+  hits.push({ shape: "rect", x, y, w, h, match, rowIndex, summary, mark: markRect });
+}
+
+function hitArc(
+  env: OddEnv,
+  cx: number,
+  cy: number,
+  r0: number,
+  r1: number,
+  a0: number,
+  a1: number,
+  match: [number, string][],
+  rowIndex?: number,
+  summary?: OddSummary,
+): void {
+  const hits = canHit(env);
   if (!hits) return;
-  let xMin = Infinity;
-  let xMax = -Infinity;
-  let yMin = Infinity;
-  let yMax = -Infinity;
-  for (const r of rows) {
-    const x = Number(r[xi]);
-    const y = Number(r[yi]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    xMin = Math.min(xMin, x);
-    xMax = Math.max(xMax, x);
-    yMin = Math.min(yMin, y);
-    yMax = Math.max(yMax, y);
-  }
-  if (!Number.isFinite(xMin)) return;
-  const plotW = w - 2 * pad;
-  const plotH = h - 2 * pad;
-  const stride = Math.max(1, Math.floor(rows.length / 800));
-  for (let ri = 0; ri < rows.length; ri += stride) {
-    const r = rows[ri]!;
-    const x = Number(r[xi]);
-    const y = Number(r[yi]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const sx = pad + ((x - xMin) / (xMax - xMin || 1)) * plotW;
-    const sy = pad + (1 - (y - yMin) / (yMax - yMin || 1)) * plotH;
-    const match: [number, string][] = [
-      [xi, String(r[xi])],
-      [yi, String(r[yi])],
-    ];
-    if (ci >= 0) match.unshift([ci, String(r[ci])]);
-    hits.push({
-      shape: "circle",
-      cx: sx,
-      cy: sy,
-      r: 8,
-      match,
-      rowIndex: ri,
-    });
-  }
+  hits.push({ shape: "arc", cx, cy, r0, r1, a0, a1, match, rowIndex, summary });
+}
+
+/** Row matching for a single drawn point: x, then color when present. */
+function rowMatch(row: readonly unknown[], xi: number, ci: number): [number, string][] {
+  const m: [number, string][] = [];
+  if (xi >= 0) m.push([xi, String(row[xi] ?? "")]);
+  if (ci >= 0 && ci !== xi) m.push([ci, String(row[ci] ?? "")]);
+  return m;
+}
+
+/** Summary for a small-multiple glyph (group label + mean per feature). */
+function groupSummary(env: OddEnv, xi: number, label: string, feats: number[], raw: number[]): OddSummary {
+  return {
+    columns: [fieldName(env, xi, "group"), ...feats.map((fi) => fieldName(env, fi))],
+    row: [label, ...raw.map((v) => (Number.isFinite(v) ? v : null))],
+  };
+}
+
+function firstRowIndex(rows: unknown[][], xi: number, key: string): number | undefined {
+  const i = rows.findIndex((r) => String(r[xi] ?? "") === key);
+  return i >= 0 ? i : undefined;
 }
 
 const RENDERERS: Record<OddChartKind, Renderer> = {
@@ -691,8 +720,12 @@ function drawBucketField(ctx: CanvasRenderingContext2D, rows: unknown[][], env: 
     const inner = { left: x0 + 8, right: x0 + cw - 8, top: y0 + headerH + 6, bottom: y0 + ch - 6 };
     const ih = inner.bottom - inner.top;
     if (ih < 4) return;
-    const pts = rows.filter((r) => String(r[xi]) === b).slice(0, mini ? 40 : 200);
-    pts.forEach((r, i) => {
+    const ptIdx: number[] = [];
+    for (let ri = 0; ri < rows.length && ptIdx.length < (mini ? 40 : 200); ri++) {
+      if (String(rows[ri]![xi]) === b) ptIdx.push(ri);
+    }
+    ptIdx.forEach((ri, i) => {
+      const r = rows[ri]!;
       const px = inner.left + jitter(b, i) * (inner.right - inner.left);
       const yv = ys ? toNum(r[yi]) : NaN;
       const py = ys && Number.isFinite(yv)
@@ -701,6 +734,7 @@ function drawBucketField(ctx: CanvasRenderingContext2D, rows: unknown[][], env: 
       const rDot = sScale ? sScale.radiusOf(toNum(r[si])) : base;
       const color = ci >= 0 ? env.colors[(catIdx.get(String(r[ci])) ?? 0) % env.colors.length]! : env.single;
       dot(ctx, px, py, rDot, color, env.alpha, total <= 800 ? ink.bg : null);
+      hitCircle(env, px, py, rDot, rowMatch(r, xi, ci), ri);
     });
     // Shared value scale: round min / max ticks beside the first column of regions.
     if (ys && !mini && col === 0 && env.pad >= 28 && ih >= 36) {
@@ -739,13 +773,15 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
   }
   const catIdx = categoryIndex(rows, ci);
   const byCat = new Map<string, unknown[][]>();
-  for (const r of rows) {
+  const rowIdx = new Map<unknown[], number>();
+  rows.forEach((r, ri) => {
     const k = String(r[xi]);
-    if (!Number.isFinite(toNum(r[yi]))) continue;
+    if (!Number.isFinite(toNum(r[yi]))) return;
     const l = byCat.get(k) ?? [];
     l.push(r);
     byCat.set(k, l);
-  }
+    rowIdx.set(r, ri);
+  });
   const maxN = Math.max(1, ...cats.map((c) => Math.min(mini ? 60 : 250, byCat.get(c)?.length ?? 0)));
   // Shrink dots when a band is crowded so the swarm still fits its column.
   const fit = Math.sqrt((bandW * 0.8 * ph) / (maxN * Math.PI * 1.6));
@@ -773,6 +809,7 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
       placed.push({ x: px, y: py, r: rr });
       const color = ci >= 0 ? env.colors[(catIdx.get(String(row[ci])) ?? 0) % env.colors.length]! : env.single;
       mark(ctx, env, row, px, py, rr, color, env.alpha, total <= 800 ? ink.bg : null);
+      hitCircle(env, px, py, rr, [...rowMatch(row, xi, ci), [yi, String(row[yi])]], rowIdx.get(row));
     }
   });
   const swarmKey = markLegendEntries(rows, env, ci !== xi ? ci : -1);
@@ -837,6 +874,7 @@ function drawChernoff(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
     ctx.moveTo(cx - mouthW, cy + R * 0.38);
     ctx.quadraticCurveTo(cx, cy + R * 0.38 + smile, cx + mouthW, cy + R * 0.38);
     ctx.stroke();
+    hitCircle(env, cx, cy, R * Math.max(0.8 + f[0]! * 0.3, 0.85 + f[1]! * 0.25), [[xi, label]], firstRowIndex(rows, xi, label), groupSummary(env, xi, label, feats, m.raw[bi]!));
     if (!mini) {
       ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
@@ -900,6 +938,7 @@ function drawGlyphStar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     ctx.strokeStyle = env.single;
     ctx.lineWidth = 1.5;
     ctx.stroke();
+    hitCircle(env, cx, cy, R, [[xi, label]], firstRowIndex(rows, xi, label), groupSummary(env, xi, label, feats, m.raw[bi]!));
     if (!mini) {
       ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
@@ -957,6 +996,7 @@ function drawFlower(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.beginPath();
     ctx.arc(cx, cy, Math.max(1.5, R * 0.1), 0, Math.PI * 2);
     ctx.fill();
+    hitCircle(env, cx, cy, R, [[xi, label]], firstRowIndex(rows, xi, label), groupSummary(env, xi, label, feats, m.raw[gi]!));
     if (!mini) {
       ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
@@ -1030,6 +1070,7 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   const cell = size / 10;
   const inset = Math.max(0.5, cell * 0.07);
   let filled = 0;
+  const entryRow = env.opts.hits ? entries.map(([label]) => firstRowIndex(rows, xi, label)) : [];
   cells.forEach((n, ei) => {
     ctx.fillStyle = colorOf(ei);
     ctx.globalAlpha = Math.max(0.75, env.alpha);
@@ -1037,6 +1078,18 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
       const cx = filled % 10;
       const cy = Math.floor(filled / 10);
       ctx.fillRect(gx + cx * cell + inset, gy + cy * cell + inset, cell - 2 * inset, cell - 2 * inset);
+      const [label, v] = entries[ei]!;
+      const isOther = hasOther && ei === entries.length - 1;
+      hitRect(
+        env,
+        gx + cx * cell + inset,
+        gy + cy * cell + inset,
+        cell - 2 * inset,
+        cell - 2 * inset,
+        isOther ? [] : [[xi, label]],
+        isOther ? undefined : entryRow[ei],
+        { columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null), "share"], row: [label, v, percentLabel(v / total)] },
+      );
     }
   });
   ctx.globalAlpha = 1;
@@ -1088,10 +1141,12 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     const x0 = plot.left + labelW;
     ctx.fillStyle = env.single;
     ctx.globalAlpha = Math.max(0.75, env.alpha);
+    let iconsW = 0;
     for (let i = 0; i <= full && i < maxIcons + 1; i++) {
       const part = i < full ? 1 : frac;
       if (part <= 0.02) break;
       const px = x0 + i * step;
+      iconsW = px + s * part - x0;
       ctx.save();
       ctx.beginPath();
       ctx.rect(px, cy - s / 2 - 1, s * part, s + 2);
@@ -1102,6 +1157,13 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       ctx.restore();
     }
     ctx.globalAlpha = 1;
+    if (iconsW > 0) {
+      const measure = aggregateAxisTitle(how, fieldName(env, yi) || null);
+      hitRect(env, x0, cy - s / 2, iconsW, s, [[xi, label]], firstRowIndex(rows, xi, label), {
+        columns: [fieldName(env, xi), measure],
+        row: [label, v],
+      });
+    }
     if (!mini) {
       ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
@@ -1422,6 +1484,13 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     ctx.globalAlpha = 1;
     mark(ctx, env, p.row, x0, sy(p.a), mini ? 2.2 : 3.5, env.single, 1, mini ? null : ink.bg);
     mark(ctx, env, p.row, x1, sy(p.b), mini ? 2.2 : 3.5, env.single, 1, mini ? null : ink.bg);
+    const ri = firstRowIndex(rows, xi, p.c);
+    const summary: OddSummary = {
+      columns: [fieldName(env, xi), `${fieldName(env, yi)} (mean)`, `${fieldName(env, si)} (mean)`],
+      row: [p.c, p.a, p.b],
+    };
+    hitCircle(env, x0, sy(p.a), mini ? 2.2 : 3.5, [[xi, p.c], [yi, String(p.a)]], ri, summary);
+    hitCircle(env, x1, sy(p.b), mini ? 2.2 : 3.5, [[xi, p.c], [si, String(p.b)]], ri, summary);
   }
   if (mini) return;
   const targets = pairs.map((p) => sy(p.b));
@@ -1457,11 +1526,16 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
   const cell = new Map<string, number[]>();
   const totals = new Map<string, number>();
   const seriesRow = new Map<string, unknown[]>();
-  for (const r of rows) {
+  const rowIndexOf = new Map<unknown[], number>();
+  for (let ri = 0; ri < rows.length; ri++) {
+    const r = rows[ri]!;
     const v = toNum(r[yi]);
     if (!Number.isFinite(v)) continue;
     const s = String(r[ci]);
-    if (!seriesRow.has(s)) seriesRow.set(s, r);
+    if (!seriesRow.has(s)) {
+      seriesRow.set(s, r);
+      rowIndexOf.set(r, ri);
+    }
     const key = `${model.keyOf(r)}||${s}`;
     const l = cell.get(key) ?? [];
     l.push(v);
@@ -1573,6 +1647,17 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
         if (v != null) mark(ctx, env, seriesRow.get(s), xAt(i), deltaMode ? yAtDelta(v) : yAt(v), 3.2, color, 1, ink.bg);
       });
     }
+    const sRow = seriesRow.get(s);
+    const sRi = sRow ? rowIndexOf.get(sRow) : undefined;
+    model.keys.forEach((key, i) => {
+      const v = values[i]!.get(s);
+      if (v == null) return;
+      const rank = ranks[i]!.get(s);
+      hitCircle(env, xAt(i), deltaMode ? yAtDelta(v) : yAt(v), mini ? 2 : 3.2, [[xi, key], [ci, s]], sRi, {
+        columns: [fieldName(env, xi), fieldName(env, ci), deltaMode ? "Δ rank" : "rank"],
+        row: [key, s, deltaMode ? v : (rank ?? null)],
+      });
+    });
     if (last) ends.push({ s, y: (last as { y: number }).y, color });
   });
   if (mini) return;
@@ -1650,6 +1735,16 @@ function drawStream(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.strokeStyle = withAlpha(ink.bg, 0.6);
     ctx.lineWidth = 0.75;
     ctx.stroke();
+    model.keys.forEach((key, i) => {
+      const thick = L.bot[i]! - L.top[i]!;
+      if (!(thick > 0.5)) return;
+      const match: [number, string][] = [[xi, key]];
+      if (ci >= 0 && s !== "__other") match.push([ci, s]);
+      hitCircle(env, xAt(i), (L.top[i]! + L.bot[i]!) / 2, Math.max(3, Math.min(thick / 2, 10)), match, undefined, {
+        columns: [fieldName(env, xi), ...(ci >= 0 ? [fieldName(env, ci)] : []), `${fieldName(env, yi)} (sum)`],
+        row: [key, ...(ci >= 0 ? [nameOf(s)] : []), grid[si0]![i]!],
+      });
+    });
   });
   if (mini) return;
   drawOrderedXAxis(ctx, env, model, plot);
@@ -1718,7 +1813,7 @@ function drawHorizon(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     sums.set(k, cur);
   }
   const pts = model.keys
-    .map((k, i) => ({ pos: model.pos[i]!, v: sums.has(k) ? sums.get(k)!.s / sums.get(k)!.n : NaN }))
+    .map((k, i) => ({ k, pos: model.pos[i]!, v: sums.has(k) ? sums.get(k)!.s / sums.get(k)!.n : NaN }))
     .filter((p) => Number.isFinite(p.v));
   if (pts.length < 2) return "Horizon needs at least two numeric points";
   const { mini, ink } = env;
@@ -1759,6 +1854,14 @@ function drawHorizon(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       ctx.fill();
     }
   }
+  // One point per drawn sample, on the top edge of its first (lightest) fold.
+  for (const p of pts) {
+    const fillT = Math.max(0, Math.min(1, Math.abs(p.v - baseline) / step));
+    hitCircle(env, xAt(p.pos), plot.bottom - fillT * ph, 4, [[xi, p.k]], undefined, {
+      columns: [fieldName(env, xi), `${fieldName(env, yi)} (mean)`],
+      row: [p.k, p.v],
+    });
+  }
   if (mini) return;
   drawAxisFrame(ctx, env.w, env.h, plot, env.look);
   drawOrderedXAxis(ctx, env, model, plot);
@@ -1773,9 +1876,9 @@ function drawHorizon(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 
 function drawSpiral(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
   if (yi < 0) return "Time spiral needs a numeric column";
-  type P = { y: number; c: string; x: string };
+  type P = { y: number; c: string; x: string; ri: number };
   let pts: P[] = rows
-    .map((r, i) => ({ y: toNum(r[yi]), c: ci >= 0 ? String(r[ci]) : "", x: xi >= 0 ? String(r[xi]) : String(i + 1) }))
+    .map((r, i) => ({ y: toNum(r[yi]), c: ci >= 0 ? String(r[ci]) : "", x: xi >= 0 ? String(r[xi]) : String(i + 1), ri: i }))
     .filter((p) => Number.isFinite(p.y));
   if (xi >= 0) {
     const model = orderedKeys(rows, xi, 100000);
@@ -1828,6 +1931,15 @@ function drawSpiral(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  pts.forEach((p, i) => {
+    const at = posOf(i);
+    const t = (p.y - lo) / span;
+    const match: [number, string][] = [];
+    if (xi >= 0) match.push([xi, p.x]);
+    if (ci >= 0) match.push([ci, p.c]);
+    match.push([yi, String(rows[p.ri]![yi])]);
+    hitCircle(env, at.x, at.y, Math.max(3, ((mini ? 1 : 1.5) + t * (mini ? 4 : 8)) / 2), match, p.ri);
+  });
   if (!mini && xi >= 0) {
     ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
@@ -1890,6 +2002,10 @@ function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     ctx.fillStyle = env.single;
     ctx.fill();
     ctx.globalAlpha = 1;
+    hitArc(env, cx, cy, inner, r, a0, a1, [[xi, label]], firstRowIndex(rows, xi, label), {
+      columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null)],
+      row: [label, v],
+    });
     if (mini) return;
     const am = (a0 + a1) / 2;
     const lx = cx + Math.cos(am) * (r + 6);
@@ -1978,7 +2094,14 @@ function drawChord(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     const ang = angOf(i);
     const x = cx + Math.cos(ang) * R;
     const y = cy + Math.sin(ang) * R;
-    dot(ctx, x, y, (mini ? 2.5 : 3.5) + (mini ? 2 : 4) * Math.sqrt(nodeTotal.get(n)! / maxNode), nodeColor(n), 1, ink.bg);
+    const dotR = (mini ? 2.5 : 3.5) + (mini ? 2 : 4) * Math.sqrt(nodeTotal.get(n)! / maxNode);
+    dot(ctx, x, y, dotR, nodeColor(n), 1, ink.bg);
+    const col = sourceSet.has(n) ? xi : ci;
+    const half = Math.min(Math.PI / nodes.length, Math.max(dotR, 6) / R);
+    hitArc(env, cx, cy, Math.max(0, R - dotR), R + dotR, ang - half, ang + half, [[col, n]], firstRowIndex(rows, col, n), {
+      columns: [fieldName(env, col), aggregateAxisTitle(how, fieldName(env, yi) || null)],
+      row: [n, nodeTotal.get(n)!],
+    });
     if (mini) return;
     const right = Math.cos(ang) >= 0;
     const lx = cx + Math.cos(ang) * (R + 12);
@@ -2021,7 +2144,7 @@ function clipCloser(poly: Pt2[], a: Pt2, b: Pt2): Pt2[] {
 function drawVoronoi(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
   if (xi < 0 || yi < 0) return "Voronoi needs two numeric columns";
   let pts = rows
-    .map((r) => ({ x: toNum(r[xi]), y: toNum(r[yi]), c: ci >= 0 ? String(r[ci]) : "" }))
+    .map((r, ri) => ({ x: toNum(r[xi]), y: toNum(r[yi]), c: ci >= 0 ? String(r[ci]) : "", ri }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (!pts.length) return `No rows have numeric ${fieldName(env, xi, "x")} and ${fieldName(env, yi, "y")}`;
   const cap = env.mini ? 40 : 150;
@@ -2032,7 +2155,7 @@ function drawVoronoi(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   const plot = basePlot(env);
   const sx = linear(xs.min, xs.max, plot.left, plot.right);
   const sy = linear(ys.min, ys.max, plot.bottom, plot.top);
-  const mapped = pts.map((p) => ({ x: sx(p.x), y: sy(p.y), c: p.c }));
+  const mapped = pts.map((p) => ({ x: sx(p.x), y: sy(p.y), c: p.c, ri: p.ri }));
   const catIdx = categoryIndex(rows, ci);
   const colorOf = (c: string) => (ci >= 0 ? env.colors[(catIdx.get(c) ?? 0) % env.colors.length]! : env.single);
   const rect: Pt2[] = [
@@ -2059,7 +2182,13 @@ function drawVoronoi(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     ctx.lineWidth = 1;
     ctx.stroke();
   });
-  for (const p of mapped) dot(ctx, p.x, p.y, mini ? 1.8 : 3, colorOf(p.c), 1, ink.bg);
+  for (const p of mapped) {
+    dot(ctx, p.x, p.y, mini ? 1.8 : 3, colorOf(p.c), 1, ink.bg);
+    const row = rows[p.ri]!;
+    const match: [number, string][] = [[xi, String(row[xi])], [yi, String(row[yi])]];
+    if (ci >= 0) match.push([ci, p.c]);
+    hitCircle(env, p.x, p.y, mini ? 1.8 : 3, match, p.ri);
+  }
   if (mini) return;
   drawAxisFrame(ctx, env.w, env.h, plot, env.look);
   drawChartTicks(ctx, xs.min, xs.max, ys.min, ys.max, env.w, env.h, plot, env.look);
@@ -2125,6 +2254,16 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     ctx.fillStyle = front;
     ctx.fillRect(x0, yT, bw, yB - yT);
     ctx.globalAlpha = 1;
+    const label = entries[i]![0];
+    // Hover anywhere on the block (incl. extrusion); focus hugs the front face.
+    const hx0 = Math.min(x0, x0 + dx);
+    const hx1 = Math.max(x1, x1 + dx);
+    const hy0 = Math.min(yT, yT + dy);
+    const hy1 = Math.max(yB, yB + dy);
+    hitRect(env, hx0, hy0, hx1 - hx0, hy1 - hy0, [[xi, label]], firstRowIndex(rows, xi, label), {
+      columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null)],
+      row: [label, v],
+    }, { x: x0, y: yT, w: bw, h: Math.max(1, yB - yT) });
   });
   if (mini) return;
   // Floor edge follows the extrusion (fake-3D), not a flat cartesian L-frame.
@@ -2171,7 +2310,7 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number, si: number) {
   if (xi < 0 || yi < 0) return "Isometric scatter needs two numeric columns";
   let pts = rows
-    .map((r) => ({ x: toNum(r[xi]), y: toNum(r[yi]), z: si >= 0 ? toNum(r[si]) : NaN, c: ci >= 0 ? String(r[ci]) : "", row: r }))
+    .map((r, ri) => ({ x: toNum(r[xi]), y: toNum(r[yi]), z: si >= 0 ? toNum(r[si]) : NaN, c: ci >= 0 ? String(r[ci]) : "", row: r, ri }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (!pts.length) return `No rows have numeric ${fieldName(env, xi, "x")} and ${fieldName(env, yi, "y")}`;
   const cap = env.mini ? 80 : 400;
@@ -2273,6 +2412,9 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     }
     const color = ci >= 0 ? env.colors[(catIdx.get(d.p.c) ?? 0) % env.colors.length]! : env.single;
     mark(ctx, env, d.p.row, top.sx, top.sy, r, color, env.alpha, ink.bg);
+    const match: [number, string][] = [[xi, String(d.p.row[xi])], [yi, String(d.p.row[yi])]];
+    if (ci >= 0) match.push([ci, d.p.c]);
+    hitCircle(env, top.sx, top.sy, r, match, d.p.ri);
   }
   if (mini) return;
   // Tick labels on the two floor edges from the origin — stay on the diamond after Direction.
@@ -2388,6 +2530,10 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
       ctx.globalAlpha = Math.max(0.8, env.alpha);
       ctx.fillRect(xCursor, yCursor, Math.max(0, colW - gap), Math.max(0, segH - gap));
       ctx.globalAlpha = 1;
+      hitRect(env, xCursor, yCursor, Math.max(1, colW - gap), Math.max(1, segH - gap), [[xi, a], [ci, b]], undefined, {
+        columns: [fieldName(env, xi), fieldName(env, ci), aggregateAxisTitle(how, fieldName(env, yi) || null), "share"],
+        row: [a, b, v, percentLabel(v / colTotal)],
+      });
       if (!mini && colW - gap >= 30 && segH - gap >= 14) {
         ctx.font = oddFont(env, 10);
         ctx.fillStyle = inkOn(color);
@@ -2500,6 +2646,27 @@ function drawContour(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       if (t < 0.04) continue;
       ctx.fillStyle = colorAt(t);
       ctx.fillRect(plot.left + i * cellW, plot.top + j * cellH, cellW + 0.6, cellH + 0.6);
+    }
+  }
+  // No points are drawn: register coarse density blocks (4×4 cells) as summary rects.
+  const blk = 4;
+  for (let j = 0; j < gh; j += blk) {
+    for (let i = 0; i < gw; i += blk) {
+      const j1 = Math.min(gh, j + blk);
+      const i1 = Math.min(gw, i + blk);
+      let sum = 0;
+      let n = 0;
+      for (let jj = j; jj <= j1; jj++) for (let ii = i; ii <= i1; ii++) { sum += grid[jj]![ii]!; n++; }
+      const t = sum / (n * gmax);
+      if (t < 0.04) continue;
+      const x0v = xs.min + (i / gw) * (xs.max - xs.min);
+      const x1v = xs.min + (i1 / gw) * (xs.max - xs.min);
+      const y1v = ys.max - (j / gh) * (ys.max - ys.min);
+      const y0v = ys.max - (j1 / gh) * (ys.max - ys.min);
+      hitRect(env, plot.left + i * cellW, plot.top + j * cellH, (i1 - i) * cellW, (j1 - j) * cellH, [], undefined, {
+        columns: [fieldName(env, xi), fieldName(env, yi), "density"],
+        row: [`${formatDataValue(x0v)}–${formatDataValue(x1v)}`, `${formatDataValue(y0v)}–${formatDataValue(y1v)}`, percentLabel(t)],
+      });
     }
   }
   const levels = [0.2, 0.4, 0.6, 0.8];

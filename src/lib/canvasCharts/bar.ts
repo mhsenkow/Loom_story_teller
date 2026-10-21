@@ -262,6 +262,7 @@ export function renderFullBar(
       ctx.fillText(formatDataValue(val), tipRight ? left + len + 5 : left - 5, yMid);
       pushHit(opts, {
         shape: "rect", x: rect.left, y: rect.top + band * i, w: rect.right - rect.left, h: band,
+        mark: { x: Math.min(left, left + len), y: yMid - barT / 2, w: Math.abs(len), h: barT },
         match: [[xi, label]],
         summary: summaryFor(label, val),
       });
@@ -321,6 +322,7 @@ export function renderFullBar(
     }
     pushHit(opts, {
       shape: "rect", x: rect.left + band * i, y: rect.top, w: band, h: rect.bottom - rect.top,
+      mark: { x: rect.left + band * (i + 0.5) - barW / 2, y: Math.min(Y(0), Y(val)), w: barW, h: Math.max(val === 0 ? 0 : 1, Math.abs(Y(val) - Y(0))) },
       match: [[xi, label]],
       summary: summaryFor(label, val),
     });

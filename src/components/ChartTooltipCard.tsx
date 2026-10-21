@@ -30,6 +30,8 @@ export function ChartTooltipCard({
   fontFamily,
   axisFontSize,
   pinned = false,
+  onPin,
+  markPinned = false,
 }: {
   tip: ChartTooltipPayload;
   presentation: ChartTooltipPresentation;
@@ -40,6 +42,10 @@ export function ChartTooltipCard({
   fontFamily?: string;
   axisFontSize?: number;
   pinned?: boolean;
+  /** Pin / unpin the mark this readout describes (touch + sheet presentations). */
+  onPin?: () => void;
+  /** The described mark is already pinned (button reads “Unpin”). */
+  markPinned?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);
@@ -138,6 +144,17 @@ export function ChartTooltipCard({
     >
       <div className="flex items-start gap-2">
         <div className="min-w-0 flex-1">{body}</div>
+        {interactive && onPin && (
+          <button
+            type="button"
+            onClick={onPin}
+            className="shrink-0 min-h-8 px-2 -mt-1 text-2xs font-medium rounded border border-loom-accent/50 text-loom-accent hover:bg-loom-accent/10 focus-visible:outline focus-visible:outline-loom-accent"
+            aria-pressed={markPinned}
+            title={markPinned ? "Unpin this readout" : "Keep this readout on the chart (and in exports / links)"}
+          >
+            {markPinned ? "Unpin" : "Pin"}
+          </button>
+        )}
         {interactive && onDismiss && (
           <button
             type="button"

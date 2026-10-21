@@ -277,4 +277,23 @@ describe("chart links", () => {
     expect(decoded!.visual?.chartPadding).toBe(16);
     expect(decoded!.visual).not.toHaveProperty("notARealKey");
   });
+
+  it("carries pinned readouts for the active chart only, capped and validated", () => {
+    const rec = { id: "r1", kind: "bar", title: "t", subtitle: "", score: 1, spec: {}, xField: "city", yField: "units", colorField: null } as ChartRecommendation;
+    const pin = (chartId: string, v: string) => ({ chartId, ref: { fields: [["city", v]] as [string, string][] }, columns: ["city", "Sum of units"], row: [v, 12] });
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: rec,
+      pinnedTooltips: [pin("r1", "Rome"), pin("other", "Oslo"), ...["a", "b", "c", "d", "e"].map((v) => pin("r1", v))],
+    })!;
+    expect(link.pins).toHaveLength(5);
+    expect(link.pins!.every((p) => p.f[0]![1] !== "Oslo")).toBe(true);
+    const decoded = decodeChartLink(encodeChartLink(link))!;
+    expect(decoded.pins).toEqual(link.pins);
+    // Garbage in the pin list is dropped, not trusted.
+    const raw = JSON.parse(b64urlDecode(encodeChartLink(link).slice("chart=".length)));
+    raw.pn = [{ f: [["city", 1]], c: ["x"], r: [{}] }, "nope", ...raw.pn.slice(0, 1)];
+    const tampered = decodeChartLink(`chart=${b64urlEncode(JSON.stringify(raw))}`)!;
+    expect(tampered.pins).toHaveLength(1);
+  });
 });

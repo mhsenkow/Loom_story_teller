@@ -25,6 +25,15 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-21f",
+    date: "2026-10-21",
+    title: "Point at what matters",
+    items: [
+      { title: "Every mark lights up", detail: "Hover or arrow-key through any chart and the bar, point, slice, cell or path you're on gets a clear highlight shaped to the chart: rings for points, outlines for bars, edges for slices, a soft wash for bands. Maps, globes, terrain, weaves and trail charts now answer hover too." },
+      { title: "Pin it, share it", detail: "Click a mark (or press Enter, or tap Pin on your phone) to keep its readout on the chart. Up to five pins, numbered. They're drawn into exported images and saved in share links, so whoever opens your chart sees exactly what you were pointing at." },
+    ],
+  },
+  {
     id: "2026-10-21e",
     date: "2026-10-21",
     title: "Feeds that take a rest",

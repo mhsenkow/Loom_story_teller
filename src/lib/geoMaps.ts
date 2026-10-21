@@ -441,7 +441,7 @@ function resolveLonLat(
   return { lonI, latI };
 }
 
-type GeoPoint = { lon: number; lat: number; category: number; size: number; row: unknown[] };
+type GeoPoint = { lon: number; lat: number; category: number; size: number; row: unknown[]; rowIndex: number };
 
 function collectPoints(
   rows: unknown[][],
@@ -453,7 +453,8 @@ function collectPoints(
   // Category ids follow first appearance across all rows so they line up with the shared legend.
   const catMap = categoryIndex(rows, colorI);
   const out: GeoPoint[] = [];
-  for (const r of rows) {
+  for (let ri = 0; ri < rows.length; ri++) {
+    const r = rows[ri]!;
     const lon = num(r[lonI]);
     const lat = num(r[latI]);
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue;
@@ -462,7 +463,7 @@ function collectPoints(
     if (lat === 0 && lon === 0) continue;
     const cat = colorI >= 0 ? (catMap.get(String(r[colorI])) ?? 0) : 0;
     const size = sizeI >= 0 ? num(r[sizeI]) : NaN;
-    out.push({ lon, lat, category: cat, size, row: r });
+    out.push({ lon, lat, category: cat, size, row: r, rowIndex: ri });
   }
   return out;
 }
@@ -645,6 +646,14 @@ function renderProjectedPoints(
       ctx.strokeStyle = withAlpha(ink.bg, 0.7);
       ctx.lineWidth = 0.6;
       ctx.stroke();
+      if (opts.hits) {
+        // Hex bins are aggregates: identify by their center on the map.
+        const ll = projection.invert?.([b.cx, b.cy]);
+        opts.hits.push({
+          shape: "circle", cx: b.cx, cy: b.cy, r: hr, match: [],
+          summary: { columns: ["Near", "Rows in this hex"], row: [ll ? `${ll[1].toFixed(1)}°, ${ll[0].toFixed(1)}°` : "—", b.n] },
+        });
+      }
     }
     if (showKey) {
       drawRampKey(ctx, { ...keyOrigin(w, h, pad, opts.axisFontSize), min: minC, max: Math.max(minC, maxC), colorAt, title: "Rows per hex", ink, axisFontSize: opts.axisFontSize, fontFamily: font });
@@ -672,6 +681,7 @@ function renderProjectedPoints(
     if (!xy) continue;
     const symbol = symbols.of(p.row);
     drawGeoMarker(ctx, xy[0], xy[1], radius(p), pointColor(colors, p), markAlpha, ink.halo, haloW, symbol.shape, symbol.glyph);
+    opts.hits?.push({ shape: "circle", cx: xy[0], cy: xy[1], r: radius(p), match: [], rowIndex: p.rowIndex });
   }
   if (showKey && scale) {
     const { side, bottom } = mapInsets(pad);
@@ -851,6 +861,7 @@ function renderGlobeLike(
         ctx.lineTo(b.sx, b.sy);
         ctx.stroke();
       }
+      for (const p of list) if (p.visible) opts.hits?.push({ shape: "circle", cx: p.sx, cy: p.sy, r: Math.max(rMin, radius(p)), match: [], rowIndex: p.rowIndex });
       const tip = list[list.length - 1];
       if (tip?.visible) {
         const marker = markerFor(tip);
@@ -866,6 +877,7 @@ function renderGlobeLike(
     for (const p of drawn) {
       const marker = markerFor(p);
       drawGeoMarker(ctx, p.sx, p.sy, radius(p), pointColor(colors, p), alpha * (0.55 + 0.45 * p.depth), ink.halo, haloW, marker.shape, marker.glyph);
+      opts.hits?.push({ shape: "circle", cx: p.sx, cy: p.sy, r: radius(p), match: [], rowIndex: p.rowIndex });
     }
   }
 
@@ -956,6 +968,7 @@ function renderArcMap(
     const xy = projection([p.lon, p.lat]);
     if (!xy) continue;
     drawDot(ctx, xy[0], xy[1], r, pointColor(colors, p), Math.min(1, alpha + 0.1), ink.halo, 0.75);
+    opts.hits?.push({ shape: "circle", cx: xy[0], cy: xy[1], r, match: [], rowIndex: p.rowIndex });
   }
   ctx.restore();
 }

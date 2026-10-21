@@ -59,6 +59,7 @@ export function ChartLinkSync() {
   const sampleRows = useLoomStore((s) => s.sampleRows);
   const inspectingFilePath = useLoomStore((s) => s.inspectingFilePath);
   const chartLink = useLoomStore((s) => s.chartLink);
+  const pinnedTooltips = useLoomStore((s) => s.pinnedTooltips);
   const prevView = useRef<string | null>(null);
 
   // Apply a shared link once its dataset (columns + rows) is open.
@@ -96,6 +97,18 @@ export function ChartLinkSync() {
       viewMode: "chart",
       panelTab: s.panelTab === "settings" ? "chart" : s.panelTab,
       chartLink: null,
+      // Shared highlights reopen pinned on the same marks.
+      pinnedTooltips: [
+        ...s.pinnedTooltips.filter((t) => t.chartId !== rec.id),
+        ...(chartLink.pins ?? []).map((p, i) => ({
+          id: `pt-link-${i}`,
+          chartId: rec.id,
+          ref: { fields: p.f },
+          rowIndex: -1,
+          row: p.r,
+          columns: p.c,
+        })),
+      ],
     });
     // Snapshot reopen already toasted in WebSessionResume — don't stack a second one.
     if (!storyIdFromSharedPath(selectedFile.path)) {
@@ -141,6 +154,7 @@ export function ChartLinkSync() {
       connectScatterTrail,
       showMarginals,
       appSettings: { chartAspect, chartDevice },
+      pinnedTooltips,
     });
     if (!link) return;
     const hash = `#${encodeChartLink(link)}`;
@@ -161,6 +175,7 @@ export function ChartLinkSync() {
     showMarginals,
     chartAspect,
     chartDevice,
+    pinnedTooltips,
   ]);
 
   return null;

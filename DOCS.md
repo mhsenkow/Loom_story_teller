@@ -316,3 +316,14 @@ Chart contains four icon-labeled sections: Encoding, Visual, Analyze, and Overla
 ### Firefly fields
 
 Firefly plots keep observations on fixed X/Y axes. Size encodes steady glow intensity; without Size, an encoded time field supplies recency. Without either, every observation has equal weight. Missing timestamps never become row-order recency. Colored cores and source-over halos remain readable on light and dark themes. Axis and grid styling applies to the live chart and Canvas captures. No perpetual twinkle runs, so static data does not imply change and idle charts spend no animation frames.
+
+## Mark focus and pinned readouts
+
+`src/lib/markFocus.ts` is the one hover / focus / pin system for every chart kind, built on the `HitTarget`s renderers register while painting (`chartTooltip.ts`; optional `mark` = drawn bounds when the hover area is padded, e.g. a bar's whole band).
+
+- **Identity:** `MarkRef` = a mark's column → value pairs (`match`, else summary label, else the row's encoded fields). Pins re-find their mark after resize, live refresh and link round trips (`findHitForMark`).
+- **Layer:** `ChartView` owns a `data-loom-focus-layer` canvas above every chart layer. It draws pinned marks (solid), the hovered / keyboard-focused mark (lighter), then numbered callouts (`drawPinnedCallout`, placed to stay in-frame and clear of each other). The PNG export composes this layer, so shares carry the highlight.
+- **Styles** (`markFocusStyle`): point → ring + halo; bar → outline + value-end cap; band (box / violin / area slices) → dashed wash; cell (heatmap / treemap / choropleth) → inset outline; wedge (pie / sunburst) → lifted edge. Colors come from the theme accent.
+- **Input:** click pins (mouse / pen); the readout's **Pin** button covers touch; arrow keys walk marks in reading order (`keyboardNavigableHits`), Enter / Space pins, Escape clears. Scatter marks come from `scatterDataRef` (`scatterHitForRow`).
+- **State / links:** `pinnedTooltips` (store) holds `{ chartId, ref, row, columns }`, max 5 per chart. Share links carry them as `pn` (`chartLink.ts`, validated + capped on decode); `ChartLinkSync` restores them onto the reopened chart.
+
