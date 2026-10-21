@@ -61,6 +61,12 @@ Privacy: https://loom.ibm.io/privacy
 - Release: After approval  
 - Uses IDFA: **No**  
 
+## Resubmitted (2026-10-21)
+- Rejected 2026-10-21 under 2.1(a) ("malware error during launch") — reviewers saw **build 2**, which let DuckDB autoinstall unsigned extensions in the sandbox. Later builds had the fix but were never attached to the submission.
+- Build **11** (delivery `a77722c1-883b-4a2e-a8c8-f2eddab12a55`) attached to macOS 1.0 and resubmitted in the same submission (`cc18614f…`) with a reply to App Review.
+- Description / review notes: "CSV / Parquet" → "CSV or SQLite" (MAS build cannot load Parquet/Excel without extensions).
+- Lesson: after uploading a fix, **swap the build on the version** — TestFlight uploads alone don't change what's in review.
+
 ## Mac App Store build (sandbox + user folders)
 
 Same folder model as desktop/iPad: **only folders the user picks** (App Sandbox + `files.user-selected.read-write` + app-scope bookmarks). No blanket home-directory access.
