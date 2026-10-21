@@ -5,8 +5,16 @@
 /** Bump when source transform column shapes change (invalidates edge cache). */
 export const SOURCE_CACHE_SCHEMA_VERSION = 2;
 
+/** Per-feed revisions: bump one feed's cache (e.g. after a fetch fix) without evicting all. */
+const SOURCE_CACHE_KIND_REV: Record<string, number> = {
+  // 2: subrequest-capped payloads (48 Pokémon, 42 Met objects) were cached for a day.
+  pokemon: 2,
+  met: 2,
+};
+
 export function sourceCacheKey(kind: string): string {
-  return `https://loom-source.internal/source/v${SOURCE_CACHE_SCHEMA_VERSION}/${kind}`;
+  const rev = SOURCE_CACHE_KIND_REV[kind];
+  return `https://loom-source.internal/source/v${SOURCE_CACHE_SCHEMA_VERSION}/${kind}${rev ? `-r${rev}` : ""}`;
 }
 
 /** Catalog search `rows` query param — finite integer in [1, 200]. */

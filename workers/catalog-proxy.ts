@@ -1246,21 +1246,42 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   },
 
   pokemon: async () => {
-    const list = await upstreamJson<{ results?: { url?: string }[] }>(
-      "PokéAPI",
-      "https://pokeapi.co/api/v2/pokemon?limit=151",
-      20_000,
-    );
-    const urls = (Array.isArray(list.results) ? list.results : [])
-      .map((r) => (typeof r?.url === "string" ? r.url : null))
-      .filter((u): u is string => !!u)
-      .slice(0, 151);
-    const settled = await settleLimited(
-      urls.map((url) => () => upstreamJson("PokéAPI", url, 15_000)),
-      12,
-    );
-    const details = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-    if (!details.length) throw new UpstreamError("PokéAPI: no Pokémon details returned");
+    // One GraphQL request for all 151 — the REST path needs 152 calls and Workers
+    // cap a request at 50 subrequests (production silently returned ~48 rows).
+    const query =
+      "{ pokemon_v2_pokemon(where:{id:{_lte:151}}, order_by:{id:asc}) { id name height weight " +
+      "pokemon_v2_pokemontypes { slot pokemon_v2_type { name } } " +
+      "pokemon_v2_pokemonstats { base_stat pokemon_v2_stat { name } } } }";
+    let res: Response;
+    try {
+      res = await fetch("https://beta.pokeapi.co/graphql/v1beta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ query }),
+        signal: AbortSignal.timeout(20_000),
+      });
+    } catch (e) {
+      throw new UpstreamError(`PokéAPI: ${(e as Error).message}`);
+    }
+    if (!res.ok) throw new UpstreamError(`PokéAPI ${res.status}`);
+    type Gql = {
+      data?: { pokemon_v2_pokemon?: {
+        id: number; name: string; height: number; weight: number;
+        pokemon_v2_pokemontypes?: { slot: number; pokemon_v2_type?: { name: string } }[];
+        pokemon_v2_pokemonstats?: { base_stat: number; pokemon_v2_stat?: { name: string } }[];
+      }[] };
+    };
+    const list = ((await res.json()) as Gql).data?.pokemon_v2_pokemon ?? [];
+    // Reshape to the REST detail shape pokemonRows already parses.
+    const details = list.map((p) => ({
+      id: p.id,
+      name: p.name,
+      height: p.height,
+      weight: p.weight,
+      types: (p.pokemon_v2_pokemontypes ?? []).map((t) => ({ slot: t.slot, type: { name: t.pokemon_v2_type?.name } })),
+      stats: (p.pokemon_v2_pokemonstats ?? []).map((st) => ({ base_stat: st.base_stat, stat: { name: st.pokemon_v2_stat?.name } })),
+    }));
+    if (!details.length) throw new UpstreamError("PokéAPI: no Pokémon returned");
     return JSON.stringify(pokemonRows(details));
   },
 
@@ -1271,7 +1292,8 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     const MET = "https://collectionapi.metmuseum.org/public/collection/v1";
     // European paintings, modern, Asian, Egyptian, Greek & Roman, medieval.
     // The Met's bot shield 403s bursts, so keep the fan-out small and slow.
-    const departments = [11, 21, 6, 10, 13, 17];
+    // Workers cap a request at 50 subrequests: 3 listings + 45 objects.
+    const departments = [11, 6, 10];
     const lists = await settleLimited(
       departments.map((id) => () => upstreamJson<{ objectIDs?: number[] }>("Met Museum", `${MET}/objects?departmentIds=${id}`, 20_000)),
       1,
@@ -1280,7 +1302,7 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     for (const r of lists) {
       if (r.status !== "fulfilled") continue;
       const all = Array.isArray(r.value.objectIDs) ? r.value.objectIDs : [];
-      const take = 20;
+      const take = 15;
       const step = Math.max(1, Math.floor(all.length / take));
       for (let i = 0; i < all.length && ids.length < departments.length * take; i += step) {
         if (i / step >= take) break;
