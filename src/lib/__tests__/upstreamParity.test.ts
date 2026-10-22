@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 import { ADSB_POINTS, WORLD_CITIES, adsbToOpensky } from "../../../workers/sourceTransforms";
 import { SOURCE_DEFS, SOURCE_KINDS, type SourceKind } from "../sourceRegistry";
 import { SOURCE_ENDPOINTS } from "../sourceEndpoints";
-import { parseSourceRows } from "../webStreams";
+import { parseSourceRows, stormLevel } from "../webStreams";
 
 const ROOT = resolve(__dirname, "../../..");
 const read = (p: string) => readFileSync(resolve(ROOT, p), "utf8");
@@ -97,5 +97,12 @@ describe("shared constants (LOOM-681)", () => {
   it("adsbToOpensky default cap is the shared aircraft cap", () => {
     const many = Array.from({ length: 2500 }, (_, i) => ({ hex: i.toString(16).padStart(6, "0"), lat: 1, lon: 1 }));
     expect(adsbToOpensky([{ now: 1, ac: many }]).states.length).toBeLessThanOrEqual(2000);
+  });
+});
+
+describe("spaceweather storm level parity", () => {
+  it("stormLevel matches the Kp → G fixture that sources_tests.rs also reads", () => {
+    const cases = fixture("storm_levels.json") as [number, string][];
+    for (const [kp, level] of cases) expect([kp, stormLevel(kp)]).toEqual([kp, level]);
   });
 });
