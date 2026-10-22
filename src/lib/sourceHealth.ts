@@ -74,5 +74,6 @@ export function feedHealthNote(h: FeedHealth | undefined, now = Date.now()): str
   };
   const last = ago(h.lastOk);
   if (h.state === "resting") return `The upstream service hasn’t answered${last ? ` since ${last}` : " lately"}. Loom will bring it back when it does.`;
-  return `The upstream service is having trouble — showing the last good copy${last ? ` (${last})` : ""}.`;
+  // Shown on stopped cards too, so don't promise data on screen.
+  return `The upstream service is patchy${last ? ` — last answered ${last}` : " right now"}.`;
 }

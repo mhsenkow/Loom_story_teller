@@ -26,9 +26,9 @@ import {
   type SocialPresetId,
 } from "@/lib/socialExport";
 import { getThemeUiColors } from "@/lib/chartPalettes";
-import { downloadBlob } from "@/lib/zipStore";
+import { downloadBlob, savedToast } from "@/lib/download";
 import { buildChartSharePageHtml } from "@/lib/dashboardMicrosite";
-import { isDesktop } from "@/lib/tauri";
+import { isCapacitor, isDesktop, isNativeShell } from "@/lib/tauri";
 import { chartLinkFromState } from "@/lib/chartLink";
 import { currentChartShareUrl } from "./ChartLinkSync";
 import {
@@ -99,6 +99,9 @@ function ShareSheetBody() {
   const returnFocusRef = useRef<HTMLElement | null>(null);
   /** Mac/Windows Tauri only — iPad app is not “desktop” for share labels / NeoSpace. */
   const desktopApp = useMemo(isDesktop, []);
+  const nativeShell = useMemo(isNativeShell, []);
+  /** Capacitor has no external-URL opener, so the handoff would strand the user. */
+  const neoSpaceAvailable = useMemo(() => !desktopApp && !isCapacitor(), [desktopApp]);
   const close = useCallback(() => {
     setShareSheetOpen(false);
     returnFocusRef.current?.focus();
@@ -231,10 +234,10 @@ function ShareSheetBody() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!blob) return;
-    downloadBlob(blob, filename);
-    setToast("Image saved");
+    const msg = savedToast(await downloadBlob(blob, filename), "Image saved");
+    if (msg) setToast(msg);
   };
 
   const handleCopyCaption = async () => {
@@ -302,7 +305,8 @@ function ShareSheetBody() {
       return;
     }
     setBusy("neospace");
-    const child = window.open("about:blank", "neospace_loom_share");
+    // iOS webviews can't open a second window; the handoff goes to Safari there.
+    const child = nativeShell ? null : window.open("about:blank", "neospace_loom_share");
     try {
       const published = await publishStory();
       if (!published?.url) {
@@ -431,9 +435,14 @@ function ShareSheetBody() {
         if (e instanceof Error && e.name === "AbortError") return;
       }
     }
-    downloadBlob(blob, filename);
+    const outcome = await downloadBlob(blob, filename);
+    if (outcome === "cancelled") return;
     if (text) await copyTextToClipboard(text);
-    setToast("Image saved and caption copied — paste them into Instagram");
+    setToast(
+      outcome === "unsupported"
+        ? "Couldn’t save the image on this device"
+        : "Image saved and caption copied — paste them into Instagram",
+    );
   };
 
   const openMoreExports = () => {
@@ -641,7 +650,7 @@ function ShareSheetBody() {
         >
           Save image
         </button>
-        {!desktopApp ? (
+        {neoSpaceAvailable ? (
           <button
             type="button"
             onClick={handlePostToNeoSpace}

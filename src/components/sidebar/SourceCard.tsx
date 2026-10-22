@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
 import { activateDataset } from "@/lib/datasetPipeline";
-import { isDesktop, openExternalUrl, sourceClear, sourceSnapshot, sourceStart, sourceStatus, sourceStop } from "@/lib/tauri";
+import { sourceClear, sourceSnapshot, sourceStart, sourceStatus, sourceStop } from "@/lib/tauri";
 import { SOURCE_EXPLORE_ROWS, sourceStreamPath, type SourceDef } from "@/lib/sourceRegistry";
 import { feedRef } from "@/lib/sourceRef";
 import { feedHealthNote } from "@/lib/sourceHealth";
@@ -134,7 +134,8 @@ export function SourceCard({ def }: { def: SourceDef }) {
               </span>
             )}
           </p>
-          {healthNote && !running && <p className="sr-only">{healthNote}</p>}
+          {/* Visible, not a tooltip: touch devices never show title text. */}
+          {healthNote && !running && <p className="text-2xs text-loom-muted mt-0.5 leading-snug">{healthNote}</p>}
           <p className="text-2xs text-loom-muted mt-0.5 leading-snug">{def.description}</p>
         </div>
         {!running ? (
@@ -193,12 +194,6 @@ export function SourceCard({ def }: { def: SourceDef }) {
             target="_blank"
             rel="noopener noreferrer"
             className="block min-w-0 text-2xs text-loom-label hover:text-loom-accent w-fit"
-            onClick={(e) => {
-              if (isDesktop()) {
-                e.preventDefault();
-                void openExternalUrl(def.homepage);
-              }
-            }}
           >
             {def.attribution}
           </a>

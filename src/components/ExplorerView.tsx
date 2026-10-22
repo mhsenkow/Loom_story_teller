@@ -293,6 +293,14 @@ export function ExplorerView() {
     setFilterInputValues(tableColumnFilters ?? {});
   }, [selectedFile?.path]);
 
+  /** Undo/redo restore filters in the store; mirror them into the filter boxes. */
+  const syncFilterInputs = useCallback(() => {
+    // Drop pending keystroke debounces so they can't re-apply the undone text.
+    for (const t of Object.values(filterDebounceRef.current)) clearTimeout(t);
+    filterDebounceRef.current = {};
+    setFilterInputValues(useLoomStore.getState().tableColumnFilters ?? {});
+  }, []);
+
   const setFilterInputAndDebounce = useCallback((col: string, value: string) => {
     setFilterInputValues((prev) => ({ ...prev, [col]: value }));
     if (filterDebounceRef.current[col]) clearTimeout(filterDebounceRef.current[col]);
@@ -957,8 +965,8 @@ export function ExplorerView() {
             )}
           </div>
           <span className="text-loom-border hidden sm:inline" aria-hidden>|</span>
-          <button type="button" onClick={undoTable} disabled={tableUndoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Undo" aria-label="Undo table change">↶</button>
-          <button type="button" onClick={redoTable} disabled={tableRedoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Redo" aria-label="Redo table change">↷</button>
+          <button type="button" onClick={() => { undoTable(); syncFilterInputs(); }} disabled={tableUndoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Undo" aria-label="Undo table change">↶</button>
+          <button type="button" onClick={() => { redoTable(); syncFilterInputs(); }} disabled={tableRedoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Redo" aria-label="Redo table change">↷</button>
           {!isMobile && (
             <>
               <span className="text-loom-border" aria-hidden>|</span>

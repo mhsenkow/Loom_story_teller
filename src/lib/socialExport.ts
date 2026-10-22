@@ -291,8 +291,11 @@ export async function shareOrDownloadFile(
       if (e instanceof Error && e.name === "AbortError") throw e;
     }
   }
-  downloadBlob(blob, filename);
-  return "downloaded";
+  const saved = await downloadBlob(blob, filename);
+  if (saved === "cancelled") throw new DOMException("Share cancelled", "AbortError");
+  // Callers toast success on return — don't claim a save that never happened.
+  if (saved === "unsupported") throw new Error("Couldn’t save the file on this device");
+  return saved === "shared" ? "shared" : "downloaded";
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {

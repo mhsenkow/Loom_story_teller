@@ -439,22 +439,26 @@ export function useSidebarController() {
       activeChart: null,
       inspectingFilePath: file.path,
     });
-    addRecentFile(file);
     if (sidebarOverlays && sidebarOpen) toggleSidebar();
-    setLastSession({
-      folderPath: mountedFolder,
-      filePath: file.path,
-      viewMode,
-    });
     try {
       const cached = webFileCache[file.path];
       const result = cached ?? await inspectFile(file.path, 500);
       if (useLoomStore.getState().selectedFile?.path !== file.path) return;
       activateDataset({ file, stats: result.stats, sample: result.sample, inspectingFilePath: null });
+      // Only remember files that actually opened, so a broken file can't
+      // become the session the next launch tries to resume.
+      addRecentFile(file);
+      setLastSession({
+        folderPath: mountedFolder,
+        filePath: file.path,
+        viewMode,
+      });
     } catch (e) {
       console.error("File inspection failed:", e);
       if (useLoomStore.getState().selectedFile?.path === file.path) {
-        setToast("Failed to load file. Try another or check the file.");
+        // Clear the selection so Explorer leaves its loading skeleton for Start.
+        useLoomStore.getState().setSelectedFile(null);
+        setToast(`Couldn’t open ${file.name} — pick another file`);
       }
     } finally {
       if (useLoomStore.getState().inspectingFilePath === file.path) {
