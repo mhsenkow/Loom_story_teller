@@ -38,6 +38,7 @@ import { probeConnection } from "@/lib/connectionStatus";
 import { RECONNECTED_EVENT } from "./OfflineBanner";
 import { SOURCE_DEFS, SOURCE_EXPLORE_ROWS, SOURCE_BY_KIND, sourceKindFromPath } from "@/lib/sourceRegistry";
 import { parseShareDataSnapshot, sharedStoryPath, storyIdFromSharedPath } from "@/lib/shareLineage";
+import { feedHealthNote, loadFeedHealth } from "@/lib/sourceHealth";
 import { guessHomepageFromDataUrl } from "@/lib/dataProvenance";
 import { remoteCsvLoadPrompt } from "@/lib/webSharedLink";
 
@@ -154,26 +155,45 @@ export function WebSessionResume() {
     let pendingOffline = false;
     const resumeStream = async () => {
       {
+        // Startup precedence (startupIntent.ts) keeps Onboarding closed whenever a
+        // saved session exists, so there's no discover sheet to wait for here.
         if (useLoomStore.getState().selectedFile) return;
-        // First-visit discover modal still open — don’t fight it (unless a link asked for this stream).
-        try {
-          if (!sharedSrc && !window.localStorage.getItem("loom-discover-v1")) return;
-        } catch {
-          /* continue */
-        }
 
         const kind = path.replace(/^stream:\/\//, "");
         const name = STREAM_NAMES[kind] ?? kind;
+        /** Say we tried — otherwise a down feed just lands on an empty start screen. */
+        const feedDown = async () => {
+          if (useLoomStore.getState().selectedFile) return;
+          const { setToast } = useLoomStore.getState();
+          if (chartLink) {
+            setToast("Couldn’t reach the live feed for this shared chart — try again in a moment");
+            return;
+          }
+          let note: string | null = null;
+          try {
+            note = feedHealthNote((await loadFeedHealth({ timeoutMs: 1500 }))[kind]);
+          } catch {
+            /* health is optional */
+          }
+          if (useLoomStore.getState().selectedFile) return;
+          setToast(note ? `Couldn’t reopen ${name}. ${note}` : `Couldn’t reopen ${name} — the feed isn’t answering right now`);
+        };
         try {
           if (kind === "wiki") {
             await streamStart();
-            // Fresh SSE buffers start empty — give a shared link a few seconds to fill.
+            // Fresh SSE buffers start empty — give the feed a few seconds to fill
+            // before calling it down (a saved session too, not just shared links).
             let snap = await new Promise<Awaited<ReturnType<typeof streamSnapshot>>>((r) => setTimeout(() => r(streamSnapshot(500)), 800));
-            for (let i = 0; sharedSrc && i < 6 && !snap.sample.rows.length; i++) {
+            for (let i = 0; i < 6 && !snap.sample.rows.length; i++) {
+              if (useLoomStore.getState().selectedFile) return;
               await new Promise((r) => setTimeout(r, 800));
               snap = await streamSnapshot(500);
             }
-            if (!snap.sample.rows.length) return;
+            if (useLoomStore.getState().selectedFile) return;
+            if (!snap.sample.rows.length) {
+              await feedDown();
+              return;
+            }
             const file = {
               path,
               name,
@@ -193,7 +213,10 @@ export function WebSessionResume() {
 
           await sourceStart(kind as SourceKind);
           const snap = await sourceSnapshot(kind as SourceKind, SOURCE_EXPLORE_ROWS);
-          if (!snap.sample.rows.length) return;
+          if (!snap.sample.rows.length) {
+            await feedDown();
+            return;
+          }
           const file = {
             path,
             name,
@@ -210,7 +233,7 @@ export function WebSessionResume() {
           });
         } catch {
           /* leave empty shell — Chart CTA still works */
-          if (chartLink) useLoomStore.getState().setToast("Couldn’t reach the live feed for this shared chart — try again in a moment");
+          await feedDown();
         }
       }
     };

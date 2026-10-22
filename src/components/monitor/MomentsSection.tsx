@@ -10,7 +10,7 @@ import { MOMENT_THEME, momentSvg, momentText, type Moment } from "@/lib/monitori
 import { downloadMomentPng, postMomentToNeoSpace, publishMoment } from "@/lib/monitoring/shareMoment";
 import { openMonitorChart } from "@/lib/monitoring/openChart";
 import { copyTextToClipboard } from "@/lib/socialExport";
-import { isNativeShell, openExternalUrl } from "@/lib/tauri";
+import { isNativeShell } from "@/lib/tauri";
 
 function ago(t: number): string {
   const m = Math.round((Date.now() - t) / 60_000);
@@ -87,7 +87,7 @@ function FocusedMoment({ mo }: { mo: Moment }) {
         </div>
         <div className="rounded-md overflow-hidden [&>svg]:w-full [&>svg]:h-auto" dangerouslySetInnerHTML={{ __html: svg }} />
         {mo.decision && <p className="text-sm text-loom-text"><span className="text-loom-label">Plan:</span> {mo.decision}</p>}
-        {mo.storyUrl && <p className="text-2xs text-loom-muted break-all">Published at <a className="underline" href={mo.storyUrl} target="_blank" rel="noreferrer" onClick={(e) => { if (isNativeShell()) { e.preventDefault(); void openExternalUrl(mo.storyUrl!); } }}>{mo.storyUrl}</a></p>}
+        {mo.storyUrl && <p className="text-2xs text-loom-muted break-all">Published at <a className="underline" href={mo.storyUrl} target="_blank" rel="noreferrer">{mo.storyUrl}</a></p>}
         <MomentActions mo={mo} large />
       </div>
     </div>

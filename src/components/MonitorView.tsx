@@ -18,6 +18,7 @@ import { notificationPermission, requestNotificationPermission, type NotifyPermi
 import { runMonitorNow } from "@/lib/monitoring/runner";
 import { openMonitorChart } from "@/lib/monitoring/openChart";
 import { exportMonitorsJson, parseMonitorsJson } from "@/lib/monitoring/storage";
+import { downloadBlob } from "@/lib/download";
 import { ALERT_OUTCOME_LABELS, type AlertOutcome, type CheckRecord, type CheckStatus, type Monitor, type MonitorAlert } from "@/lib/monitoring/types";
 import { MonitorEditor } from "./monitor/MonitorEditor";
 import { ConnectPanel } from "./monitor/ConnectPanel";
@@ -284,13 +285,10 @@ export function MonitorView() {
     return [...g.entries()].sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
   }, [monitors]);
 
-  const exportAll = () => {
+  const exportAll = async () => {
     const blob = new Blob([exportMonitorsJson(monitors)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "loom-monitors.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const outcome = await downloadBlob(blob, "loom-monitors.json");
+    if (outcome === "unsupported") setToast("Couldn’t save the file on this device");
   };
   const importFile = async (f: File) => {
     try {
