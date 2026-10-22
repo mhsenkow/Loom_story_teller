@@ -1090,7 +1090,7 @@ export function ExplorerView() {
                       } ${
                         chartRole
                           ? "text-loom-text bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-bg))] border-b border-loom-accent/35 shadow-[inset_0_-2px_0_0_color-mix(in_srgb,var(--loom-accent)_55%,transparent)]"
-                          : "text-loom-muted bg-loom-bg border-b border-loom-border"
+                          : "loom-data-chrome text-loom-muted bg-loom-bg border-b border-loom-border"
                       }`}
                       onKeyDown={(e) => handleSortKey(e, ci)}
                       onClick={() => {

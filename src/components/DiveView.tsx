@@ -1325,7 +1325,7 @@ function DiveSamples({
         </div>
       )}
       <table className="text-2xs font-mono border-collapse">
-        <thead className="sticky top-0 bg-loom-bg">
+        <thead className="loom-data-chrome sticky top-0 bg-loom-bg">
           <tr className="border-b border-loom-border text-loom-muted">
             {shown.map(({ c, i }) => (
               <th key={c} className="text-left font-medium px-2 py-1 whitespace-nowrap">

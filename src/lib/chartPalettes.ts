@@ -3,6 +3,7 @@
 
 import { resolveRuntimeTheme } from "./resolveEffectiveTheme";
 import { type LookTheme } from "./lookSystem";
+import { ensureContrast } from "./wcagColor";
 
 /** Dark-theme series stops — bumped luminance for AA on #0a0a0c (LOOM-071). */
 const LOOM_DEFAULT = ["#8b7cf8", "#34e0a1", "#ff8585", "#ffe066", "#4dcae8", "#f09578", "#c4b5fd", "#93c5fd"];
@@ -101,16 +102,16 @@ const VIZ_CAT_8 = VIZ_CATEGORICAL.slice(0, 8);
 
 /** Chart series colors per look theme (keep in sync with globals.css --chart-*). */
 export const THEME_CHART: Record<LookTheme, string[]> = {
-  light: ["#b84e1f", "#008f62", "#b71c1c", "#c49200", "#007a96", "#6b5fd4", "#4a8fc0", "#5c574e"],
+  light: ["#b84e1f", "#008f62", "#b71c1c", "#a77c00", "#007a96", "#6b5fd4", "#4a8fc0", "#5c574e"],
   dark: ["#74b9ff", "#00d68f", "#ff7675", "#ffeaa7", "#00cec9", "#fab1a0", "#a29bfe", "#fd79a8"],
   contrast: ["#ffff00", "#00ff9d", "#ff5555", "#00ccff", "#ff8844", "#bb99ff", "#66bbff", "#ffffff"],
   paper: ["#7a3d0f", "#2f5a40", "#8a2424", "#8a6800", "#24526a", "#5c4068", "#4e5e3e", "#5c5548"],
   glass: ["#6d28d9", "#047857", "#b91c1c", "#b45309", "#1d4ed8", "#be185d", "#0e7490", "#4b5b70"],
   frost: ["#c4b5fd", "#34d399", "#f87171", "#fbbf24", "#38bdf8", "#fb7185", "#a78bfa", "#94a3b8"],
-  brutal: ["#e00000", "#0000cc", "#006600", "#cc8800", "#000000", "#cc00cc", "#008888", "#555555"],
+  brutal: ["#e00000", "#0000cc", "#006600", "#c28100", "#000000", "#cc00cc", "#008888", "#555555"],
   loom: ["#e0b45a", "#a78bfa", "#ef8a8a", "#7ed687", "#74b9ff", "#ff8a65", "#ce93d8", "#b0aca4"],
   tank: ["#6bb866", "#f0d44a", "#ef8a8a", "#64b5f6", "#8ed07a", "#ff8a65", "#4dd0e1", "#7eb4c4"],
-  nes: ["#d40028", "#e8c800", "#1a8ad4", "#008800", "#000000", "#e88828", "#88d8b0", "#881400"],
+  nes: ["#d40028", "#9d8700", "#1a8ad4", "#008800", "#000000", "#c57422", "#5c9277", "#881400"],
 };
 
 /** Full palette catalog — system primary, then research adjuncts. */
@@ -477,6 +478,11 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
   }
 
   let colors = stopsForPalette(palette, opts.theme);
+  // Okabe stops like #BBBB00 nearly vanish on light grounds; keep each ≥3:1 on the plot bg
+  if (opts.colorblind && inherited && id === "okabe") {
+    const bg = THEME_UI[resolveRuntimeTheme(opts.theme)].bg;
+    colors = colors.map((c) => ensureContrast(c, bg, true));
+  }
   if (reverse) colors = [...colors].reverse();
 
   const continuous =

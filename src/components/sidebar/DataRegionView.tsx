@@ -461,7 +461,7 @@ export function DataRegionView({
             <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>
           )}
           {dataGovError && (
-            <p className="text-2xs text-loom-warning px-1 py-1" role="alert">{dataGovError}</p>
+            <p className="text-2xs text-loom-warning-text px-1 py-1" role="alert">{dataGovError}</p>
           )}
           {!dataGovLoading && !dataGovError && dataGovDatasets.length === 0 && (
             <p className="text-2xs text-loom-muted px-1 py-2">No datasets matched. Try different search terms.</p>
@@ -522,7 +522,7 @@ export function DataRegionView({
             loading={ukLoading}
           />
           {ukLoading && <p className="text-2xs text-loom-muted px-1 py-2">Loading…</p>}
-          {ukError && <p className="text-2xs text-loom-warning px-1 py-1" role="alert">{ukError}</p>}
+          {ukError && <p className="text-2xs text-loom-warning-text px-1 py-1" role="alert">{ukError}</p>}
           {!ukLoading && !ukError && ukDatasets.length === 0 && (
             <p className="text-2xs text-loom-muted px-1 py-2">No CSV datasets found. Try different search terms.</p>
           )}

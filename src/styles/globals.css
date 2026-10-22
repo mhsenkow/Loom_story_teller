@@ -552,11 +552,17 @@ code, pre, .font-mono { font-variant-ligatures: none; }
   --loom-success: var(--color-success);
   --loom-warning: var(--color-warning);
   --loom-error: var(--color-error);
+  /* Ink on solid error fills (badges); a theme with a colored bg overrides it */
+  --on-error: var(--color-bg);
 }
 
 /* ============================================================
  * THEMES — data-theme (portfolio / wordcount)
  * Muted text targets ≥4.5:1 on bg for captions; labels ≥3:1 on surface.
+ * The legacy html.light / html.dark classes also sit on the other light /
+ * dark themes at equal specificity, so each theme restates the tokens those
+ * blocks set (--loom-accent-text; light: --loom-border-strong,
+ * --loom-warning-text) instead of inheriting light's or dark's values.
  * ============================================================ */
 
 html[data-theme="light"],
@@ -592,7 +598,7 @@ html.light {
   --chart-1: #b84e1f;
   --chart-2: #008f62;
   --chart-3: #b71c1c;
-  --chart-4: #c49200;
+  --chart-4: #a77c00;
   --chart-5: #007a96;
   --chart-6: #6b5fd4;
   --chart-7: #4a8fc0;
@@ -651,6 +657,7 @@ html.theme-high-contrast {
   --color-success: #00ff9d;
   --color-warning: #ffcc00;
   --color-error: #ff5555;
+  --loom-accent-text: var(--color-accent);
   --btn-primary-fg: #000000;
   --panel-border-w: 2px;
   --focus-ring: 3px solid #ffffff;
@@ -687,6 +694,8 @@ html[data-theme="paper"] {
   --color-success: #2f5a40;
   --color-warning: #8a6800;
   --color-error: #8a2424;
+  --loom-border-strong: #7d7466;
+  --loom-warning-text: #7a5c00;
   --btn-primary-fg: #fbf7ef;
   --selection-bg: rgba(122, 61, 15, 0.2);
   --selection-text: #1a1610;
@@ -719,6 +728,8 @@ html[data-theme="glass"] {
   --color-success: #047857;
   --color-warning: #b45309;
   --color-error: #b91c1c;
+  --loom-border-strong: #64748b;
+  --loom-warning-text: #92400e;
   --btn-primary-fg: #ffffff;
   --glass-blur: blur(14px) saturate(150%);
   --selection-bg: rgba(109, 40, 217, 0.22);
@@ -751,6 +762,7 @@ html[data-theme="frost"] {
   --color-success: #6ee7b7;
   --color-warning: #fcd34d;
   --color-error: #fca5a5;
+  --loom-accent-text: var(--color-accent);
   --btn-primary-fg: #0f172a;
   --glass-blur: blur(16px) saturate(160%);
   --selection-bg: rgba(196, 181, 253, 0.3);
@@ -783,6 +795,8 @@ html[data-theme="brutal"] {
   --color-success: #006600;
   --color-warning: #cc8800;
   --color-error: #e00000;
+  --loom-border-strong: var(--color-border);
+  --loom-warning-text: #9e6900;
   --btn-primary-fg: #ffffff;
   --radius-sm: 0;
   --radius-md: 0;
@@ -800,7 +814,7 @@ html[data-theme="brutal"] {
   --chart-1: #e00000;
   --chart-2: #0000cc;
   --chart-3: #006600;
-  --chart-4: #cc8800;
+  --chart-4: #c28100;
   --chart-5: #000000;
   --chart-6: #cc00cc;
   --chart-7: #008888;
@@ -822,6 +836,7 @@ html[data-theme="loom"] {
   --color-success: #7ed687;
   --color-warning: #e0b45a;
   --color-error: #ef8a8a;
+  --loom-accent-text: var(--color-accent);
   --btn-primary-fg: #0a0a0f;
   --selection-bg: rgba(224, 180, 90, 0.3);
   --selection-text: #f0ede8;
@@ -854,6 +869,7 @@ html[data-theme="tank"] {
   --color-success: #8ed07a;
   --color-warning: #f0d44a;
   --color-error: #ef8a8a;
+  --loom-accent-text: var(--color-accent);
   --btn-primary-fg: #0a161c;
   --radius-sm: 0;
   --radius-md: 0;
@@ -893,6 +909,11 @@ html[data-theme="nes"] {
   --color-success: #008800;
   --color-warning: #c9a800;
   --color-error: #d40028;
+  --loom-border-strong: var(--color-border);
+  --loom-warning-text: #836d00;
+  /* Bg is blue here: white reads on the red fill, and a black ring reads on the blue */
+  --on-error: #ffffff;
+  --focus-ring: 3px solid #000000;
   --btn-primary-fg: #ffffff;
   --radius-sm: 0;
   --radius-md: 0;
@@ -909,12 +930,12 @@ html[data-theme="nes"] {
   --weight-ui-strong: 700;
   --font-optical: 1.02;
   --chart-1: #d40028;
-  --chart-2: #e8c800;
+  --chart-2: #9d8700;
   --chart-3: #1a8ad4;
   --chart-4: #008800;
   --chart-5: #000000;
-  --chart-6: #e88828;
-  --chart-7: #88d8b0;
+  --chart-6: #c57422;
+  --chart-7: #5c9277;
   --chart-8: #881400;
 }
 
@@ -1482,9 +1503,9 @@ html {
 
   /* Dark theme: brighter accent for contrast. Keep selectors simple —
      LightningCSS/Turbopack mangled `a.text-loom-accent` + escaped
-     `.hover\:underline` into invalid `:hovera` pseudo-classes. */
-  html[data-theme="dark"] .text-loom-accent,
-  html.dark .text-loom-accent {
+     `.hover\:underline` into invalid `:hovera` pseudo-classes. Not html.dark:
+     that class also sits on contrast/frost/loom/tank, which keep their accent. */
+  html[data-theme="dark"] .text-loom-accent {
     color: var(--loom-accent-text);
   }
 
@@ -1691,5 +1712,7 @@ html[data-theme="brutal"], html[data-theme="tank"], html[data-theme="nes"] { --c
 .loom-plot-caption { background-color: color-mix(in srgb, var(--chart-bg) 90%, transparent); }
 .discover-story-preview { border-bottom: 1px solid color-mix(in srgb, var(--loom-border) 45%, transparent); }
 html[data-theme="nes"] .discover-landing { background: var(--loom-surface) !important; border-width: var(--panel-border-w); }
+/* Sticky table headers and result bars sit on the light surface, not the blue chrome */
+html[data-theme="nes"] .loom-data-chrome { background-color: var(--loom-surface); }
 html[data-theme="nes"] .discover-story-preview { border-bottom-color: var(--loom-border); }
 html[data-theme="nes"] .discover-header { border-bottom: 3px solid var(--chart-3); }

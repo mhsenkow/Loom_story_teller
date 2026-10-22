@@ -372,7 +372,7 @@ export function VizSwipeDeck() {
             type="button"
             onClick={() => commit("right")}
             disabled={!!exitDir}
-            className="min-h-12 min-w-[7rem] sm:min-w-[7.5rem] rounded-full bg-loom-accent text-white text-sm font-medium shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="min-h-12 min-w-[7rem] sm:min-w-[7.5rem] rounded-full bg-loom-accent text-[color:var(--btn-primary-fg)] text-sm font-medium shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
             aria-label="Keep this chart"
           >
             Keep

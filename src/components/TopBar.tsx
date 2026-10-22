@@ -166,7 +166,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             <span className="hidden sm:inline">{mode.label}</span>
             <span className="ml-1 text-2xs opacity-50 font-mono hidden md:inline">{mode.shortcut}</span>
             {mode.key === "monitor" && firingCount > 0 && (
-              <span className="ml-1 inline-flex min-w-4 h-4 px-1 items-center justify-center rounded-full bg-loom-error text-2xs font-semibold text-loom-bg" aria-label={`${firingCount} open alerts`}>
+              <span className="ml-1 inline-flex min-w-4 h-4 px-1 items-center justify-center rounded-full bg-loom-error text-2xs font-semibold text-[color:var(--on-error)]" aria-label={`${firingCount} open alerts`}>
                 {firingCount}
               </span>
             )}
