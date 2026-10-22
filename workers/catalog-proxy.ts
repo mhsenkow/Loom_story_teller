@@ -1428,6 +1428,19 @@ function staleSecs(ttl: number): number {
   return Math.min(2 * 86_400, Math.max(600, ttl * 4));
 }
 
+/** Upper bound on how long the edge keeps any source copy. */
+const SOURCE_CACHE_HARD_SECS = 7 * 86_400;
+
+/**
+ * Oldest copy served as STALE while the upstream is failing, and so how long the edge keeps
+ * a copy at all (X-Loom-Fetched-Ms stays the freshness clock). Scales with the feed's cadence
+ * (24 polls, at least 3 h) instead of a flat week: clients treat any 200 as a live poll, so a
+ * week-old ISS fix or per-minute count must not come back as current data.
+ */
+function sourceCacheMaxAge(ttl: number, stale: number): number {
+  return Math.min(SOURCE_CACHE_HARD_SECS, Math.max(ttl + stale, 3 * 3600, ttl * 24));
+}
+
 function sourceResponse(
   body: BodyInit | null,
   cacheState: string,
@@ -1484,7 +1497,7 @@ async function refreshSourceCache(
       new Response(text, {
         headers: {
           "Content-Type": "application/json",
-          "Cache-Control": `public, max-age=${ttl + stale}`,
+          "Cache-Control": `public, max-age=${sourceCacheMaxAge(ttl, stale)}`,
           "X-Loom-Fetched-Ms": String(now),
         },
       }),
@@ -1526,6 +1539,7 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
   const cached = await cache.match(key).catch(() => undefined);
   const cachedAt = cached ? Number(cached.headers.get("X-Loom-Fetched-Ms") || "0") : 0;
   const ageMs = cachedAt > 0 ? now - cachedAt : 0;
+  const fallback = cached && ageMs <= sourceCacheMaxAge(ttl, stale) * 1000 ? cached : undefined;
 
   if (cached && ageMs <= ttl * 1000) {
     logSourceRequest({ kind, cache: "HIT", ms: Date.now() - started });
@@ -1554,7 +1568,7 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
             .put(key, new Response(text, {
               headers: {
                 "Content-Type": "application/json",
-                "Cache-Control": `public, max-age=${ttl + stale}`,
+                "Cache-Control": `public, max-age=${sourceCacheMaxAge(ttl, stale)}`,
                 "X-Loom-Fetched-Ms": String(fetchedAt),
               },
             }))
@@ -1568,9 +1582,10 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
   try {
     const { text, ok, fetchedAt } = await job;
     if (!ok) {
-      if (cached && ageMs <= (ttl + stale) * 1000) {
+      // A recent-enough copy beats an error; X-Loom-Fetched-At tells the client its age.
+      if (fallback) {
         logSourceRequest({ kind, cache: "STALE", ms: Date.now() - started, fallback: true });
-        return sourceResponse(cached.body, "STALE", cachedAt, request, ttl, stale);
+        return sourceResponse(fallback.body, "STALE", cachedAt, request, ttl, stale);
       }
       throw new UpstreamError("Upstream returned empty payload");
     }
@@ -1579,14 +1594,14 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
     return sourceResponse(text, "MISS", fetchedAt, request, ttl, stale);
   } catch (e) {
     // Outcome (ok or failed) is recorded by the waitUntil job above.
-    if (cached && ageMs <= (ttl + stale) * 1000) {
+    if (fallback) {
       logSourceRequest({
         kind,
         cache: "STALE",
         ms: Date.now() - started,
         error: e instanceof Error ? e.message : String(e),
       });
-      return sourceResponse(cached.body, "STALE", cachedAt, request, ttl, stale);
+      return sourceResponse(fallback.body, "STALE", cachedAt, request, ttl, stale);
     }
     cached?.body?.cancel().catch(() => {});
     logSourceRequest({

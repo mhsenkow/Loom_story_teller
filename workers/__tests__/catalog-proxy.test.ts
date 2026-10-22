@@ -293,6 +293,67 @@ describe("handleSource", () => {
     await Promise.all(pending);
     expect(mockCachePut).not.toHaveBeenCalled();
   });
+
+  it("keeps cached copies at the edge past ttl+stale, scaled to the feed's cadence", async () => {
+    const { handleSource } = await importHandlers();
+    const geoJson = JSON.stringify({ type: "FeatureCollection", features: [{ type: "Feature", properties: { mag: 1 } }] });
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce(new Response(geoJson, { status: 200 }));
+    const pending: Promise<unknown>[] = [];
+    const ctx = { waitUntil: (p: Promise<unknown>) => void pending.push(p) };
+    await handleSource("usgs", makeRequest("https://loom.ibm.io/api/source/usgs"), ctx);
+    await Promise.all(pending);
+    const stored = mockCachePut.mock.calls[0][1] as Response;
+    // usgs: ttl 60 s, stale 600 s → kept max(660, 3 h, 24 polls) = 3 h.
+    expect(stored.headers.get("Cache-Control")).toBe(`public, max-age=${3 * 3600}`);
+  });
+
+  describe("upstream outage with an expired cached copy", () => {
+    const cachedBody = JSON.stringify({ type: "FeatureCollection", features: [{ type: "Feature", properties: { mag: 4 } }] });
+
+    async function seedExpired() {
+      const { SOURCE_TTL_SECS } = await importHandlers();
+      const ttl = SOURCE_TTL_SECS.usgs;
+      const stale = Math.min(2 * 86_400, Math.max(600, ttl * 4));
+      const fetchedMs = Date.now() - (ttl + stale + 60) * 1000;
+      mockCacheMatch.mockImplementation(async () =>
+        new Response(cachedBody, { headers: { "X-Loom-Fetched-Ms": String(fetchedMs) } }),
+      );
+      return fetchedMs;
+    }
+
+    it("serves the cached copy as STALE when the fetch throws", async () => {
+      const { handleSource } = await importHandlers();
+      const fetchedMs = await seedExpired();
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("upstream down"));
+      const res = await handleSource("usgs", makeRequest("https://loom.ibm.io/api/source/usgs"), noopCtx);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-Loom-Cache")).toBe("STALE");
+      expect(res.headers.get("X-Loom-Fetched-At")).toBe(new Date(fetchedMs).toISOString());
+      expect(await res.text()).toBe(cachedBody);
+    });
+
+    it("serves the cached copy as STALE when the upstream returns an unusable payload", async () => {
+      const { handleSource } = await importHandlers();
+      await seedExpired();
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValue(
+        new Response("<!doctype html><html><body>Down for maintenance</body></html>", { status: 200 }),
+      );
+      const res = await handleSource("usgs", makeRequest("https://loom.ibm.io/api/source/usgs"), noopCtx);
+      expect(res.status).toBe(200);
+      expect(res.headers.get("X-Loom-Cache")).toBe("STALE");
+      expect(await res.text()).toBe(cachedBody);
+    });
+
+    it("returns 502 rather than a copy older than the fallback window", async () => {
+      const { handleSource } = await importHandlers();
+      mockCacheMatch.mockImplementation(async () =>
+        new Response(cachedBody, { headers: { "X-Loom-Fetched-Ms": String(Date.now() - 4 * 3600 * 1000) } }),
+      );
+      (globalThis.fetch as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("upstream down"));
+      const res = await handleSource("usgs", makeRequest("https://loom.ibm.io/api/source/usgs"), noopCtx);
+      expect(res.status).toBe(502);
+    });
+  });
 });
 
 // ===================================================================
