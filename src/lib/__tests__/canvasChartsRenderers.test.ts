@@ -209,6 +209,14 @@ const renderers: [string, Draw][] = [
 ];
 
 describe("extracted canvas renderers", () => {
+  it.each(renderers)("%s supports a single custom color", (_name, render) => {
+    const { ctx, calls } = fakeCtx();
+    const o = { ...opts(), colors: ["#123456"], continuousStops: ["#123456"] };
+    expect(() => render(ctx, rows, o)).not.toThrow();
+    expect(calls.paint).toBeGreaterThan(0);
+    expect(o.legend?.every((entry) => typeof entry.color === "string") ?? true).toBe(true);
+  });
+
   it.each(renderers)("%s paints without throwing", (_name, render) => {
     const { ctx, calls } = fakeCtx();
     expect(() => render(ctx, rows, opts())).not.toThrow();

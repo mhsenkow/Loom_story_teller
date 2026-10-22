@@ -43,6 +43,7 @@ import { notifyChartPainted } from "@/lib/chartPaintSignal";
 import { drawCanvasAnnotations } from "@/lib/canvasAnnotationDraw";
 import { CanvasArrangeOverlay, type ArrangeChange } from "./CanvasArrangeOverlay";
 import { ARRANGEMENT_KEYS, ARRANGE_PLOT_KINDS, arrangementPlot, arrangedFrameSize, hasCanvasArrangement, titleArrangementRect } from "@/lib/canvasArrangement";
+import { applyChartSpecColors } from "@/lib/chartSpecColors";
 import type { ChartVisualOverrides } from "@/lib/chartVisualTypes";
 import { type ChartChromeLayout, type ChartChromeTarget, chromeHighlightRect, chromeSectionFor, pickChartChromeRegion } from "@/lib/chartChromeLink";
 import { type AtlasBundle, type AtlasKind, loadAtlas } from "@/lib/geoAtlas";
@@ -343,6 +344,7 @@ export function ChartView() {
       : null;
     const resolved = resolveChartColors({
       paletteId: chartVisualOverrides.colorPalette ?? "auto",
+      customColors: chartVisualOverrides.customColors,
       theme: effectiveTheme,
       colorblind: !!appSettings.colorblindCharts,
       chartKind: activeChart?.kind ?? null,
@@ -350,9 +352,10 @@ export function ChartView() {
       reverse: !!chartVisualOverrides.colorPaletteReverse !== !!activeChart?.channelInvert?.color,
       scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
     });
-    return discreteSeriesColors(resolved, Math.max(8, resolved.colors.length));
+    return resolved.continuous ? discreteSeriesColors(resolved, Math.max(8, resolved.colors.length)) : resolved.colors;
   }, [
     chartVisualOverrides.colorPalette,
+    chartVisualOverrides.customColors,
     chartVisualOverrides.colorPaletteReverse,
     chartVisualOverrides.colorScaleKind,
     effectiveTheme,
@@ -373,6 +376,7 @@ export function ChartView() {
       : null;
     return resolveChartColors({
       paletteId: chartVisualOverrides.colorPalette ?? "auto",
+      customColors: chartVisualOverrides.customColors,
       theme: effectiveTheme,
       colorblind: !!appSettings.colorblindCharts,
       chartKind: activeChart?.kind ?? null,
@@ -382,6 +386,7 @@ export function ChartView() {
     }).colors;
   }, [
     chartVisualOverrides.colorPalette,
+    chartVisualOverrides.customColors,
     chartVisualOverrides.colorPaletteReverse,
     chartVisualOverrides.colorScaleKind,
     effectiveTheme,
@@ -405,6 +410,7 @@ export function ChartView() {
       : null;
     return describeChartColorStatus({ ...activeChart, colorField }, {
       paletteId: chartVisualOverrides.colorPalette ?? "auto",
+      customColors: chartVisualOverrides.customColors,
       scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
       reverse: !!chartVisualOverrides.colorPaletteReverse !== !!activeChart?.channelInvert?.color,
       theme: effectiveTheme,
@@ -417,6 +423,7 @@ export function ChartView() {
     effectiveColorField,
     columnStats,
     chartVisualOverrides.colorPalette,
+    chartVisualOverrides.customColors,
     chartVisualOverrides.colorScaleKind,
     chartVisualOverrides.colorPaletteReverse,
     effectiveTheme,
@@ -1018,6 +1025,7 @@ export function ChartView() {
     chartVisualOverrides,
     chartFootnoteText,
     sceneOrbit,
+    continuousStops,
     colors,
     opacity,
     pointSize,
@@ -1030,6 +1038,7 @@ export function ChartView() {
     chartVisualOverrides,
     chartFootnoteText,
     sceneOrbit,
+    continuousStops,
     colors,
     opacity,
     pointSize,
@@ -1831,7 +1840,7 @@ export function ChartView() {
       svgMode === "off"
         ? null
         : async (): Promise<string | null> => {
-      const { vegaSpec: spec, sampleRows: rows } = exportStateRef.current;
+      const { vegaSpec: spec, sampleRows: rows, colors: exportColors, continuousStops: exportStops } = exportStateRef.current;
       if (!spec || !rows?.rows?.length) return null;
       try {
         const { compile } = await import("vega-lite");
@@ -1849,7 +1858,7 @@ export function ChartView() {
         const exportConfig = vegaExportConfigForTheme(resolveRuntimeTheme(current.appSettings.theme), { ...visual, colorblindCharts: current.appSettings.colorblindCharts, fontFamily: resolveChartFontFamily(visual.fontFamily, current.appSettings.font, current.appSettings.faces) });
         const base = (spec as { config?: Record<string, unknown> }).config ?? {};
         const specWithData = {
-          ...spec,
+          ...applyChartSpecColors(spec as Record<string, unknown>, exportColors, exportStops),
           data: { values },
           config: {
             ...base,

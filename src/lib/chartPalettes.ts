@@ -1,6 +1,8 @@
 // Shared color system for chart visual overrides (right panel + ChartView).
 // Primary catalog: Loom data-viz palettes. "theme" follows look-system tokens.
 
+import { parseCustomColors } from "./chartCustomColors";
+
 import { resolveRuntimeTheme } from "./resolveEffectiveTheme";
 import { type LookTheme } from "./lookSystem";
 
@@ -311,6 +313,7 @@ export type ResolvedChartColors = {
 };
 
 export type ResolveChartColorsOpts = {
+  customColors?: string | null;
   paletteId?: string | null;
   theme?: string | null;
   colorblind?: boolean;
@@ -352,7 +355,7 @@ function stopsForPalette(p: ColorPalette, theme?: string | null): string[] {
 /** Discrete sample — ordered cycle; reverse flips stop order. */
 export function sampleCategorical(colors: string[], n: number, reverse = false): string[] {
   const src = reverse ? [...colors].reverse() : colors;
-  if (n <= 0) return [];
+  if (n <= 0 || src.length === 0) return [];
   if (n <= src.length) return src.slice(0, n);
   const out: string[] = [];
   for (let i = 0; i < n; i++) out.push(src[i % src.length]!);
@@ -476,7 +479,7 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
     id = palette.id;
   }
 
-  let colors = stopsForPalette(palette, opts.theme);
+  let colors = parseCustomColors(opts.customColors) ?? stopsForPalette(palette, opts.theme);
   if (reverse) colors = [...colors].reverse();
 
   const continuous =
@@ -487,10 +490,6 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
     opts.chartKind === "treemap" ||
     opts.chartKind === "sunburst" ||
     opts.chartKind === "forceBubble";
-
-  if (!continuous && colors.length < 8) {
-    colors = sampleCategorical(colors, 8, false);
-  }
 
   return {
     kind: palette.kind,
@@ -543,6 +542,7 @@ export type ChartColorStatusInfo = {
 };
 
 type ChartColorStatusOpts = {
+  customColors?: string | null;
   paletteId?: string | null;
   scaleKind?: ResolveChartColorsOpts["scaleKind"];
   reverse?: boolean;
@@ -578,6 +578,7 @@ export function describeChartColorStatus(
 
   const resolved = resolveChartColors({
     paletteId,
+    customColors: opts.customColors,
     theme: opts.theme,
     colorblind: opts.colorblind,
     chartKind: chart.kind,
@@ -592,11 +593,11 @@ export function describeChartColorStatus(
     !!colorField ||
     resolved.continuous ||
     VALUE_RAMP_KINDS.has(chart.kind) ||
-    userPicked;
+    userPicked || !!parseCustomColors(opts.customColors);
   if (!atPlay) return null;
 
   const palette = getPaletteById(resolved.paletteId);
-  const name = palette?.name ?? resolved.paletteId;
+  const name = parseCustomColors(opts.customColors) ? "Custom colors" : palette?.name ?? resolved.paletteId;
   const rev = opts.reverse ? " ↺" : "";
   const role = (opts.channelLabel?.trim() || "color").toLowerCase();
   const fieldLabel = field ? `${role}: ${field}` : role;

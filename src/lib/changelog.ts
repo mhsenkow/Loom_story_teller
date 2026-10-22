@@ -46,6 +46,7 @@ export const CHANGELOG: ChangelogRelease[] = [
     date: "2026-10-21",
     title: "Point at what matters",
     items: [
+      { title: "Make the colors yours", detail: "Keep your favorite presets or edit individual swatches and gradient stops with a color picker or hex code. Fit a palette to your field’s value count, see when colors repeat, and browse presets without changing your chart. Custom colors travel with Undo, saved looks and shared charts; SVG exports now honor the selected palette." },
       { title: "Every mark lights up", detail: "Hover or arrow-key through any chart and the bar, point, slice, cell or path you're on gets a clear highlight shaped to the chart: rings for points, outlines for bars, edges for slices, a soft wash for bands. Maps, globes, terrain, weaves and trail charts now answer hover too." },
       { title: "Pin it, share it", detail: "Click a mark (or press Enter, or tap Pin on your phone) to keep its readout on the chart. Up to five pins, numbered. They're drawn into exported images and saved in share links, so whoever opens your chart sees exactly what you were pointing at." },
     ],

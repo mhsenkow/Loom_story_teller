@@ -47,7 +47,7 @@ const full: ChartLink = {
     subtitle: "stacked by product",
   },
   titleOverride: "Where the money is — café ☕",
-  visual: { colorPalette: "seq-blue", axisStyle: "ladder", showGrid: false, pointSize: 6, markerMode: "emoji", markEmoji: "📍" },
+  visual: { customColors: "#123456,#abcdef", colorPalette: "seq-blue", axisStyle: "ladder", showGrid: false, pointSize: 6, markerMode: "emoji", markEmoji: "📍" },
   barStackMode: "stacked",
   connectScatterTrail: true,
   showMarginals: true,

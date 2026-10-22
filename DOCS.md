@@ -327,3 +327,7 @@ Firefly plots keep observations on fixed X/Y axes. Size encodes steady glow inte
 - **Input:** click pins (mouse / pen); the readout's **Pin** button covers touch; arrow keys walk marks in reading order (`keyboardNavigableHits`), Enter / Space pins, Escape clears. Scatter marks come from `scatterDataRef` (`scatterHitForRow`).
 - **State / links:** `pinnedTooltips` (store) holds `{ chartId, ref, row, columns }`, max 5 per chart. Share links carry them as `pn` (`chartLink.ts`, validated + capped on decode); `ChartLinkSync` restores them onto the reopened chart.
 
+
+### Color editing
+
+`ChartColorControls` owns only transient search/filter UI. `chartVisualOverrides.customColors` stores up to 16 comma-separated normalized hex stops (a primitive for existing links/backups). `chartCustomColors.ts` validates the entire list; invalid lists fall back to the selected preset. `resolveChartColors` applies custom stops before reversal, retaining the selected/automatic scale semantics. Categorical palettes keep their actual length rather than padding to eight, so Canvas and GPU modulo cycles agree for short palettes. `ChartView` supplies those colors to renderers and color chrome. `chartSpecColors.ts` replaces explicit encoding ranges/schemes recursively at SVG export; native PNG uses the live canvas. Color shuffle clears custom colors unless locked. The inspector reports distinct loaded field values, not post-aggregation mark counts, and does not promise persistent named-category mappings.

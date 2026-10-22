@@ -18,11 +18,11 @@ export function vegaConfigFromUi(ui: ThemeUiColors, typography: Typography = {})
     font,
     background: "transparent",
     axis: {
-      labelColor: ensureContrast(ui.label, ui.bg),
+      labelColor: ensureContrast(typography.axisLabelColor ?? ui.label, ui.bg),
       titleColor: ui.text,
       gridColor: ui.border,
-      domainColor: ui.border,
-      tickColor: ui.border,
+      domainColor: typography.axisLineColor ?? ui.border,
+      tickColor: typography.axisLineColor ?? ui.border,
       labelLimit: 180,
       labelFont: font,
       titleFont: font,
@@ -62,7 +62,7 @@ export function vegaExportConfigForTheme(theme?: string | null, typography?: Typ
   const style = resolveThemeChartStyle(theme, typography);
   return {
     ...base,
-    range: { category: resolveChartColors({ theme, paletteId: typography?.colorPalette, colorblind: typography?.colorblindCharts, reverse: typography?.colorPaletteReverse }).colors },
+    range: { category: resolveChartColors({ theme, paletteId: typography?.colorPalette, customColors: typography?.customColors, colorblind: typography?.colorblindCharts, reverse: typography?.colorPaletteReverse }).colors },
     line: { strokeWidth: style.lineWidth, strokeCap: style.lineCap, strokeJoin: style.lineJoin },
     area: { strokeCap: style.lineCap, strokeJoin: style.lineJoin },
     point: { shape: style.markShape },

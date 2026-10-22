@@ -19,6 +19,8 @@ export interface ChartVisualOverrides {
   pointSize?: number;
   opacity?: number;
   colorPalette?: string;
+  /** Comma-separated hex stops; overrides the selected palette without changing its scale. */
+  customColors?: string;
   colorScaleKind?: "auto" | "categorical" | "sequential" | "diverging" | "semantic" | "reference" | "spectrum";
   colorPaletteReverse?: boolean;
   axisFontSize?: number;

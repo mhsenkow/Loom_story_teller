@@ -2,6 +2,7 @@
 // chartVisualSanitize — whitelist + clamp for #chart= visual overrides
 // =================================================================
 
+import { parseCustomColors } from "./chartCustomColors";
 import type { ChartVisualOverrides } from "./chartVisualTypes";
 import { CHART_VISUAL_OVERRIDE_KEYS } from "./lookSystem";
 import { CURATED_MARK_EMOJIS, MARK_SHAPE_IDS } from "./chartMarks";
@@ -110,6 +111,11 @@ export function sanitizeChartVisualOverrides(
     }
     if (typeof val === "string") {
       if (BOOLEAN_KEYS.has(key) || CLAMPS[key]) continue;
+      if (key === "customColors") {
+        const colors = parseCustomColors(val);
+        if (colors) out.customColors = colors.join(",");
+        continue;
+      }
       const allowed = STRING_ENUMS[key];
       if (allowed && !allowed.includes(val)) continue;
       if (key === "fontFamily" && val.length > 80) continue;

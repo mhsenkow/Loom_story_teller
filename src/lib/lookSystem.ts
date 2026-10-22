@@ -631,7 +631,7 @@ export const VISUAL_SHUFFLE_SECTIONS: { id: VisualShuffleSection; label: string 
 export type VisualShuffleLocks = Partial<Record<VisualShuffleSection, boolean>>;
 
 const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]> = {
-  color: ["colorPalette", "colorScaleKind", "colorPaletteReverse", "opacity"],
+  color: ["customColors", "colorPalette", "colorScaleKind", "colorPaletteReverse", "opacity"],
   design: [
     "chartDetail", "markMotif", "axisStyle", "titleLayout", "chartFrame",
     "emphasisStyle", "backgroundStyle",
@@ -722,6 +722,7 @@ export function shuffleVisualOverrides(
       if (v !== undefined) (next as Record<string, unknown>)[key] = v;
     }
   }
+  if (!locks.color) delete next.customColors;
   return next;
 }
 

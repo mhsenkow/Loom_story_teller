@@ -19,6 +19,9 @@ import { ChartKindPicker } from "@/components/ChartKindPicker";
 import { ColumnFieldPicker } from "@/components/ColumnFieldPicker";
 import { EncodingInfoTip } from "@/components/EncodingInfoTip";
 import { ChartEditToolbar } from "@/components/ChartEditToolbar";
+import { ChartColorControls } from "@/components/ChartColorControls";
+import { ChartColorInput } from "@/components/ChartColorInput";
+import { getThemeUiColors } from "@/lib/chartPalettes";
 import { ChartLookLibrary } from "@/components/ChartLookLibrary";
 import { ChartInspectorSection } from "@/components/ChartInspectorSection";
 import { chartSpacePadding } from "@/lib/chartSpace";
@@ -26,9 +29,6 @@ import { goToDashboardsAfterSave, saveChartView } from "@/lib/saveChartView";
 import {
   AXIS_LABEL_COLOR_SWATCHES,
   AXIS_LINE_COLOR_SWATCHES,
-  palettesGrouped,
-  resolveChartColors,
-  type PaletteKind,
 } from "@/lib/chartPalettes";
 import {
   THEMES,
@@ -394,25 +394,6 @@ type IconToggleOption<T extends string | number> = {
   icon: ReactNode;
 };
 
-const COLOR_SCALE_KIND_OPTIONS = [
-  { value: "auto", label: "Auto" },
-  { value: "categorical", label: "Categorical" },
-  { value: "sequential", label: "Sequential" },
-  { value: "diverging", label: "Diverging" },
-  { value: "spectrum", label: "Spectrum" },
-  { value: "semantic", label: "Semantic" },
-] as const;
-
-const PALETTE_KIND_LABELS: Record<PaletteKind | "auto", string> = {
-  auto: "Auto",
-  categorical: "Categorical",
-  sequential: "Sequential",
-  diverging: "Diverging",
-  semantic: "Semantic",
-  reference: "Reference",
-  spectrum: "Spectrum",
-};
-
 const MARK_SHAPE_ICON: Record<(typeof MARK_SHAPE_OPTIONS)[number]["value"], string> = {
   circle: "●",
   "pill-vertical": "▮",
@@ -517,6 +498,10 @@ function ColorSwatchGroup({
   options: ReadonlyArray<{ value: string; label: string; color: string }>;
   onChange: (value: string) => void;
 }) {
+  const theme = useChartTheme();
+  const ui = getThemeUiColors(theme);
+  const themeColor = options === AXIS_LABEL_COLOR_SWATCHES ? ui.label : ui.border;
+  const resolved = value === "theme" ? themeColor : value;
   return (
     <div>
       <p className="text-2xs text-loom-muted mb-1">{label}</p>
@@ -541,7 +526,7 @@ function ColorSwatchGroup({
                 style={{
                   background:
                     opt.color === "theme"
-                      ? "var(--loom-border)"
+                      ? themeColor
                       : opt.color,
                 }}
               />
@@ -549,6 +534,7 @@ function ColorSwatchGroup({
           );
         })}
       </div>
+      <div className="mt-2"><ChartColorInput label={`Custom ${label.toLowerCase()}`} value={resolved} onChange={onChange} /></div>
     </div>
   );
 }
@@ -1109,7 +1095,6 @@ export default function ChartPanelTab() {
     ),
   );
   const [visualSections, setVisualSections] = useState<Record<string, boolean>>({ design: true });
-  const [paletteQuery, setPaletteQuery] = useState("");
   const toggleVisualSection = (key: string) => setVisualSections((prev) => ({ ...prev, [key]: !prev[key] }));
   const [encodingLocks, setEncodingLocks] = useState<EncodingShuffleLocks>({});
   const [visualLocks, setVisualLocks] = useState<VisualShuffleLocks>({});
@@ -3220,139 +3205,7 @@ export default function ChartPanelTab() {
 
             {/* Color palettes */}
             <ChartInspectorSection title="Color" open={!!visualSections.color} onToggle={() => toggleVisualSection("color")}>
-              <div className="flex items-center gap-1 mb-0.5">
-                <p className="text-2xs text-loom-muted leading-snug flex-1 min-w-0">
-                  Palette for the Color channel (and heat / density ramps).
-                </p>
-                <EncodingInfoTip
-                  label="About color scales"
-                  text="Auto picks categorical, sequential, or semantic from the chart. This is visual ink — Encoding → Color chooses which field; the lock row above Shuffle keeps it during Shuffle and Random."
-                />
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {COLOR_SCALE_KIND_OPTIONS.map(({ value: id, label }) => {
-                  const cur = chartVisualOverrides.colorScaleKind ?? "auto";
-                  const active = cur === id;
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => {
-                        editChartVisualOverrides({ colorScaleKind: id, colorPalette: "auto" });
-                      }}
-                      className={`px-2 py-1 text-2xs rounded border ${
-                        active
-                          ? "border-loom-accent text-loom-accent bg-loom-accent/10"
-                          : "border-loom-border text-loom-muted hover:border-loom-accent/50"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={!!chartVisualOverrides.colorPaletteReverse}
-                  onChange={(e) => updateOverride("colorPaletteReverse", e.target.checked)}
-                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                />
-                Reverse scale
-              </label>
-              {(() => {
-                const colorColumn = caps.colorChannel ? columnStats.find((c) => c.name === activeChart?.colorField) : undefined;
-                const applied = resolveChartColors({
-                  paletteId: chartVisualOverrides.colorPalette ?? "auto",
-                  theme: effectiveTheme,
-                  colorblind: !!appSettings.colorblindCharts,
-                  chartKind: activeChart?.kind ?? null,
-                  reverse: !!chartVisualOverrides.colorPaletteReverse !== !!activeChart?.channelInvert?.color,
-                  colorFieldType: colorColumn ? (isNumericType(colorColumn.data_type) ? "quantitative" : "nominal") : null,
-                  scaleKind: chartVisualOverrides.colorScaleKind ?? "auto",
-                });
-                const kindFilter = chartVisualOverrides.colorScaleKind ?? "auto";
-                const grouped = palettesGrouped();
-                const query = paletteQuery.trim().toLowerCase();
-                const filterList = (list: typeof grouped.system) => list.filter((p) =>
-                  (kindFilter === "auto" || p.kind === (kindFilter as PaletteKind)) &&
-                  (!query || `${p.name} ${p.id} ${p.kind} ${p.source}`.toLowerCase().includes(query)));
-                const sections: { title: string; items: typeof grouped.system }[] = [
-                  { title: "System", items: filterList(grouped.system) },
-                  { title: "Theme", items: filterList(grouped.theme) },
-                  { title: "Research", items: filterList(grouped.research) },
-                ].filter((s) => s.items.length > 0);
-                const selectedId = chartVisualOverrides.colorPalette ?? "auto";
-                return (
-                  <div className="space-y-2.5">
-                    <input type="search" aria-label="Search color palettes" placeholder="Search palettes…" value={paletteQuery} onChange={(e) => setPaletteQuery(e.target.value)} className="loom-input w-full text-xs min-h-9 px-2" />
-                    {!sections.length && <p role="status" className="text-2xs text-loom-muted">No palettes match this search and scale. Clear the search or choose Auto to browse all scales.</p>}
-                    <div className="rounded border border-loom-border/60 bg-loom-elevated/40 px-2 py-1.5">
-                      <p className="text-2xs text-loom-muted mb-1">
-                        Applied · {applied.paletteId}{selectedId === "auto" ? " · automatic" : ""}
-                        {applied.continuous ? " · continuous" : ""}
-                      </p>
-                      <div className="flex h-3 rounded overflow-hidden">
-                        {applied.colors.map((c, i) => (
-                          <span key={`${c}-${i}`} className="flex-1" style={{ background: c }} title={c} />
-                        ))}
-                      </div>
-                    </div>
-                    {appSettings.colorblindCharts && <p className="text-2xs text-loom-label">Colorblind defaults are on. Auto uses Okabe–Ito for categories and Cividis for magnitudes; explicit palettes stay selected.</p>}
-                    <button
-                      type="button"
-                      aria-pressed={selectedId === "auto"}
-                      onClick={() => {
-                        editChartVisualOverrides({ colorPalette: "auto", colorScaleKind: "auto" });
-                      }}
-                      className={`w-full text-left rounded border px-2 py-1.5 ${
-                        selectedId === "auto"
-                          ? "border-loom-accent bg-loom-accent/10"
-                          : "border-loom-border hover:border-loom-accent/40"
-                      }`}
-                    >
-                      <span className="text-2xs text-loom-text font-medium">Auto</span>
-                      <span className="block text-2xs text-loom-muted">Follow chart, theme, and accessibility settings</span>
-                    </button>
-                    {sections.map((sec) => (
-                      <div key={sec.title} className="space-y-1">
-                        <p className="text-2xs text-loom-muted uppercase tracking-wide">{sec.title}</p>
-                        <div className="space-y-1 max-h-48 overflow-y-auto pr-0.5">
-                          {sec.items.map((p) => {
-                            const active = selectedId === p.id;
-                            return (
-                              <button
-                                key={p.id}
-                                type="button"
-                                aria-pressed={active}
-                                onClick={() => {
-                                  editChartVisualOverrides({ colorPalette: p.id, colorScaleKind: p.kind });
-                                }}
-                                className={`w-full text-left rounded border px-2 py-1.5 ${
-                                  active
-                                    ? "border-loom-accent bg-loom-accent/10"
-                                    : "border-loom-border hover:border-loom-accent/40"
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2 mb-1">
-                                  <span className="text-2xs text-loom-text font-medium truncate">{p.name}</span>
-                                  <span className="text-2xs text-loom-muted shrink-0">{PALETTE_KIND_LABELS[p.kind]}</span>
-                                </div>
-                                <div className="flex h-2.5 rounded overflow-hidden">
-                                  {resolveChartColors({ paletteId: p.id, theme: effectiveTheme, colorblind: !!appSettings.colorblindCharts, chartKind: activeChart?.kind, reverse: !!chartVisualOverrides.colorPaletteReverse !== !!activeChart?.channelInvert?.color }).colors.map((c, i) => (
-                                    <span key={`${p.id}-${i}`} className="flex-1" style={{ background: c }} />
-                                  ))}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })()}
+              <ChartColorControls chart={activeChart} columns={columnStats} rows={sampleRows} visual={chartVisualOverrides} theme={effectiveTheme} colorblind={!!appSettings.colorblindCharts} onChange={editChartVisualOverrides} />
             </ChartInspectorSection>
 
             {/* Look spectrum — only controls that affect this chart kind */}
@@ -3769,7 +3622,7 @@ export default function ChartPanelTab() {
                     Mark outline
                   </label>
                   {chartVisualOverrides.markStroke && (
-                    <div className="grid grid-cols-2 gap-1">
+                    <div className="space-y-2">
                       <div>
                         <label className="block text-2xs text-loom-muted mb-0.5">Stroke width</label>
                         <input aria-label="Stroke width"
@@ -3782,6 +3635,9 @@ export default function ChartPanelTab() {
                           className="loom-input w-full text-xs py-1"
                         />
                       </div>
+                      <p className="text-2xs text-loom-muted">Outline color{!chartVisualOverrides.markStrokeColor || chartVisualOverrides.markStrokeColor === "auto" ? " · follows each mark" : " · custom"}</p>
+                      <ChartColorInput label="Outline color" value={chartVisualOverrides.markStrokeColor && chartVisualOverrides.markStrokeColor !== "auto" ? chartVisualOverrides.markStrokeColor : getThemeUiColors(effectiveTheme).text} onChange={(color) => updateOverride("markStrokeColor", color)} />
+                      <button type="button" className="loom-btn-ghost text-2xs min-h-9" onClick={() => updateOverride("markStrokeColor", undefined)}>Match mark color</button>
                     </div>
                   )}
                   <div>

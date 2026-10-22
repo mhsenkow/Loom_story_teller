@@ -138,15 +138,15 @@ it("keeps accessible Auto and explicit palette selection connected to undo", () 
   useLoomStore.getState().setAppSettings((s) => ({ ...s, colorblindCharts: true }));
   render(<ChartPanelTab />);
   fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
-  fireEvent.click(screen.getByRole("button", { name: "Sequential" }));
-  expect(screen.getByText(/Applied · cividis/)).toBeTruthy();
-  expect(useLoomStore.getState().chartVisualOverrides).toMatchObject({ colorPalette: "auto", colorScaleKind: "sequential" });
-  const explicit = screen.getByRole("button", { name: "Sequential Blue Sequential" });
+  fireEvent.change(screen.getByRole("combobox", { name: "Browse palettes" }), { target: { value: "sequential" } });
+  expect(useLoomStore.getState().chartVisualOverrides).toEqual({});
+  const explicit = screen.getByRole("button", { name: /Sequential Blue/ });
   fireEvent.click(explicit);
   expect(explicit.getAttribute("aria-pressed")).toBe("true");
-  expect(screen.getByText(/Applied · seq-blue/)).toBeTruthy();
+  expect(screen.getByText(/Applied · Sequential Blue/)).toBeTruthy();
   act(() => useLoomStore.getState().undoChartEdit());
-  expect(screen.getByText(/Applied · cividis/)).toBeTruthy();
+  expect(screen.getByText(/Applied · Okabe–Ito/)).toBeTruthy();
+
 });
 
 it("keeps Analyze and Overlays in the chart section navigation with icons and keyboard access", async () => {
@@ -162,4 +162,37 @@ it("keeps Analyze and Overlays in the chart section navigation with icons and ke
   expect(useLoomStore.getState().chartPanelSection).toBe("overlays");
   fireEvent.keyDown(screen.getByRole("tab", { name: "Overlays" }), { key: "Home" });
   expect(useLoomStore.getState().chartPanelSection).toBe("encoding");
+});
+
+
+it("edits individual colors, validates hex, restores presets and undoes the change", () => {
+  render(<ChartPanelTab />);
+  fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+  fireEvent.click(screen.getByRole("button", { name: "Customize colors" }));
+  expect(useLoomStore.getState().chartVisualOverrides.customColors?.split(",")).toHaveLength(1);
+  fireEvent.change(screen.getByLabelText("Color 1"), { target: { value: "#123456" } });
+  expect(useLoomStore.getState().chartVisualOverrides.customColors).toBe("#123456");
+  const hex = screen.getByRole("textbox", { name: "Color 1 hex" });
+  fireEvent.change(hex, { target: { value: "oops" } });
+  fireEvent.blur(hex);
+  expect(hex).toHaveAttribute("aria-invalid", "true");
+  expect(useLoomStore.getState().chartVisualOverrides.customColors).toBe("#123456");
+  fireEvent.change(hex, { target: { value: "abc" } });
+  fireEvent.blur(hex);
+  expect(useLoomStore.getState().chartVisualOverrides.customColors).toBe("#aabbcc");
+  fireEvent.click(screen.getByRole("button", { name: "Restore preset colors" }));
+  expect(useLoomStore.getState().chartVisualOverrides.customColors).toBeUndefined();
+  act(() => useLoomStore.getState().undoChartEdit());
+  expect(useLoomStore.getState().chartVisualOverrides.customColors).toBe("#aabbcc");
+});
+
+it("fits a categorical palette to the selected field without hiding other presets", () => {
+  useLoomStore.setState((s) => ({ activeChart: { ...s.activeChart!, colorField: "city" } }));
+  render(<ChartPanelTab />);
+  fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use 3 colors for city" }));
+  expect(useLoomStore.getState().chartVisualOverrides.customColors?.split(",")).toHaveLength(3);
+  fireEvent.click(screen.getByRole("button", { name: /Viridis/ }));
+  expect(useLoomStore.getState().chartVisualOverrides.customColors).toBeUndefined();
+  expect(screen.getByRole("button", { name: /Okabe–Ito/ })).toBeInTheDocument();
 });
