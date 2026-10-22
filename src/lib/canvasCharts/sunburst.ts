@@ -130,8 +130,11 @@ export function renderFullSunburst(
     if (hasInner) {
       let childAngle = angle;
       entry.children.sort((a, b) => b.value - a.value);
+      // Split the parent wedge by the children's own sum: under mean/min/max
+      // (or mixed signs) child values don't add up to entry.total.
+      const childSum = entry.children.reduce((s, c) => s + c.value, 0) || 1;
       for (const child of entry.children) {
-        const childSweep = (child.value / entry.total) * sweep;
+        const childSweep = (child.value / childSum) * sweep;
         ctx.fillStyle = fill;
         ctx.globalAlpha = alpha * 0.6;
         ctx.beginPath();
