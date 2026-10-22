@@ -60,6 +60,42 @@ describe("mock-data CSV", () => {
 
     it("parses accounting negatives in parentheses", () => {
       expect(coerceCsvNumber("(1,234)")).toBe(-1234);
+      expect(coerceCsvNumber("($1,234.00)")).toBe(-1234);
+    });
+
+    it("parses signed currency and explicit plus signs", () => {
+      expect(coerceCsvNumber("-$1,234")).toBe(-1234);
+      expect(coerceCsvNumber("-$5.00")).toBe(-5);
+      expect(coerceCsvNumber("$-5.00")).toBe(-5);
+      expect(coerceCsvNumber("-€1.234,56")).toBe(-1234.56);
+      expect(coerceCsvNumber("+1,234")).toBe(1234);
+      expect(coerceCsvNumber("−1,234")).toBe(-1234);
+      expect(coerceCsvNumber("--5")).toBeNull();
+      expect(coerceCsvNumber("$")).toBeNull();
+    });
+
+    it("reads a leading 0, group as a decimal comma, not thousands", () => {
+      expect(coerceCsvNumber("0,125")).toBe(0.125);
+      expect(coerceCsvNumber("1,250")).toBe(1250);
+    });
+
+    it("reports true min/max for text and date columns, not first/last row", () => {
+      const full = inspectFromTabular(
+        ["when", "name", "n"],
+        [["2026-03-01", "pear", "5"], ["2025-01-15", "apple", "-2"], ["2026-12-31", "zucchini", "10"], ["2025-06-01", "fig", "1"]],
+      );
+      expect([full.stats[0]?.min_value, full.stats[0]?.max_value]).toEqual(["2025-01-15", "2026-12-31"]);
+      expect([full.stats[1]?.min_value, full.stats[1]?.max_value]).toEqual(["apple", "zucchini"]);
+      expect([full.stats[2]?.min_value, full.stats[2]?.max_value]).toEqual(["-2", "10"]);
+    });
+
+    it("types a column of signed currency as DOUBLE with no incompatible cells", () => {
+      const columns = ["profit"];
+      const rawRows = [["$100"], ["-$50"], ["-$25"]];
+      const full = inspectFromTabular(columns, rawRows);
+      expect(full.stats[0]?.data_type).toBe("DOUBLE");
+      expect(full.sample.rows.map((r) => r[0])).toEqual([100, -50, -25]);
+      expect(full.diagnostics.incompatible_count).toBe(0);
     });
   });
 
