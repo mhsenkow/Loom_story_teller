@@ -9,9 +9,9 @@ Remote MCP for [loom.ibm.io](https://loom.ibm.io/) — same chart recommendation
 | Tool | Description |
 |---|---|
 | `profile_data` | Infer columns / types from CSV or JSON |
-| `recommend_charts` | Ranked chart ideas + Vega-Lite specs (+ ChatGPT widget) |
-| `list_chart_kinds` | Which of the 24 Loom kinds this schema can support |
-| `build_chart` | Build one chart for kind + encodings |
+| `recommend_charts` | Ranked chart ideas with field encodings (+ ChatGPT widget) |
+| `list_chart_kinds` | Which Loom chart kinds (classic, odd charts, geo maps, GPU scenes) this schema can support |
+| `build_chart` | Build one Vega-Lite chart for kind + encodings, with sample rows inlined |
 | `open_loom` | Deep link to the full Loom app |
 
 CSV/JSON is processed in memory for the request only (capped ~500 rows / 400 KB) — nothing is stored.
