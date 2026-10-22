@@ -13,6 +13,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react
 import dynamic from "next/dynamic";
 import { useShallow } from "zustand/react/shallow";
 import { useLoomStore } from "@/lib/store";
+import { viewModeName } from "@/lib/viewModes";
 import type { DashboardSlot, DashboardLayoutTemplate, ViewMode } from "@/lib/store";
 import { Sidebar } from "@/components/Sidebar";
 import { TopBar } from "@/components/TopBar";
@@ -168,7 +169,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
         ? "Opened live chart"
         : slot.viewType === "query"
           ? "Opened query"
-          : "Opened in Explorer",
+          : `Opened in ${viewModeName("explorer")}`,
     );
   };
 
@@ -365,11 +366,11 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
             aria-modal="true"
             aria-label="Focused view"
           >
-            <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-loom-border bg-loom-surface/80 shrink-0">
+            <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-[calc(0.5rem+var(--safe-top))] border-b border-loom-border bg-loom-surface/80 shrink-0">
               <button
                 type="button"
                 onClick={handleBackFromFocus}
-                className="text-xs px-3 py-1.5 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
+                className="text-xs px-3 py-1.5 max-md:min-h-9 rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"
               >
                 ← Back to dashboard
               </button>
@@ -379,7 +380,7 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
               <button
                 type="button"
                 onClick={() => openLiveView(focusedSlot)}
-                className="text-xs px-3 py-1.5 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium shrink-0"
+                className="text-xs px-3 py-1.5 max-md:min-h-9 rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium shrink-0"
               >
                 Open live
               </button>
@@ -801,7 +802,7 @@ function HomeContent({
 
             {helpTab === "shortcuts" && (
               <ul className="text-xs text-loom-text space-y-2.5 leading-relaxed">
-                <li><kbd className="loom-kbd">1</kbd> Explorer · <kbd className="loom-kbd">2</kbd> Chart · <kbd className="loom-kbd">3</kbd> Query · <kbd className="loom-kbd">4</kbd> Dive</li>
+                <li><kbd className="loom-kbd">1</kbd> Explorer · <kbd className="loom-kbd">2</kbd> Chart · <kbd className="loom-kbd">3</kbd> Query · <kbd className="loom-kbd">4</kbd> Dive · <kbd className="loom-kbd">5</kbd> Monitor</li>
                 <li><kbd className="loom-kbd">⌥1</kbd>–<kbd className="loom-kbd">⌥5</kbd> Panel tabs (Stats → Settings)</li>
                 <li><kbd className="loom-kbd">[</kbd> Sidebar · <kbd className="loom-kbd">]</kbd> Right panel</li>
                 <li className="pt-1 text-loom-muted font-medium text-2xs uppercase tracking-wider">Scatter</li>

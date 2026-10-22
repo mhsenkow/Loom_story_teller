@@ -27,10 +27,10 @@ import {
   webhookProblem,
   webPushAvailable,
   webhookKindFor,
-  type CloudWebhookKind,
+  WEBHOOK_KIND_LABEL,
 } from "@/lib/monitoring/cloudSync";
 
-const KIND_LABEL: Record<CloudWebhookKind, string> = { ntfy: "ntfy (phone)", slack: "Slack", discord: "Discord", json: "Webhook" };
+const KIND_LABEL = WEBHOOK_KIND_LABEL;
 
 function Qr({ text }: { text: string }) {
   const svg = useMemo(() => {

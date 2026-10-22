@@ -44,7 +44,7 @@ export function DeployMismatchBanner() {
 
   return (
     <div
-      className="fixed bottom-4 left-4 right-4 md:left-auto md:right-4 md:max-w-md z-[200] p-3 rounded-lg border border-loom-warning/40 bg-loom-surface shadow-lg text-xs text-loom-text space-y-2"
+      className="fixed bottom-[max(1rem,calc(var(--safe-bottom)+0.5rem))] left-4 right-4 md:left-auto md:right-4 md:max-w-md z-[200] p-3 rounded-lg border border-loom-warning/40 bg-loom-surface shadow-lg text-xs text-loom-text space-y-2"
       role="status"
     >
       <p>{state.message}</p>

@@ -8,6 +8,7 @@
 "use client";
 
 import { useLoomStore } from "@/lib/store";
+import { viewModeName } from "@/lib/viewModes";
 import { applyQueryResult } from "@/lib/datasetPipeline";
 import { queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
 import { STREAM_SQL_SNIPPETS, SOURCE_SQL_SNIPPETS } from "@/lib/recommendations";
@@ -472,7 +473,7 @@ export function QueryView() {
                 onClick={() => {
                   if (!queryResult) return;
                   applyQueryResult(queryResult, selectedFile.name);
-                  setToast("Using query results for Chart and Explorer");
+                  setToast(`Using query results for ${viewModeName("chart")} and ${viewModeName("explorer")}`);
                   useLoomStore.getState().setViewMode("chart");
                 }}
                 className="text-2xs px-2 py-0.5 max-md:min-h-9 max-md:px-3 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium"

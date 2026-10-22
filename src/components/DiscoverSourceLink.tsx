@@ -68,7 +68,8 @@ export function DiscoverSourceLink({
       <button
         type="button"
         className="
-          max-w-[5.5rem] truncate px-1.5 py-px text-[9px] uppercase tracking-wider font-medium
+          relative block max-w-[5.5rem] px-1.5 py-px text-[9px] max-md:text-[11px] uppercase tracking-wider font-medium
+          max-md:after:absolute max-md:after:-inset-2.5 max-md:after:content-['']
           rounded border border-loom-border/70 bg-loom-bg/85 text-loom-muted
           hover:text-loom-accent hover:border-loom-accent/40
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent
@@ -83,7 +84,8 @@ export function DiscoverSourceLink({
         }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        Data
+        {/* Truncate on the inner span so the button's enlarged phone hit area (::after) isn't clipped. */}
+        <span className="block truncate">Data</span>
       </button>
       {open && (
         <span

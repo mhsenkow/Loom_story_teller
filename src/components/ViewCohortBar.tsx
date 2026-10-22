@@ -113,7 +113,7 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
 
   return (
     <div
-      className="view-cohort-bar flex items-center gap-2 px-2.5 py-1.5 min-h-9 border-b border-loom-accent/20 bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-bg))] backdrop-blur-sm"
+      className="view-cohort-bar flex items-center gap-2 px-2.5 py-1.5 min-h-9 max-md:overflow-x-auto scrollbar-none border-b border-loom-accent/20 bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-bg))] backdrop-blur-sm"
       role="status"
       aria-label="Current view cohort"
     >
@@ -163,7 +163,7 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
         type="button"
         title={brushLinksFilter ? "Brush filters the table (on)" : "Brush only selects (off)"}
         aria-pressed={brushLinksFilter}
-        className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono border transition-colors ${
+        className={`shrink-0 px-1.5 py-0.5 max-md:min-h-9 max-md:px-2.5 max-md:text-xs rounded text-[10px] font-mono border transition-colors ${
           brushLinksFilter
             ? "border-loom-accent/40 text-loom-accent bg-loom-accent/10"
             : "border-loom-border text-loom-muted hover:text-loom-text"
@@ -180,7 +180,7 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
       {selectedRowIndices.length > 0 && !cohort.hasRowFilter && (
         <button
           type="button"
-          className="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-mono border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/15"
+          className="shrink-0 px-1.5 py-0.5 max-md:min-h-9 max-md:px-2.5 max-md:text-xs rounded text-[10px] font-mono border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/15"
           onClick={() => {
             applyBrushSelection(selectedRowIndices);
             setToast(`Showing ${selectedRowIndices.length} selected`);
@@ -194,7 +194,7 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
         <button
           type="button"
           title={`Unpin color · ${lockedColorField}`}
-          className="shrink-0 min-h-7 px-2 py-0.5 rounded-md text-2xs border border-loom-accent/35 text-loom-text hover:bg-loom-accent/10"
+          className="shrink-0 min-h-7 px-2 py-0.5 max-md:min-h-9 max-md:px-2.5 max-md:text-xs rounded-md text-2xs border border-loom-accent/35 text-loom-text hover:bg-loom-accent/10"
           onClick={() => {
             unlockColorAndResetLocks();
             setToast("Color unpinned");
@@ -207,7 +207,7 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
       {cohort.active && (
         <button
           type="button"
-          className="shrink-0 min-h-7 px-2 rounded-md text-2xs font-medium border border-loom-border bg-loom-surface/90 text-loom-text hover:border-loom-accent hover:text-loom-accent transition-colors"
+          className="shrink-0 min-h-7 px-2 max-md:min-h-9 max-md:px-2.5 max-md:text-xs rounded-md text-2xs font-medium border border-loom-border bg-loom-surface/90 text-loom-text hover:border-loom-accent hover:text-loom-accent transition-colors"
           onClick={() => {
             resetViewCohort();
             setToast("View reset");

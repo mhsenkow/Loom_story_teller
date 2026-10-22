@@ -728,10 +728,10 @@ export function ExplorerView() {
             </>
           ) : (
             <>
-              {formatNumber(totalRowCount)}<span className="hidden sm:inline"> rows</span><span className="sm:hidden">r</span>
+              {formatNumber(totalRowCount)} rows
             </>
           )}
-          {" "}&middot; {columnStats.length}<span className="hidden sm:inline"> cols</span><span className="sm:hidden">c</span>
+          {" "}&middot; {columnStats.length} cols
         </span>
         <div className="flex-1 min-w-0" />
         {selectedRowIndices.length > 0 && (

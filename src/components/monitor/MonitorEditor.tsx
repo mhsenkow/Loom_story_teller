@@ -5,6 +5,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useLoomStore } from "@/lib/store";
+import { viewModeName } from "@/lib/viewModes";
 import { SOURCE_DEFS, SOURCE_BY_KIND, type SourceKind } from "@/lib/sourceRegistry";
 import { computeMetric, describeRule, fmtValue } from "@/lib/monitoring/engine";
 import { describeSchedule, nextRunAfter, scheduleError } from "@/lib/monitoring/schedule";
@@ -14,7 +15,7 @@ import { metricSeries, simulate, spanLabel } from "@/lib/monitoring/backfill";
 import { MonitorPreviewChart } from "./MonitorPreviewChart";
 import { useFeedSample } from "./useFeedSample";
 import { NumberField } from "./NumberField";
-import { CLOUD_MIN_INTERVAL_MINUTES, loadWebhook } from "@/lib/monitoring/cloudSync";
+import { CLOUD_MIN_INTERVAL_MINUTES, WEBHOOK_KIND_LABEL, loadWebhook } from "@/lib/monitoring/cloudSync";
 import type { ExpectedWindow, MetricFilter, MonitorAgg, MonitorRule, MonitorSchedule } from "@/lib/monitoring/types";
 
 const AGGS: { id: MonitorAgg; label: string }[] = [
@@ -179,6 +180,7 @@ export function MonitorEditor() {
 
   if (!editingId) return null;
   const r = d.rule;
+  const hook = loadWebhook();
 
   return (
     <div
@@ -190,7 +192,7 @@ export function MonitorEditor() {
         role="dialog"
         aria-modal="true"
         aria-label={existing ? `Edit ${existing.name}` : "New monitor"}
-        className="loom-focus-panel h-full w-full max-w-xl overflow-y-auto bg-loom-surface border-l border-loom-border p-4 sm:p-6 space-y-5"
+        className="loom-focus-panel h-full w-full max-w-xl overflow-y-auto bg-loom-surface border-l border-loom-border p-4 pt-[max(1rem,var(--safe-top))] sm:p-6 space-y-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between gap-2">
@@ -488,10 +490,9 @@ export function MonitorEditor() {
           <label className="flex items-start gap-2 text-xs">
             <input type="checkbox" className="mt-0.5" checked={!!d.cloud} onChange={(e) => set({ cloud: e.target.checked || undefined })} />
             <span>
-              Always on: Loom&apos;s server checks this every 5 minutes, even when the app is closed, and sends alerts to your channel.
+              Always on: Loom&apos;s server runs this check on its schedule (at most every {CLOUD_MIN_INTERVAL_MINUTES} min), even when the app is closed, and sends alerts to your channel.
               <span className="block text-2xs text-loom-muted">
-                {loadWebhook() ? `Alerts go to your ${loadWebhook()!.kind} channel.` : "Set a channel under Always on in Monitor first, or alerts are only logged."}
-                {d.schedule.kind === "interval" && d.schedule.minutes < CLOUD_MIN_INTERVAL_MINUTES && ` Always-on runs at most every ${CLOUD_MIN_INTERVAL_MINUTES} min.`}
+                {hook ? `Alerts go to ${WEBHOOK_KIND_LABEL[hook.kind]}.` : `Set up a channel in ${viewModeName("monitor")} → Where alerts go first, or alerts are only logged.`}
               </span>
             </span>
           </label>
@@ -502,7 +503,7 @@ export function MonitorEditor() {
           </div>
         </section>
 
-        <div className="sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 py-3 bg-loom-surface border-t border-loom-border flex items-center justify-between gap-2">
+        <div className="sticky bottom-0 -mx-4 sm:-mx-6 px-4 sm:px-6 pt-3 pb-[max(0.75rem,var(--safe-bottom))] bg-loom-surface border-t border-loom-border flex items-center justify-between gap-2">
           <p className="text-2xs text-loom-muted min-w-0">{problems[0] ?? `${describeSchedule(d.schedule)} · ${def.label}`}</p>
           <button type="button" className="loom-btn-primary text-sm px-4 py-1.5 rounded-md shrink-0" disabled={problems.length > 0} onClick={save}>
             {existing ? "Save" : "Start watching"}

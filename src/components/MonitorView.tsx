@@ -33,6 +33,7 @@ import { sourceKindFromPath, type SourceKind } from "@/lib/sourceRegistry";
 import { draftForFeed, type MonitorDraft } from "@/lib/monitoring/templates";
 import type { QueryResult } from "@/lib/queryTypes";
 import { MonitorSparkline } from "./monitor/MonitorSparkline";
+import { friendlyError } from "./sidebar/shared";
 
 const STATUS_STYLE: Record<CheckStatus | "idle" | "paused", { dot: string; label: string }> = {
   ok: { dot: "bg-loom-success", label: "OK" },
@@ -296,7 +297,8 @@ export function MonitorView() {
       for (const { id: _i, createdAt: _c, nextRunAt: _n, ...draft } of list) addMonitor(draft);
       setToast(`Imported ${list.length} monitor${list.length === 1 ? "" : "s"}`);
     } catch (e) {
-      setToast(`Import failed: ${e instanceof Error ? e.message : e}`);
+      const notExport = e instanceof SyntaxError || e instanceof TypeError || (e instanceof Error && e.message === "Not a Loom monitors file");
+      setToast(notExport ? "That file isn’t a Loom monitors export" : `Couldn’t import monitors — ${friendlyError(e)}`);
     }
   };
 

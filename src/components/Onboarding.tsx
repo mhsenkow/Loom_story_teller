@@ -345,6 +345,8 @@ export function Onboarding() {
                 .map((story) => ({ ...story, snapshotCached: true })),
             ]),
             discoverStoryLimit(),
+            // Same feed affinity (♥ / Less / Hide) the scan itself cuts with.
+            discoverAffinityMap([...ALL_SOURCE_KINDS, "wiki"]),
           );
           setDiscoverStoryCache(merged);
           void writeDiscoverDailyCache(
