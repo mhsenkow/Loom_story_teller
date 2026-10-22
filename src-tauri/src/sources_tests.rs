@@ -810,12 +810,18 @@ fn citibike_joins_info_and_status() {
 
 #[test]
 fn space_weather_kp_and_storm_levels() {
-    assert_eq!(storm_level(4.67), "G0");
+    assert_eq!(storm_level(4.67), "G1");
     assert_eq!(storm_level(5.0), "G1");
     assert_eq!(storm_level(6.33), "G2");
     assert_eq!(storm_level(7.0), "G3");
-    assert_eq!(storm_level(8.67), "G4");
+    assert_eq!(storm_level(8.67), "G5");
     assert_eq!(storm_level(9.0), "G5");
+    // Shared with upstreamParity.test.ts so desktop and web G-levels can't drift.
+    let cases = fixture("storm_levels.json");
+    for case in cases.as_array().unwrap() {
+        let kp = case[0].as_f64().unwrap();
+        assert_eq!(storm_level(kp), case[1].as_str().unwrap(), "Kp {kp}");
+    }
 
     let rows = kp_rows(&fixture("kp.json")).unwrap();
     assert_eq!(rows.len(), 4);
