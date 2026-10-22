@@ -2,7 +2,7 @@
  * Unit tests for chart type catalog grouping + search.
  */
 import { describe, it, expect } from "vitest";
-import { CHART_KIND_CATALOG, searchChartKinds, scoreChartKind } from "../chartKindSearch";
+import { CHART_KIND_CATALOG, chartKindLabel, searchChartKinds, scoreChartKind } from "../chartKindSearch";
 import { CHART_KIND_OPTIONS } from "../recommendations";
 
 describe("chart kind catalog", () => {
@@ -45,5 +45,17 @@ describe("searchChartKinds", () => {
       expect.arrayContaining(["pie", "treemap"]),
     );
     expect(searchChartKinds("overplotting")[0]?.value).toBe("hexbin");
+  });
+});
+
+describe("chartKindLabel", () => {
+  it("returns the catalog label instead of the raw id", () => {
+    expect(chartKindLabel("forceBubble")).toBe("Force Bubble");
+    expect(chartKindLabel("scatter")).toBe("Dot (scatter)");
+    for (const e of CHART_KIND_CATALOG) expect(chartKindLabel(e.value)).toBe(e.label);
+  });
+
+  it("passes unknown ids through", () => {
+    expect(chartKindLabel("notAKind")).toBe("notAKind");
   });
 });

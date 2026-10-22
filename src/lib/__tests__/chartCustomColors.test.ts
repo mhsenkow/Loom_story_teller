@@ -64,6 +64,9 @@ describe("custom chart colors", () => {
         ?.paletteName,
     ).toBe("Custom colors");
   });
+  it("preserves authored hex colors with automatic accessibility enabled", () => {
+    expect(resolveChartColors({ theme: "light", colorblind: true, customColors: "#ffff00,#ffffff" }).colors).toEqual(["#ffff00", "#ffffff"]);
+  });
   it("preserves locked custom colors and clears them when color is shuffled", () => {
     expect(
       shuffleVisualOverrides({ customColors }, { color: true }).customColors,

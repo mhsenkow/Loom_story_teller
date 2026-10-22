@@ -149,16 +149,19 @@ export function DiveView() {
 
   const load = useCallback(async (p: string, quiet = false) => {
     if (!quiet) setLoading(true);
+    // A slower load for a dataset the user already left must not land on top.
+    const stale = () => pathRef.current !== p;
     try {
       const ds = await loadDiveDataset(p, sampleRef.current);
+      if (stale()) return;
       setDataset(ds);
       setDatasetPath(p);
       setError(null);
       setRefreshedAt(Date.now());
     } catch (e) {
-      if (!quiet) setError(e instanceof Error ? e.message : String(e));
+      if (!quiet && !stale()) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (!quiet) setLoading(false);
+      if (!quiet && !stale()) setLoading(false);
     }
   }, []);
 
@@ -167,6 +170,7 @@ export function DiveView() {
     if (!path) {
       setDataset(null);
       setDatasetPath(null);
+      setLoading(false);
       return;
     }
     void load(path);
@@ -1325,7 +1329,7 @@ function DiveSamples({
         </div>
       )}
       <table className="text-2xs font-mono border-collapse">
-        <thead className="sticky top-0 bg-loom-bg">
+        <thead className="loom-data-chrome sticky top-0 bg-loom-bg">
           <tr className="border-b border-loom-border text-loom-muted">
             {shown.map(({ c, i }) => (
               <th key={c} className="text-left font-medium px-2 py-1 whitespace-nowrap">

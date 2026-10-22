@@ -408,7 +408,7 @@ export function HydrateStore() {
     skipFirstPersist.current.chartViews = false;
     for (const c of chartViews) {
       if (c.snapshotImageDataUrl?.startsWith("data:")) {
-        void putChartViewThumbnail(c.id, c.snapshotImageDataUrl);
+        void putChartViewThumbnail(c.id, c.snapshotImageDataUrl).catch(() => {});
       }
     }
     if (

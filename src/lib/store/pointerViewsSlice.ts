@@ -37,7 +37,8 @@ export function createPointerViewsSlice(set: Setter) {
     setPngExportHandler: (fn: (() => Promise<Blob | null>) | null) => set({ pngExportHandler: fn }),
     setSvgExportHandler: (fn: (() => Promise<string | null>) | null) => set({ svgExportHandler: fn }),
     setSvgExportLabel: (label: string | null) => set({ svgExportLabel: label }),
-    setHoveredRowIndex: (idx: number | null) => set({ hoveredRowIndex: idx }),
+    // Same index → return state unchanged so pointer moves within one mark don't notify subscribers.
+    setHoveredRowIndex: (idx: number | null) => set((s) => (s.hoveredRowIndex === idx ? s : { hoveredRowIndex: idx })),
     setTooltipLink: (link: { field: string; value: string } | null) => set({ tooltipLink: link }),
     togglePinnedTooltip: (pin: Omit<PinnedMark, "id">) =>
       set((s) => {

@@ -23,7 +23,8 @@ describe("feed health (client)", () => {
     expect(feedHealthNote({ state: "ok" }, now)).toBeNull();
     expect(feedHealthNote({ state: "unknown" }, now)).toBeNull();
     expect(feedHealthNote({ state: "resting", lastOk: now - 5 * 3_600_000 }, now)).toMatch(/since 5 h ago/);
-    expect(feedHealthNote({ state: "degraded", lastOk: now - 20 * 60_000 }, now)).toMatch(/last good copy \(20 min ago\)/);
+    expect(feedHealthNote({ state: "degraded", lastOk: now - 20 * 60_000 }, now)).toMatch(/patchy — last answered 20 min ago/);
+    expect(feedHealthNote({ state: "degraded" }, now)).toBe("The upstream service is patchy right now.");
   });
 
   it("keeps a resting feed out of Digest even when it's loved", () => {

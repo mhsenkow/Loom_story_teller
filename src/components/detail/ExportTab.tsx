@@ -460,7 +460,7 @@ export default function ExportTab() {
         story packs, video, SVG, and CSV.
       </p>
       {copyError && (
-        <p role="alert" className="text-2xs text-loom-warning bg-loom-warning/10 border border-loom-warning/30 rounded px-2 py-1.5 flex items-center justify-between gap-2">
+        <p role="alert" className="text-2xs text-loom-warning-text bg-loom-warning/10 border border-loom-warning/30 rounded px-2 py-1.5 flex items-center justify-between gap-2">
           <span>{copyError}</span>
           <button type="button" onClick={clearError} className="shrink-0 text-loom-muted hover:text-loom-text" aria-label="Dismiss">×</button>
         </p>

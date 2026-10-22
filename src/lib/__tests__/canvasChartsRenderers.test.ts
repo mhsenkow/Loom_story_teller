@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ChartRenderOpts } from "../chartRenderTypes";
-import { buildBarFacetGrid, type HitTarget } from "../chartTooltip";
+import { buildBarFacetGrid, pickHitTarget, rowForHitTarget, type HitTarget } from "../chartTooltip";
 import { renderFullBar, renderFullHistogram } from "../canvasCharts/bar";
 import { renderFullScatter } from "../canvasCharts/scatter";
 import { renderFullLine, renderFullHeatmap } from "../canvasCharts/lineHeatmap";
@@ -30,7 +30,7 @@ import {
 import { renderFullSunburst } from "../canvasCharts/sunburst";
 
 function fakeCtx() {
-  const calls = { paint: 0, strokes: [] as { cap: unknown; join: unknown }[], labels: [] as { text: string; font: string }[] };
+  const calls = { paint: 0, strokes: [] as { cap: unknown; join: unknown }[], labels: [] as { text: string; font: string }[], points: [] as { x: number; y: number }[] };
   const paintOps = new Set(["fill", "stroke", "fillRect", "strokeRect", "fillText", "strokeText", "drawImage"]);
   const target: Record<string, unknown> = {
     measureText: (s: string) => ({ width: String(s).length * 6 }),
@@ -46,6 +46,7 @@ function fakeCtx() {
         calls.paint += 1;
         calls.labels.push({ text, font: String(t.font) });
       };
+      if (prop === "lineTo") return (x: number, y: number) => void calls.points.push({ x, y });
       if (prop === "stroke") return () => { calls.paint += 1; calls.strokes.push({ cap: t.lineCap, join: t.lineJoin }); };
       if (paintOps.has(prop)) return () => void (calls.paint += 1);
       return () => {};
@@ -307,4 +308,46 @@ it("fits forecast bands inside the plot and keeps date events on the extended ax
   o.hits = [];
   renderFullLine(ctx, data, 0, 1, -1, W, H, PAD, o);
   expect(o.hits.some(hit => hit.summary?.columns[0] === "Forecast")).toBe(false);
+});
+
+describe("stat chart geometry", () => {
+  it("keeps the first ridgeline ridge inside the plot", () => {
+    const { ctx, calls } = fakeCtx();
+    const o = opts();
+    renderFullRidgeline(ctx, rows, 1, 0, W, H, PAD, o);
+    const rect = o.scales!.rect;
+    expect(calls.points.length).toBeGreaterThan(0);
+    for (const p of calls.points) {
+      expect(p.y).toBeGreaterThanOrEqual(rect.top - 0.001);
+    }
+    const rects = o.hits!.filter((hit) => hit.shape === "rect");
+    for (const hit of rects) {
+      if (hit.shape !== "rect") continue;
+      expect(hit.y).toBeGreaterThanOrEqual(rect.top);
+      expect(hit.y + hit.h).toBeLessThanOrEqual(rect.bottom + 0.001);
+    }
+    // The first band owns the headroom its peak reaches into.
+    expect(Math.min(...rects.map((hit) => (hit.shape === "rect" ? hit.y : Infinity)))).toBe(rect.top);
+  });
+
+  it("hits the parallel-coordinates line under the pointer, not the first one drawn", () => {
+    const { ctx } = fakeCtx();
+    const o = opts();
+    // Coloured by region, so a shared category match would hide the row.
+    renderFullParallel(ctx, rows, cols, 0, W, H, PAD, o);
+    expect(o.hits!.length).toBeGreaterThan(0);
+    expect(o.hits!.every((hit) => hit.shape === "circle")).toBe(true);
+    const circles = o.hits!.flatMap((hit) => (hit.shape === "circle" ? [hit] : []));
+    // A vertex no other line lands near, on a row that isn't its category's first.
+    const target = circles.find(
+      (hit) =>
+        rows.findIndex((r) => r[0] === rows[hit.rowIndex!]![0]) < hit.rowIndex! &&
+        !circles.some((c) => c.rowIndex !== hit.rowIndex && Math.hypot(c.cx - hit.cx, c.cy - hit.cy) <= c.r),
+    )!;
+    expect(target).toBeDefined();
+    const picked = pickHitTarget(o.hits, target.cx, target.cy)!;
+    expect(picked.rowIndex).toBe(target.rowIndex);
+    // The tooltip resolves to that line's row, not the category's first row.
+    expect(rowForHitTarget(picked, rows as (string | number | boolean | null)[][])).toBe(target.rowIndex);
+  });
 });

@@ -2,7 +2,7 @@
 
 import { useId } from "react";
 import { Dialog } from "@/components/ui/Dialog";
-import { isDesktop, openExternalUrl, OPEN_DATA_PORTALS, type DataGovDataset } from "@/lib/tauri";
+import { isTauri, openExternalUrl, OPEN_DATA_PORTALS, type DataGovDataset } from "@/lib/tauri";
 
 export function DatasetPreviewModal({
   dataset,
@@ -76,7 +76,8 @@ export function DatasetPreviewModal({
             type="button"
             onClick={() => {
               onOpenFullSite();
-              if (isDesktop()) void openExternalUrl(viewUrl);
+              // Any Tauri shell (iOS has no new-window support) hands off to the system browser.
+              if (isTauri()) void openExternalUrl(viewUrl);
               else window.open(viewUrl, "_blank", "noopener,noreferrer");
             }}
             className="loom-btn-primary text-xs flex-1"

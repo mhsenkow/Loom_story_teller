@@ -392,9 +392,12 @@ export function renderFullRidgeline(
   if (opts) opts.scales = { x: X, valueAxis: "x", rect };
   const bins = 48;
   const binW = (xs.max - xs.min) / bins;
-  const bandH = (rect.bottom - rect.top) / groups.length;
-  // Ridges overlap the band above by ~40% — the classic joyplot look
-  const ridgeH = Math.min(bandH * 1.4, rect.bottom - rect.top);
+  // Ridges overlap the band above by ~40% — the classic joyplot look. Reserve
+  // that 0.4 band of headroom at the top so the first ridge stays in the plot.
+  const headroom = 0.4;
+  const bandH = (rect.bottom - rect.top) / (groups.length + headroom);
+  const bandTop = rect.top + headroom * bandH;
+  const ridgeH = Math.min(bandH * (1 + headroom), rect.bottom - rect.top);
   drawAxisFrame(ctx, w, h, rect, opts);
   drawChartGrid(ctx, w, h, rect, opts, { x: [xs.min, xs.max], y: null });
   const color = palette[0]!;
@@ -407,7 +410,7 @@ export function renderFullRidgeline(
     for (const v of g.sorted) counts[Math.min(bins - 1, Math.max(0, Math.floor((v - xs.min) / binW)))]! += 1;
     for (let pass = 0; pass < 2; pass++) counts = counts.map((c, i) => ((counts[i - 1] ?? 0) + 2 * c + (counts[i + 1] ?? 0)) / 4);
     const maxC = Math.max(...counts, 1e-9);
-    const baseline = rect.top + (gi + 1) * bandH;
+    const baseline = bandTop + (gi + 1) * bandH;
     centers.push(baseline - bandH * 0.3);
 
     ctx.beginPath();
@@ -427,7 +430,8 @@ export function renderFullRidgeline(
     ctx.lineWidth = 1.25;
     ctx.stroke();
     pushHit(opts, {
-      shape: "rect", x: rect.left, y: rect.top + gi * bandH, w: rect.right - rect.left, h: bandH,
+      // The first band also owns the headroom its ridge peaks into.
+      shape: "rect", x: rect.left, y: gi === 0 ? rect.top : bandTop + gi * bandH, w: rect.right - rect.left, h: gi === 0 ? bandH * (1 + headroom) : bandH,
       match: [[yi, g.label]],
       summary: { columns: [gName, "Rows", `Median ${vName}`], row: [g.label, formatTooltipNumber(g.sorted.length), formatTooltipNumber(g.q2)] },
     });
@@ -684,25 +688,32 @@ export function renderFullParallel(
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     let started = false;
+    const vertices: { x: number; y: number }[] = [];
     axes.forEach((ax, i) => {
       const v = chartNumber(r[ax.idx]);
       if (isNaN(v)) return;
       const t = (v - ax.min) / (ax.max - ax.min || 1);
       const y = plotBot - t * (plotBot - plotTop);
+      vertices.push({ x: axisXs[i]!, y });
       if (!started) { ctx.moveTo(axisXs[i]!, y); started = true; }
       else ctx.lineTo(axisXs[i]!, y);
     });
     ctx.stroke();
+    // Hit each line where it crosses an axis — a shared full-plot rect per
+    // row meant the first line drawn always won the hover. No colour `match`:
+    // it would resolve the tooltip/pin to the first row of that category
+    // instead of this line's row.
     if (opts?.hits) {
-      opts.hits.push({
-        shape: "rect",
-        x: Math.min(...axisXs) - 6,
-        y: plotTop - 4,
-        w: Math.max(...axisXs) - Math.min(...axisXs) + 12,
-        h: plotBot - plotTop + 8,
-        match: ci >= 0 ? [[ci, String(r[ci])]] : [],
-        rowIndex: ri,
-      });
+      for (const p of vertices) {
+        opts.hits.push({
+          shape: "circle",
+          cx: p.x,
+          cy: p.y,
+          r: 4,
+          match: [],
+          rowIndex: ri,
+        });
+      }
     }
   }
 

@@ -7,11 +7,15 @@
 // (OG image) alongside the PNG so the post keeps a preview + reopen link.
 // =================================================================
 
+import { isMobileOs, isTauri } from "./tauri";
+
 export type NativeExportOutcome = "saved" | "shared" | "downloaded" | "cancelled" | "unsupported";
 
 /** Trigger a one-shot browser download (desktop web / fallback). */
 export function downloadBlob(blob: Blob, filename: string): NativeExportOutcome {
   if (typeof document === "undefined") return "unsupported";
+  // iPhone/iPad Tauri cancels <a download> clicks — don't claim it worked.
+  if (isTauri() && isMobileOs()) return "unsupported";
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -97,9 +101,8 @@ export async function saveOrShareBlob(
   filename: string,
   opts?: { title?: string; preferShare?: boolean },
 ): Promise<NativeExportOutcome> {
-  const preferShare =
-    opts?.preferShare ??
-    (typeof navigator !== "undefined" && /iPhone|iPad|iPod|Android/i.test(navigator.userAgent));
+  // isMobileOs also catches iPadOS, whose webview reports a Macintosh UA.
+  const preferShare = opts?.preferShare ?? isMobileOs();
   if (preferShare) {
     const shared = await shareBlob(blob, filename, opts?.title);
     if (shared === "shared" || shared === "cancelled") return shared;

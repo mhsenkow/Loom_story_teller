@@ -145,8 +145,13 @@ import {
   seedEmojiMap,
 } from "@/lib/chartEmoji";
 import { semanticEmojiMap } from "@/lib/discoverMarkers";
+import { chartKindLabel } from "@/lib/chartKindSearch";
+import { onRadioGroupKeyDown, radioTabIndex } from "@/lib/radioGroupKeys";
 
 const DRAG_TYPE_COLUMN = "application/x-loom-column";
+
+/** Plain names for shuffle-lock keys in the Random toast. */
+const SHUFFLE_LOCK_LABEL: Record<keyof EncodingShuffleLocks, string> = { kind: "chart type", x: "X", y: "Y", color: "color", size: "size", z: "Z" };
 
 type EncodingOption = { value: string; label: string; type?: string; disabled?: boolean };
 
@@ -1615,12 +1620,15 @@ export default function ChartPanelTab() {
       : undefined;
     const rec = tryBuildRandomChartRec(columnStats, tableName, { locks: encodingLocks, keep });
     if (rec) {
-      const locked = Object.entries(encodingLocks).filter(([, v]) => v).map(([k]) => k);
+      const locked = Object.entries(encodingLocks)
+        .filter(([, v]) => v)
+        .map(([k]) => SHUFFLE_LOCK_LABEL[k as keyof EncodingShuffleLocks] ?? k);
+      const kindLabel = chartKindLabel(rec.kind);
       commitRec(
         rec,
         locked.length
-          ? `Random · ${rec.kind} (kept ${locked.join(", ")})`
-          : `Random · ${rec.kind}`,
+          ? `Random · ${kindLabel} (kept ${locked.join(", ")})`
+          : `Random · ${kindLabel}`,
       );
     } else {
       setToast("Couldn’t find a random chart for these columns");
@@ -1630,7 +1638,7 @@ export default function ChartPanelTab() {
   const handleRandomizeEncoding = useCallback(() => {
     if (columnStats.length === 0 || !activeChart) return;
     if (!chartKindDataSupport(columnStats, activeChart.kind).ok) {
-      setToast(`This table can’t support ${activeChart.kind} — pick another type`);
+      setToast(`This table can’t support ${chartKindLabel(activeChart.kind)} — pick another type`);
       return;
     }
     const keep = {
@@ -1664,11 +1672,11 @@ export default function ChartPanelTab() {
           rec.xField,
           rec.yField,
           encodingLocks.color ? null : rec.colorField,
-          rec.rowField ? `facets:${rec.rowField}` : null,
+          rec.rowField ? `split by ${rec.rowField}` : null,
           rec.topN ? `top ${rec.topN}` : null,
           rec.y2Field ? `vs ${rec.y2Field}` : null,
           rec.comparePrevious ? "vs earlier" : null,
-          rec.rollingWindow ? `roll ${rec.rollingWindow}` : null,
+          rec.rollingWindow ? `${rec.rollingWindow}-pt average` : null,
           rec.seriesNormalize === "index100" ? "index 100" : rec.seriesNormalize === "zscore" ? "z-score" : null,
           rec.yScale && rec.yScale !== "linear" ? `${rec.yScale} Y` : null,
           rec.residualOverlay ? "residuals" : null,
@@ -1909,7 +1917,7 @@ export default function ChartPanelTab() {
               const curSupport = chartKindDataSupport(columnStats, activeChart.kind);
               if (!curSupport.ok) {
                 return (
-                  <div role="alert" className="rounded-md border border-loom-warning/40 bg-loom-warning/10 px-2.5 py-2 text-2xs text-loom-warning">
+                  <div role="alert" className="rounded-md border border-loom-warning/40 bg-loom-warning/10 px-2.5 py-2 text-2xs text-loom-warning-text">
                     <span className="font-medium">Doesn’t fit this table:</span> {curSupport.reason}
                   </div>
                 );
@@ -2850,7 +2858,7 @@ export default function ChartPanelTab() {
                       h.level === "error"
                         ? "border-loom-error/40 bg-loom-error/10 text-loom-error"
                         : h.level === "warn"
-                          ? "border-loom-warning/40 bg-loom-warning/10 text-loom-warning"
+                          ? "border-loom-warning/40 bg-loom-warning/10 text-loom-warning-text"
                           : "border-loom-border bg-loom-elevated/50 text-loom-muted"
                     }`}
                   >
@@ -3554,10 +3562,11 @@ export default function ChartPanelTab() {
                   </div>
                   <div>
                     <span className="block text-2xs text-loom-muted mb-1">Marker</span>
-                    <div className="grid grid-cols-7 gap-1" role="radiogroup" aria-label="Mark shape">
-                      {MARK_SHAPE_OPTIONS.map((shape) => {
+                    <div className="grid grid-cols-7 gap-1" role="radiogroup" aria-label="Mark shape" onKeyDown={onRadioGroupKeyDown}>
+                      {MARK_SHAPE_OPTIONS.map((shape, shapeIdx) => {
+                        const shapeMode = (chartVisualOverrides.markerMode ?? "shape") === "shape";
                         const selected =
-                          (chartVisualOverrides.markerMode ?? "shape") === "shape" &&
+                          shapeMode &&
                           (chartVisualOverrides.markShape ?? inheritedStyle.markShape ?? "circle") === shape.value;
                         return (
                           <button
@@ -3565,6 +3574,8 @@ export default function ChartPanelTab() {
                             type="button"
                             role="radio"
                             aria-checked={selected}
+                            aria-label={shape.label}
+                            tabIndex={radioTabIndex(selected, shapeIdx, shapeMode)}
                             title={shape.label}
                             onClick={() => editChartVisualOverrides({ markerMode: "shape", markShape: shape.value })}
                             className={`h-8 rounded border text-base leading-none ${
@@ -3573,13 +3584,13 @@ export default function ChartPanelTab() {
                                 : "border-loom-border text-loom-muted hover:text-loom-text"
                             }`}
                           >
-                            {MARK_SHAPE_ICON[shape.value]}
+                            <span aria-hidden>{MARK_SHAPE_ICON[shape.value]}</span>
                           </button>
                         );
                       })}
                     </div>
-                    <div className="grid grid-cols-8 gap-1 mt-2" role="radiogroup" aria-label="Emoji marker">
-                      {CURATED_MARK_EMOJIS.map((emoji) => {
+                    <div className="grid grid-cols-8 gap-1 mt-2" role="radiogroup" aria-label="Emoji marker" onKeyDown={onRadioGroupKeyDown}>
+                      {CURATED_MARK_EMOJIS.map((emoji, emojiIdx) => {
                         const selected =
                           chartVisualOverrides.markerMode === "emoji" &&
                           chartVisualOverrides.markEmoji === emoji;
@@ -3590,6 +3601,12 @@ export default function ChartPanelTab() {
                             role="radio"
                             aria-checked={selected}
                             aria-label={`Emoji marker ${emoji}`}
+                            tabIndex={radioTabIndex(
+                              selected,
+                              emojiIdx,
+                              chartVisualOverrides.markerMode === "emoji" &&
+                                (CURATED_MARK_EMOJIS as readonly string[]).includes(chartVisualOverrides.markEmoji ?? ""),
+                            )}
                             onClick={() => editChartVisualOverrides({ markerMode: "emoji", markEmoji: emoji })}
                             className={`h-8 rounded border text-base leading-none ${
                               selected

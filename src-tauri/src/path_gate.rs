@@ -139,6 +139,35 @@ pub fn unique_csv_path(dir: &Path, filename: &str) -> PathBuf {
     }
 }
 
+/// Deletes an in-progress download (`<name>.part`) on drop unless `disarm`ed, so
+/// every early return leaves no truncated file behind for the next folder scan.
+pub struct PartFileGuard {
+    path: PathBuf,
+    armed: bool,
+}
+
+impl PartFileGuard {
+    pub fn new(path: PathBuf) -> Self {
+        Self { path, armed: true }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PartFileGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +211,28 @@ mod tests {
         let b = unique_csv_path(&dir, "data.csv");
         assert_ne!(a, b);
         assert!(b.file_name().unwrap().to_string_lossy().contains("data-1"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn part_file_guard_removes_unless_disarmed() {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("loom-part-guard-{}", stamp));
+        fs::create_dir_all(&dir).unwrap();
+        let dropped = dir.join("a.csv.part");
+        fs::write(&dropped, b"partial").unwrap();
+        drop(PartFileGuard::new(dropped.clone()));
+        assert!(!dropped.exists());
+
+        let kept = dir.join("b.csv.part");
+        fs::write(&kept, b"done").unwrap();
+        let mut guard = PartFileGuard::new(kept.clone());
+        guard.disarm();
+        drop(guard);
+        assert!(kept.exists());
         let _ = fs::remove_dir_all(&dir);
     }
 }

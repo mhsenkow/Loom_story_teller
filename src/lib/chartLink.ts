@@ -156,6 +156,43 @@ function cleanVisual(v: ChartVisualOverrides | undefined): Record<string, Primit
   return Object.keys(out).length ? out : undefined;
 }
 
+const LINK_OPTION_FIELDS = [
+  "topN",
+  "comparePrevious",
+  "rollingWindow",
+  "yScale",
+  "seriesNormalize",
+  "residualOverlay",
+  "anomalyHighlight",
+  "bumpMode",
+  "pyramidScaleMode",
+  "deltaDisplay",
+] as const;
+type LinkOptionField = (typeof LINK_OPTION_FIELDS)[number];
+
+/** Scalar chart options a link carries; defaults collapse to undefined so links stay short. */
+function linkChartOptions(
+  rec: Pick<ChartRecommendation, LinkOptionField> | Pick<ChartLinkChart, LinkOptionField>,
+): Pick<ChartLinkChart, LinkOptionField> {
+  return {
+    topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
+    comparePrevious: rec.comparePrevious || undefined,
+    rollingWindow: rec.rollingWindow === 7 || rec.rollingWindow === 30 ? rec.rollingWindow : undefined,
+    yScale: rec.yScale && rec.yScale !== "linear" ? rec.yScale : undefined,
+    seriesNormalize: rec.seriesNormalize === "index100" || rec.seriesNormalize === "zscore" ? rec.seriesNormalize : undefined,
+    residualOverlay: rec.residualOverlay || undefined,
+    anomalyHighlight: rec.anomalyHighlight || undefined,
+    bumpMode: rec.bumpMode === "delta" || rec.bumpMode === "rank" ? rec.bumpMode : undefined,
+    pyramidScaleMode:
+      rec.pyramidScaleMode === "shared" ||
+      rec.pyramidScaleMode === "independent" ||
+      rec.pyramidScaleMode === "auto"
+        ? rec.pyramidScaleMode
+        : undefined,
+    deltaDisplay: rec.deltaDisplay === "diff" || rec.deltaDisplay === "pct" ? rec.deltaDisplay : undefined,
+  };
+}
+
 /** Snapshot the current chart setup as a link (null when there is no chart or dataset). */
 export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
   const rec = s.activeChart;
@@ -179,22 +216,8 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     emojiField: str(rec.emojiField),
     emojiMap: parseChartEmojiMap(rec.emojiMap),
     yAggregate: rec.yAggregate ?? undefined,
-    topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
     y2Field: str(rec.y2Field),
-    comparePrevious: rec.comparePrevious || undefined,
-    rollingWindow: rec.rollingWindow === 7 || rec.rollingWindow === 30 ? rec.rollingWindow : undefined,
-    yScale: rec.yScale && rec.yScale !== "linear" ? rec.yScale : undefined,
-    seriesNormalize: rec.seriesNormalize === "index100" || rec.seriesNormalize === "zscore" ? rec.seriesNormalize : undefined,
-    residualOverlay: rec.residualOverlay || undefined,
-    anomalyHighlight: rec.anomalyHighlight || undefined,
-    bumpMode: rec.bumpMode === "delta" || rec.bumpMode === "rank" ? rec.bumpMode : undefined,
-    pyramidScaleMode:
-      rec.pyramidScaleMode === "shared" ||
-      rec.pyramidScaleMode === "independent" ||
-      rec.pyramidScaleMode === "auto"
-        ? rec.pyramidScaleMode
-        : undefined,
-    deltaDisplay: rec.deltaDisplay === "diff" || rec.deltaDisplay === "pct" ? rec.deltaDisplay : undefined,
+    ...linkChartOptions(rec),
     timeWindowField: str(rec.timeWindowField),
     timeWindow: rec.timeWindow && rec.timeWindow !== "all" ? rec.timeWindow : undefined,
     tooltipFields: rec.tooltipFields?.length ? [...rec.tooltipFields] : undefined,
@@ -469,12 +492,16 @@ export function restoreChartRec(
   const used = [...ENCODING_FIELDS.map((f) => c[f]), c.tooltipKeyField].filter((f): f is string => !!f);
   if (!names.size || used.some((f) => !names.has(f))) return null;
 
-  const same = recs.find(
-    (r) =>
-      r.kind === c.kind &&
-      ENCODING_FIELDS.every((f) => norm(r[f]) === norm(c[f])) &&
-      (!c.yAggregate || norm(r.yAggregate) === c.yAggregate),
-  );
+  // Options (top N, log Y, rolling, …) must match too, or the rail rec would
+  // silently drop the sender's tweaks; a mismatch falls through to createChartRec.
+  const wantOpts = linkChartOptions(c);
+  const same = recs.find((r) => {
+    if (r.kind !== c.kind) return false;
+    if (!ENCODING_FIELDS.every((f) => norm(r[f]) === norm(c[f]))) return false;
+    if (c.yAggregate && norm(r.yAggregate) !== c.yAggregate) return false;
+    const opts = linkChartOptions(r);
+    return LINK_OPTION_FIELDS.every((f) => opts[f] === wantOpts[f]);
+  });
   let rec: ChartRecommendation | null = same ?? null;
   if (!rec) {
     rec = createChartRec(c.kind, columns, c.xField, c.yField ?? null, c.colorField ?? null, tableName, {

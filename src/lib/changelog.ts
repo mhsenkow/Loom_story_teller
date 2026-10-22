@@ -29,6 +29,7 @@ export const CHANGELOG: ChangelogRelease[] = [
     date: "2026-10-21",
     title: "Polish pass",
     items: [
+      { title: "Make the colors yours", detail: "Keep your favorite presets or edit individual swatches and gradient stops with a color picker or hex code. Fit a palette to your field’s value count, see when colors repeat, and browse presets without changing your chart. Custom colors travel with Undo, saved looks and shared charts; SVG exports now honor the selected palette." },
       { title: "Shared stories open again", detail: "“Open with shared data in Loom” links and refreshed snapshot pages now load the shared chart instead of an empty app." },
       { title: "Share fits on phones", detail: "The phone top bar no longer runs off the screen, so Share is always fully visible. Theme stays in Settings." },
       { title: "Years read as time", detail: "A year column in an uploaded spreadsheet now suggests trend lines over time, and text columns like incident type or created by stay categories instead of turning into empty time charts." },
@@ -39,6 +40,16 @@ export const CHANGELOG: ChangelogRelease[] = [
       { title: "Share images stay current", detail: "After you change colors, theme, notes or pins, or the data refreshes, Share now creates a new image instead of reusing the old one." },
       { title: "Query keeps your SQL", detail: "Saved query views and Dive’s “Open in Query” now fill the editor, and Copy cell / Copy row copy the row you see after sorting." },
       { title: "Charts speak to screen readers", detail: "With a screen reader, arrow keys step through marks and each one is read aloud with its values. Pinning and unpinning are announced too." },
+      { title: "Comfortable on phones", detail: "Banners, sheets and full-screen views stay clear of the notch and home indicator, and small buttons and story card text are bigger and easier to tap and read." },
+      { title: "Messages in plain words", detail: "When a feed, file or import can’t load, Loom says what failed and whether you’re offline instead of showing a raw error." },
+      { title: "Saving on iPhone and iPad", detail: "Save Image and Take Photo no longer close the app, saving a file opens the share sheet, and Loom only says something was saved when it really was." },
+      { title: "Links open once", detail: "Links to data portals and other sites open a single time in your browser instead of twice or inside Loom." },
+      { title: "Easier-to-read colors", detail: "Chart series, warnings, badges and focus rings have stronger contrast in every theme, including colorblind mode." },
+      { title: "Steadier desktop app", detail: "Slow queries no longer stall live feeds on Mac, interrupted CSV downloads don’t leave half-written files, and SQLite files that can’t be opened explain why instead of disappearing." },
+      { title: "Feeds ride out outages", detail: "When a data provider goes down, the web and iPhone apps show the last good copy instead of an error." },
+      { title: "Back where you left off", detail: "Reopening Loom resumes your saved live feed again and tells you if it comes back empty." },
+      { title: "Shared charts match", detail: "Chart links keep the sender’s options such as top N, log scale and comparisons, and times line up the same in every time zone." },
+      { title: "Tidier charts", detail: "Sunburst inner rings stay inside their wedges, the top ridgeline fits on the chart, and hovering parallel coordinates picks the line under your pointer." },
     ],
   },
   {
@@ -46,7 +57,6 @@ export const CHANGELOG: ChangelogRelease[] = [
     date: "2026-10-21",
     title: "Point at what matters",
     items: [
-      { title: "Make the colors yours", detail: "Keep your favorite presets or edit individual swatches and gradient stops with a color picker or hex code. Fit a palette to your field’s value count, see when colors repeat, and browse presets without changing your chart. Custom colors travel with Undo, saved looks and shared charts; SVG exports now honor the selected palette." },
       { title: "Every mark lights up", detail: "Hover or arrow-key through any chart and the bar, point, slice, cell or path you're on gets a clear highlight shaped to the chart: rings for points, outlines for bars, edges for slices, a soft wash for bands. Maps, globes, terrain, weaves and trail charts now answer hover too." },
       { title: "Pin it, share it", detail: "Click a mark (or press Enter, or tap Pin on your phone) to keep its readout on the chart. Up to five pins, numbered. They're drawn into exported images and saved in share links, so whoever opens your chart sees exactly what you were pointing at." },
     ],
@@ -111,7 +121,7 @@ export const CHANGELOG: ChangelogRelease[] = [
       { title: "Unusual isn't the same as wrong", detail: "Choose a limit, a healthy range, a sudden change, or \"unusual for this hour\". Add expected windows for maintenance or planned events. When you mark an alert as expected, Loom stops alerting at that time." },
       { title: "Was it worth it?", detail: "Each alert asks what happened next. Cards show how often alerts led to action and flag monitors that are mostly noise. Related metrics group into scorecards." },
       { title: "Schedules and notifications", detail: "Check every few minutes, daily, weekly, or on a cron schedule, with quiet hours and reminder cooldowns. Alerts arrive as system notifications on Mac, iPhone, iPad, and in the browser." },
-      { title: "Always on", detail: "Mark a monitor Always on and Loom's server checks it every 5 minutes even when the app is closed. Alerts go to an ntfy topic on your phone, Slack, Discord, or a webhook." },
+      { title: "Always on", detail: "Mark a monitor Always on and Loom's server keeps checking it on its schedule (as often as every 15 minutes), even when the app is closed. Alerts go to an ntfy topic on your phone, Slack, Discord, or a webhook." },
     ],
   },
   {

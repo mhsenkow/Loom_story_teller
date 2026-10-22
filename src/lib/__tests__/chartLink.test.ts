@@ -261,6 +261,31 @@ describe("chart links", () => {
     expect(restoreChartRec(link, columns, [story], "usgs")).toEqual(story);
   });
 
+  it("keeps the sender's log Y and top N when the rail holds the untweaked rec", () => {
+    const original = createChartRec("bar", columns, "region", "revenue", null, "sales")!;
+    const tweaked = createChartRec("bar", columns, "region", "revenue", null, "sales", { yScale: "log", topN: 10 })!;
+    expect(tweaked.yScale).toBe("log");
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: tweaked,
+    })!;
+    const decoded = decodeChartLink(encodeChartLink(link))!;
+    const rec = restoreChartRec(decoded, columns, [original], "sales")!;
+    expect(rec.yScale).toBe("log");
+    expect(rec.topN).toBe(10);
+  });
+
+  it("still reuses the rail rec when its options match the link", () => {
+    const original = createChartRec("bar", columns, "region", "revenue", null, "sales")!;
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: original,
+    })!;
+    const decoded = decodeChartLink(encodeChartLink(link))!;
+    const railRec = { ...original, spec: { ...original.spec, description: "rail copy" } };
+    expect(restoreChartRec(decoded, columns, [railRec], "sales")!.spec).toBe(railRec.spec);
+  });
+
   it("returns null when the dataset lacks a column the chart uses", () => {
     const link: ChartLink = { src: "mock://a.csv", chart: { kind: "bar", xField: "region", yField: "profit" } };
     expect(restoreChartRec(link, columns, [], "a")).toBeNull();

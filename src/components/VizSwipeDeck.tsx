@@ -12,6 +12,7 @@ import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useLoomStore } from "@/lib/store";
 import { ChartCard } from "@/components/ChartCard";
 import { getRecommendationReason } from "@/lib/recommendations";
+import { chartKindLabel } from "@/lib/chartKindSearch";
 import { eventCount } from "@/lib/vizPreferences";
 import type { ChartRecommendation } from "@/lib/recommendations";
 
@@ -372,7 +373,7 @@ export function VizSwipeDeck() {
             type="button"
             onClick={() => commit("right")}
             disabled={!!exitDir}
-            className="min-h-12 min-w-[7rem] sm:min-w-[7.5rem] rounded-full bg-loom-accent text-white text-sm font-medium shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
+            className="min-h-12 min-w-[7rem] sm:min-w-[7.5rem] rounded-full bg-loom-accent text-[color:var(--btn-primary-fg)] text-sm font-medium shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50"
             aria-label="Keep this chart"
           >
             Keep
@@ -391,7 +392,7 @@ function PeekChartStill({ rec }: { rec: ChartRecommendation }) {
   return (
     <div className="h-[26rem] max-h-[62vh] p-4 flex flex-col justify-between bg-loom-surface">
       <div className="space-y-1">
-        <p className="text-2xs uppercase tracking-[0.18em] text-loom-muted">{rec.kind}</p>
+        <p className="text-2xs uppercase tracking-[0.18em] text-loom-muted">{chartKindLabel(rec.kind)}</p>
         <p className="text-sm font-semibold text-loom-text line-clamp-2">{rec.title}</p>
         {rec.subtitle ? (
           <p className="text-2xs text-loom-muted line-clamp-2">{rec.subtitle}</p>

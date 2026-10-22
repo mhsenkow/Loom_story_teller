@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
 import { activateDataset } from "@/lib/datasetPipeline";
-import { isDesktop, openExternalUrl, sourceClear, sourceSnapshot, sourceStart, sourceStatus, sourceStop } from "@/lib/tauri";
+import { sourceClear, sourceSnapshot, sourceStart, sourceStatus, sourceStop } from "@/lib/tauri";
 import { SOURCE_EXPLORE_ROWS, sourceStreamPath, type SourceDef } from "@/lib/sourceRegistry";
 import { feedRef } from "@/lib/sourceRef";
 import { feedHealthNote } from "@/lib/sourceHealth";
 import { LoveButton, SaveButton, SourcePrefMenu } from "@/components/SourcePrefControls";
-import { ipcErrorMessage, leaveSourcesShowChart } from "./shared";
+import { friendlyError, ipcErrorMessage, leaveSourcesShowChart } from "./shared";
 
 export function SourceCard({ def }: { def: SourceDef }) {
   const status = useLoomStore((s) => s.sourceStatuses[def.kind]);
@@ -66,7 +66,7 @@ export function SourceCard({ def }: { def: SourceDef }) {
       setToast(`Loaded ${snap.sample.rows.length} ${def.label} rows`);
       return true;
     } catch (e) {
-      if (!opts?.quiet) setToast(`Failed: ${e instanceof Error ? e.message : e}`);
+      if (!opts?.quiet) setToast(`Couldn’t open ${def.label} — ${friendlyError(e)}`);
       return false;
     }
   };
@@ -86,10 +86,10 @@ export function SourceCard({ def }: { def: SourceDef }) {
       setToast(
         s.last_error
           ? `${def.label} is unavailable right now — Loom will keep retrying`
-          : `Connected to ${def.label} — tap Explore when rows appear`,
+          : `Connected to ${def.label} — tap Chart it when rows appear`,
       );
     } catch (e) {
-      setToast(`${def.label} failed: ${e instanceof Error ? e.message : e}`);
+      setToast(`Couldn’t connect to ${def.label} — ${friendlyError(e)}`);
     } finally { setConnecting(false); }
   };
 
@@ -127,23 +127,25 @@ export function SourceCard({ def }: { def: SourceDef }) {
               <span
                 title={healthNote}
                 className={`ml-1.5 align-middle text-2xs font-normal px-1.5 py-px rounded-full border ${
-                  resting ? "border-loom-border text-loom-muted" : "border-loom-warning/40 text-loom-warning"
+                  resting ? "border-loom-border text-loom-muted" : "border-loom-warning/40 text-loom-warning-text"
                 }`}
               >
                 {resting ? "Resting" : "Patchy"}
               </span>
             )}
           </p>
-          {healthNote && !running && <p className="sr-only">{healthNote}</p>}
+          {/* Visible, not a tooltip: touch devices never show title text. */}
+          {healthNote && !running && <p className="text-2xs text-loom-muted mt-0.5 leading-snug">{healthNote}</p>}
           <p className="text-2xs text-loom-muted mt-0.5 leading-snug">{def.description}</p>
         </div>
         {!running ? (
           <button type="button" onClick={handleConnect} disabled={connecting}
+            aria-label={`${connecting ? "Loading" : resting ? "Try anyway" : "Connect"} ${def.label}`}
             className="text-2xs py-1 px-2.5 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50 shrink-0">
             {connecting ? "Loading…" : resting ? "Try anyway" : "Connect"}
           </button>
         ) : (
-          <button type="button" onClick={handleDisconnect}
+          <button type="button" onClick={handleDisconnect} aria-label={`Stop ${def.label}`}
             className="text-2xs py-1 px-2.5 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-error/50 bg-loom-error/10 text-loom-error hover:bg-loom-error/20 font-medium shrink-0">
             Stop
           </button>
@@ -153,10 +155,10 @@ export function SourceCard({ def }: { def: SourceDef }) {
         <div className="flex items-center justify-between pl-4">
           <span className="text-2xs text-loom-muted tabular-nums">{(status?.total_events ?? 0).toLocaleString()} rows</span>
           <div className="flex gap-1.5">
-            <button type="button" onClick={handleClear} className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">Clear</button>
-            <button type="button" onClick={() => void handleExplore()} disabled={bufferRows === 0}
+            <button type="button" onClick={handleClear} aria-label={`Clear ${def.label}`} className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated">Clear</button>
+            <button type="button" onClick={() => void handleExplore()} disabled={bufferRows === 0} aria-label={`Chart it: ${def.label}`}
               className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50">
-              Explore
+              Chart it
             </button>
           </div>
         </div>
@@ -171,7 +173,7 @@ export function SourceCard({ def }: { def: SourceDef }) {
         </p>
       )}
       {running && status?.last_error && (
-        <p className="text-2xs text-loom-warning pl-4 leading-snug" role="status">
+        <p className="text-2xs text-loom-warning-text pl-4 leading-snug" role="status">
           {bufferRows > 0 ? "Showing the last good data — " : "Source unavailable right now — "}
           retrying automatically.
           <span className="block text-loom-muted/80 truncate" title={status.last_error}>{status.last_error}</span>
@@ -180,9 +182,9 @@ export function SourceCard({ def }: { def: SourceDef }) {
       {!running && bufferRows > 0 && (
         <div className="flex items-center justify-between pl-4">
           <span className="text-2xs text-loom-muted tabular-nums">{bufferRows.toLocaleString()} rows ready</span>
-          <button type="button" onClick={() => void handleExplore()}
+          <button type="button" onClick={() => void handleExplore()} aria-label={`Chart it: ${def.label}`}
             className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium">
-            Explore
+            Chart it
           </button>
         </div>
       )}
@@ -193,12 +195,6 @@ export function SourceCard({ def }: { def: SourceDef }) {
             target="_blank"
             rel="noopener noreferrer"
             className="block min-w-0 text-2xs text-loom-label hover:text-loom-accent w-fit"
-            onClick={(e) => {
-              if (isDesktop()) {
-                e.preventDefault();
-                void openExternalUrl(def.homepage);
-              }
-            }}
           >
             {def.attribution}
           </a>

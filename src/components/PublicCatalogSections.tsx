@@ -218,7 +218,7 @@ export function SocrataCatalogSection({
 
       <div aria-live="polite" aria-atomic="true" className="min-h-[1.25rem]">
         {loading && <p className="text-2xs text-loom-muted px-1 py-2">Searching portals…</p>}
-        {!loading && error && <p className="text-2xs text-loom-warning px-1 py-1">{error}</p>}
+        {!loading && error && <p className="text-2xs text-loom-warning-text px-1 py-1">{error}</p>}
         {!loading && !error && datasets.length === 0 && (
           <p className="text-2xs text-loom-muted px-1 py-2">No tables matched. Try fewer or different words.</p>
         )}
@@ -445,7 +445,7 @@ export function TidyTuesdaySection({
       <div aria-live="polite" aria-atomic="true">
         {loading && <p className="text-2xs text-loom-muted px-1 py-2">Loading weeks…</p>}
         {!loading && error && (
-          <p className="text-2xs text-loom-warning px-1 py-1">
+          <p className="text-2xs text-loom-warning-text px-1 py-1">
             {error}{" "}
             <button type="button" onClick={() => setReload((n) => n + 1)} className="underline hover:text-loom-text">
               Retry

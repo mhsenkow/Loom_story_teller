@@ -47,7 +47,7 @@ export function FocusCurtain({ open, title, onClose, children }: { open: boolean
   return createPortal(
     <div className="loom-focus-curtain fixed inset-0 z-[180]">
       <button type="button" className="loom-focus-scrim absolute inset-0" aria-label="Close explanation" onClick={onClose} />
-      <aside ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="loom-focus-title" tabIndex={-1} className="loom-focus-panel absolute inset-y-0 right-0 flex w-full max-w-[28rem] flex-col border-l border-loom-border bg-loom-bg">
+      <aside ref={panelRef} role="dialog" aria-modal="true" aria-labelledby="loom-focus-title" tabIndex={-1} className="loom-focus-panel absolute inset-y-0 right-0 flex w-full max-w-[28rem] flex-col border-l border-loom-border bg-loom-bg pt-[var(--safe-top)] pb-[var(--safe-bottom)]">
         <header className="flex items-center gap-3 border-b border-loom-border px-5 py-4">
           <p className="sr-only">Forecast explanation</p>
           <h2 id="loom-focus-title" className="flex-1 text-base font-semibold">{title}</h2>

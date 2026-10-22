@@ -18,6 +18,7 @@ import { notificationPermission, requestNotificationPermission, type NotifyPermi
 import { runMonitorNow } from "@/lib/monitoring/runner";
 import { openMonitorChart } from "@/lib/monitoring/openChart";
 import { exportMonitorsJson, parseMonitorsJson } from "@/lib/monitoring/storage";
+import { downloadBlob } from "@/lib/download";
 import { ALERT_OUTCOME_LABELS, type AlertOutcome, type CheckRecord, type CheckStatus, type Monitor, type MonitorAlert } from "@/lib/monitoring/types";
 import { MonitorEditor } from "./monitor/MonitorEditor";
 import { ConnectPanel } from "./monitor/ConnectPanel";
@@ -32,6 +33,7 @@ import { sourceKindFromPath, type SourceKind } from "@/lib/sourceRegistry";
 import { draftForFeed, type MonitorDraft } from "@/lib/monitoring/templates";
 import type { QueryResult } from "@/lib/queryTypes";
 import { MonitorSparkline } from "./monitor/MonitorSparkline";
+import { friendlyError } from "./sidebar/shared";
 
 const STATUS_STYLE: Record<CheckStatus | "idle" | "paused", { dot: string; label: string }> = {
   ok: { dot: "bg-loom-success", label: "OK" },
@@ -284,13 +286,10 @@ export function MonitorView() {
     return [...g.entries()].sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
   }, [monitors]);
 
-  const exportAll = () => {
+  const exportAll = async () => {
     const blob = new Blob([exportMonitorsJson(monitors)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "loom-monitors.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const outcome = await downloadBlob(blob, "loom-monitors.json");
+    if (outcome === "unsupported") setToast("Couldn’t save the file on this device");
   };
   const importFile = async (f: File) => {
     try {
@@ -298,7 +297,8 @@ export function MonitorView() {
       for (const { id: _i, createdAt: _c, nextRunAt: _n, ...draft } of list) addMonitor(draft);
       setToast(`Imported ${list.length} monitor${list.length === 1 ? "" : "s"}`);
     } catch (e) {
-      setToast(`Import failed: ${e instanceof Error ? e.message : e}`);
+      const notExport = e instanceof SyntaxError || e instanceof TypeError || (e instanceof Error && e.message === "Not a Loom monitors file");
+      setToast(notExport ? "That file isn’t a Loom monitors export" : `Couldn’t import monitors — ${friendlyError(e)}`);
     }
   };
 

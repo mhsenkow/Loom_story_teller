@@ -42,6 +42,8 @@ targets:
       path: loom_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
+        NSCameraUsageDescription: Take a photo to attach to feedback.
+        NSPhotoLibraryAddUsageDescription: Loom saves chart images you export to Photos.
         UILaunchStoryboardName: LaunchScreen
         UIRequiredDeviceCapabilities: [arm64, metal]
         UISupportedInterfaceOrientations:

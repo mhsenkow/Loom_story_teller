@@ -8,7 +8,7 @@
 "use client";
 
 import { ThemeCycleButton } from "./ThemeCycleButton";
-import { useLoomStore, type ViewMode } from "@/lib/store";
+import { useLoomStore } from "@/lib/store";
 import {
   CHART_ASPECTS,
   type ChartAspectId,
@@ -16,14 +16,8 @@ import {
   resolveDevice,
 } from "@/lib/chartViewport";
 import { useViewportWidth } from "@/lib/useMediaQuery";
+import { VIEW_MODES } from "@/lib/viewModes";
 
-const VIEW_MODES: { key: ViewMode; label: string; short: string; shortcut: string }[] = [
-  { key: "explorer", label: "Explorer", short: "Data", shortcut: "1" },
-  { key: "chart", label: "Chart", short: "Chart", shortcut: "2" },
-  { key: "query", label: "Query", short: "SQL", shortcut: "3" },
-  { key: "dive", label: "Dive", short: "Dive", shortcut: "4" },
-  { key: "monitor", label: "Monitor", short: "Watch", shortcut: "5" },
-];
 
 const DEVICES: { id: ChartDeviceId; label: string; icon: "phone" | "tablet" | "desktop" | "auto" }[] = [
   { id: "auto", label: "Auto", icon: "auto" },
@@ -166,7 +160,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             <span className="hidden sm:inline">{mode.label}</span>
             <span className="ml-1 text-2xs opacity-50 font-mono hidden md:inline">{mode.shortcut}</span>
             {mode.key === "monitor" && firingCount > 0 && (
-              <span className="ml-1 inline-flex min-w-4 h-4 px-1 items-center justify-center rounded-full bg-loom-error text-2xs font-semibold text-loom-bg" aria-label={`${firingCount} open alerts`}>
+              <span className="ml-1 inline-flex min-w-4 h-4 px-1 items-center justify-center rounded-full bg-loom-error text-2xs font-semibold text-[color:var(--on-error)]" aria-label={`${firingCount} open alerts`}>
                 {firingCount}
               </span>
             )}

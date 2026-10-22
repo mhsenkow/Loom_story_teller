@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useState } from "react";
 import qrcode from "qrcode-generator";
 import { useLoomStore } from "@/lib/store";
-import { isNativeShell, openExternalUrl } from "@/lib/tauri";
+import { isNativeShell } from "@/lib/tauri";
 import { publicLoomWebOrigin } from "@/lib/publicOrigin";
 import { copyTextToClipboard } from "@/lib/socialExport";
 import { notificationPermission, playChime, requestNotificationPermission, type NotifyPermission } from "@/lib/monitoring/notify";
@@ -27,10 +27,10 @@ import {
   webhookProblem,
   webPushAvailable,
   webhookKindFor,
-  type CloudWebhookKind,
+  WEBHOOK_KIND_LABEL,
 } from "@/lib/monitoring/cloudSync";
 
-const KIND_LABEL: Record<CloudWebhookKind, string> = { ntfy: "ntfy (phone)", slack: "Slack", discord: "Discord", json: "Webhook" };
+const KIND_LABEL = WEBHOOK_KIND_LABEL;
 
 function Qr({ text }: { text: string }) {
   const svg = useMemo(() => {
@@ -103,13 +103,9 @@ export function ConnectPanel() {
     }
     setHook(w);
   };
-  /** Native shells open links in the system browser. */
-  const ext = (url: string) => (e: React.MouseEvent) => {
-    if (!isNativeShell()) return;
-    e.preventDefault();
-    void openExternalUrl(url);
-  };
 
+  // Plain target=_blank links: Tauri's shell plugin already opens them in the
+  // system browser, so an extra onClick opener would open them twice.
   const origin = publicLoomWebOrigin();
   const pageUrl = pub ? `${origin}/w/${pub.id}` : null;
   const needAlwaysOn = cloudCount === 0 && monitors.length > 0;
@@ -135,7 +131,7 @@ export function ConnectPanel() {
         <Row title="Your phone" status={hook?.kind === "ntfy" ? "Connected" : "Not set up"} on={hook?.kind === "ntfy"}>
           {hook?.kind === "ntfy" ? (
             <>
-              <p className="text-2xs text-loom-muted">Always-on alerts go to the free <a className="underline" href="https://ntfy.sh/" target="_blank" rel="noreferrer" onClick={ext("https://ntfy.sh/")}>ntfy</a> app. Scan to subscribe on another phone.</p>
+              <p className="text-2xs text-loom-muted">Always-on alerts go to the free <a className="underline" href="https://ntfy.sh/" target="_blank" rel="noreferrer">ntfy</a> app. Scan to subscribe on another phone.</p>
               {showQr && <div className="flex items-center gap-3"><Qr text={hook.url} /><p className="text-2xs text-loom-muted break-all">{hook.url}</p></div>}
               <div className="flex flex-wrap gap-1">
                 <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" onClick={() => setShowQr((x) => !x)}>{showQr ? "Hide QR" : "Show QR"}</button>
@@ -193,7 +189,7 @@ export function ConnectPanel() {
           <p className="text-2xs text-loom-muted">A read-only status page of your always-on monitors and their moments, plus an RSS feed for Slack, Zapier, IFTTT or any reader. Only names, rules, values and moments are shown.</p>
           {pub && pageUrl ? (
             <div className="space-y-1">
-              <a className="block text-xs underline break-all text-loom-accent-text" href={pageUrl} target="_blank" rel="noreferrer" onClick={ext(pageUrl)}>{pageUrl}</a>
+              <a className="block text-xs underline break-all text-loom-accent-text" href={pageUrl} target="_blank" rel="noreferrer">{pageUrl}</a>
               <div className="flex flex-wrap gap-1">
                 <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" onClick={async () => setToast((await copyTextToClipboard(pageUrl)) ? "Page link copied" : pageUrl)}>Copy page link</button>
                 <button type="button" className="loom-btn-ghost text-xs px-2 py-1 rounded-md" onClick={async () => setToast((await copyTextToClipboard(`${pageUrl}/feed.xml`)) ? "RSS link copied" : `${pageUrl}/feed.xml`)}>Copy RSS link</button>

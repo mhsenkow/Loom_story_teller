@@ -42,16 +42,28 @@ function idbReq<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
-async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
-  const res = await fetch(dataUrl);
-  return res.blob();
+/**
+ * Decode a data: URL in memory. fetch(data:) is blocked by the Tauri CSP
+ * (connect-src has no data:), so thumbnails never reached IndexedDB there.
+ */
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const comma = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:") || comma < 0) throw new Error("Not a data URL");
+  const meta = dataUrl.slice(5, comma);
+  const mime = /^([^;,]+)/.exec(meta)?.[1] ?? "image/png";
+  const payload = dataUrl.slice(comma + 1);
+  if (!/;base64$/i.test(meta)) return new Blob([decodeURIComponent(payload)], { type: mime });
+  const bin = atob(payload);
+  const bytes = new Uint8Array(bin.length);
+  for (let k = 0; k < bin.length; k++) bytes[k] = bin.charCodeAt(k);
+  return new Blob([bytes], { type: mime });
 }
 
 /** Persist thumbnail; returns stable id (view id). */
 export async function putChartViewThumbnail(viewId: string, dataUrl: string): Promise<void> {
   const db = await openDb();
   try {
-    const blob = await dataUrlToBlob(dataUrl);
+    const blob = dataUrlToBlob(dataUrl);
     const tx = db.transaction(STORE, "readwrite");
     const done = waitTx(tx);
     tx.objectStore(STORE).put({ viewId, blob, updatedAt: Date.now() });

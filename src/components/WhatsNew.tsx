@@ -20,9 +20,27 @@ import {
   type ChangelogRelease,
 } from "@/lib/changelog";
 import { DISCOVER_SEEN_KEY } from "@/lib/discoverStories";
+import { getLastSession } from "@/lib/persist";
+import { resolveStartupIntent, shouldOpenOnboarding } from "@/lib/startupIntent";
 
 /** User activity only: hydration writes settings before this lazy module loads. */
 const HISTORY_KEYS = ["loom-discover-v1", "loom-last-session", "loom-recent-files"];
+
+/**
+ * Promise discover only when Onboarding will really open it next — the same
+ * startup rule it uses, so a saved session or shared link means "Got it".
+ */
+function discoverOpensNext(): boolean {
+  if (readStorage(DISCOVER_SEEN_KEY) != null) return false;
+  return shouldOpenOnboarding(
+    resolveStartupIntent({
+      hash: window.location.hash,
+      hasDiscoverSeen: false,
+      hasLastSession: !!getLastSession()?.filePath,
+      neospaceHandoff: window.location.search.includes("neospace=1"),
+    }),
+  );
+}
 
 function readStorage(key: string): string | null {
   try {
@@ -77,7 +95,7 @@ export function WhatsNew() {
     }
     // Visitors from before the changelog existed only need the latest release.
     setFresh(seen ? unseenReleases(seen) : [latest]);
-    setDiscoverNext(readStorage(DISCOVER_SEEN_KEY) == null);
+    setDiscoverNext(discoverOpensNext());
     setOpen(true);
   }, [setOpen]);
 

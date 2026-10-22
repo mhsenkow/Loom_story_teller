@@ -33,6 +33,8 @@ const WEBHOOK_KEY = "loom-monitor-webhook";
 
 export type CloudWebhookKind = "ntfy" | "slack" | "discord" | "json";
 export interface CloudWebhookConfig { kind: CloudWebhookKind; url: string }
+/** Display names for each channel kind (never show the raw id). */
+export const WEBHOOK_KIND_LABEL: Record<CloudWebhookKind, string> = { ntfy: "ntfy (phone)", slack: "Slack", discord: "Discord", json: "Webhook" };
 
 /** Cloud cron runs interval monitors at most this often. */
 export const CLOUD_MIN_INTERVAL_MINUTES = 15;

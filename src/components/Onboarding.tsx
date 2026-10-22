@@ -345,6 +345,8 @@ export function Onboarding() {
                 .map((story) => ({ ...story, snapshotCached: true })),
             ]),
             discoverStoryLimit(),
+            // Same feed affinity (♥ / Less / Hide) the scan itself cuts with.
+            discoverAffinityMap([...ALL_SOURCE_KINDS, "wiki"]),
           );
           setDiscoverStoryCache(merged);
           void writeDiscoverDailyCache(
@@ -735,6 +737,15 @@ export function Onboarding() {
     settingFilter !== "all" ||
     search.trim() !== "" ||
     sortMode !== "score";
+  /** Nothing to clear: every story left comes from a source the user hid (sort order doesn't narrow). */
+  const onlyHiddenSourcesLeft =
+    categoryFilter === "all" &&
+    chartFilter === "all" &&
+    sourceFilter === "all" &&
+    settingFilter === "all" &&
+    search.trim() === "" &&
+    !showHiddenSources &&
+    hiddenSourceCount > 0;
   const closeRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
   const displayed = groups.slice(0, shownCount);
@@ -1254,17 +1265,33 @@ export function Onboarding() {
         )}
         {showFilters && !visible.length && (
           <div className="discover-empty">
-            <h3>No stories match yet.</h3>
-            <p>
-              Try a broader search or clear a filter to see more perspectives.
-            </p>
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="loom-btn-primary mt-4 px-4 min-h-11 rounded-lg"
-            >
-              Clear filters
-            </button>
+            {onlyHiddenSourcesLeft ? (
+              <>
+                <h3>All current stories come from sources you hid.</h3>
+                <p>Show them for now, or browse other datasets.</p>
+                <button
+                  type="button"
+                  onClick={() => setShowHiddenSources(true)}
+                  className="loom-btn-primary mt-4 px-4 min-h-11 rounded-lg"
+                >
+                  Show hidden sources
+                </button>
+              </>
+            ) : (
+              <>
+                <h3>No stories match yet.</h3>
+                <p>
+                  Try a broader search or clear a filter to see more perspectives.
+                </p>
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="loom-btn-primary mt-4 px-4 min-h-11 rounded-lg"
+                >
+                  Clear filters
+                </button>
+              </>
+            )}
           </div>
         )}
         {displayed.length > 0 && (

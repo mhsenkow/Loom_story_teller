@@ -56,3 +56,5 @@ Final expressive-discovery export `2026-10-17T01:14:37.227Z` reports **405 kB Fi
 **Color inspector (2026-10-21):** Custom palette parsing is bounded to 16 hex stops, outside per-mark loops. Distinct-value counting runs only while the Color section is mounted and is memoized by the rows/field; it adds one linear scan and a set of unique keys, without copying row payloads. SVG color rewriting walks the spec at export time only. No new render loop or dependency is introduced. Physical-device frame timing remains unmeasured.
 
 The color-inspector production export reported **460 kB First Load JS** for `/`, within the proposed 600 kB budget. Browser checks at 1,280 × 720 and 390 × 844 verified custom swatches, matching chart/legend colors, and usable phone input rows.
+
+After integrating the October 22 polish changes, the combined production export reports **464 kB First Load JS** for `/`, still within the proposed 600 kB budget.
