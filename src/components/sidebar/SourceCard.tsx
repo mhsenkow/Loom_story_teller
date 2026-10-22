@@ -127,7 +127,7 @@ export function SourceCard({ def }: { def: SourceDef }) {
               <span
                 title={healthNote}
                 className={`ml-1.5 align-middle text-2xs font-normal px-1.5 py-px rounded-full border ${
-                  resting ? "border-loom-border text-loom-muted" : "border-loom-warning/40 text-loom-warning"
+                  resting ? "border-loom-border text-loom-muted" : "border-loom-warning/40 text-loom-warning-text"
                 }`}
               >
                 {resting ? "Resting" : "Patchy"}
@@ -171,7 +171,7 @@ export function SourceCard({ def }: { def: SourceDef }) {
         </p>
       )}
       {running && status?.last_error && (
-        <p className="text-2xs text-loom-warning pl-4 leading-snug" role="status">
+        <p className="text-2xs text-loom-warning-text pl-4 leading-snug" role="status">
           {bufferRows > 0 ? "Showing the last good data — " : "Source unavailable right now — "}
           retrying automatically.
           <span className="block text-loom-muted/80 truncate" title={status.last_error}>{status.last_error}</span>

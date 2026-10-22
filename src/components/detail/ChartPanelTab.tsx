@@ -1924,7 +1924,7 @@ export default function ChartPanelTab() {
               const curSupport = chartKindDataSupport(columnStats, activeChart.kind);
               if (!curSupport.ok) {
                 return (
-                  <div role="alert" className="rounded-md border border-loom-warning/40 bg-loom-warning/10 px-2.5 py-2 text-2xs text-loom-warning">
+                  <div role="alert" className="rounded-md border border-loom-warning/40 bg-loom-warning/10 px-2.5 py-2 text-2xs text-loom-warning-text">
                     <span className="font-medium">Doesn’t fit this table:</span> {curSupport.reason}
                   </div>
                 );
@@ -2865,7 +2865,7 @@ export default function ChartPanelTab() {
                       h.level === "error"
                         ? "border-loom-error/40 bg-loom-error/10 text-loom-error"
                         : h.level === "warn"
-                          ? "border-loom-warning/40 bg-loom-warning/10 text-loom-warning"
+                          ? "border-loom-warning/40 bg-loom-warning/10 text-loom-warning-text"
                           : "border-loom-border bg-loom-elevated/50 text-loom-muted"
                     }`}
                   >

@@ -31,6 +31,8 @@ const config: Config = {
           "accent-dim": token("--loom-accent-dim"),
           success:  token("--loom-success"),
           warning:  token("--loom-warning"),
+          // AA text ink for warnings; `warning` stays the fill/border color
+          "warning-text": token("--loom-warning-text"),
           error:    token("--loom-error"),
         },
       },

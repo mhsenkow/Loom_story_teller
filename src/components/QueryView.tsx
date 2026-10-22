@@ -351,7 +351,7 @@ export function QueryView() {
               describedBy={!validation.valid && validation.error ? validationId : undefined}
             />
             {!validation.valid && validation.error && (
-              <p id={validationId} className="text-2xs text-loom-warning mt-1 font-mono" role="status">
+              <p id={validationId} className="text-2xs text-loom-warning-text mt-1 font-mono" role="status">
                 {validation.error}
               </p>
             )}
@@ -433,7 +433,7 @@ export function QueryView() {
           <QueryResultsSkeleton rows={8} cols={queryResult?.columns.length ?? 4} />
         ) : queryResult && queryResult.rows.length > 0 ? (
           <>
-            <div className="sticky max-md:static top-0 z-20 bg-loom-bg border-b border-loom-border">
+            <div className="loom-data-chrome sticky max-md:static top-0 z-20 bg-loom-bg border-b border-loom-border">
             <div className="flex items-center gap-2 px-3 py-1 flex-wrap">
               <span className="text-2xs text-loom-muted font-mono">
                 {queryResult.rows.length < queryResult.total_rows
@@ -482,7 +482,7 @@ export function QueryView() {
                     <span className={added > 0 ? "text-loom-success ml-1" : added < 0 ? "text-loom-error ml-1" : "text-loom-muted ml-1"}>
                       {added > 0 ? `+${added}` : added} rows
                     </span>
-                    {colsDiff && <span className="text-loom-warning ml-1">cols changed</span>}
+                    {colsDiff && <span className="text-loom-warning-text ml-1">cols changed</span>}
                   </span>
                 );
               })()}
@@ -493,7 +493,7 @@ export function QueryView() {
                   {queryResult.columns.map((col, ci) => (
                     <th
                       key={`${col}-${ci}`}
-                      className="px-3 py-2 text-left text-2xs font-semibold text-loom-muted uppercase tracking-wider whitespace-nowrap bg-loom-bg border-b border-loom-border"
+                      className="loom-data-chrome px-3 py-2 text-left text-2xs font-semibold text-loom-muted uppercase tracking-wider whitespace-nowrap bg-loom-bg border-b border-loom-border"
                     >
                       <button
                         type="button"
