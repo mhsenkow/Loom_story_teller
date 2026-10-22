@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildSharePreviewKey,
   invalidateSharePreview,
+  noteShareCapture,
   peekSharePreview,
   seedSharePreview,
   sharePreviewKeyFromStore,
@@ -37,6 +38,8 @@ describe("sharePreviewCache", () => {
 
   it("builds a stable key from chart + preset + burn-in + supersample", () => {
     useLoomStore.setState({ exportSupersample: 1 });
+    const b = sharePreviewKeyFromStore("ig-square")!;
+    const epoch = Number(b.split("|").pop()!.slice(1));
     const a = buildSharePreviewKey({
       chartId: "c1",
       presetId: "ig-square",
@@ -47,8 +50,8 @@ describe("sharePreviewCache", () => {
       includeHandle: false,
       handleText: "",
       supersample: 1,
+      epoch,
     });
-    const b = sharePreviewKeyFromStore("ig-square");
     expect(b).toBe(a);
   });
 
@@ -71,5 +74,28 @@ describe("sharePreviewCache", () => {
     const b = await warmSharePreview("ig-square");
     expect(a).toBe(blob);
     expect(b).toBe(blob);
+  });
+
+  it("changes the key when the painted chart changes, so a stale image is never served", () => {
+    const key = sharePreviewKeyFromStore("current")!;
+    seedSharePreview(key, new Blob(["png"], { type: "image/png" }));
+    useLoomStore.setState({ chartVisualOverrides: { colorPalette: "viridis" } });
+    const next = sharePreviewKeyFromStore("current")!;
+    expect(next).not.toBe(key);
+    expect(peekSharePreview(next)).toBeNull();
+  });
+
+  it("ignores a capture's temporary aspect / export-target swap", () => {
+    const key = sharePreviewKeyFromStore("current")!;
+    const prevAspect = useLoomStore.getState().appSettings.chartAspect;
+    // Same order as capturePlatformPng: aspect, target, then restore target, aspect.
+    noteShareCapture(1);
+    useLoomStore.getState().setAppSettings((s) => ({ ...s, chartAspect: "square" }));
+    useLoomStore.getState().setSocialExportTarget({ width: 400, height: 400, pixelRatio: 2 } as never);
+    useLoomStore.getState().setSocialExportTarget(null);
+    useLoomStore.getState().setAppSettings((s) => ({ ...s, chartAspect: prevAspect }));
+    noteShareCapture(-1);
+    useLoomStore.setState({ sidebarOpen: !useLoomStore.getState().sidebarOpen });
+    expect(sharePreviewKeyFromStore("current")).toBe(key);
   });
 });

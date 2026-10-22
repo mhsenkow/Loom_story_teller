@@ -618,6 +618,7 @@ describe("/api/catalog/<portal>", () => {
     const res = await call("/api/catalog/us?q=water&rows=5");
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Loom-Cache")).toBe("HIT");
+    expect(res.headers.get("Access-Control-Allow-Origin")).not.toBeNull();
     expect(await res.text()).toBe('{"datasets":[]}');
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -1610,6 +1610,8 @@ async function handleCatalogSearch(
   const hit = await cache.match(cacheReq).catch(() => undefined);
   if (hit) {
     const headers = new Headers(hit.headers);
+    // Cached entries carry no CORS; native shells (tauri/capacitor localhost) need it on every hit.
+    for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
     headers.set("X-Loom-Cache", "HIT");
     applyBaselineSecurityHeaders(headers);
     return new Response(hit.body, { status: hit.status, headers });

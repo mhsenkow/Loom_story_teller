@@ -58,6 +58,8 @@ export interface DiscoverStory {
   quality?: number;
   /** Actual content change, separate from a successful unchanged poll. */
   dataChangedAt?: number;
+  /** The feed's evidence-based headline (carries discoverHookFor's hook); leads its question group. */
+  headline?: boolean;
 }
 
 /** TLDR + credit for What’s interesting data chips (hover bubble / inspect). */
@@ -326,6 +328,10 @@ function* buildDiscoverStorySteps(
     story.insight = evidence.insight;
     story.score = Math.round(primary.score * 0.3 + chart.score * 0.3
       + evidence.quality * 0.25 + evidence.insight.strength * 15);
+    if (chart === primaryChart) {
+      story.headline = true;
+      story.score += 5;
+    }
     // IDs depend on the recipe, not a changing rank or completion order.
     story.id = `discover-${kind}-${chart.id}-${discoverRecipeId(chart)}`;
     all.push(story);
@@ -335,6 +341,14 @@ function* buildDiscoverStorySteps(
   for (const story of ranked) if (!bestByKind.has(story.chartKind)) bestByKind.set(story.chartKind, story);
   // Preserve every viable kind when it fits, before spending slots on settings.
   const representatives = [...bestByKind.values()];
+  // The headline hook is the landing page's best text — never lose it to a sibling of the same kind.
+  const head = all.find((s) => s.headline);
+  if (head && !representatives.some((s) => s.id === head.id)) {
+    // When every slot is already a kind representative, the headline takes its own kind's slot.
+    const sameKind = representatives.findIndex((s) => s.chartKind === head.chartKind);
+    if (representatives.length >= maxVariants && sameKind >= 0) representatives[sameKind] = head;
+    else representatives.unshift(head);
+  }
   const represented = new Set(representatives.map((s) => s.id));
   const out = representatives.length <= maxVariants
     ? [...representatives, ...orderDiscoverStories(all.filter((s) => !represented.has(s.id)), (s) => s.score, maxVariants - representatives.length)]

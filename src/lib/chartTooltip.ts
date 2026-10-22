@@ -9,7 +9,7 @@ import { chartNumber } from "./chartNumbers";
 
 import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
 import { classifyKeys, histogramBins } from "./chartAxes";
-import { buildSpatialHitIndex, spatialCandidates } from "./spatialHitIndex";
+import { buildSpatialHitIndex, spatialCandidates, type SpatialHitIndex } from "./spatialHitIndex";
 
 /** Precomputed facet for bar charts (category × subcategory); used for canvas draw + hit-test. */
 export type BarFacetHitPayload = {
@@ -147,14 +147,25 @@ function hitDistance(t: HitTarget, x: number, y: number): number | null {
   return a <= t.a1 ? 0 : null;
 }
 
+// One index per painted target list; pointer moves reuse it instead of rebuilding.
+const spatialIndexCache = new WeakMap<HitTarget[], { len: number; idx: SpatialHitIndex }>();
+
+/** Cached grid index for a paint's targets (rebuilt if the list grew or shrank). */
+export function spatialIndexFor(targets: HitTarget[]): SpatialHitIndex {
+  const cached = spatialIndexCache.get(targets);
+  if (cached && cached.len === targets.length) return cached.idx;
+  const idx = buildSpatialHitIndex(targets, { w: 8192, h: 8192 });
+  spatialIndexCache.set(targets, { len: targets.length, idx });
+  return idx;
+}
+
 /** Topmost / closest registered mark under the pointer. */
 export function pickHitTarget(targets: HitTarget[] | undefined, x: number, y: number): HitTarget | null {
   if (!targets?.length) return null;
   const scan =
     targets.length > 48
       ? (() => {
-          const idx = buildSpatialHitIndex(targets, { w: 8192, h: 8192 });
-          const near = spatialCandidates(idx, x, y);
+          const near = spatialCandidates(spatialIndexFor(targets), x, y, targets);
           return near.length ? near : targets;
         })()
       : targets;

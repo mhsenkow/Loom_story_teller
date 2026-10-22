@@ -13,6 +13,7 @@ import {
 } from "./socialExport";
 import { getThemeUiColors } from "./chartPalettes";
 import { waitForChartPaint } from "./chartPaintSignal";
+import { noteShareCapture } from "./sharePreviewCache";
 import {
   afterPaint,
   blobToDataUrl,
@@ -60,6 +61,8 @@ async function captureNow(
   const sameFrame = !preset.width || !preset.height;
   let nudged = false;
 
+  // The stage swap + restore below must not read as a chart edit to the share preview cache.
+  noteShareCapture(1);
   try {
     if (sameFrame) {
       if (prevTarget) {
@@ -121,6 +124,7 @@ async function captureNow(
       getState().setDashboardsExpanded(prevDashboardsExpanded);
       if (!sameFrame) await sleep(100);
     }
+    noteShareCapture(-1);
   }
 }
 

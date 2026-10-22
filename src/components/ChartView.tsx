@@ -1116,6 +1116,10 @@ export function ChartView() {
   const [whyReasonOpen, setWhyReasonOpen] = useState(false);
   const [chartDataTableOpen, setChartDataTableOpen] = useState(false);
   const [keyboardMarkIndex, setKeyboardMarkIndex] = useState(-1);
+  /** Spoken for keyboard mark steps and pins (the tooltip card itself stays quiet). */
+  const [markAnnouncement, setMarkAnnouncement] = useState("");
+  /** Set by a keyboard step so only that step's readout is announced (not later hovers). */
+  const announceKeyStepRef = useRef(false);
   // Mark focus (markFocus.ts): the hovered / keyboard-focused mark, drawn on its own
   // layer above the chart; pins are drawn there too so exports carry them.
   const focusLayerRef = useRef<HTMLCanvasElement>(null);
@@ -1880,6 +1884,11 @@ export function ChartView() {
   );
   /** Glass / dock stay put on touch — finger leave shouldn't wipe the readout. */
   const stickyTooltip = tooltipPresentation === "glass" || tooltipPresentation === "dock";
+  /** Height of the carved footer info band (source footnote / colour stops); overlays sit above it. */
+  const footerBandPx =
+    (chartFootnoteText || chartColorInfo?.stops?.length) && (chartVisualOverrides.chromeInfoBand ?? "footer") === "footer"
+      ? FOOTNOTE_BAND_PX
+      : 0;
 
   // ---- Mark focus (markFocus.ts) ------------------------------------------
   // A mark's identity is its encoded values, so pins re-find their mark after
@@ -2233,6 +2242,7 @@ export function ChartView() {
     const frame = canvas2DHitRef.current;
     if (!hits.length || !el || !frame) return;
     const focusAt = (i: number) => {
+      announceKeyStepRef.current = true;
       setKeyboardMarkIndex(i);
       const t = hits[i]!;
       // Reuse the pointer path at the mark's anchor so keyboard and mouse show the same readout.
@@ -2251,17 +2261,32 @@ export function ChartView() {
       focusAt(nextMarkIndex(keyboardMarkIndex, hits.length, -1));
     } else if ((e.key === "Enter" || e.key === " ") && keyboardMarkIndex >= 0 && chartTooltip) {
       e.preventDefault();
+      const wasPinned = !!hoverRef && pinnedTooltips.some((t) => t.chartId === activeChart?.id && sameMark(t.ref, hoverRef));
       pinMark(hoverMark, chartTooltip);
+      setMarkAnnouncement(wasPinned ? "Unpinned" : "Pinned");
     } else if (e.key === "Escape" && (keyboardMarkIndex >= 0 || hoverMark || chartTooltip)) {
       // Only clear the mark — keep the brush and share-ready mode; a second Esc reaches them.
       e.preventDefault();
       e.stopPropagation();
+      setMarkAnnouncement("");
       setKeyboardMarkIndex(-1);
       setHoverMark(null);
       setChartTooltip(null);
       setHoveredRowIndex(null);
     }
   };
+
+  // Announce keyboard steps whatever the tooltip presentation (off / obscured readouts included).
+  useEffect(() => {
+    // Pointer hovers after a keyboard step keep keyboardMarkIndex; they must stay silent.
+    if (!announceKeyStepRef.current) return;
+    announceKeyStepRef.current = false;
+    if (keyboardMarkIndex < 0 || !chartTooltip) return;
+    const n = keyboardNavigableHits(canvas2DHitRef.current?.targets).length;
+    setMarkAnnouncement(
+      `Mark ${keyboardMarkIndex + 1} of ${n}: ${chartTooltip.columns.map((c, j) => `${c} ${chartTooltip.row[j] ?? ""}`).join(", ")}`,
+    );
+  }, [keyboardMarkIndex, chartTooltip]);
 
   const handleCanvas2DPointerLeave = useCallback(() => {
     if (!stickyTooltip) {
@@ -2758,6 +2783,8 @@ export function ChartView() {
       (useWebGpuScene && isWebGpuDrawableScene(activeChart.kind) && sceneRendererRef.current) ||
       (useWebGpuGlobe && isWebGpuGlobeKind(activeChart.kind) && sceneRendererRef.current)
     ) {
+      // Drop the previous chart's marks so hover / focus / pins never resolve against them.
+      canvas2DHitRef.current = null;
       const canvas2D = canvas2DRef.current;
       if (canvas2D) {
         const ctx = canvas2D.getContext("2d");
@@ -2825,6 +2852,24 @@ export function ChartView() {
           bounds = { xMin: lay.xs.min, xMax: lay.xs.max, yMin: lay.ys.min, yMax: lay.ys.max, zMin: 0, zMax: 1 };
           plotRect = { left: lay.left, top: lay.top, right: lay.right, bottom: lay.bottom };
           crowd = fireflyDensity(points.length, lay.right - lay.left, lay.bottom - lay.top);
+          // Same circles the Canvas fallback registers (gpuScenes.ts), so firefly answers hover on GPU too.
+          const sceneRows = chartSampleRows?.rows ?? sampleRows.rows;
+          const sceneCols = sampleRows.columns;
+          const targets: HitTarget[] = points.map((p) => ({ shape: "circle", cx: lay.sx(p.x), cy: lay.sy(p.y), r: 6, match: [], rowIndex: p.row ?? p.trail }));
+          canvas2DHitRef.current = {
+            kind: activeChart.kind,
+            frameH: h,
+            rows: sceneRows,
+            columns: sceneCols,
+            pad: ffPad,
+            w,
+            h: ffHeight,
+            xIdx: sceneCols.indexOf(activeChart.xField),
+            yIdx: activeChart.yField ? sceneCols.indexOf(activeChart.yField) : -1,
+            cIdx: activeChart.colorField ? sceneCols.indexOf(activeChart.colorField) : -1,
+            sizeIdx: activeChart.sizeField ? sceneCols.indexOf(activeChart.sizeField) : -1,
+            targets,
+          };
         }
         sceneRendererRef.current.uploadData(points, bounds, {
           plotRect,
@@ -2842,6 +2887,7 @@ export function ChartView() {
         sceneRendererRef.current.setCamera(sceneOrbit.yaw, sceneOrbit.pitch, sceneOrbit.zoom);
         sceneRendererRef.current.render(w, h);
       }
+      setHitsVersion((v) => v + 1);
       notifyChartPainted();
       return;
     }
@@ -4232,6 +4278,12 @@ export function ChartView() {
           >
             {stageLiveMessage}
           </div>
+          <div className="sr-only" aria-live="polite" aria-atomic="true">
+            {markAnnouncement}
+          </div>
+          <p id="loom-chart-keys-hint" className="sr-only">
+            Arrow keys move between marks, Enter pins, Escape clears.
+          </p>
           {loadingSample && (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-loom-bg/70" role="status">
               <p className="text-sm text-loom-text">Loading chart data…</p>
@@ -4375,7 +4427,10 @@ export function ChartView() {
           )}
           <div
             ref={containerRef}
-            role={arranging ? "group" : "img"}
+            // Not role=img: the stage holds real buttons, and arrow keys must reach handleMarkKeyDown.
+            role={arranging ? "group" : activeChart && activeChart.kind !== "scatter" ? "application" : "group"}
+            aria-roledescription="chart"
+            aria-describedby="loom-chart-keys-hint"
             aria-label={chartA11yLabel}
             tabIndex={activeChart && activeChart.kind !== "scatter" ? 0 : undefined}
             onKeyDown={(e) => {
@@ -4749,23 +4804,27 @@ export function ChartView() {
                   presentation="compact"
                   fontFamily={chartFontFamily}
                   axisFontSize={chartRenderOpts.axisFontSize}
+                  announce={false}
                 />
               </>
             );
           })()}
           {/* Ruler measurement */}
           {rulerPins.length === 2 && (
-            <div className="absolute bottom-8 left-2 z-[6] max-w-[calc(100%-1rem)] tabular-nums text-loom-text bg-loom-surface/90 border border-loom-border rounded px-1.5 py-0.5" style={{ fontFamily: chartFontStack(chartFontFamily), fontSize: chartRenderOpts.axisFontSize, lineHeight: 1.5 }}>
+            <div className="absolute left-2 z-[6] max-w-[calc(100%-1rem)] tabular-nums text-loom-text bg-loom-surface/90 border border-loom-border rounded px-1.5 py-0.5" style={{ bottom: footerBandPx + 32, fontFamily: chartFontStack(chartFontFamily), fontSize: chartRenderOpts.axisFontSize, lineHeight: 1.5 }}>
               Δx={formatAxisValue(Math.abs(rulerPins[1].x - rulerPins[0].x))} Δy={formatAxisValue(Math.abs(rulerPins[1].y - rulerPins[0].y))}
               <button type="button" onClick={() => setRulerPins([])} aria-label="Clear ruler measurement" className="ml-1 text-loom-label hover:text-loom-text">×</button>
             </div>
           )}
           {/* Pinned readouts are drawn on the focus layer; this chip clears them. */}
           {activeChart && pinnedTooltips.some((t) => t.chartId === activeChart.id) && (
-            <div className={`absolute ${scatterViewMoved ? "bottom-10" : "bottom-2"} right-2 z-[6] flex items-center gap-1.5 text-2xs text-loom-text bg-loom-surface/90 border border-loom-border rounded-full pl-2.5 pr-1 py-0.5`}>
+            <div
+              className="absolute right-2 z-[6] flex items-center gap-1.5 text-2xs text-loom-text bg-loom-surface/90 border border-loom-border rounded-full pl-2.5 pr-1 py-0.5"
+              style={{ bottom: footerBandPx + (scatterViewMoved ? 40 : 8) }}
+            >
               <span>
                 {pinnedTooltips.filter((t) => t.chartId === activeChart.id).length} pinned
-                <span className="text-loom-muted"> · in exports &amp; links</span>
+                <span className="hidden sm:inline text-loom-muted"> · in exports &amp; links</span>
               </span>
               <button
                 type="button"
@@ -4925,7 +4984,22 @@ export function ChartView() {
             tip={(scatterTooltip ?? chartTooltip)!}
             presentation={tooltipPresentation}
             link={tooltipLink}
-            onPin={hoverMark ? () => pinMark(hoverMark, (scatterTooltip ?? chartTooltip)!) : undefined}
+            // Hover readouts stay silent; keyboard steps are announced by markAnnouncement.
+            announce={false}
+            onPin={
+              hoverMark
+                ? () => {
+                    const wasPinned = !!hoverRef && pinnedTooltips.some((t) => t.chartId === activeChart?.id && sameMark(t.ref, hoverRef));
+                    pinMark(hoverMark, (scatterTooltip ?? chartTooltip)!);
+                    // Glass/dock cards stay open on touch; once pinned, the canvas callout carries the readout.
+                    if (stickyTooltip && !wasPinned) {
+                      setScatterTooltip(null);
+                      setChartTooltip(null);
+                      setHoveredRowIndex(null);
+                    }
+                  }
+                : undefined
+            }
             markPinned={!!hoverRef && pinnedTooltips.some((t) => t.chartId === activeChart?.id && sameMark(t.ref, hoverRef))}
             stageRect={containerRef.current?.getBoundingClientRect() ?? null}
             onDismiss={

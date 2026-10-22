@@ -4,7 +4,7 @@
 import React from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act } from "react";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryView } from "../QueryView";
 import { useLoomStore } from "@/lib/store";
 
@@ -88,5 +88,33 @@ describe("QueryView", () => {
     rerender(<QueryView />);
     const next = document.querySelector('[aria-label="SQL query"]') as HTMLTextAreaElement;
     expect(next.value.toLowerCase()).toMatch(/usgs/);
+  });
+
+  it("keeps SQL handed off before mount (saved views, Dive → Query)", () => {
+    useLoomStore.setState({ querySql: "SELECT 1" });
+    render(<QueryView />);
+    const ta = document.querySelector('[aria-label="SQL query"]') as HTMLTextAreaElement;
+    expect(ta.value).toBe("SELECT 1");
+    expect(useLoomStore.getState().querySql).toBe("SELECT 1");
+  });
+
+  it("loads SQL handed off while the editor is already open", () => {
+    render(<QueryView />);
+    act(() => useLoomStore.setState({ querySql: "SELECT 2" }));
+    const ta = document.querySelector('[aria-label="SQL query"]') as HTMLTextAreaElement;
+    expect(ta.value).toBe("SELECT 2");
+  });
+
+  it("copies the displayed row after sorting", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    useLoomStore.setState({
+      queryResult: { columns: ["name", "n"], types: ["VARCHAR", "BIGINT"], rows: [["b", 2], ["a", 1]], total_rows: 2 },
+    } as Partial<ReturnType<typeof useLoomStore.getState>>);
+    render(<QueryView />);
+    fireEvent.click(document.querySelector("th button")!); // sort by name: a, b
+    fireEvent.contextMenu(screen.getAllByText("a").find((el) => el.tagName === "TD")!);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy row" }));
+    expect(writeText).toHaveBeenCalledWith("a\t1");
   });
 });

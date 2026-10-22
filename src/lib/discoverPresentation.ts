@@ -37,6 +37,11 @@ export function groupDiscoverStories(
     if (group) group.stories.push(story);
     else groups.set(id, { id, stories: [story] });
   }
+  // The feed's headline is the card for its question, even when a sibling scored higher.
+  for (const g of groups.values()) {
+    const i = g.stories.findIndex((s) => s.headline);
+    if (i > 0) g.stories.unshift(...g.stories.splice(i, 1));
+  }
   return [...groups.values()];
 }
 export const DISCOVER_SETTING_FILTERS = [

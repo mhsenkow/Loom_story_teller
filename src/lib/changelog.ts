@@ -25,6 +25,23 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-21g-polish",
+    date: "2026-10-21",
+    title: "Polish pass",
+    items: [
+      { title: "Shared stories open again", detail: "“Open with shared data in Loom” links and refreshed snapshot pages now load the shared chart instead of an empty app." },
+      { title: "Share fits on phones", detail: "The phone top bar no longer runs off the screen, so Share is always fully visible. Theme stays in Settings." },
+      { title: "Years read as time", detail: "A year column in an uploaded spreadsheet now suggests trend lines over time, and text columns like incident type or created by stay categories instead of turning into empty time charts." },
+      { title: "Catalog search on iPhone and iPad", detail: "Searching the open-data catalog works for popular queries on iPhone and iPad, not just the first time a search is run." },
+      { title: "Clearer charts and readouts", detail: "Horizontal bars with only negative values fill the chart, and their value labels no longer cover the category names. Hovering long bars and wide bands always finds them, globes no longer show the previous chart’s readouts, and firefly charts answer hover." },
+      { title: "Better first stories", detail: "Discover leads with each feed’s headline finding and only calls a leader “concentrated” when it really stands out. It no longer blames extreme values when repeated values are the real cause." },
+      { title: "Pins on phones", detail: "Pinning a mark closes the floating readout so the pinned callout is the only one left, and the pin counter sits above the source note." },
+      { title: "Share images stay current", detail: "After you change colors, theme, notes or pins, or the data refreshes, Share now creates a new image instead of reusing the old one." },
+      { title: "Query keeps your SQL", detail: "Saved query views and Dive’s “Open in Query” now fill the editor, and Copy cell / Copy row copy the row you see after sorting." },
+      { title: "Charts speak to screen readers", detail: "With a screen reader, arrow keys step through marks and each one is read aloud with its values. Pinning and unpinning are announced too." },
+    ],
+  },
+  {
     id: "2026-10-21f",
     date: "2026-10-21",
     title: "Point at what matters",

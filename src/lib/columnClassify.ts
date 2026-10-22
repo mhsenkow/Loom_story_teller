@@ -3,11 +3,14 @@
 // =================================================================
 
 import type { ColumnInfo } from "./queryTypes";
+import { parseChartTime } from "./chartTime";
 
 export type ColumnSemanticType = "quantitative" | "nominal" | "temporal";
 
 const INTEGER_TYPES =
   /INTEGER|BIGINT|TINYINT|SMALLINT|HUGEINT|UBIGINT|UINTEGER|USMALLINT|UTINYINT/;
+
+const NON_TIME_SUFFIXES = new Set(["BY", "TYPE", "ID", "CATEGORY", "ZONE", "NAME"]);
 
 export function columnNameTokens(name: string): string[] {
   const spaced = name.replace(/([a-z])([A-Z])/g, "$1 $2");
@@ -25,9 +28,14 @@ function isYearLikeIntegerColumn(
 ): boolean {
   const tokens = columnNameTokens(colName);
   if (!tokens.some((t) => t === "YEAR" || t === "YR" || t === "FYEAR" || t === "FISCAL_YEAR")) return false;
-  if (!INTEGER_TYPES.test(dt.toUpperCase())) return false;
+  // Web/iOS uploads type every numeric column DOUBLE; accept those when the stats are whole years.
+  const T = dt.toUpperCase();
+  const intType = INTEGER_TYPES.test(T);
+  const floatType = /DOUBLE|FLOAT|REAL|DECIMAL|NUMERIC/.test(T);
+  if (!intType && !floatType) return false;
   const min = Number(minVal);
   const max = Number(maxVal);
+  if (floatType && !(Number.isInteger(min) && Number.isInteger(max))) return false;
   return Number.isFinite(min) && Number.isFinite(max) && min >= 1000 && max <= 2100;
 }
 
@@ -74,8 +82,17 @@ export function inferColumnType(
     "UPDATED",
     "INCIDENT",
   ]);
-  if (tokens.some((tok) => temporalTokens.has(tok))) return "temporal";
-  if (/^(CREATED_AT|UPDATED_AT|INCIDENT_DATE)$/i.test(name.replace(/\s/g, "_"))) return "temporal";
+  // incident_type / created_by / time_zone name a kind of thing, not a time.
+  const last = tokens[tokens.length - 1];
+  const nameSaysTime =
+    !NON_TIME_SUFFIXES.has(last ?? "") &&
+    (tokens.some((tok) => temporalTokens.has(tok)) ||
+      /^(CREATED_AT|UPDATED_AT|INCIDENT_DATE)$/i.test(name.replace(/\s/g, "_")));
+  if (nameSaysTime) {
+    // Trust the name only when the values agree (or there are no stats to check).
+    const samples = [minVal, maxVal].filter((v): v is string => v != null && v !== "");
+    if (samples.length === 0 || samples.some((v) => parseChartTime(v) != null)) return "temporal";
+  }
   return "nominal";
 }
 

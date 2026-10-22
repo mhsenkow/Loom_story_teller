@@ -401,22 +401,32 @@ export function createDiscoverAssessor(
           if (x != null && y != null) pairs.push([x, y]);
         }
         // Rank correlation is robust to that outlier; trust the weaker of the two.
+        // Ties share their average rank so discrete / zero-heavy measures aren't scrambled by row order.
         const ranks = (vals: number[]) => {
           const order = vals.map((v, i) => [v, i] as const).sort((a, b) => a[0] - b[0]);
           const out = new Array<number>(vals.length);
-          order.forEach(([, i], rank) => (out[i] = rank));
+          let i = 0;
+          while (i < order.length) {
+            let j = i;
+            while (j + 1 < order.length && order[j + 1]![0] === order[i]![0]) j++;
+            const avg = (i + j) / 2;
+            for (let q = i; q <= j; q++) out[order[q]![1]] = avg;
+            i = j + 1;
+          }
           return out;
         };
         const rx = ranks(pairs.map((p) => p[0]));
         const ry = ranks(pairs.map((p) => p[1]));
-        const mean = (pairs.length - 1) / 2;
+        const avgOf = (v: number[]) => v.reduce((a, b) => a + b, 0) / (v.length || 1);
+        const rmx = avgOf(rx);
+        const rmy = avgOf(ry);
         let sxy = 0,
           sxx = 0,
           syy = 0;
         for (let i = 0; i < pairs.length; i++) {
-          sxy += (rx[i]! - mean) * (ry[i]! - mean);
-          sxx += (rx[i]! - mean) ** 2;
-          syy += (ry[i]! - mean) ** 2;
+          sxy += (rx[i]! - rmx) * (ry[i]! - rmy);
+          sxx += (rx[i]! - rmx) ** 2;
+          syy += (ry[i]! - rmy) ** 2;
         }
         const rho = sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
         const outlierDriven = Math.abs(r) - Math.abs(rho) > 0.3;
@@ -541,16 +551,16 @@ export function createDiscoverAssessor(
           !chart.yField ||
           chart.yAggregate === "sum" ||
           chart.yAggregate === "count";
+        // Judge the leader against an even split: with 2 groups, 50% is the floor, not a finding.
+        const k = ordered.length;
+        const excess = k > 1 ? (share - 1 / k) / (1 - 1 / k) : 0;
+        const concentrated = additive && k >= 3 && excess >= 0.35;
         insight = {
-          label:
-            additive && share >= 0.4
-              ? "Concentrated at the top"
-              : "See who leads",
-          detail:
-            additive && share > 0
-              ? `${first.label.slice(0, 80)} accounts for ${(share * 100).toFixed(1)}% of the observed total across ${ordered.length} groups.`
-              : `${first.label.slice(0, 80)} leads ${ordered.length} groups at ${numFormat(first.value)}${chart.yField ? ` (${discoverFieldLabel(chart.yField)})` : " rows"}.`,
-          strength: additive ? Math.min(0.9, share) : 0.4,
+          label: concentrated ? "Concentrated at the top" : "See who leads",
+          detail: concentrated
+            ? `${first.label.slice(0, 80)} accounts for ${(share * 100).toFixed(1)}% of the observed total across ${k} groups.`
+            : `${first.label.slice(0, 80)} leads ${k} groups at ${numFormat(first.value)}${chart.yField ? ` (${discoverFieldLabel(chart.yField)})` : " rows"}.`,
+          strength: additive ? (concentrated ? Math.min(0.9, 0.4 + excess * 0.5) : 0.3) : 0.4,
         };
       }
       return { quality: Math.min(100, Math.max(0, quality)), insight };

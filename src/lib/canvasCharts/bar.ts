@@ -217,13 +217,17 @@ export function renderFullBar(
     // Category names read left-to-right in a gutter; values sit at the bar ends.
     const band = (rect.bottom - rect.top) / n;
     const labelW = labelGutter(ctx, entries.map((e) => e[0]), w, pad, opts);
-    const x0 = rect.left + labelW;
     const valueFont = axisFont(opts);
     const valueRoom = widestText(ctx, vals.map(formatDataValue), valueFont) + 10;
+    // Negative bars put their value labels on the left; keep them off the category names.
+    const needLeft = reverse ? vMax > 0 : vMin < 0;
+    const x0 = rect.left + labelW + (needLeft ? valueRoom : 0);
     const plotW = Math.max(8, rect.right - x0 - valueRoom);
+    // All-negative data has vMax 0: keep zero at the end rather than padding out to 1.
+    const hiV = vMax > vMin ? vMax : vMin + 1;
     const X = reverse
-      ? linear(vMin, vMax || 1, x0 + plotW, x0)
-      : linear(vMin, vMax || 1, x0, x0 + plotW);
+      ? linear(vMin, hiV, x0 + plotW, x0)
+      : linear(vMin, hiV, x0, x0 + plotW);
     if (opts) opts.scales = { x: X, valueAxis: "x", rect: { left: x0, top: rect.top, right: x0 + plotW, bottom: rect.bottom } };
     const barT = Math.max(2, Math.min(band * 0.72, 30));
     const centers: number[] = [];
@@ -270,7 +274,7 @@ export function renderFullBar(
     ctx.textBaseline = "alphabetic";
     // Baseline at zero replaces the L-frame (category labels sit left of it)
     drawZeroLine(ctx, X(0), rect.top, X(0), rect.bottom, opts);
-    drawBandAxisY(ctx, entries.map((e) => e[0]), centers, band, x0 - 8, labelW - 10, opts);
+    drawBandAxisY(ctx, entries.map((e) => e[0]), centers, band, rect.left + labelW - 8, labelW - 10, opts);
     ctx.globalAlpha = 1;
     return;
   }

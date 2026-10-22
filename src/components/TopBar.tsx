@@ -123,7 +123,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
 
   return (
     <header
-      className="flex items-center gap-1 sm:gap-2 flex-shrink-0 border-b border-loom-border bg-loom-surface/95 backdrop-blur-md px-1.5 sm:px-3"
+      className="flex items-center gap-1 sm:gap-2 flex-shrink-0 min-w-0 overflow-hidden border-b border-loom-border bg-loom-surface/95 backdrop-blur-md px-1.5 sm:px-3"
       style={{
         height: "calc(var(--topbar-height) + var(--safe-top))",
         paddingTop: "var(--safe-top)",
@@ -160,7 +160,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             type="button"
             onClick={() => setViewMode(mode.key)}
             aria-current={viewMode === mode.key ? "page" : undefined}
-            className="loom-seg-item min-h-9 sm:min-h-0 px-2.5 sm:px-3"
+            className="loom-seg-item min-h-9 sm:min-h-0 px-1.5 sm:px-3"
           >
             <span className="sm:hidden">{mode.short}</span>
             <span className="hidden sm:inline">{mode.label}</span>
@@ -291,14 +291,17 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         <button
           type="button"
           onClick={onOpenShortcuts}
-          className={`loom-btn-ghost ${discoverReturnPath === selectedFile?.path ? "hidden md:flex" : "flex"} min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md`}
+          className={`loom-btn-ghost ${discoverReturnPath === selectedFile?.path ? "hidden md:flex" : "hidden sm:flex"} min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md`}
           title="Keyboard shortcuts (?)"
           aria-label="Keyboard shortcuts"
         >
           ?
         </button>
       )}
-      <ThemeCycleButton />
+      {/* Phones: theme lives in Settings; the wrapper hides it (the button's own display:grid beats `hidden`). */}
+      <div className="hidden sm:flex shrink-0" data-testid="topbar-theme">
+        <ThemeCycleButton />
+      </div>
 
       {viewMode !== "monitor" && <button
         type="button"

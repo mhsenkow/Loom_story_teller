@@ -116,6 +116,36 @@ describe("chart refinement regressions", () => {
     }
   });
 
+  it("keeps zero at the end of all-negative horizontal bars", () => {
+    const { ctx } = fakeCtx();
+    const o: ChartRenderOpts = { ...opts(), fieldNames: ["country", "change"] };
+    renderFullBar(ctx, [["a", -0.05], ["b", -0.02], ["c", -0.01]], 0, 1, -1, W, H, PAD, o, null, true);
+    const right = o.scales!.rect!.right;
+    expect(Math.abs(o.scales!.x!(0) - right)).toBeLessThanOrEqual(2);
+    expect(o.scales!.x!(-0.05)).toBeLessThan(right - 100);
+  });
+
+  it("keeps negative value labels clear of the category names", () => {
+    const { ctx } = fakeCtx();
+    const texts: { text: string; x: number; align: unknown }[] = [];
+    const rec = new Proxy(ctx as unknown as Record<string, unknown>, {
+      get(t, prop: string) {
+        if (prop === "fillText") return (text: string, x: number) => void texts.push({ text, x, align: t.textAlign });
+        return t[prop];
+      },
+      set(t, prop: string, v) {
+        t[prop] = v;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D;
+    const o: ChartRenderOpts = { ...opts(), fieldNames: ["country", "change"] };
+    renderFullBar(rec, [["neg", -50], ["pos", 30]], 0, 1, -1, W, H, PAD, o, null, true);
+    const catX = Math.max(...texts.filter((t) => t.text === "neg" || t.text === "pos").map((t) => t.x));
+    const neg = texts.find((t) => t.text === "-50")!;
+    expect(neg.align).toBe("right");
+    expect(neg.x - neg.text.length * 6).toBeGreaterThanOrEqual(catX);
+  });
+
   it("positions bubble marks inside authored plot bounds", () => {
     const { ctx } = fakeCtx();
     const o: ChartRenderOpts = { ...opts(), plotBounds: { left: 180, top: 90, right: 480, bottom: 280 }, legendPosition: "none" };

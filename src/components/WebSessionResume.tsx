@@ -37,7 +37,7 @@ import { ChartLinkSync } from "./ChartLinkSync";
 import { probeConnection } from "@/lib/connectionStatus";
 import { RECONNECTED_EVENT } from "./OfflineBanner";
 import { SOURCE_DEFS, SOURCE_EXPLORE_ROWS, SOURCE_BY_KIND, sourceKindFromPath } from "@/lib/sourceRegistry";
-import { parseShareDataSnapshot, sharedStoryPath, storyIdFromSharedPath } from "@/lib/shareLineage";
+import { parseShareDataSnapshot, sharedStoryPath, storyIdFromHash, storyIdFromSharedPath } from "@/lib/shareLineage";
 import { guessHomepageFromDataUrl } from "@/lib/dataProvenance";
 import { remoteCsvLoadPrompt } from "@/lib/webSharedLink";
 
@@ -45,11 +45,6 @@ const STREAM_NAMES: Record<string, string> = {
   wiki: "Wikipedia Live",
   ...Object.fromEntries(SOURCE_DEFS.map((d) => [d.kind, d.fileName])),
 };
-
-function parseStoryId(hash: string): string | null {
-  const m = hash.match(/#story=([a-z0-9]{8,16})\b/i);
-  return m?.[1] ?? null;
-}
 
 /** Landing view + collapsed chrome applied with the resumed live feed. */
 function landExtra(landView: "dive" | "chart") {
@@ -75,7 +70,7 @@ export function WebSessionResume() {
     ran.current = true;
 
     const hash = typeof window !== "undefined" ? window.location.hash : "";
-    const storyId = parseStoryId(hash);
+    const storyId = storyIdFromHash(hash);
     if (storyId) {
       void openSharedStory(storyId);
       return;

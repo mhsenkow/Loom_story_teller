@@ -18,6 +18,8 @@ export type SharePreviewKeyParts = {
   includeHandle: boolean;
   handleText: string;
   supersample: 1 | 2;
+  /** Bumps whenever anything that changes the painted chart changes (see render epoch below). */
+  epoch: number;
 };
 
 export function buildSharePreviewKey(parts: SharePreviewKeyParts): string {
@@ -30,10 +32,57 @@ export function buildSharePreviewKey(parts: SharePreviewKeyParts): string {
     parts.includeTimestamp ? "1" : "0",
     parts.includeHandle ? `h:${parts.handleText}` : "0",
     `ss${parts.supersample}`,
+    `e${parts.epoch}`,
   ].join("|");
 }
 
+// ---- Render epoch ------------------------------------------------------------
+// Chart ids encode only kind + fields, so palette / theme / annotation / pin / data
+// changes would otherwise keep serving the old PNG. Any change to what the stage
+// paints bumps the epoch. Captures temporarily swap aspect / export target and then
+// restore them; those swaps are ignored and compared against the pre-capture state.
+let renderEpoch = 0;
+let lastDeps: unknown[] | null = null;
+let subscribed = false;
+let captureDepth = 0;
+
+/** capturePlatformPng brackets its stage swap with +1 / -1. */
+export function noteShareCapture(delta: 1 | -1): void {
+  captureDepth = Math.max(0, captureDepth + delta);
+}
+
+function renderDeps(s: ReturnType<typeof useLoomStore.getState>): unknown[] {
+  return [
+    s.activeChart,
+    s.chartVisualOverrides,
+    s.appSettings.theme,
+    s.appSettings.chartAspect,
+    s.appSettings.chartDevice,
+    s.chartAnnotations,
+    s.pinnedTooltips,
+    s.customRefLines,
+    s.barStackMode,
+    s.showMarginals,
+    s.connectScatterTrail,
+    s.sampleRows,
+    s.chartTitleOverrides,
+  ];
+}
+
+function ensureEpochSubscription(): void {
+  if (subscribed) return;
+  subscribed = true;
+  lastDeps = renderDeps(useLoomStore.getState());
+  useLoomStore.subscribe((s) => {
+    if (captureDepth > 0 || s.socialExportTarget) return;
+    const deps = renderDeps(s);
+    if (lastDeps && deps.some((d, i) => d !== lastDeps![i])) renderEpoch++;
+    lastDeps = deps;
+  });
+}
+
 export function sharePreviewKeyFromStore(presetId: SocialPresetId): string | null {
+  ensureEpochSubscription();
   const s = useLoomStore.getState();
   const chart = s.activeChart;
   if (!chart) return null;
@@ -48,6 +97,7 @@ export function sharePreviewKeyFromStore(presetId: SocialPresetId): string | nul
     includeHandle: !!s.exportBurnIn.includeHandle,
     handleText: s.exportBurnIn.handleText ?? "",
     supersample: s.exportSupersample === 2 ? 2 : 1,
+    epoch: renderEpoch,
   });
 }
 

@@ -32,6 +32,7 @@ export function ChartTooltipCard({
   pinned = false,
   onPin,
   markPinned = false,
+  announce = true,
 }: {
   tip: ChartTooltipPayload;
   presentation: ChartTooltipPresentation;
@@ -46,6 +47,8 @@ export function ChartTooltipCard({
   onPin?: () => void;
   /** The described mark is already pinned (button reads “Unpin”). */
   markPinned?: boolean;
+  /** Speak updates as a live status; off when the host announces (e.g. keyboard steps) itself. */
+  announce?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState(0);
@@ -139,7 +142,7 @@ export function ChartTooltipCard({
             : `px-2.5 py-2 rounded-md bg-loom-surface ${pinned ? "border-loom-accent/60" : "border-loom-border"}`
       }`}
       style={{ ...typeStyle, ...layout, boxSizing: "border-box", overflowY: "auto", overscrollBehavior: "contain" }}
-      role={pinned ? "group" : "status"}
+      role={pinned ? "group" : announce ? "status" : undefined}
       aria-label={pinned ? "Pinned chart values" : undefined}
     >
       <div className="flex items-start gap-2">

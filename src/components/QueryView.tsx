@@ -11,7 +11,7 @@ import { useLoomStore } from "@/lib/store";
 import { applyQueryResult } from "@/lib/datasetPipeline";
 import { queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
 import { STREAM_SQL_SNIPPETS, SOURCE_SQL_SNIPPETS } from "@/lib/recommendations";
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { SqlEditor } from "@/components/SqlEditor";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { QueryResultsSkeleton } from "@/components/Skeleton";
@@ -49,13 +49,22 @@ export function QueryView() {
   const [localSql, setLocalSql] = useState(querySql || defaultSql);
   const filePath = selectedFile?.path ?? null;
 
+  // Reset only on a real dataset switch: on mount, querySql may carry a saved view /
+  // Dive handoff, and openDataset already clears query state for the new file.
+  const lastPathRef = useRef(filePath);
   useEffect(() => {
+    if (lastPathRef.current === filePath) return;
+    lastPathRef.current = filePath;
     setLocalSql(defaultSql);
     setQueryResult(null);
     setQueryError(null);
     setResultSort(null);
     setQuerySql("");
   }, [filePath, defaultSql, setQueryResult, setQueryError, setQuerySql]);
+  // Handoffs (saved query views, Dive "Open in Query") reach an already-mounted editor.
+  useEffect(() => {
+    if (querySql) setLocalSql((cur) => (cur === querySql ? cur : querySql));
+  }, [querySql]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number; colIndex: number } | null>(null);
   const [schemaOpen, setSchemaOpen] = useState(true);
   const [diffSnapshotId, setDiffSnapshotId] = useState<string | null>(null);
@@ -89,24 +98,23 @@ export function QueryView() {
     };
   }, [contextMenu]);
 
+  // Context-menu indices are positions in the displayed (sorted) rows.
   const copyCell = useCallback((rowIndex: number, colIndex: number) => {
-    if (!queryResult) return;
-    const row = queryResult.rows[rowIndex];
+    const row = sortedResultRows[rowIndex];
     if (!row || colIndex < 0 || colIndex >= row.length) return;
     const val = row[colIndex];
     const text = val === null || val === undefined ? "" : String(val);
     void navigator.clipboard.writeText(text);
     setContextMenu(null);
-  }, [queryResult]);
+  }, [sortedResultRows]);
 
   const copyRow = useCallback((rowIndex: number) => {
-    if (!queryResult) return;
-    const row = queryResult.rows[rowIndex];
+    const row = sortedResultRows[rowIndex];
     if (!row) return;
     const text = row.map((c) => (c === null || c === undefined ? "" : String(c))).join("\t");
     void navigator.clipboard.writeText(text);
     setContextMenu(null);
-  }, [queryResult]);
+  }, [sortedResultRows]);
 
   const validation = useMemo(() => validateQuery(localSql), [localSql]);
 

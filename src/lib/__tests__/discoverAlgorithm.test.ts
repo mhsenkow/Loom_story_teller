@@ -163,6 +163,16 @@ describe("full discovery consideration", () => {
     }
   });
 
+  it("keeps the feed's headline hook as the card for its question", () => {
+    const stories = buildDiscoverStories("meteo", stats, sample, enumerateDiscoverCharts(stats, [base], "meteo"), 24);
+    const head = stories.find((s) => s.headline);
+    expect(head).toBeDefined();
+    expect(stories.filter((s) => s.headline)).toHaveLength(1);
+    const lead = groupDiscoverStories(stories).find((g) => g.stories.includes(head!))!;
+    expect(lead.stories[0]).toBe(head);
+    expect(lead.stories[0]!.hook).toBe(head!.hook);
+  });
+
   it("retains broad useful kinds and compatible pairs after qualification, with stable recipe identities", () => {
     const candidates = enumerateDiscoverCharts(stats, [base], "meteo");
     const stories = buildDiscoverStories(
@@ -309,6 +319,37 @@ describe("snapshot fitness and evidence", () => {
     });
     expect(snapshot(line)).toBeNull();
     expect(snapshot({ ...line, kind: "bump" })).toBeNull();
+  });
+
+  it("only calls a leader concentrated when it beats an even split", () => {
+    const groups = (counts: number[]) =>
+      createDiscoverAssessor([], {
+        columns: ["group", "n"],
+        types: ["VARCHAR", "DOUBLE"],
+        rows: counts.flatMap((c, g) => Array.from({ length: c }, () => [`G${g}`, 1])),
+        total_rows: counts.reduce((a, b) => a + b, 0),
+      })({ ...base, kind: "bar", xField: "group", yField: null, yAggregate: "count", title: "Rows by group" });
+    const pair = groups([60, 40]);
+    expect(pair?.insight.label).toBe("See who leads");
+    expect(pair!.insight.strength).toBeLessThanOrEqual(0.3);
+    expect(pair!.insight.detail).not.toContain("% of");
+    const top = groups([80, 5, 5, 5, 5]);
+    expect(top?.insight.label).toBe("Concentrated at the top");
+    expect(top!.insight.detail).toContain("80.0%");
+  });
+
+  it("does not blame extreme values when ties drive the rank gap", () => {
+    // Zero-inflated x: 40 tied zeros (whose y falls in row order), then y rises with x.
+    const rows = Array.from({ length: 60 }, (_, i) =>
+      i < 40 ? [0, (39 - i) * 0.01] : [i - 39, (i - 39) * 10],
+    );
+    const result = createDiscoverAssessor([], { columns: ["x", "y"], types: ["DOUBLE", "DOUBLE"], rows, total_rows: 60 })({
+      ...base,
+      kind: "scatter",
+      xField: "x",
+      yField: "y",
+    });
+    expect(result?.insight.detail).not.toContain("driven by a few extreme values");
   });
 
   it("reports measured relationships and chronological change, without claiming causes", () => {

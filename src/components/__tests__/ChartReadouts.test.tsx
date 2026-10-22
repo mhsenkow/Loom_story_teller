@@ -69,4 +69,14 @@ describe("chart readout typography", () => {
     act(() => useLoomStore.setState({ panelOpen: false }));
     expect(screen.getByRole("button", { name: "Search and commands" })).toBeInTheDocument();
   });
+
+  it("lets the host silence hover readouts so keyboard steps are not read twice", () => {
+    const tip = { clientX: 10, clientY: 10, rowIndex: 0, row: ["East", 3], columns: ["region", "n"] };
+    const { unmount } = render(<ChartTooltipCard tip={tip} presentation="hover" />);
+    expect(screen.getByRole("status")).toBeInTheDocument();
+    unmount();
+    render(<ChartTooltipCard tip={tip} presentation="hover" announce={false} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("East")).toBeInTheDocument();
+  });
 });

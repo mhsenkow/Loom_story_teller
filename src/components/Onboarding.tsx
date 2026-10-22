@@ -559,9 +559,9 @@ export function Onboarding() {
             Math.min(1, 1 - (rankedAt - story.dataChangedAt) / 900_000),
           ) * 4
         : 0;
-      return (
-        story.score + (affinity === HIDDEN_RANK_PENALTY ? 0 : affinity) + fresh
-      );
+      // Rank the question by its best variant, not whichever story leads the card.
+      const best = Math.max(...byStory.get(story)!.stories.map((s) => s.score));
+      return best + (affinity === HIDDEN_RANK_PENALTY ? 0 : affinity) + fresh;
     }).map((story) => byStory.get(story)!);
   }, [visible, sortMode, sourceAffinity, rankedAt]);
   const spotlights = useMemo(
