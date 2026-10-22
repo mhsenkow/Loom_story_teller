@@ -150,28 +150,22 @@ function statsFromRows(columns: string[], types: string[], rows: Cell[][]): Colu
     const nonNull = values.filter((v) => v !== null && v !== undefined);
     const distinct = new Set(nonNull.map(String)).size;
     const isNum = ["DOUBLE", "INTEGER", "BIGINT", "FLOAT"].includes(type);
-    const isTime = type === "TIMESTAMP" || type === "DATE";
-    const nums = isNum
-      ? nonNull.map(Number).filter((n) => !Number.isNaN(n))
-      : [];
-    const strings = !isNum ? nonNull.map(String) : [];
-    let min_value: string | null = null;
-    let max_value: string | null = null;
-    if (isNum && nums.length > 0) {
-      min_value = String(Math.min(...nums));
-      max_value = String(Math.max(...nums));
-    } else if ((isTime || strings.length > 0) && strings.length > 0) {
-      const sorted = [...strings].sort();
-      min_value = sorted[0]!;
-      max_value = sorted[sorted.length - 1]!;
+    // Linear scan (no sort): numeric order for numbers, string order otherwise.
+    let min: number | string | null = null;
+    let max: number | string | null = null;
+    for (const v of nonNull) {
+      const k = isNum ? Number(v) : String(v);
+      if (isNum && Number.isNaN(k)) continue;
+      if (min === null || k < min) min = k;
+      if (max === null || k > max) max = k;
     }
     return {
       name,
       data_type: type,
       null_count: values.length - nonNull.length,
       distinct_count: distinct,
-      min_value,
-      max_value,
+      min_value: min === null ? null : String(min),
+      max_value: max === null ? null : String(max),
     };
   });
 }
@@ -567,49 +561,55 @@ export async function webStreamClear(): Promise<void> {
   wikiBuf.rateSamples = [];
 }
 
+/** Poll cadence with exponential backoff while the feed keeps failing (jittered ±15%). */
+function sourcePollIntervalMs(kind: SourceKind): number {
+  const buf = sourceBufs[kind];
+  const base = SOURCE_POLL_MS[kind] || (buf.rows.length === 0 ? 60_000 : 0);
+  if (base <= 0) return 0;
+  const mult = Math.min(10, 2 ** Math.min(buf.failStreak, 4));
+  return Math.round(base * mult * (0.85 + Math.random() * 0.3));
+}
+
+/**
+ * One poll + reschedule. Shared by start and resume-after-hidden so there is a
+ * single loop per feed: bails if stopped or hidden while the fetch was in flight,
+ * and clears any pending timer before arming the next one.
+ */
+async function runSourcePoll(kind: SourceKind): Promise<void> {
+  const buf = sourceBufs[kind];
+  if (!buf.running || buf.pollInFlight || buf.pausedForHidden) return;
+  buf.pollInFlight = true;
+  try {
+    await pollSourceOnce(kind);
+    buf.lastError = null;
+    buf.lastSuccessAt = Date.now();
+    buf.failStreak = 0;
+    buf.nextRetryAt = null;
+  } catch (e) {
+    buf.failStreak += 1;
+    buf.lastError = formatStreamFetchError(kind, e);
+    buf.nextRetryAt = Date.now() + sourcePollIntervalMs(kind);
+  } finally {
+    buf.pollInFlight = false;
+  }
+  if (!buf.running || buf.pausedForHidden) return;
+  const ms = sourcePollIntervalMs(kind);
+  if (ms <= 0) return;
+  if (SOURCE_POLL_MS[kind] === 0 && buf.rows.length > 0) return;
+  if (buf.pollTimer) clearTimeout(buf.pollTimer);
+  buf.pollTimer = setTimeout(() => {
+    buf.pollTimer = null;
+    void runSourcePoll(kind);
+  }, ms);
+}
+
 export async function webSourceStart(kind: SourceKind): Promise<void> {
   const buf = sourceBufs[kind];
   if (buf.running) return;
   buf.running = true;
   buf.startedAt = Math.floor(Date.now() / 1000);
   hydrateSourceBufferFromCache(kind);
-
-  const basePollMs = () => SOURCE_POLL_MS[kind] || (buf.rows.length === 0 ? 60_000 : 0);
-
-  const pollIntervalMs = () => {
-    const base = basePollMs();
-    if (base <= 0) return 0;
-    const mult = Math.min(10, 2 ** Math.min(buf.failStreak, 4));
-    return Math.round(base * mult * (0.85 + Math.random() * 0.3));
-  };
-
-  const runPoll = async () => {
-    if (!buf.running || buf.pollInFlight || buf.pausedForHidden) return;
-    buf.pollInFlight = true;
-    try {
-      await pollSourceOnce(kind);
-      buf.lastError = null;
-      buf.lastSuccessAt = Date.now();
-      buf.failStreak = 0;
-      buf.nextRetryAt = null;
-    } catch (e) {
-      buf.failStreak += 1;
-      buf.lastError = formatStreamFetchError(kind, e);
-      buf.nextRetryAt = Date.now() + pollIntervalMs();
-    } finally {
-      buf.pollInFlight = false;
-    }
-    if (!buf.running) return;
-    const ms = pollIntervalMs();
-    if (ms <= 0) return;
-    if (SOURCE_POLL_MS[kind] === 0 && buf.rows.length > 0) return;
-    buf.pollTimer = setTimeout(() => {
-      buf.pollTimer = null;
-      void runPoll();
-    }, ms);
-  };
-
-  await runPoll();
+  await runSourcePoll(kind);
 }
 
 export async function webSourceStop(kind: SourceKind): Promise<void> {
@@ -680,30 +680,7 @@ async function resumeAllStreamWork() {
     const buf = sourceBufs[kind];
     if (!buf.running) continue;
     buf.pausedForHidden = false;
-    const pollIntervalMs = () =>
-      SOURCE_POLL_MS[kind] || (buf.rows.length === 0 ? 60_000 : 0);
-    const runPoll = async () => {
-      if (!buf.running || buf.pollInFlight || buf.pausedForHidden) return;
-      buf.pollInFlight = true;
-      try {
-        await pollSourceOnce(kind);
-        buf.lastError = null;
-        buf.lastSuccessAt = Date.now();
-      } catch (e) {
-        buf.lastError = e instanceof Error ? e.message : String(e);
-      } finally {
-        buf.pollInFlight = false;
-      }
-      if (!buf.running || buf.pausedForHidden) return;
-      const ms = pollIntervalMs();
-      if (ms <= 0) return;
-      if (SOURCE_POLL_MS[kind] === 0 && buf.rows.length > 0) return;
-      buf.pollTimer = setTimeout(() => {
-        buf.pollTimer = null;
-        void runPoll();
-      }, ms);
-    };
-    void runPoll();
+    void runSourcePoll(kind);
   }
 }
 

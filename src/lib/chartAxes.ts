@@ -8,6 +8,7 @@
 // =================================================================
 
 import { chartFont } from "./chartType";
+import { parseNaiveUtc } from "./chartTime";
 
 export type NiceScale = {
   /** Domain after rounding outward to whole steps (when `extend`). */
@@ -199,7 +200,7 @@ const DATE_LIKE = /^\d{4}-\d{2}(-\d{2})?([T ][\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$|^\d
 
 function parseTime(s: string): number {
   if (!DATE_LIKE.test(s.trim())) return NaN;
-  return Date.parse(s.trim());
+  return parseNaiveUtc(s);
 }
 
 /** Classify string keys as numbers, dates, or plain categories, and order them. */

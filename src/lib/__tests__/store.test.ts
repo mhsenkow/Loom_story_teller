@@ -371,4 +371,20 @@ describe("store", () => {
       expect(getState().dashboards[0]!.slots).toEqual([]);
     });
   });
+
+  describe("hovered row", () => {
+    it("does not notify subscribers when the hovered index is unchanged", () => {
+      let calls = 0;
+      const unsub = useLoomStore.subscribe(() => {
+        calls += 1;
+      });
+      getState().setHoveredRowIndex(3);
+      getState().setHoveredRowIndex(3);
+      getState().setHoveredRowIndex(null);
+      getState().setHoveredRowIndex(null);
+      unsub();
+      expect(calls).toBe(2);
+      expect(getState().hoveredRowIndex).toBeNull();
+    });
+  });
 });
