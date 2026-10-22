@@ -93,7 +93,7 @@ export const CHANGELOG: ChangelogRelease[] = [
       { title: "Unusual isn't the same as wrong", detail: "Choose a limit, a healthy range, a sudden change, or \"unusual for this hour\". Add expected windows for maintenance or planned events. When you mark an alert as expected, Loom stops alerting at that time." },
       { title: "Was it worth it?", detail: "Each alert asks what happened next. Cards show how often alerts led to action and flag monitors that are mostly noise. Related metrics group into scorecards." },
       { title: "Schedules and notifications", detail: "Check every few minutes, daily, weekly, or on a cron schedule, with quiet hours and reminder cooldowns. Alerts arrive as system notifications on Mac, iPhone, iPad, and in the browser." },
-      { title: "Always on", detail: "Mark a monitor Always on and Loom's server checks it every 5 minutes even when the app is closed. Alerts go to an ntfy topic on your phone, Slack, Discord, or a webhook." },
+      { title: "Always on", detail: "Mark a monitor Always on and Loom's server keeps checking it on its schedule (as often as every 15 minutes), even when the app is closed. Alerts go to an ntfy topic on your phone, Slack, Discord, or a webhook." },
     ],
   },
   {

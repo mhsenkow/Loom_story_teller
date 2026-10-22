@@ -8,7 +8,7 @@
 "use client";
 
 import { ThemeCycleButton } from "./ThemeCycleButton";
-import { useLoomStore, type ViewMode } from "@/lib/store";
+import { useLoomStore } from "@/lib/store";
 import {
   CHART_ASPECTS,
   type ChartAspectId,
@@ -16,14 +16,8 @@ import {
   resolveDevice,
 } from "@/lib/chartViewport";
 import { useViewportWidth } from "@/lib/useMediaQuery";
+import { VIEW_MODES } from "@/lib/viewModes";
 
-const VIEW_MODES: { key: ViewMode; label: string; short: string; shortcut: string }[] = [
-  { key: "explorer", label: "Explorer", short: "Data", shortcut: "1" },
-  { key: "chart", label: "Chart", short: "Chart", shortcut: "2" },
-  { key: "query", label: "Query", short: "SQL", shortcut: "3" },
-  { key: "dive", label: "Dive", short: "Dive", shortcut: "4" },
-  { key: "monitor", label: "Monitor", short: "Watch", shortcut: "5" },
-];
 
 const DEVICES: { id: ChartDeviceId; label: string; icon: "phone" | "tablet" | "desktop" | "auto" }[] = [
   { id: "auto", label: "Auto", icon: "auto" },

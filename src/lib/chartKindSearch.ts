@@ -44,6 +44,13 @@ export const CHART_KIND_CATALOG: ChartKindEntry[] = (() => {
   return out;
 })();
 
+const LABEL_BY_KIND = new Map<string, string>(CHART_KIND_CATALOG.map((e) => [e.value, e.label]));
+
+/** Human label for a chart kind id ("forceBubble" → "Force Bubble"); unknown ids pass through. */
+export function chartKindLabel(kind: string): string {
+  return LABEL_BY_KIND.get(kind) ?? kind;
+}
+
 /** "dataCube" → "data cube" so ids match word queries. */
 function splitId(id: string): string {
   return id.replace(/([a-z0-9])([A-Z])/g, "$1 $2").toLowerCase();

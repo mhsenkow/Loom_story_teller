@@ -406,7 +406,14 @@
   .discover-story-blurb { display: none; }
   .discover-story-proof { padding: .1rem .3rem .1rem .45rem; }
   .discover-story-meta { flex: 1; }
-  .discover-story-preview { padding: .35rem .35rem .875rem; }
+  /* 11px floor for card meta (not 12px: the nowrap meta must still fit 9rem tiles). */
+  .discover-story-eyebrow, .discover-story-kind, .discover-story-settings li,
+  .discover-story-proof, .discover-story-proof button,
+  .discover-story-views, .discover-story-views-count { font-size: .6875rem; }
+  .discover-story-proof button, .discover-story-views select,
+  .discover-story-views-count { min-height: 2.25rem; }
+  /* Extra bottom room so the absolute kind label still fits under the chart. */
+  .discover-story-preview { padding: .35rem .35rem 1.125rem; }
   .discover-story-preview > div { height: 5.5rem; }
   .discover-layout-tiles .discover-story-preview > div { height: auto; }
   .discover-layout-list .discover-story-preview { width: 5.5rem; }

@@ -6,6 +6,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
+import { viewModeName } from "@/lib/viewModes";
 import { SOURCE_BY_KIND, SOURCE_DEFS, type SourceKind } from "@/lib/sourceRegistry";
 import { computeMetric, fmtValue } from "@/lib/monitoring/engine";
 import { metricSeries, simulate, spanLabel } from "@/lib/monitoring/backfill";
@@ -117,7 +118,7 @@ export function QuickWatch() {
 
   return (
     <div className="fixed inset-0 z-[110] flex items-end sm:items-center justify-center loom-overlay animate-fade-in" onClick={close} onKeyDown={(e) => { if (e.key === "Escape") close(); }}>
-      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Quick watch" className="outline-none loom-focus-panel w-full sm:max-w-xl max-h-[92vh] overflow-y-auto bg-loom-surface border border-loom-border rounded-t-xl sm:rounded-xl p-4 space-y-3" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Quick watch" className="outline-none loom-focus-panel w-full sm:max-w-xl max-h-[92vh] overflow-y-auto bg-loom-surface border border-loom-border rounded-t-xl sm:rounded-xl p-4 pb-[max(1rem,var(--safe-bottom))] space-y-3" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="text-2xs uppercase tracking-wide text-loom-label flex items-center gap-1">
@@ -180,7 +181,7 @@ export function QuickWatch() {
           <p className="text-2xs uppercase tracking-wide text-loom-label">Then I&apos;ll</p>
           <div className="flex flex-wrap gap-1">
             {PLANS.map((p) => (
-              <button key={p} type="button" aria-pressed={plan === p} className={`text-2xs px-2 py-1 rounded-full border ${plan === p ? "border-loom-accent bg-loom-accent/10 text-loom-text" : "border-loom-border text-loom-muted"}`} onClick={() => setPlan(p)}>{p}</button>
+              <button key={p} type="button" aria-pressed={plan === p} className={`text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 rounded-full border ${plan === p ? "border-loom-accent bg-loom-accent/10 text-loom-text" : "border-loom-border text-loom-muted"}`} onClick={() => setPlan(p)}>{p}</button>
             ))}
           </div>
           <input className="loom-input w-full text-xs" aria-label="Your plan" value={plan} onChange={(e) => setPlan(e.target.value)} />
@@ -190,7 +191,7 @@ export function QuickWatch() {
           <p className="text-2xs uppercase tracking-wide text-loom-label">Tell me</p>
           <div className="flex flex-wrap gap-1.5 text-xs">
             <label className="flex items-center gap-1"><input type="checkbox" checked={d.notify.system} onChange={(e) => setD({ ...d, notify: { ...d.notify, system: e.target.checked } })} /> On this screen</label>
-            <label className="flex items-center gap-1" title={remote ? undefined : "Set up your phone or browser push in Monitor → Where alerts go"}>
+            <label className="flex items-center gap-1" title={remote ? undefined : `Set up your phone or browser push in ${viewModeName("monitor")} → Where alerts go`}>
               <input type="checkbox" checked={alwaysOn} onChange={(e) => setAlwaysOn(e.target.checked)} /> Even when Loom is closed{remote ? ` (${[hasPhone ? "phone" : null, hasPush ? "browser push" : null].filter(Boolean).join(" + ")})` : ""}
             </label>
             <label className="flex items-center gap-1"><input type="checkbox" checked={d.onFire?.chime ?? true} onChange={(e) => setD({ ...d, onFire: { ...d.onFire, chime: e.target.checked } })} /> Chime</label>

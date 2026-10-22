@@ -8,6 +8,7 @@ import { useLoomStore } from "@/lib/store";
 import { loadMonitors, saveMonitors } from "@/lib/monitoring/storage";
 import { startMonitorScheduler, tickMonitors } from "@/lib/monitoring/runner";
 import { markCloudPushed, pullCloudResults, syncCloudNow } from "@/lib/monitoring/cloudSync";
+import { friendlyError } from "./sidebar/shared";
 
 const PULL_MS = 60_000;
 
@@ -39,7 +40,7 @@ export function MonitorRunner() {
             .then(() => { syncFailing = false; })
             .catch((e) => {
               // Say it once; keep retrying quietly on later changes.
-              if (!syncFailing) useLoomStore.getState().setToast(`Always-on sync failed: ${e instanceof Error ? e.message : e}. Loom will retry.`);
+              if (!syncFailing) useLoomStore.getState().setToast(`Couldn’t reach Loom’s server for always-on monitors (${friendlyError(e)}). Loom will retry.`);
               syncFailing = true;
             });
         }, 2_000);

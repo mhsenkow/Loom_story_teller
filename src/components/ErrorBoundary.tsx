@@ -8,6 +8,7 @@ import { Component, type ReactNode } from "react";
 import { deployMismatchFromError, markReloadOnce } from "@/lib/deployVersionGuard";
 import { requestHelp } from "@/lib/changelog";
 import { useLoomStore } from "@/lib/store";
+import { viewModeName } from "@/lib/viewModes";
 
 interface Props {
   children: ReactNode;
@@ -72,7 +73,7 @@ export class ErrorBoundary extends Component<Props, State> {
             {deploy ? "Loom was updated" : "Something went wrong"}
           </p>
           <p className="text-xs text-loom-muted leading-relaxed">
-            {deploy?.message ?? "Loom caught a rendering problem. You can recover to Explorer, then report it with the current error details attached."}
+            {deploy?.message ?? `Loom caught a rendering problem. You can recover to ${viewModeName("explorer")}, then report it with the current error details attached.`}
           </p>
           {deploy?.canReload ? (
             <button
@@ -92,7 +93,7 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick={this.recoverToExplorer}
                 className="loom-btn-primary text-xs"
               >
-                Try again in Explorer
+                Try again in {viewModeName("explorer")}
               </button>
               <button
                 type="button"
