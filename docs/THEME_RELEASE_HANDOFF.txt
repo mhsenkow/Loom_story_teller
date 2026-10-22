@@ -1,0 +1,76 @@
+Loom theme and Visual panel release handoff
+Prepared 2026-10-17; repository /Users/powerox/Loom_story_teller
+
+STATUS
+Implementation complete locally. No commit, Git push, or production deployment
+was performed for this work. Current branch: main.
+Origin: https://github.com/mhsenkow/Loom_story_teller.git
+Production destination in wrangler.jsonc: loom.ibm.io (loom-storyteller Worker).
+
+SCOPE
+Review the explicit candidate file list in docs/THEME_RELEASE_FILES.txt.
+It includes new source and regression tests; do not omit untracked source files.
+The list is a review boundary, not proof that every hunk belongs to this task:
+inspect each diff, especially if another agent has edited it since this handoff.
+Do not use git add . or git add -A.
+Exclude unrelated brand/, public icon assets, ios/, macos/, scripts/, and
+src-tauri/ work from this theme commit. Leave those changes in place.
+
+IMPLEMENTED
+- Discover header and single-click theme switch.
+- Theme palettes, magnitude ramps, separate plot backgrounds, materials,
+  icon strokes, mark geometry, line caps/joins, and inherited dialog corners.
+- NES plot backgrounds no longer inherit the blue workspace.
+- Shared theme resolution for System mode and chart renderers.
+- Optional coordinated theme/typeface/chrome pairing; manual choices preserved.
+- Source Sans 3, Source Serif 4, IBM Plex Mono; explicit device-fallback labels.
+- Accessible Auto palette selection resolves scale before accessibility.
+  Categories use Okabe-Ito; magnitudes use Cividis; diverging semantics remain.
+  Explicit palettes, including Plasma, stay selected and applied.
+- Theme-aware palette swatches, applied-state display, selection/undo tests.
+- Large-number axis labels and mobile tooltip/inspector overlap fixes.
+
+VERIFIED
+make check passed: TypeScript, lint (existing warnings), Worker checks,
+1856 logic tests, 56 DOM tests, and Rust tests (94 passed, 1 ignored).
+Detailed local log: /tmp/loom-connections-check.log (temporary, not committed).
+All ten themes visually inspected in Discover. Browser-verified contour flow:
+colorblind defaults enabled -> Auto Sequential resolves Cividis -> explicit
+Plasma remains selected and applied. Source diff whitespace check passed.
+
+REMAINING RELEASE GATES
+Production build, bundle budget, full make ci, push, and deployment are pending.
+Do not describe the release as live until deployment and a production check pass.
+No new data services, secrets, migrations, or native release are needed.
+
+CURSOR RELEASE WORKFLOW
+1. Read AGENTS.md, DOCS.md, README.md and the candidate file list. Inspect diffs.
+2. Commit only reviewed theme hunks and all required new source/tests on a
+   codex/ branch. Preserve all unrelated local work.
+3. Validate the commit from a clean checkout with npm ci and make ci.
+   Use a separate checkout for production builds: the current dev server on
+   port 1337 shares .next, so building here while it runs can disrupt preview.
+4. Inspect the final diff and push the branch; create a PR following repo policy.
+   Do not force-push or merge without appropriate user authorization.
+5. When asked to deploy, use the repository's make loft from the validated
+   checkout. Read the Cloudflare/Wrangler skill before invoking Wrangler.
+   This command checks, builds static assets, and deploys to the configured Worker.
+6. Verify loom.ibm.io: load Discover, cycle themes including NES, open a contour,
+   exercise accessible Auto / explicit palette / undo, switch System mode,
+   and inspect Settings typeface/chrome at phone and desktop widths.
+7. Report commit SHA, production URL and deployed version; retain the preceding
+   deployment version for rollback if the production smoke check fails.
+
+LIMITS
+Canvas is the primary renderer; SVG exports retain existing Vega approximations.
+Named downloadable typefaces depend on network availability; device fonts remain
+intentional fallbacks. Theme selection does not silently change curve smoothing.
+
+ADDITIONAL MATERIAL PASS
+Toolbar and Discover now share per-theme icons and one-click theme cycling.
+Bars and pies (full Canvas and previews) use inherited flat/glaze/satin/ink/etched
+finishes, with a Composition override. Grid/title weight defaults follow theme.
+Data cube walls now mix lightly with theme border ink rather than rendering
+opaque mid-gray. SVG finishes remain flat approximations; density ramps stay flat.
+Re-run release gates after these changes; latest local checks are recorded in
+/tmp/loom-material-final.log. Candidate file list includes these additions.

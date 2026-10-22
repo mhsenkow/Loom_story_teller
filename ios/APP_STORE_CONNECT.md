@@ -66,16 +66,16 @@ Privacy: https://loom.ibm.io/privacy
 - Adding a 6th requires leaving READY_FOR_REVIEW first
 
 ## Icon / logo
-Yes — build **8** includes the App Store icon (`iconAssetToken` present). Home screen, TestFlight, and ASC use the woven cube + “loom” wordmark from `ios/store/AppIcon-1024.png` / Capacitor assets.
+Yes — build **22** includes App Icon appearance themes (Any / Dark / Tinted) from `ios/App/.../AppIcon.appiconset` (`AppIcon-1024.png`, `-dark`, `-tinted`). Canonical mark: `brand/loom-icon-1024.png`. Regenerate with `node scripts/prepare-app-icons.mjs` then `npx tauri icon brand/loom-icon-1024.png`.
 
-## Live ASC status (2026-10-13)
-- Version **1.0** · build **8** · **WAITING_FOR_REVIEW**
-- Price **$4.95** equalized across **175** territories · Category Productivity (+ Utilities) · 4+ · IDFA off
-- Content rights: third-party content · Privacy + accessibility URLs → https://loom.ibm.io/privacy
-- TestFlight: beta description, privacy/marketing URLs, review notes filled
-- Accessibility declarations drafted (iPhone + iPad: dark interface, larger text, sufficient contrast) — Apple only lets you **publish** them after the app is live on the Store
-- Build encryption: `usesNonExemptEncryption=false` (HTTPS-only; no extra declaration needed)
-- Portal-only leftover: **App Privacy** nutrition labels (public API JWT cannot set; needs ASC web) — choose **Data Not Collected** in ASC → App Privacy
+## Live ASC status (2026-10-15)
+- Version **1.0** · build **26** uploaded (UUID `03f4582a-61c7-40b9-a583-455ffc1b112e`) — Claude chart, Discover, and share updates · prior **25** uploaded (UUID `d68710bb-4f54-44e1-b500-343aa549949f`)
+- App Icon: traditional `ios-marketing` + Dark/Tinted (`brand/loom-icon-1024.png`)
+- Screenshots: iPhone 6.7" ×6 + iPad 13" ×6 (incl. `06-phone`)
+- App preview videos: `preview-iphone67.mp4`, `preview-ipad13.mp4` (15s+, AAC) — rebuild via `node scripts/build-app-previews.mjs`
+- Upload media: `node scripts/upload-store-media.mjs`
+- ASC admin header may still show a blue placeholder until first App Store release; device/TestFlight/product page use the woven cube
+- Portal-only: confirm **App Privacy** nutrition labels if ASC still flags them
 
 ## One-time portal setup
 1. Xcode → Settings → Accounts → Michael Senkow (team WC44W2QVE4) signed in  
