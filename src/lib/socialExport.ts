@@ -136,17 +136,111 @@ export interface CaptionInput {
 
 /** Threads rejects posts longer than 500 characters. */
 export const THREADS_TEXT_MAX = 500;
+/** Bluesky posts are capped at 300 characters (graphemes). */
+export const BLUESKY_TEXT_MAX = 300;
+/** Mastodon's default instance limit. */
+export const MASTODON_TEXT_MAX = 500;
+
+/**
+ * Caption plus the public URL, clipped to `max` characters. The link always
+ * survives; the caption is shortened with an ellipsis to make room.
+ */
+export function clipPostText(caption: string, pageUrl: string, max: number): string {
+  const link = pageUrl.trim();
+  const body = caption.trim();
+  if (!link) return [...body].slice(0, max).join("");
+  const joiner = body ? "\n\n" : "";
+  const room = max - link.length - joiner.length;
+  if (room < 1) return link.slice(0, max);
+  const chars = [...body];
+  const clipped = chars.length <= room ? body : `${chars.slice(0, room - 1).join("").trimEnd()}…`;
+  return clipped ? `${clipped}${joiner}${link}` : link;
+}
 
 /** Caption plus the public URL, clipped so a Threads intent stays valid. */
 export function threadsPostText(caption: string, pageUrl: string): string {
-  const link = pageUrl.trim();
-  const body = caption.trim();
-  if (!link) return body.slice(0, THREADS_TEXT_MAX);
-  const joiner = body ? "\n\n" : "";
-  const room = THREADS_TEXT_MAX - link.length - joiner.length;
-  if (room < 1) return link.slice(0, THREADS_TEXT_MAX);
-  const clipped = body.length <= room ? body : `${body.slice(0, room - 1).trimEnd()}…`;
-  return clipped ? `${clipped}${joiner}${link}` : link;
+  return clipPostText(caption, pageUrl, THREADS_TEXT_MAX);
+}
+
+/** Bluesky web intent: opens the composer (app or web) with text prefilled. */
+export function blueskyShareHref(caption: string, pageUrl: string): string {
+  return `https://bsky.app/intent/compose?text=${encodeURIComponent(clipPostText(caption, pageUrl, BLUESKY_TEXT_MAX))}`;
+}
+
+/**
+ * Normalize what someone types as their Mastodon server: "mastodon.social",
+ * "https://hachyderm.io/home", "@me@fosstodon.org" → bare host, or null.
+ */
+export function normalizeMastodonServer(input: string): string | null {
+  let v = input.trim().toLowerCase();
+  if (!v) return null;
+  const handle = v.match(/^@?[^@\s]+@([^@\s/]+)$/);
+  if (handle) v = handle[1]!;
+  v = v.replace(/^[a-z]+:\/\//, "").split(/[/?#]/)[0]!.replace(/:\d+$/, "");
+  return /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(v) ? v : null;
+}
+
+/** Mastodon's built-in share endpoint on the person's own server. */
+export function mastodonShareHref(server: string, caption: string, pageUrl: string): string {
+  return `https://${server}/share?text=${encodeURIComponent(clipPostText(caption, pageUrl, MASTODON_TEXT_MAX))}`;
+}
+
+/** SeenU has no share intent; the post starts from its home page. */
+export const SEENU_URL = "https://seenu.io/";
+
+/** Instagram's web inbox — messages there accept a pasted link. */
+export const INSTAGRAM_DIRECT_URL = "https://www.instagram.com/direct/inbox/";
+
+/**
+ * Instagram Stories cover roughly the top 250px (profile, progress bar) and the
+ * bottom 340px (reply bar, stickers) of a 1080×1920 frame.
+ */
+export const STORY_SIZE = { width: 1080, height: 1920 } as const;
+export const STORY_SAFE = { top: 250, bottom: 340, side: 48 } as const;
+
+/** Where a w×h chart image lands inside the story's safe band (scaled to fit, centered). */
+export function storySafeRect(w: number, h: number): { x: number; y: number; width: number; height: number } {
+  const availW = STORY_SIZE.width - 2 * STORY_SAFE.side;
+  const availH = STORY_SIZE.height - STORY_SAFE.top - STORY_SAFE.bottom;
+  const scale = Math.min(availW / w, availH / h);
+  const width = Math.round(w * scale);
+  const height = Math.round(h * scale);
+  return {
+    x: Math.round((STORY_SIZE.width - width) / 2),
+    y: STORY_SAFE.top + Math.round((availH - height) / 2),
+    width,
+    height,
+  };
+}
+
+/**
+ * Place a chart PNG (best: the 4:5 post render) inside a 1080×1920 story frame,
+ * clear of Instagram's overlays, on the chart's own background color.
+ */
+export async function composeStoryImage(chart: Blob): Promise<Blob | null> {
+  try {
+    const bitmap = await createImageBitmap(chart);
+    const canvas = document.createElement("canvas");
+    canvas.width = STORY_SIZE.width;
+    canvas.height = STORY_SIZE.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    // Sample the chart's corner so the frame reads as one surface.
+    const probe = document.createElement("canvas");
+    probe.width = probe.height = 1;
+    const pctx = probe.getContext("2d");
+    pctx?.drawImage(bitmap, 2, 2, 1, 1, 0, 0, 1, 1);
+    const [r, g, b] = pctx ? pctx.getImageData(0, 0, 1, 1).data : [16, 16, 18];
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const rect = storySafeRect(bitmap.width, bitmap.height);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height);
+    bitmap.close?.();
+    return await new Promise((resolve) => canvas.toBlob((out) => resolve(out), "image/png"));
+  } catch {
+    return null;
+  }
 }
 
 /**

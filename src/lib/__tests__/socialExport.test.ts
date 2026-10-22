@@ -15,6 +15,14 @@ import {
   threadsShareHref,
   THREADS_TEXT_MAX,
   LINK_PREVIEW_SIZE,
+  BLUESKY_TEXT_MAX,
+  blueskyShareHref,
+  clipPostText,
+  mastodonShareHref,
+  normalizeMastodonServer,
+  STORY_SAFE,
+  STORY_SIZE,
+  storySafeRect,
 } from "../socialExport";
 import { buildZip, ZIP_UTF8_FLAG, zipDosDateTime } from "../zipStore";
 import { LOOM_OG_IMG_TOKEN, LOOM_PAGE_URL_TOKEN, LOOM_SHARE_IMG_TOKEN, buildChartSharePageHtml } from "../dashboardMicrosite";
@@ -120,3 +128,50 @@ describe("zipStore", () => {
     expect(zip[7]).toBe((ZIP_UTF8_FLAG >> 8) & 0xff);
   });
 });
+
+describe("Bluesky, Mastodon and post clipping", () => {
+  const page = "https://loom.ibm.io/s/abc123";
+
+  it("keeps the link and clips the caption to the network's limit", () => {
+    const text = clipPostText("y".repeat(1000), page, BLUESKY_TEXT_MAX);
+    expect([...text].length).toBeLessThanOrEqual(BLUESKY_TEXT_MAX);
+    expect(text.endsWith(page)).toBe(true);
+    expect(text).toContain("…");
+    expect(clipPostText("Short", page, 300)).toBe(`Short\n\n${page}`);
+    // Emoji count as one character, never split in half.
+    expect(clipPostText("📈".repeat(400), page, 300)).not.toMatch(/\uD83D$/);
+  });
+
+  it("builds the Bluesky compose intent with caption and link", () => {
+    const href = blueskyShareHref("Quakes today", page);
+    expect(href.startsWith("https://bsky.app/intent/compose?text=")).toBe(true);
+    expect(decodeURIComponent(href.split("text=")[1]!)).toBe(`Quakes today\n\n${page}`);
+  });
+
+  it("normalizes whatever people type as their Mastodon server", () => {
+    expect(normalizeMastodonServer("mastodon.social")).toBe("mastodon.social");
+    expect(normalizeMastodonServer(" https://Hachyderm.io/home ")).toBe("hachyderm.io");
+    expect(normalizeMastodonServer("@me@fosstodon.org")).toBe("fosstodon.org");
+    expect(normalizeMastodonServer("me@mstdn.social")).toBe("mstdn.social");
+    expect(normalizeMastodonServer("not a server")).toBeNull();
+    expect(normalizeMastodonServer("localhost")).toBeNull();
+    expect(normalizeMastodonServer("javascript:alert(1)")).toBeNull();
+    expect(mastodonShareHref("mastodon.social", "Hi", page)).toBe(
+      `https://mastodon.social/share?text=${encodeURIComponent(`Hi\n\n${page}`)}`,
+    );
+  });
+});
+
+describe("Instagram story framing", () => {
+  it("keeps a 4:5 chart inside the story safe band, centered", () => {
+    const r = storySafeRect(1080, 1350);
+    expect(r.y).toBeGreaterThanOrEqual(STORY_SAFE.top);
+    expect(r.y + r.height).toBeLessThanOrEqual(STORY_SIZE.height - STORY_SAFE.bottom);
+    expect(r.x).toBeGreaterThanOrEqual(STORY_SAFE.side);
+    expect(Math.abs(r.x * 2 + r.width - STORY_SIZE.width)).toBeLessThanOrEqual(1);
+    expect(r.width / r.height).toBeCloseTo(1080 / 1350, 2);
+    // Nearly full width: the band is about as tall as a 4:5 render.
+    expect(r.width).toBeGreaterThan(950);
+  });
+});
+

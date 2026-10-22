@@ -25,6 +25,16 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-22a",
+    date: "2026-10-22",
+    title: "Share anywhere",
+    items: [
+      { title: "Bluesky, Mastodon and SeenU", detail: "Share now opens Bluesky and Mastodon with your caption and chart link ready, and Mastodon remembers your server after the first time. SeenU gets the image, caption and link ready to post." },
+      { title: "Instagram, sized right", detail: "Pick Post, Story or Message. Posts get a 4:5 image with your caption, Stories get a 9:16 frame that keeps the chart clear of Instagram's top bar and reply field (the link is copied for a link sticker), and Messages send the chart link." },
+      { title: "Clearer choices", detail: "Every share option now says what will happen before you tap it, and Copy caption no longer sits on top of the preview." },
+    ],
+  },
+  {
     id: "2026-10-21g-polish",
     date: "2026-10-21",
     title: "Polish pass",
