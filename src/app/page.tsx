@@ -928,7 +928,8 @@ function HomeContent({
       {/* Main Body: Sidebar + Canvas + Panel. When dataSourcesExpanded, sidebar takes over. */}
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          <div className="loom-shell-side">
+          {/* Expanded sources: the wrapper must grow too, or the flex-1 sidebar inside collapses to 0. */}
+          <div className={`loom-shell-side ${dataSourcesExpanded && !socialExportReady ? "flex-1" : ""}`}>
             <div className="loom-shell-side-inner">
               {!socialExportReady && <Sidebar />}
             </div>
