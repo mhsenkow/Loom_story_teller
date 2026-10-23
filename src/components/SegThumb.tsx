@@ -22,7 +22,8 @@ function place(seg: HTMLElement) {
     seg.prepend(thumb);
   }
   const active = seg.querySelector<HTMLElement>(ACTIVE);
-  seg.classList.add("loom-seg-tracked");
+  // classList.add always writes `class`, which the observer watches — guard it or sync loops forever.
+  if (!seg.classList.contains("loom-seg-tracked")) seg.classList.add("loom-seg-tracked");
   if (!active) {
     thumb.style.opacity = "0";
     return;
@@ -49,7 +50,8 @@ export function SegThumb() {
     function schedule() {
       if (queued) return;
       queued = true;
-      queueMicrotask(() => {
+      // A frame, not a microtask: the browser still gets to paint if anything re-triggers us.
+      requestAnimationFrame(() => {
         queued = false;
         sync();
       });
