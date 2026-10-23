@@ -1,3 +1,4 @@
+import { dataLibraryInitialState } from "./dataLibrarySlice";
 // =================================================================
 // store/helpers — composed initialState (LOOM-552)
 // =================================================================
@@ -15,6 +16,7 @@ export { datasetScopedResetSlice };
 
 export const initialState = {
   ...coreInitialState(),
+  ...dataLibraryInitialState,
   ...tableInitialState(),
   ...queryInitialState(),
   ...dashboardInitialState(),

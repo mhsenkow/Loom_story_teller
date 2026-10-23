@@ -347,9 +347,8 @@ export function ChartCard({
       className={`
         group flex flex-col overflow-hidden text-left min-w-0
         border bg-loom-elevated
-        transition-[border-color,box-shadow,transform] duration-150
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent
-        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-[var(--radius-lg)] hover:border-transparent" : "rounded-[var(--radius-md)] hover:shadow-loom"}
+        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-[var(--radius-lg)] hover:border-transparent" : "loom-lift rounded-[var(--radius-md)] hover:shadow-loom"}
         ${!hero && isActive ? "border-loom-accent ring-2 ring-loom-accent/40 shadow-loom" : !hero ? "border-loom-border hover:border-loom-accent/50" : ""}
         ${compact ? "w-[152px] shrink-0 snap-start rounded-[var(--radius-sm)]" : "w-full"}
       `}

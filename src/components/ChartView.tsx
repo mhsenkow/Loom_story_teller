@@ -31,6 +31,7 @@ import { analysisScope, analysisUnavailable } from "@/lib/timeSeriesAnalysis";
 import { smartOverlayPalette } from "@/lib/chartSmartOverlayStyle";
 import { chartStageLiveMessage, chartStageStatus } from "@/lib/chartStageStatus";
 import { useReducedMotion } from "@/lib/useReducedMotion";
+import { chartEntranceReveal, easeOutCubic, playChartSwap, traceEntranceClip } from "@/lib/motion";
 import { describeChartColorStatus, discreteSeriesColors, getThemeUiColors, hexToRgb01, resolveChartColors } from "@/lib/chartPalettes";
 import { useIsMobile, useMediaQuery, useMobileLiveEdit, useShellMode } from "@/lib/useMediaQuery";
 import { aspectLabel, fitChartFrame } from "@/lib/chartViewport";
@@ -2724,7 +2725,7 @@ export function ChartView() {
       }
       const tr = cubeTransitionRef.current;
       const animating = !!tr && tr.cube === dataCube && cubeAnim < 1;
-      const ease = 1 - Math.pow(1 - cubeAnim, 3);
+      const ease = easeOutCubic(cubeAnim);
       const centerOf = animating
         ? (cell: DataCube["cells"][number]): [number, number, number] => {
             const to = cubeCellCenter(dataCube, cell.xi, cell.yi, cell.zi);
@@ -3004,8 +3005,7 @@ export function ChartView() {
         drawChartBackground(ctx, w, hFull, opts.backgroundStyle, opts.themeBg);
         if (clipProgress < 1) {
           ctx.save();
-          ctx.beginPath();
-          ctx.rect(0, 0, w * clipProgress, hFull);
+          traceEntranceClip(ctx, w, hFull, clipProgress, chartEntranceReveal(activeChart.kind, w, hFull));
           ctx.clip();
         }
         ctx.globalCompositeOperation = "source-over";
@@ -3555,8 +3555,7 @@ export function ChartView() {
       const tick = (now: number) => {
         if (cancelled) return;
         const t = Math.min(1, (now - start) / DURATION_MS);
-        const eased = 1 - Math.pow(1 - t, 3);
-        drawOneFrame(eased);
+        drawOneFrame(easeOutCubic(t));
         if (t < 1) requestAnimationFrame(tick);
         else {
           drawOneFrame(1);
@@ -3574,6 +3573,26 @@ export function ChartView() {
     notifyChartPainted();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- LOOM-617: omit hover/export-only fields so crosshair moves do not rerun the full draw/GPU path.
   }, [canvasSized, activeChart, chartSampleRows, chartFootnoteText, chartColorInfo, footnoteOpts, gpuReady, useWebGPUScatter, useWebGpuScene, useWebGpuGlobe, extractScatterData, getEffectiveScatterBounds, scatterView, chartRenderOpts, chartVisualOverrides.animateEntrance, chartVisualOverrides.sizeScale, chartVisualOverrides.sourceFootnoteAlign, refreshKey, chartTitleOverrides, smartResults, themeUi, colors, opacity, pointSize, isCompact, isMobile, containerSize.w, containerSize.h, sceneOrbit, dataCube, useWebGpuCube, cubeHover, continuousStops, cubeSlice, cubeTableOpen, cubeAnim, connectScatterTrail, showMarginals, customRefLines, monitorLines, geoAtlasBundle, reducedMotion, fontEpoch]);
+
+  // Settle the stage when the chart itself changes (not on first mount, hover, or theme).
+  const chartSwapKey = activeChart
+    ? [activeChart.id, activeChart.kind, activeChart.xField, activeChart.yField].join("\u0001")
+    : "";
+  const prevChartSwapKeyRef = useRef<string | null>(null);
+  const chartSwapAnimsRef = useRef<Animation[]>([]);
+  useEffect(() => {
+    const prev = prevChartSwapKeyRef.current;
+    prevChartSwapKeyRef.current = chartSwapKey;
+    if (prev === null || !chartSwapKey || prev === chartSwapKey) return;
+    if (socialExportReady || arranging) return;
+    for (const a of chartSwapAnimsRef.current) a.cancel();
+    const gpu = useWebGPUScatter || useWebGpuScene || useWebGpuGlobe || useWebGpuCube;
+    chartSwapAnimsRef.current = playChartSwap(
+      gpu ? [axesOverlayRef.current, canvasRef.current, canvas2DRef.current] : [canvas2DRef.current],
+      reducedMotion,
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- replay only when the chart key changes
+  }, [chartSwapKey]);
 
   // WebGPU scatter: upload packed points when data/zoom scale changes (not pan).
   useEffect(() => {
@@ -4062,12 +4081,12 @@ export function ChartView() {
   );
 
   const suggestionsRestoreTab = !suggestionsRailOpen && !socialExportReady && !liveEdit && !arranging && (
-    <div className={isMobile ? "order-2 flex w-full shrink-0 items-center border-t border-loom-border bg-loom-surface pr-20" : "contents"}>
+    <div className={isMobile ? "loom-ideas-restore order-2 flex w-full shrink-0 items-center border-t border-loom-border bg-loom-surface pr-20" : "contents"}>
     <button
       type="button"
       onClick={showSuggestionsRail}
       className={`
-        shrink-0 flex items-center justify-center gap-1 border-loom-border bg-loom-surface
+        loom-ideas-restore shrink-0 flex items-center justify-center gap-1 border-loom-border bg-loom-surface
         text-loom-muted hover:text-loom-accent hover:bg-loom-accent/10 transition-colors
         ${isMobile
           ? "flex-1 min-h-10 px-3 text-xs font-medium"
@@ -4102,9 +4121,9 @@ export function ChartView() {
 
   if (chartRecs.length === 0) {
     return (
-      <div className="flex h-full animate-fade-in flex-col md:flex-row">
+      <div className="flex h-full animate-enter flex-col md:flex-row">
         {suggestionsRailOpen ? (
-          <div className="hidden md:flex w-[220px] flex-shrink-0 border-r border-loom-border bg-loom-surface flex-col overflow-hidden">
+          <div className="loom-ideas-rail hidden md:flex w-[220px] flex-shrink-0 border-r border-loom-border bg-loom-surface flex-col overflow-hidden">
             {suggestionHeader}
             <div className="flex-1 flex items-center justify-center p-4">
               <div className="text-center">
@@ -4130,12 +4149,12 @@ export function ChartView() {
   const showSuggestionsPanel = suggestionsRailOpen && !socialExportReady && !liveEdit && !arranging;
 
   return (
-    <div className={`flex h-full animate-fade-in ${suggestionsExpanded || isMobile ? "flex-col" : ""}`}>
+    <div className={`flex h-full animate-enter ${suggestionsExpanded || isMobile ? "flex-col" : ""}`}>
       {/* Recommendation panel — desktop left rail, mobile bottom rail, or full browse grid */}
       {showSuggestionsPanel ? (
       <div
         className={`
-          bg-loom-surface overflow-hidden transition-[width,height] duration-200 ease-out
+          loom-ideas-rail bg-loom-surface overflow-hidden transition-[width,height] duration-200 ease-out
           ${suggestionsExpanded
             ? "order-1 w-full flex-1 flex flex-col min-h-0 border-b border-loom-border"
             : mobileRail
@@ -4146,7 +4165,7 @@ export function ChartView() {
         {suggestionHeader}
         <div
           className={`
-            flex-1 min-h-0
+            loom-stagger flex-1 min-h-0
             ${suggestionsExpanded
               ? "overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 content-start"
               : mobileRail
@@ -4359,7 +4378,7 @@ export function ChartView() {
             }`}
           >
           {!socialExportReady && activeChart && isMobile && !liveEdit && (
-            <div className="flex flex-col items-stretch gap-1.5">
+            <div className="loom-chart-tools flex flex-col items-stretch gap-1.5">
               {whyReasonOpen && (
                 <div
                   className="rounded-lg border border-loom-border bg-loom-surface/95 p-2.5 shadow-sm"
@@ -4911,7 +4930,7 @@ export function ChartView() {
           )}
           </div>
           {!socialExportReady && activeChart && !isMobile && (
-            <div className="flex flex-col gap-1.5 self-start items-start shrink-0">
+            <div className="loom-chart-tools flex flex-col gap-1.5 self-start items-start shrink-0">
               {whyReasonOpen && (
                 <div
                   className="w-[11.5rem] rounded-lg border border-loom-border bg-[color-mix(in_srgb,var(--loom-surface)_95%,transparent)] backdrop-blur-md p-2.5 shadow-sm"

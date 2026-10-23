@@ -8,7 +8,7 @@
 
 import { filterCatalog, type CatalogEntry, type CatalogFreshness } from "./sourceCatalog";
 import { SOURCE_GROUP_LABELS, type SourceGeo, type SourceGroup, type SourceTopic } from "./sourceRegistry";
-import { hasExplicitSourcePreferences, isHidden, isSourceSaved, sourceAffinity, type SourcePreferences } from "./sourcePreferences";
+import { hasExplicitSourcePreferences, isHidden, isSourceMarked, isSourceSaved, sourceAffinity, type SourcePreferences } from "./sourcePreferences";
 
 export type FeedSort = "foryou" | "freshest" | "az";
 export type FeedWhere = "world" | "us" | "city";
@@ -18,12 +18,18 @@ export const FEED_FRESHNESS_LABELS: Record<CatalogFreshness, string> = { live: "
 /** "World" covers single-country feeds outside the US too (e.g. the UK grid). */
 const WHERE_GEO: Record<FeedWhere, SourceGeo[]> = { world: ["world", "region"], us: ["us"], city: ["city"] };
 
+export function geosForWhere(where: FeedWhere[]): SourceGeo[] {
+  return where.flatMap((w) => WHERE_GEO[w]);
+}
+
 export interface FeedBrowserState {
   query: string;
   topics: SourceTopic[];
   where: FeedWhere[];
   freshness: CatalogFreshness[];
   savedOnly: boolean;
+  /** Heart, spark, or curious. */
+  markedOnly: boolean;
   sort: FeedSort;
   showHidden: boolean;
 }
@@ -34,6 +40,7 @@ export const DEFAULT_FEED_BROWSER_STATE: FeedBrowserState = {
   where: [],
   freshness: [],
   savedOnly: false,
+  markedOnly: false,
   sort: "foryou",
   showHidden: false,
 };
@@ -61,7 +68,7 @@ export function feedSortLabel(sort: FeedSort, prefs: SourcePreferences): string 
 const FRESH_RANK: Record<CatalogFreshness, number> = { live: 0, daily: 1, historical: 2 };
 
 export function filtersActive(s: FeedBrowserState): boolean {
-  return !!(s.query.trim() || s.topics.length || s.where.length || s.freshness.length || s.savedOnly);
+  return !!(s.query.trim() || s.topics.length || s.where.length || s.freshness.length || s.savedOnly || s.markedOnly);
 }
 
 export function browseFeeds(
@@ -74,7 +81,7 @@ export function browseFeeds(
   const matched = filterCatalog(entries, {
     query: state.query,
     topics: state.topics,
-    geo: state.where.flatMap((w) => WHERE_GEO[w]),
+    geo: geosForWhere(state.where),
     freshness: state.freshness,
   });
   const relevance = new Map(matched.map((e, i) => [e.ref, i]));
@@ -82,6 +89,7 @@ export function browseFeeds(
   let hiddenCount = 0;
   const kept = matched.filter((e) => {
     if (state.savedOnly && !isSourceSaved(e.ref, prefs)) return false;
+    if (state.markedOnly && !isSourceMarked(e.ref, prefs)) return false;
     if (!state.showHidden && isHidden(e.ref, prefs)) {
       hiddenCount += 1;
       return false;

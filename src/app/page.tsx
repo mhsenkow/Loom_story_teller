@@ -48,9 +48,11 @@ import {
   captureStoryDashboardPreviews,
 } from "@/lib/captureStoryPreviews";
 import { endShareReadyAspect } from "@/lib/shareReadySession";
+import { exitChartFocus, onFullscreenChange, toggleChartFocus } from "@/lib/chartFocus";
+import { SegThumb } from "@/components/SegThumb";
 
 const viewSkeleton = (
-  <div className="loom-panel flex-1 min-h-[12rem] animate-pulse bg-loom-surface/40" aria-hidden />
+  <div className="loom-panel loom-shimmer flex-1 min-h-[12rem]" aria-hidden />
 );
 
 const ExplorerView = dynamic(() => import("@/components/ExplorerView").then((m) => m.ExplorerView), {
@@ -559,6 +561,7 @@ function HomeContent({
   } | null;
   socialExportReady: boolean;
 }) {
+  const chartFocus = useLoomStore((s) => s.chartFocus);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const helpCloseRef = useRef<HTMLButtonElement>(null);
   const liveEdit = useMobileLiveEdit();
@@ -612,6 +615,16 @@ function HomeContent({
   }, []);
 
   useEffect(() => {
+    document.addEventListener("fullscreenchange", onFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", onFullscreenChange);
+  }, []);
+
+  useEffect(() => {
+    if (!chartFocus) return;
+    if (viewMode !== "chart" || dataSourcesExpanded || dashboardsExpanded || socialExportReady) exitChartFocus();
+  }, [chartFocus, viewMode, dataSourcesExpanded, dashboardsExpanded, socialExportReady]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z" || e.altKey) return;
       const t = e.target as HTMLElement | null;
@@ -648,6 +661,11 @@ function HomeContent({
       if (e.key === "Escape") {
         setShortcutsOpen(false);
         if (ariaModalOpen()) return;
+        if (useLoomStore.getState().chartFocus) {
+          exitChartFocus();
+          e.preventDefault();
+          return;
+        }
         if (useLoomStore.getState().socialExportReady) {
           endShareReadyAspect();
           useLoomStore.getState().setSocialExportReady(false);
@@ -693,6 +711,13 @@ function HomeContent({
         case "]":
           useLoomStore.getState().togglePanel();
           e.preventDefault();
+          break;
+        case "f":
+        case "F":
+          if (!e.altKey && !e.shiftKey && useLoomStore.getState().viewMode === "chart") {
+            if (!toggleChartFocus()) useLoomStore.getState().setToast("Open a chart to go full screen");
+            e.preventDefault();
+          }
           break;
       }
     }
@@ -754,7 +779,8 @@ function HomeContent({
   };
 
   return (
-    <div className="flex flex-col h-dvh max-h-dvh w-screen bg-loom-bg transition-theme overflow-hidden">
+    <div className={`flex flex-col h-dvh max-h-dvh w-screen bg-loom-bg transition-theme overflow-hidden ${chartFocus ? "loom-focus-mode" : ""}`}>
+      <SegThumb />
       <a
         href="#main"
         className="sr-only focus:not-sr-only focus:absolute focus:z-[300] focus:left-4 focus:top-[calc(var(--safe-top)+0.5rem)] focus:px-3 focus:py-2 focus:rounded-md focus:bg-loom-surface focus:border focus:border-loom-border focus:text-sm focus:text-loom-text"
@@ -804,7 +830,7 @@ function HomeContent({
               <ul className="text-xs text-loom-text space-y-2.5 leading-relaxed">
                 <li><kbd className="loom-kbd">1</kbd> Explorer · <kbd className="loom-kbd">2</kbd> Chart · <kbd className="loom-kbd">3</kbd> Query · <kbd className="loom-kbd">4</kbd> Dive · <kbd className="loom-kbd">5</kbd> Monitor</li>
                 <li><kbd className="loom-kbd">⌥1</kbd>–<kbd className="loom-kbd">⌥5</kbd> Panel tabs (Stats → Settings)</li>
-                <li><kbd className="loom-kbd">[</kbd> Sidebar · <kbd className="loom-kbd">]</kbd> Right panel</li>
+                <li><kbd className="loom-kbd">[</kbd> Sidebar · <kbd className="loom-kbd">]</kbd> Right panel · <kbd className="loom-kbd">F</kbd> Full screen chart · <kbd className="loom-kbd">Esc</kbd> Leave it</li>
                 <li className="pt-1 text-loom-muted font-medium text-2xs uppercase tracking-wider">Scatter</li>
                 <li>Two-finger scroll pans · pinch / mouse wheel zooms toward cursor · double-click resets</li>
                 <li className="md:hidden">On phone: chart fills the screen · Scan for viz cards · swipe Keep / Skip · Edit opens Encoding</li>
@@ -892,19 +918,27 @@ function HomeContent({
               </div>
             )}
       </Dialog>
-      {/* Top Bar spans full width */}
-      {!socialExportReady && <TopBar onOpenShortcuts={() => setShortcutsOpen(true)} />}
+      {/* Top Bar spans full width. The track collapses in chart focus so the chart can grow. */}
+      <div className="loom-shell-top">
+        <div className="loom-shell-top-inner">
+          {!socialExportReady && <TopBar onOpenShortcuts={() => setShortcutsOpen(true)} />}
+        </div>
+      </div>
 
       {/* Main Body: Sidebar + Canvas + Panel. When dataSourcesExpanded, sidebar takes over. */}
       <div className="flex flex-1 min-h-0 flex-col">
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          {!socialExportReady && <Sidebar />}
+          <div className="loom-shell-side">
+            <div className="loom-shell-side-inner">
+              {!socialExportReady && <Sidebar />}
+            </div>
+          </div>
 
           {/* Canvas Area — hidden when Data & sources is expanded; shows dashboard when dashboards expanded */}
           <main
             id="main"
             className={`relative bg-loom-bg overflow-hidden transition-[flex] duration-200 flex flex-col ${dataSourcesExpanded && !socialExportReady ? "w-0 min-w-0 flex-shrink-0" : "flex-1 min-w-0"}`}
-            style={liveEdit && !socialExportReady ? { paddingBottom: MOBILE_LIVE_EDIT_SHEET } : undefined}
+            style={liveEdit && !socialExportReady && !chartFocus ? { paddingBottom: MOBILE_LIVE_EDIT_SHEET } : undefined}
           >
             {dashboardsExpanded && !socialExportReady ? (
               <DashboardCanvas onCollapse={() => useLoomStore.getState().setDashboardsExpanded(false)} />
@@ -962,15 +996,30 @@ function HomeContent({
           </main>
 
           {/* Monitor has its own panels; the dataset detail panel would only cover it (phones). */}
-          {!socialExportReady && viewMode !== "monitor" && <DetailPanel />}
+          <div className="loom-shell-panel">
+            <div className="loom-shell-panel-inner">
+              {!socialExportReady && !dataSourcesExpanded && viewMode !== "monitor" && <DetailPanel />}
+            </div>
+          </div>
         </div>
 
         {/* Preview as footer — suite waffle docks just above it (rides expand/collapse) */}
         {!socialExportReady && (
-          <div className="relative shrink-0">
-            <SuiteMenu />
-            <PreviewFooter />
+          <div className="loom-shell-foot relative shrink-0">
+            <div className="loom-shell-foot-inner relative">
+              <SuiteMenu />
+              {!dataSourcesExpanded && <PreviewFooter />}
+            </div>
           </div>
+        )}
+        {chartFocus && (
+          <button type="button" className="loom-focus-exit" onClick={exitChartFocus} aria-keyshortcuts="Escape">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+              <path d="M9 4H5a1 1 0 0 0-1 1v4M15 4h4a1 1 0 0 1 1 1v4M9 20H5a1 1 0 0 1-1-1v-4M15 20h4a1 1 0 0 0 1-1v-4" />
+            </svg>
+            Exit
+            <kbd className="loom-kbd">Esc</kbd>
+          </button>
         )}
       </div>
     </div>

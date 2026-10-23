@@ -113,7 +113,7 @@ export function ViewCohortBar({ surface }: { surface: "explorer" | "chart" }) {
 
   return (
     <div
-      className="view-cohort-bar flex items-center gap-2 px-2.5 py-1.5 min-h-9 max-md:overflow-x-auto scrollbar-none border-b border-loom-accent/20 bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-bg))] backdrop-blur-sm"
+      className="view-cohort-bar flex items-center gap-2 px-2.5 py-1.5 min-h-9 max-h-16 overflow-hidden max-md:overflow-x-auto scrollbar-none border-b border-loom-accent/20 bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-bg))] backdrop-blur-sm"
       role="status"
       aria-label="Current view cohort"
     >

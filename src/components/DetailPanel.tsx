@@ -106,7 +106,7 @@ export function DetailPanel() {
         aria-modal={isMobile ? true : undefined}
         aria-label={isMobile ? "Detail panel" : undefined}
         className={`
-          flex flex-col bg-loom-surface flex-shrink-0 animate-slide-up md:animate-none
+          flex flex-col bg-loom-surface flex-shrink-0 animate-sheet md:animate-panel
           md:relative md:h-full md:w-[var(--panel-width)] md:border-l md:border-loom-border md:z-auto
           fixed inset-x-0 bottom-0 z-40 w-full
           border-t border-loom-border rounded-t-2xl shadow-loom-lg

@@ -7,6 +7,7 @@
 
 "use client";
 
+import { SaveButton } from "@/components/SourcePrefControls";
 import { useEffect, useId, useMemo, useRef, useState, type ComponentType } from "react";
 import {
   SOCRATA_PORTALS,
@@ -137,28 +138,67 @@ export function SocrataCatalogSection({
       <div className="space-y-2 px-1 mb-2">
         <form
           role="search"
+          className="library-sentence"
           onSubmit={(e) => {
             e.preventDefault();
             runSearch(draft);
           }}
         >
-          <label htmlFor={`${uid}-q`} className="text-2xs text-loom-muted">
-            Search city &amp; state portals
-          </label>
-          <div className="flex gap-1.5 mt-0.5">
-            <input
-              id={`${uid}-q`}
-              type="search"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder="311, trees, crashes, permits…"
-              className="loom-input flex-1 min-w-0 text-xs py-1.5"
-              enterKeyHint="search"
-            />
-            <button type="submit" className="loom-btn-primary text-2xs px-2.5 py-1.5 shrink-0" disabled={loading}>
-              Search
+          <span className="library-sentence-phrase">
+            <span className="library-sentence-lead">searching</span>
+            <label htmlFor={`${uid}-q`}>
+              <span className="sr-only">Search city and state portals</span>
+              <input
+                id={`${uid}-q`}
+                type="search"
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                placeholder="311, trees, crashes"
+                enterKeyHint="search"
+              />
+            </label>
+            <button type="submit" className="discover-icon-button" disabled={loading} aria-label="Search city and state portals">
+              <svg aria-hidden width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+                <circle cx="10.5" cy="10.5" r="6.5" />
+                <path d="m16 16 4 4" />
+              </svg>
             </button>
-          </div>
+          </span>
+          <span className="library-sentence-phrase">
+            <span aria-hidden>in</span>
+            <label htmlFor={`${uid}-portal`}>
+              <span className="sr-only">Portal</span>
+              <select
+                id={`${uid}-portal`}
+                value={request.domain}
+                onChange={(e) => setRequest((r) => ({ ...r, domain: e.target.value }))}
+              >
+                <option value="">All portals</option>
+                {SOCRATA_PORTALS.map((p) => (
+                  <option key={p.domain} value={p.domain}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </span>
+          <span className="library-sentence-phrase">
+            <span aria-hidden>by</span>
+            <label htmlFor={`${uid}-sort`}>
+              <span className="sr-only">Sort</span>
+              <select
+                id={`${uid}-sort`}
+                value={request.sort}
+                onChange={(e) => setRequest((r) => ({ ...r, sort: e.target.value as SocrataSort }))}
+              >
+                {SOCRATA_SORTS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </span>
         </form>
         <div className="flex flex-wrap gap-1.5" role="group" aria-label="Suggested searches">
           {SOCRATA_SUGGESTIONS.map((s) => (
@@ -176,43 +216,6 @@ export function SocrataCatalogSection({
               {s}
             </button>
           ))}
-        </div>
-        <div className="flex flex-wrap gap-2 items-end">
-          <div className="min-w-0 flex-1">
-            <label htmlFor={`${uid}-portal`} className="text-2xs text-loom-muted block mb-0.5">
-              Portal
-            </label>
-            <select
-              id={`${uid}-portal`}
-              value={request.domain}
-              onChange={(e) => setRequest((r) => ({ ...r, domain: e.target.value }))}
-              className="loom-input w-full text-xs py-1.5"
-            >
-              <option value="">All portals</option>
-              {SOCRATA_PORTALS.map((p) => (
-                <option key={p.domain} value={p.domain}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="min-w-0 flex-1">
-            <label htmlFor={`${uid}-sort`} className="text-2xs text-loom-muted block mb-0.5">
-              Sort
-            </label>
-            <select
-              id={`${uid}-sort`}
-              value={request.sort}
-              onChange={(e) => setRequest((r) => ({ ...r, sort: e.target.value as SocrataSort }))}
-              className="loom-input w-full text-xs py-1.5"
-            >
-              {SOCRATA_SORTS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
       </div>
 
@@ -291,6 +294,7 @@ function SocrataCard({
         {[updated && `Updated ${updated}`, ds.columnCount > 0 && `${ds.columnCount} columns`].filter(Boolean).join(" · ")}
       </p>
       <div className="flex items-center gap-2 flex-wrap pt-0.5">
+        <SaveButton sourceRef={id} label={ds.name} asset={{ ref: id, name: ds.name, url, credit: portal, description: ds.description }} />
         {canLoadInBrowser && (
           <button
             type="button"
@@ -425,21 +429,23 @@ export function TidyTuesdaySection({
               : undefined
           }
         />
-      <div className="px-1 mb-2">
-        <label htmlFor={`${uid}-f`} className="text-2xs text-loom-muted">
-          Filter weeks
-        </label>
-        <input
-          id={`${uid}-f`}
-          type="search"
-          value={filter}
-          onChange={(e) => {
-            setFilter(e.target.value);
-            setShown(TT_PAGE);
-          }}
-          placeholder="Topic, file name, or year…"
-          className="loom-input w-full text-xs py-1.5 mt-0.5"
-        />
+      <div className="library-sentence px-1 mb-2">
+        <span className="library-sentence-phrase">
+          <span className="library-sentence-lead">finding</span>
+          <label htmlFor={`${uid}-f`}>
+            <span className="sr-only">Filter weeks</span>
+            <input
+              id={`${uid}-f`}
+              type="search"
+              value={filter}
+              onChange={(e) => {
+                setFilter(e.target.value);
+                setShown(TT_PAGE);
+              }}
+              placeholder="a topic, file, or year"
+            />
+          </label>
+        </span>
       </div>
 
       <div aria-live="polite" aria-atomic="true">
@@ -482,7 +488,7 @@ export function TidyTuesdaySection({
                 {week.files.map((file) => {
                   const id = `tt:${week.date}/${file.name}`;
                   const busy = loadingId === id || savingId === id;
-                  return actionable ? (
+                  return <div key={file.name} className="flex items-center gap-1 min-w-0"><SaveButton sourceRef={id} label={file.name} asset={{ ref: id, name: `${title ?? week.date} · ${file.name}`, url: file.url, credit: "TidyTuesday" }} />{actionable ? (
                     <button
                       key={file.name}
                       type="button"
@@ -504,7 +510,7 @@ export function TidyTuesdaySection({
                     >
                       {file.name}
                     </a>
-                  );
+                  )}</div>;
                 })}
               </div>
             </li>

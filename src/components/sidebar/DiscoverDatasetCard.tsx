@@ -1,5 +1,7 @@
 "use client";
 
+import { SaveButton } from "@/components/SourcePrefControls";
+import { ckanRef } from "@/lib/sourceRef";
 import type { DataGovDataset } from "@/lib/tauri";
 import { firstCsvResource } from "@/lib/openDataCatalog";
 import { dataGovResourceSaveable, exploreFilename } from "./shared";
@@ -33,11 +35,14 @@ export function DiscoverDatasetCard({
 
   return (
     <div className={`border border-loom-border rounded-md p-3 space-y-2.5 bg-loom-surface/40 ${expanded ? "flex flex-col min-w-0" : ""}`}>
-      <div className="min-w-0 flex-1">
+      <div className="flex items-start gap-3"><div className="min-w-0 flex-1">
         {ds.organization && (
           <p className="text-2xs text-loom-muted truncate mb-0.5" title={ds.organization}>{ds.organization}</p>
         )}
         <p className="text-sm font-medium text-loom-text leading-snug line-clamp-2">{ds.title}</p>
+      </div>
+
+      <SaveButton sourceRef={ckanRef(ds.portal_id, ds.id)} label={ds.title} asset={{ ref: ckanRef(ds.portal_id, ds.id), name: ds.title, url: csv?.url, credit: ds.organization }} />
       </div>
 
       {isWeb && csv ? (

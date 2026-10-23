@@ -20,6 +20,7 @@ import {
   type CommandPaletteCatalogHit,
   type CommandPaletteMatch,
 } from "@/lib/commandPalette";
+import { toggleChartFocus } from "@/lib/chartFocus";
 import {
   createChartRec,
   fitEncodingToKind,
@@ -206,6 +207,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
       }
       if (id === "chrome:panel") {
         store.togglePanel();
+        onClose();
+        return;
+      }
+      if (id === "chrome:focus") {
+        if (!toggleChartFocus()) store.setToast("Open a chart to go full screen");
         onClose();
         return;
       }

@@ -29,6 +29,7 @@ export type CommandPaletteActionId =
   | "chrome:shortcuts"
   | "chrome:sidebar"
   | "chrome:panel"
+  | "chrome:focus"
   | "preview:schema"
   | "preview:preview"
   | "query:nl"
@@ -166,6 +167,13 @@ const STATIC_ITEMS: CommandPaletteItem[] = [
     hint: "Encoding · looks · export",
     keywords: ["panel", "detail", "encoding", "toggle panel"],
     weight: 4,
+  },
+  {
+    id: "chrome:focus",
+    label: "Full screen chart",
+    hint: "Just the chart · F · Esc to leave",
+    keywords: ["full screen", "fullscreen", "focus", "zen", "present", "focus chart"],
+    weight: 7,
   },
   {
     id: "preview:schema",
@@ -528,7 +536,7 @@ export function shouldSearchOpenDataCatalog(query: string): boolean {
   const q = normalize(stripFiller(query.trim()));
   if (q.length < 3) return false;
   // Skip pure command / chart-kind / analysis talk
-  if (/^(share|schema|settings|shortcuts|preview|explorer|chart|query|dive|sidebar|panel)\b/.test(q)) {
+  if (/^(share|schema|settings|shortcuts|preview|explorer|chart|query|dive|sidebar|panel|fullscreen|full screen|focus)\b/.test(q)) {
     return false;
   }
   if (/^(ask|sql)\b/.test(q)) return false;

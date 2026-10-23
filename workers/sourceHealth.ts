@@ -2,10 +2,13 @@
 // Loom — live feed health (Worker side)
 // =================================================================
 // Every real upstream attempt for /api/source/<kind> reports an outcome.
-// State lives in KV (`srch:<kind>`) but is only written when a feed flips
-// between working and failing, or every WRITE_EVERY_MS while steady — KV
-// writes stay ~proportional to incidents, not traffic. /api/health turns
-// the records into ok / degraded / resting for the app and the nightly probe.
+// All feeds share one KV record (`srch:_all`). It is written when a feed
+// flips between working and failing, when a second failure in a row is
+// recorded (so other locations can classify "resting"), or every
+// WRITE_EVERY_MS while steady. Parallel updates in one isolate are folded
+// into that single write. The free KV plan allows 1,000 writes and
+// 100,000 reads a day, so /api/health is one read, not one per feed.
+// /api/health turns the records into ok / degraded / resting.
 // =================================================================
 
 export interface SourceHealthRecord {
@@ -31,14 +34,12 @@ export type SourceOutcome =
   | { ok: true; rows: number | null }
   | { ok: false; error: string };
 
-export const WRITE_EVERY_MS = 30 * 60_000;
+export const WRITE_EVERY_MS = 6 * 3_600_000;
 /** Failing continuously for this long (repeated failures) → hide the feed ("resting"). */
 export const RESTING_AFTER_MS = 3 * 3_600_000;
-const KEY_PREFIX = "srch:";
-
-export function healthKey(kind: string): string {
-  return KEY_PREFIX + kind;
-}
+/** One KV key for every feed. Per-feed keys made /api/health a read per kind. */
+export const SOURCE_HEALTH_KEY = "srch:_all";
+const INDEX_TTL_SECS = 30 * 86_400;
 
 /** Fold one outcome into a record; `persist` says whether KV needs the write. */
 export function nextSourceHealth(
@@ -57,7 +58,9 @@ export function nextSourceHealth(
         failingSince: base.streak > 0 ? (base.failingSince ?? now) : now,
       };
   const flipped = !prev || (outcome.ok ? prev.streak > 0 : prev.streak === 0);
-  const persist = flipped || now - base.written >= WRITE_EVERY_MS;
+  const prevStreak = prev?.streak ?? 0;
+  const crossedRestingStreak = !outcome.ok && prevStreak < 2 && prevStreak + 1 >= 2;
+  const persist = flipped || crossedRestingStreak || now - base.written >= WRITE_EVERY_MS;
   if (persist) record.written = now;
   return { record, persist };
 }
@@ -72,12 +75,63 @@ export function classifySourceHealth(rec: SourceHealthRecord | null, now: number
   return rec.streak >= 2 && longDown ? "resting" : "degraded";
 }
 
-// Per-isolate memory so steady traffic needs no KV read per fetch.
-const memo = new Map<string, SourceHealthRecord>();
+type HealthIndex = Record<string, SourceHealthRecord>;
 
 interface Kv {
   get(key: string, type: "json"): Promise<unknown>;
   put(key: string, value: string, opts?: { expirationTtl?: number }): Promise<void>;
+}
+
+// Per-isolate copy so steady traffic needs no KV read per fetch.
+let memo: HealthIndex | null = null;
+let loading: Promise<void> | null = null;
+let dirty = false;
+let flushing: Promise<void> | null = null;
+
+export function resetSourceHealthCache(): void {
+  memo = null;
+  loading = null;
+  dirty = false;
+  flushing = null;
+}
+
+function isIndex(value: unknown): value is HealthIndex {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+async function ensureLoaded(kv: Kv): Promise<HealthIndex> {
+  if (memo) return memo;
+  if (!loading) {
+    loading = (async () => {
+      const raw = await kv.get(SOURCE_HEALTH_KEY, "json");
+      if (!memo) memo = isIndex(raw) ? raw : {};
+    })().finally(() => {
+      loading = null;
+    });
+  }
+  await loading;
+  return memo ?? {};
+}
+
+function mergeIndex(remote: unknown, local: HealthIndex): HealthIndex {
+  const out: HealthIndex = isIndex(remote) ? { ...remote } : {};
+  for (const [kind, rec] of Object.entries(local)) {
+    if (!rec || typeof rec.streak !== "number") continue;
+    const other = out[kind];
+    if (!other || rec.written >= other.written) out[kind] = rec;
+  }
+  return out;
+}
+
+async function flush(kv: Kv): Promise<void> {
+  // Let other outcomes in this turn join the same write.
+  await Promise.resolve();
+  while (dirty && memo) {
+    dirty = false;
+    const merged = mergeIndex(await kv.get(SOURCE_HEALTH_KEY, "json"), memo);
+    memo = merged;
+    await kv.put(SOURCE_HEALTH_KEY, JSON.stringify(merged), { expirationTtl: INDEX_TTL_SECS });
+  }
 }
 
 export async function noteSourceOutcome(
@@ -88,12 +142,17 @@ export async function noteSourceOutcome(
 ): Promise<void> {
   if (!kv) return;
   try {
-    let prev = memo.get(kind) ?? null;
-    if (!prev) prev = ((await kv.get(healthKey(kind), "json")) as SourceHealthRecord | null) ?? null;
-    const { record, persist } = nextSourceHealth(prev, outcome, now);
-    memo.set(kind, record);
-    // 30-day expiry: a feed nobody requests for a month simply reads as "unknown".
-    if (persist) await kv.put(healthKey(kind), JSON.stringify(record), { expirationTtl: 30 * 86_400 });
+    const index = await ensureLoaded(kv);
+    const { record, persist } = nextSourceHealth(index[kind] ?? null, outcome, now);
+    index[kind] = record;
+    if (!persist) return;
+    dirty = true;
+    if (!flushing) {
+      flushing = flush(kv).finally(() => {
+        flushing = null;
+      });
+    }
+    await flushing;
   } catch {
     /* health is best-effort — never break the feed response */
   }
@@ -104,14 +163,19 @@ export async function readSourceHealth(
   kinds: string[],
   now = Date.now(),
 ): Promise<Record<string, { state: SourceHealthState } & Partial<SourceHealthRecord>>> {
+  let index: HealthIndex = memo ?? {};
+  if (!memo && kv) {
+    try {
+      index = await ensureLoaded(kv);
+    } catch {
+      index = {};
+    }
+  }
   const out: Record<string, { state: SourceHealthState } & Partial<SourceHealthRecord>> = {};
-  await Promise.all(
-    kinds.map(async (kind) => {
-      let rec = memo.get(kind) ?? null;
-      if (!rec && kv) rec = ((await kv.get(healthKey(kind), "json").catch(() => null)) as SourceHealthRecord | null) ?? null;
-      const { written: _w, ...rest } = rec ?? ({ streak: 0, written: 0 } as SourceHealthRecord);
-      out[kind] = rec ? { state: classifySourceHealth(rec, now), ...rest } : { state: "unknown" };
-    }),
-  );
+  for (const kind of kinds) {
+    const rec = index[kind] ?? null;
+    const { written: _w, ...rest } = rec ?? ({ streak: 0, written: 0 } as SourceHealthRecord);
+    out[kind] = rec ? { state: classifySourceHealth(rec, now), ...rest } : { state: "unknown" };
+  }
   return out;
 }

@@ -56,6 +56,10 @@ export function isLiveDivePath(path: string | null | undefined): boolean {
 
 /** Load as many rows as is reasonable for `path`; `fallback` is the current in-store sample. */
 export async function loadDiveDataset(path: string, fallback: QueryResult | null): Promise<DiveDataset> {
+  if (path.startsWith("combination://")) {
+    if (!fallback) throw new Error("Reopen the combination from the Data library.");
+    return { data: fromQuery(fallback), totalRows: fallback.total_rows, sampled: false, live: false, table: "loom_active" };
+  }
   const desktop = isDesktop();
   if (path === "stream://wiki") {
     if (desktop) {

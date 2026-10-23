@@ -19,8 +19,20 @@ import {
   type SourceReaction,
 } from "@/lib/sourcePreferences";
 
-const REACTION_LABEL: Record<SourceReaction, string> = { love: "♥ Loved", less: "👎 Less", hide: "Hidden" };
-const REACTION_CLEAR: Record<SourceReaction, string> = { love: "Unlove", less: "Undo less", hide: "Unhide" };
+const REACTION_LABEL: Record<SourceReaction, string> = {
+  love: "♥ Loved",
+  spark: "✦ Marked",
+  ask: "? Curious",
+  less: "👎 Less",
+  hide: "Hidden",
+};
+const REACTION_CLEAR: Record<SourceReaction, string> = {
+  love: "Unlove",
+  spark: "Unmark",
+  ask: "Undo curious",
+  less: "Undo less",
+  hide: "Unhide",
+};
 
 function labelFor(ref: SourceRef): string {
   const entry = catalogEntryFor(ref);

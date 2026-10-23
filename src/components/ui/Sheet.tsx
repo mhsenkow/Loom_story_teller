@@ -98,8 +98,8 @@ export function Sheet({
         {...(ariaLabel ? { "aria-label": ariaLabel } : {})}
         className={`fixed flex flex-col bg-loom-surface border-loom-border shadow-loom-lg outline-none ${
           isLeft
-            ? "inset-y-0 left-0 z-40 w-[min(100vw-2.5rem,20rem)] border-r max-h-dvh"
-            : "inset-x-0 bottom-0 z-40 w-full border-t rounded-t-2xl max-h-[min(88dvh,44rem)] animate-slide-up"
+            ? "inset-y-0 left-0 z-40 w-[min(100vw-2.5rem,20rem)] border-r max-h-dvh animate-drawer"
+            : "inset-x-0 bottom-0 z-40 w-full border-t rounded-t-2xl max-h-[min(88dvh,44rem)] animate-sheet"
         } ${panelClassName}`}
         style={{
           zIndex,

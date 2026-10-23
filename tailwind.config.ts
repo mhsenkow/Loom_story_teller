@@ -53,23 +53,34 @@ const config: Config = {
         "loom": "var(--shadow-1)",
         "loom-lg": "var(--shadow-2)",
       },
+      // Motion tokens live in globals.css (`--motion-*`, `--ease-*`) so every
+      // stock `transition-*` / `ease-out` utility moves on Loom's curves.
+      transitionTimingFunction: {
+        DEFAULT: "var(--ease-standard)",
+        out: "var(--ease-standard)",
+        in: "var(--ease-exit)",
+        enter: "var(--ease-enter)",
+        exit: "var(--ease-exit)",
+        spring: "var(--ease-spring)",
+      },
+      transitionDuration: {
+        DEFAULT: "var(--motion-quick)",
+      },
       animation: {
-        "pulse-subtle": "pulse-subtle 2s ease-in-out infinite",
-        "fade-in": "fade-in 0.2s ease-out",
-        "slide-up": "slide-up 0.3s ease-out",
+        "pulse-subtle": "pulse-subtle 2.4s var(--ease-ambient) infinite",
+        "fade-in": "loom-fade-in var(--motion-standard) var(--ease-standard) backwards",
+        enter: "loom-rise-in var(--motion-slow) var(--ease-enter) backwards",
+        "slide-up": "loom-rise-in var(--motion-gentle) var(--ease-enter) backwards",
+        "slide-out": "loom-rise-out var(--motion-quick) var(--ease-exit) forwards",
+        pop: "loom-pop-in var(--motion-gentle) var(--ease-enter) backwards",
+        sheet: "loom-sheet-in var(--motion-gentle) var(--ease-enter) backwards",
+        drawer: "loom-drawer-in var(--motion-gentle) var(--ease-enter) backwards",
+        panel: "loom-panel-in var(--motion-gentle) var(--ease-enter) backwards",
       },
       keyframes: {
         "pulse-subtle": {
           "0%, 100%": { opacity: "1" },
           "50%": { opacity: "0.7" },
-        },
-        "fade-in": {
-          "0%": { opacity: "0" },
-          "100%": { opacity: "1" },
-        },
-        "slide-up": {
-          "0%": { opacity: "0", transform: "translateY(8px)" },
-          "100%": { opacity: "1", transform: "translateY(0)" },
         },
       },
     },

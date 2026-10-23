@@ -16,6 +16,7 @@ describe("searchCommandPalette", () => {
   it("matches short keywords", () => {
     expect(searchCommandPalette("share")[0]?.id).toBe("chrome:share");
     expect(searchCommandPalette("schema")[0]?.id).toBe("preview:schema");
+    expect(searchCommandPalette("full screen")[0]?.id).toBe("chrome:focus");
   });
 
   it("matches polite sentences to views", () => {

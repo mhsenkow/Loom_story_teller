@@ -1,3 +1,5 @@
+import { DATA_LIBRARY_KEY, parseDataLibrary, pinnedLibraryPaths } from "./dataLibrary";
+import { parseSourcePreferences } from "./sourcePreferences";
 // =================================================================
 // Loom — Durable web upload store (IndexedDB)
 // =================================================================
@@ -113,6 +115,10 @@ function idbReq<T>(req: IDBRequest<T>): Promise<T> {
 }
 
 async function evictOldestEntries(store: IDBObjectStore, keepPath: string): Promise<void> {
+  let pinned = new Set<string>();
+  try {
+    pinned = pinnedLibraryPaths(parseDataLibrary(JSON.parse(localStorage.getItem(DATA_LIBRARY_KEY) ?? 'null')), parseSourcePreferences(JSON.parse(localStorage.getItem('loom-source-preferences') ?? 'null')));
+  } catch { /* Storage unavailable: retain the normal LRU policy. */ }
   const count = await idbReq(store.count());
   if (count <= MAX_ENTRIES) return;
   const toDrop = count - MAX_ENTRIES;
@@ -128,7 +134,7 @@ async function evictOldestEntries(store: IDBObjectStore, keepPath: string): Prom
         return;
       }
       const row = cursor.value as WebFilePersist;
-      if (row.path !== keepPath) {
+      if (row.path !== keepPath && !pinned.has(row.path)) {
         cursor.delete();
         dropped += 1;
       }

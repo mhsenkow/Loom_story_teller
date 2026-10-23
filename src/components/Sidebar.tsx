@@ -71,7 +71,6 @@ export function Sidebar() {
     sidebarOpen,
     sidebarOverlays,
     sidebarPanelRef,
-    toggleSidebar,
     urlImport,
     webVaultFileCount,
   } = useSidebarController();
@@ -109,8 +108,8 @@ export function Sidebar() {
           paddingTop: sidebarOverlays ? "var(--safe-top)" : undefined,
         }}
       >
-      {/* Header */}
-      <div className="flex items-center gap-2.5 px-4 h-[var(--topbar-height)] border-b border-loom-border flex-shrink-0 bg-loom-surface/95">
+      {/* The library has its own unified masthead. */}
+      {!dataRegionOpen && <div className="flex items-center gap-2.5 px-4 h-[var(--topbar-height)] border-b border-loom-border flex-shrink-0 bg-loom-surface/95">
         <div className="w-2 h-2 rounded-full bg-loom-accent shadow-[0_0_0_3px] shadow-loom-accent/20 animate-pulse-subtle" />
         <span className="text-sm font-semibold text-loom-text tracking-tight flex-1">Loom</span>
         <button
@@ -137,10 +136,11 @@ export function Sidebar() {
         >
           ×
         </button>
-      </div>
+      </div>}
 
       {dataRegionOpen ? (
         <DataRegionView
+          onClose={closeDrawer}
           onBack={() => { setDataRegionOpen(false); setDataSourcesExpanded(false); }}
           expanded={dataSourcesExpanded}
           onExpand={() => setDataSourcesExpanded(true)}
@@ -181,7 +181,7 @@ export function Sidebar() {
           inspectingFilePath={inspectingFilePath}
           onPickFolder={handlePickFolder}
           onSelectFile={handleSelectFile}
-          onOpenDataRegion={() => setDataRegionOpen(true)}
+          onOpenDataRegion={() => { setDataRegionOpen(true); setDataSourcesExpanded(true); }}
           formatNumber={formatNumber}
           isWeb={isWebEnv}
           onLoadFiles={handleLoadFiles}

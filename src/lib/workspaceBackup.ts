@@ -1,3 +1,4 @@
+import { parseDataLibrary, emptyDataLibrary, type DataLibrary } from "./dataLibrary";
 // =================================================================
 // workspaceBackup — versioned, validated workspace bundle (LOOM-659)
 // =================================================================
@@ -47,6 +48,7 @@ export interface WorkspaceSnippet {
 }
 
 export interface WorkspaceBundleContent {
+  dataLibrary?: DataLibrary;
   customChartLooks?: CustomChartLook[];
   tableViews: TableViewItem[];
   chartViews: ChartViewItem[];
@@ -79,6 +81,7 @@ export type WorkspaceParseResult =
   | { ok: false; code: "empty" | "too-large" | "not-json" | "not-loom" | "future-version" | "invalid"; message: string };
 
 export interface WorkspaceExportScope {
+  dataLibrary?: boolean;
   customChartLooks?: boolean;
   tableViews: boolean;
   chartViews: boolean;
@@ -92,6 +95,7 @@ export interface WorkspaceExportScope {
 }
 
 export const DEFAULT_EXPORT_SCOPE: WorkspaceExportScope = {
+  dataLibrary: true,
   customChartLooks: true,
   tableViews: true,
   chartViews: true,
@@ -104,7 +108,7 @@ export const DEFAULT_EXPORT_SCOPE: WorkspaceExportScope = {
 };
 
 export const WORKSPACE_PRIVACY_NOTE =
-  "Contains view names, SQL, column names, filters and dataset file names. Dataset rows are not included (chart thumbnails only if you opt in, and they can show data).";
+  "Contains view names, SQL, column names, filters, dataset file names, source URLs and combination recipes. Dataset rows are not included (chart thumbnails only if you opt in, and they can show data).";
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === "object" && !Array.isArray(v);
@@ -160,6 +164,8 @@ function parsePrefsByPath(raw: unknown): Record<string, WorkspaceTablePrefs> {
 
 function collectDatasetRefs(c: WorkspaceBundleContent): { path: string; name: string }[] {
   const map = new Map<string, string>();
+  const assets = [...(c.dataLibrary?.assets ?? []), ...(c.dataLibrary?.combinations.flatMap(r => [r.left, r.right]) ?? [])];
+  for (const a of assets) if (a.file && !a.url) map.set(a.file.path, a.file.name);
   for (const v of c.chartViews) map.set(v.filePath, v.fileName);
   for (const p of Object.keys(c.tablePrefsByPath)) if (!map.has(p)) map.set(p, p.split("/").pop() || p);
   return [...map].map(([path, name]) => ({ path, name })).sort((a, b) => a.path.localeCompare(b.path));
@@ -171,6 +177,7 @@ export function buildWorkspaceBundle(
   now: Date = new Date(),
 ): WorkspaceBundle {
   const content: WorkspaceBundleContent = {
+    dataLibrary: scope.dataLibrary === false ? emptyDataLibrary() : parseDataLibrary(input.dataLibrary),
     customChartLooks: scope.customChartLooks === false ? [] : parseCustomChartLooks(input.customChartLooks),
     tableViews: scope.tableViews
       ? (input.tableViews ?? []).map((v) => ({
@@ -200,6 +207,7 @@ export function buildWorkspaceBundle(
     version: WORKSPACE_BUNDLE_VERSION,
     createdAt: now.toISOString(),
     counts: {
+      dataLibrary: (content.dataLibrary?.assets.length ?? 0) + (content.dataLibrary?.combinations.length ?? 0),
       customChartLooks: content.customChartLooks?.length ?? 0,
       tableViews: content.tableViews.length,
       chartViews: content.chartViews.length,
@@ -257,6 +265,7 @@ export function parseWorkspaceBundle(text: string): WorkspaceParseResult {
   }
   const c = raw.content;
   const content: WorkspaceBundleContent = {
+    dataLibrary: parseDataLibrary(c.dataLibrary),
     customChartLooks: parseCustomChartLooks(c.customChartLooks),
     tableViews: parseTableViews(c.tableViews),
     chartViews: parsePersistedChartViews(c.chartViews),
@@ -267,6 +276,7 @@ export function parseWorkspaceBundle(text: string): WorkspaceParseResult {
     sourcePrefs: explicitOnly(parseSourcePreferences(c.sourcePrefs)),
   };
   const total =
+    (content.dataLibrary?.assets.length ?? 0) + (content.dataLibrary?.combinations.length ?? 0) +
     (content.customChartLooks?.length ?? 0) +
     content.tableViews.length +
     content.chartViews.length +
@@ -324,8 +334,21 @@ export function mergeWorkspaceBundle(
   const prefs = { ...incoming.tablePrefsByPath, ...current.tablePrefsByPath };
   const prefsAdded = Object.keys(prefs).length - Object.keys(current.tablePrefsByPath).length;
   const sources = mergeSourcePreferences(current.sourcePrefs ?? emptySourcePreferences(), incoming.sourcePrefs ?? emptySourcePreferences());
+  const currentLibrary = parseDataLibrary(current.dataLibrary);
+  const incomingLibrary = parseDataLibrary(incoming.dataLibrary);
+  const combinations = mergeById(currentLibrary.combinations, incomingLibrary.combinations, 100);
+  const collections = mergeById(currentLibrary.collections, incomingLibrary.collections, 40);
+  const existingRefs = new Set(currentLibrary.assets.map(a => a.ref));
+  const assets = [...currentLibrary.assets, ...incomingLibrary.assets.filter(a => !existingRefs.has(a.ref))].slice(0, 500);
+  const libraryAdded = combinations.added + collections.added + assets.length - currentLibrary.assets.length;
   return {
     merged: {
+      dataLibrary: {
+        assets,
+        combinations: combinations.list,
+        collections: collections.list,
+        foldedBookmarks: currentLibrary.foldedBookmarks || incomingLibrary.foldedBookmarks,
+      },
       customChartLooks: looks.list,
       tableViews: t.list,
       chartViews: c.list,
@@ -336,6 +359,7 @@ export function mergeWorkspaceBundle(
       sourcePrefs: sources.merged,
     },
     added: {
+      dataLibrary: libraryAdded,
       customChartLooks: looks.added,
       tableViews: t.added,
       chartViews: c.added,
@@ -346,6 +370,7 @@ export function mergeWorkspaceBundle(
       sourcePrefs: sources.added,
     },
     skipped: {
+      dataLibrary: incomingLibrary.assets.length + incomingLibrary.combinations.length - libraryAdded,
       customChartLooks: incomingLooks.length - looks.added,
       tableViews: t.skipped,
       chartViews: c.skipped,

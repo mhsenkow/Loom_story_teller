@@ -4,13 +4,17 @@
 // SourcePrefControls — ♥ Love / 🔖 Save buttons + Less / Hide overflow
 // =================================================================
 // Shared by sidebar feed cards, curated packs and Discover story cards.
-// Buttons are always visible (no hover-only controls) with phone-sized
-// targets. The overflow panel covers its card (`absolute inset-0` in the
-// nearest positioned ancestor) so it is never clipped by `overflow: hidden`.
+// On discovery cards the cluster rests in a light quaternary state and
+// comes forward on hover. Elsewhere the buttons stay visible. The overflow
+// panel covers its card (`absolute inset-0` in the nearest positioned
+// ancestor) unless the card CSS anchors it to the action cluster.
 // =================================================================
 
 import { useEffect, useId, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
+import { assetForFile, type LibraryAsset } from "@/lib/dataLibrary";
+import { collectionAlive, holdingCollection, spanLabel } from "@/lib/collections";
+import { refForPath } from "@/lib/sourceRef";
 import type { SourceRef } from "@/lib/sourceRef";
 import type { SourcePrefEntry } from "@/lib/sourcePreferences";
 
@@ -44,19 +48,40 @@ export function LoveButton({ sourceRef, label, className = "" }: { sourceRef: So
   );
 }
 
-export function SaveButton({ sourceRef, label, className = "" }: { sourceRef: SourceRef; label: string; className?: string }) {
-  const entry = useSourcePref(sourceRef);
-  const toggleSavedSource = useLoomStore((s) => s.toggleSavedSource);
-  const on = entry.saved === true;
+export function SaveButton({ sourceRef, label, asset, className = "" }: { sourceRef: SourceRef; label: string; asset?: LibraryAsset; className?: string }) {
+  const collections = useLoomStore((s) => s.dataLibrary.collections);
+  const on = !!holdingCollection(collections, sourceRef);
   return (
     <button
       type="button"
       aria-pressed={on}
-      aria-label={on ? `Saved ${label} — tap to remove` : `Save ${label}`}
-      title={on ? "Saved — listed under Saved" : "Save for later"}
+      aria-label={on ? `In a collection — ${label}` : `Collect ${label}`}
+      title={on ? "In a collection — it leaves if you don’t come back" : "Add to a collection"}
       onClick={(e) => {
         e.stopPropagation();
-        toggleSavedSource(sourceRef);
+        const state = useLoomStore.getState();
+        const living = state.dataLibrary.collections.filter((c) => collectionAlive(c));
+        const holding = living.filter((c) => c.pieces.some((p) => p.kind === "data" && p.ref === sourceRef));
+        if (holding.length) {
+          for (const c of holding) state.removeCollectionPiece(c.id, `data:${sourceRef}`);
+          state.setToast(`Removed ${label} from its collection.`);
+          return;
+        }
+        const file = [state.selectedFile, ...state.files, ...state.recentFiles].find(f => f && refForPath(f.path, f) === sourceRef);
+        if (asset || file) state.rememberLibraryAsset(asset ?? assetForFile(file!));
+        const piece = { kind: "data" as const, ref: sourceRef, name: label };
+        const latest = [...living].sort((a, b) => b.touchedAt - a.touchedAt)[0];
+        if (latest) {
+          state.addCollectionPiece(latest.id, piece);
+          state.setToast(
+            latest.span === 0
+              ? `${label} joined “${latest.intent}”. That collection keeps going.`
+              : `${label} joined “${latest.intent}” for ${spanLabel(latest.span)} from today.`,
+          );
+        } else {
+          state.createCollection({ intent: label, span: 3, pieces: [piece] });
+          state.setToast(`${label} is a collection for 3 months. Open Collections to add a chart or keep it longer.`);
+        }
       }}
       className={`${ICON_BTN} ${on ? "border-loom-accent bg-loom-accent/15 text-loom-accent" : "border-loom-border text-loom-muted hover:text-loom-text hover:bg-loom-elevated"} ${className}`}
     >
@@ -67,7 +92,7 @@ export function SaveButton({ sourceRef, label, className = "" }: { sourceRef: So
   );
 }
 
-export type SourcePrefAction = "love" | "less" | "hide" | "save";
+export type SourcePrefAction = "love" | "spark" | "ask" | "less" | "hide" | "save";
 
 /**
  * "⋯" trigger + an actions panel that covers the nearest positioned ancestor.
@@ -116,6 +141,14 @@ export function SourcePrefMenu({
       case "love": {
         const on = entry.reaction === "love";
         return { key, on, text: on ? "Loved ♥ — undo" : "Love this source", run: () => reactToSource(sourceRef, on ? null : "love") };
+      }
+      case "spark": {
+        const on = entry.reaction === "spark";
+        return { key, on, text: on ? "Marked ✦ — undo" : "Mark ✦", run: () => reactToSource(sourceRef, on ? null : "spark") };
+      }
+      case "ask": {
+        const on = entry.reaction === "ask";
+        return { key, on, text: on ? "Curious ? — undo" : "Curious ?", run: () => reactToSource(sourceRef, on ? null : "ask") };
       }
       case "less": {
         const on = entry.reaction === "less";

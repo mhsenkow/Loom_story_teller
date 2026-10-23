@@ -1,3 +1,4 @@
+import { createDataLibrarySlice } from "./dataLibrarySlice";
 // =================================================================
 // Loom — Global State (Zustand) — slice composition (LOOM-552)
 // =================================================================
@@ -17,6 +18,7 @@ import { createMonitorSlice } from "./monitorSlice";
 export const useLoomStore = create<LoomState>((set, get) => ({
   ...(initialState as unknown as LoomState),
   ...createCoreSlice(set, get, initialState),
+  ...createDataLibrarySlice(set),
   ...createChartSlice(set, get),
   ...createQuerySlice(set),
   ...createTableSlice(set),

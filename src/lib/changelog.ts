@@ -25,6 +25,18 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-23a-library",
+    date: "2026-10-23",
+    title: "A home for your data",
+    items: [
+      { title: "One data library", detail: "Find your uploads and saved combinations in one place. Collections hold datasets and charts together for a reason. Start one even before you name it. Search and filter collections and My data the same way as Discover — by topic, place, and how the data is kept. They leave if you don’t touch them — after 3, 6, or 9 months — or they can keep going. Hearts, marks, and curious notes stay as filters." },
+      { title: "Keep useful datasets", detail: "Bookmark files, feeds and public catalog results. Bookmarked uploads and files used by combinations are protected from routine local cache cleanup." },
+      { title: "Combine two sources", detail: "Match a primary dataset to a lookup table, check matched and unmatched rows, then save the recipe. Reopen it to rebuild from available source rows. Your chart keeps the result from the time you opened it." },
+      { title: "Smoother everywhere", detail: "Buttons give a little when pressed, panels and sheets glide in from where they live, new chart ideas arrive in a short cascade, and switching charts settles the new one onto the stage. Segmented controls slide to the choice you press. Reduce motion in Settings still turns all of it off." },
+      { title: "Just the chart", detail: "Full screen (F, or the corners button beside Share) slides the sidebar, panels, and bars away so the chart has the screen. Esc brings them back. Charts that animate in now grow up from the baseline." },
+    ],
+  },
+  {
     id: "2026-10-22a",
     date: "2026-10-22",
     title: "Share anywhere",

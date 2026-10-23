@@ -156,6 +156,10 @@ export function QueryView() {
     }
   }, [selectedFile, localSql, validation.valid, validation.error, setIsQuerying, setQueryError, setQuerySql, setQueryResult, appendQueryHistory, setToast]);
 
+  if (selectedFile?.path.startsWith('combination://')) {
+    return <div className="flex flex-col items-center justify-center h-full p-6 gap-4 text-center"><h2 className="text-lg font-semibold">Explore your combined result</h2><p className="text-sm text-loom-muted max-w-md">Combinations currently support tables, charts, and Dive. To query this result with SQL, export it as CSV and open the file in the desktop app.</p><button type="button" className="loom-btn-primary min-h-11" onClick={() => useLoomStore.getState().setViewMode('explorer')}>Back to the table</button></div>;
+  }
+
   if (!selectedFile) {
     return (
       <StartHere
@@ -165,7 +169,7 @@ export function QueryView() {
   }
 
   return (
-    <div className="flex flex-col h-full animate-fade-in">
+    <div className="flex flex-col h-full animate-enter">
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {queryStatusMessage}
       </p>

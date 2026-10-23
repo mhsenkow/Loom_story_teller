@@ -4,8 +4,9 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
+import { MOTION_MS } from "@/lib/motion";
 
 export function Toast() {
   const toastMessage = useLoomStore((s) => s.toastMessage);
@@ -17,24 +18,40 @@ export function Toast() {
   const undoChartEdit = useLoomStore((s) => s.undoChartEdit);
   const clearDashboardUndo = useLoomStore((s) => s.clearDashboardUndo);
   const [paused, setPaused] = useState(false);
+  const [leaving, setLeaving] = useState(false);
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const canUndoDashboard = toastShowUndo && !!dashboardUndoSnapshot;
   const canUndoChart = chartEditUndoStack.length > 0;
 
   useEffect(() => {
     setPaused(false);
+    setLeaving(false);
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
   }, [toastMessage]);
+
+  useEffect(() => () => {
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+  }, []);
+
+  const leave = useCallback((after: () => void) => {
+    setLeaving(true);
+    if (leaveTimer.current) clearTimeout(leaveTimer.current);
+    leaveTimer.current = setTimeout(after, MOTION_MS.quick);
+  }, []);
 
   useEffect(() => {
     if (!toastMessage || paused) return;
     const extra = canUndoDashboard || canUndoChart ? 4000 : 0;
     const ms = Math.max(5000, Math.min(12000, 3000 + toastMessage.length * 40 + extra));
     const t = setTimeout(() => {
-      setToast(null);
-      clearDashboardUndo();
+      leave(() => {
+        setToast(null);
+        clearDashboardUndo();
+      });
     }, ms);
     return () => clearTimeout(t);
-  }, [toastMessage, setToast, paused, canUndoDashboard, canUndoChart, clearDashboardUndo]);
+  }, [toastMessage, setToast, paused, canUndoDashboard, canUndoChart, clearDashboardUndo, leave]);
 
   const onUndo = () => {
     if (canUndoDashboard) restoreDashboardUndo();
@@ -53,7 +70,7 @@ export function Toast() {
     >
       {toastMessage ? (
         <div
-          className="pointer-events-auto px-3.5 py-2.5 text-xs text-loom-text bg-loom-surface/95 backdrop-blur-md border border-loom-border rounded-lg shadow-loom-lg flex items-center justify-between gap-3 animate-slide-up"
+          className={`loom-toast pointer-events-auto px-3.5 py-2.5 text-xs text-loom-text bg-loom-surface/95 backdrop-blur-md border border-loom-border rounded-lg shadow-loom-lg flex items-center justify-between gap-3 ${leaving ? "animate-slide-out" : "animate-slide-up"}`}
           onMouseEnter={() => setPaused(true)}
           onMouseLeave={() => setPaused(false)}
           onFocus={() => setPaused(true)}
@@ -72,7 +89,7 @@ export function Toast() {
             ) : null}
             <button
               type="button"
-              onClick={() => setToast(null)}
+              onClick={() => leave(() => setToast(null))}
               className="flex-shrink-0 grid place-items-center size-7 rounded-md text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors"
               aria-label="Dismiss notification"
             >

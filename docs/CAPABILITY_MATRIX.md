@@ -16,7 +16,10 @@
 | On-screen charts | Canvas 2D + gated WebGPU | Same | Same | Same |
 | Vega-Lite | Spec + SVG export only | Same | Same | Same |
 | Public story link | Optional data upload | Same | Same | Same |
-| IndexedDB dataset cache | N/A | Yes (≤24 LRU) | Yes | Yes; private mode may block |
+| IndexedDB dataset cache | Used for in-memory remote imports | Yes (24-entry soft LRU; bookmarks and recipe inputs protected) | Same | Same; private mode may block |
+| Data library / bookmarks | Yes, local metadata | Same | Same | Same |
+| Two-source lookup combinations | Bounded TS join over inspected rows | Same, over web buffers / uploads | Same | Same |
+| Combination refresh | Rebuild on open; no continuous result refresh or SQL | Same | Same | Same |
 | Share sheet / export PNG | Native + web fallbacks | iOS share | Download / Web Share | Web Share when available |
 
 **Feature detection:** UI uses `isDesktop()`, `isTauri()`, `navigator.maxTouchPoints`, and explicit checks in `webFolderPick.ts` before showing unsupported controls.

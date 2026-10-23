@@ -17,6 +17,7 @@ import {
 } from "@/lib/chartViewport";
 import { useViewportWidth } from "@/lib/useMediaQuery";
 import { VIEW_MODES } from "@/lib/viewModes";
+import { toggleChartFocus } from "@/lib/chartFocus";
 
 
 const DEVICES: { id: ChartDeviceId; label: string; icon: "phone" | "tablet" | "desktop" | "auto" }[] = [
@@ -62,6 +63,7 @@ function DeviceIcon({ kind }: { kind: (typeof DEVICES)[number]["icon"] }) {
 export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
   const firingCount = useLoomStore((s) => s.monitorAlerts.filter((x) => !x.closedAt && !x.acknowledgedAt).length);
   const {
+    dataSourcesExpanded,
     viewMode,
     setViewMode,
     sidebarOpen,
@@ -152,7 +154,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           <button
             key={mode.key}
             type="button"
-            onClick={() => setViewMode(mode.key)}
+            onClick={() => { setViewMode(mode.key); if (dataSourcesExpanded) useLoomStore.getState().setDataSourcesExpanded(false); }}
             aria-current={viewMode === mode.key ? "page" : undefined}
             className="loom-seg-item min-h-9 sm:min-h-0 px-1.5 sm:px-3"
           >
@@ -169,7 +171,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       </nav>
 
       {/* Aspect / device framing — desktop & tablet authoring only (phones always fill) */}
-      {viewMode === "chart" && (
+      {viewMode === "chart" && !(dataSourcesExpanded && sidebarOpen) && (
         <>
           {/* Tablet widths: one native picker instead of a clipped strip of 7 buttons */}
           <label className="hidden md:flex xl:hidden items-center shrink-0">
@@ -261,6 +263,21 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
             {selectedFile.name}
           </span>
         </div>
+      )}
+
+      {viewMode === "chart" && !(dataSourcesExpanded && sidebarOpen) && (
+        <button
+          type="button"
+          onClick={() => { if (!toggleChartFocus()) setToast("Open a chart to go full screen"); }}
+          className="loom-btn-ghost min-h-10 min-w-10 flex items-center justify-center px-2 rounded-md shrink-0"
+          aria-label="Full screen chart"
+          title="Full screen chart (F)"
+          aria-keyshortcuts="f"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4" />
+          </svg>
+        </button>
       )}
 
       {viewMode === "chart" && (

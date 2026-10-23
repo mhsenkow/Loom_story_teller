@@ -393,6 +393,7 @@ export const LOOM_PREFERENCE_STORAGE_KEYS = [
   KEY_DASHBOARDS,
   KEY_VIZ_PREFERENCES,
   KEY_SOURCE_PREFERENCES,
+  "loom-data-library",
 ] as const;
 
 export function clearPersistedPreferences(): void {

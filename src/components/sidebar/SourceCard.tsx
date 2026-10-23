@@ -188,7 +188,7 @@ export function SourceCard({ def }: { def: SourceDef }) {
           </button>
         </div>
       )}
-      <div className="flex items-center justify-between gap-2 pl-4">
+      <div className="library-card-foot">
         {def.attribution ? (
           <a
             href={def.homepage}
@@ -198,11 +198,11 @@ export function SourceCard({ def }: { def: SourceDef }) {
           >
             {def.attribution}
           </a>
-        ) : <span />}
-        <div className="flex items-center gap-1 shrink-0">
+        ) : null}
+        <div className="library-card-actions">
           <LoveButton sourceRef={feedRef(def.kind)} label={def.label} />
           <SaveButton sourceRef={feedRef(def.kind)} label={def.label} />
-          <SourcePrefMenu sourceRef={feedRef(def.kind)} label={def.label} actions={["less", "hide"]} />
+          <SourcePrefMenu sourceRef={feedRef(def.kind)} label={def.label} actions={["spark", "ask", "less", "hide"]} />
         </div>
       </div>
     </div>

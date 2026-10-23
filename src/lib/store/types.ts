@@ -1,3 +1,4 @@
+import type { DataLibrarySlice } from "./dataLibrarySlice";
 // =================================================================
 // Loom Store — Shared Type Definitions (LOOM-552)
 // =================================================================
@@ -188,7 +189,7 @@ export interface PinnedMark {
   columns: string[];
 }
 
-export interface LoomState extends MonitorState {
+export interface LoomState extends MonitorState, DataLibrarySlice {
   // Folder
   mountedFolder: string | null;
   files: FileEntry[];
@@ -308,6 +309,8 @@ export interface LoomState extends MonitorState {
   exportSupersample: 1 | 2;
   socialPresetId: SocialPresetId;
   shareSheetOpen: boolean;
+  /** Chart fills the workspace; shell chrome slides away. Not persisted. */
+  chartFocus: boolean;
   whatsNewOpen: boolean;
   discoverReturnPath: string | null;
 
@@ -518,6 +521,7 @@ export interface LoomState extends MonitorState {
   setExportSupersample: (v: 1 | 2) => void;
   setSocialPresetId: (v: SocialPresetId) => void;
   setShareSheetOpen: (v: boolean) => void;
+  setChartFocus: (v: boolean) => void;
   setDiscoverReturnPath: (path: string | null) => void;
   setWhatsNewOpen: (v: boolean) => void;
   applyQuerySnapshot: (id: string) => void;

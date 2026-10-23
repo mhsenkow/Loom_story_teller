@@ -12,7 +12,10 @@ import { catalogEntryFor } from "./sourceCatalog";
 import { feedRef, isSourceRef, type FeedKind, type SourceRef } from "./sourceRef";
 import type { SourceTopic } from "./sourceRegistry";
 
-export type SourceReaction = "love" | "less" | "hide";
+export type SourceReaction = "love" | "spark" | "ask" | "less" | "hide";
+
+/** Marks you can filter on. They are not a collection. */
+export const MARK_REACTIONS = ["love", "spark", "ask"] as const;
 
 export interface SourcePrefEntry {
   reaction?: SourceReaction;
@@ -32,6 +35,8 @@ export interface SourcePreferences {
 export const SOURCE_AFFINITY_CLAMP = 20;
 /** Explicit reaction weights (affinity units ≈ Discover score points). */
 export const LOVE_BOOST = 10;
+export const SPARK_BOOST = 6;
+export const ASK_BOOST = 4;
 export const LESS_PENALTY = -8;
 export const SAVED_BOOST = 3;
 /** Implicit opens: +1 per (decayed) open, never more than this. */
@@ -47,7 +52,7 @@ const OPEN_HALF_LIFE_MS = 1000 * 60 * 60 * 24 * 30; // ~30 days
 /** Re-activating the same dataset within this window is one open, not many. */
 const OPEN_DEDUPE_MS = 10 * 60 * 1000;
 const MAX_ENTRIES = 400;
-const REACTIONS: readonly SourceReaction[] = ["love", "less", "hide"];
+const REACTIONS: readonly SourceReaction[] = ["love", "spark", "ask", "less", "hide"];
 
 export function emptySourcePreferences(): SourcePreferences {
   return { version: 1, entries: {} };
@@ -123,6 +128,12 @@ export function isSourceSaved(ref: SourceRef, prefs: SourcePreferences = cached)
   return prefs.entries[ref]?.saved === true;
 }
 
+/** Heart, spark, or curious — the filterable marks, separate from collections. */
+export function isSourceMarked(ref: SourceRef, prefs: SourcePreferences = cached): boolean {
+  const reaction = prefs.entries[ref]?.reaction;
+  return !!reaction && (MARK_REACTIONS as readonly string[]).includes(reaction);
+}
+
 export function isHidden(ref: SourceRef, prefs: SourcePreferences = cached): boolean {
   return prefs.entries[ref]?.reaction === "hide";
 }
@@ -164,6 +175,8 @@ export function sourceAffinity(ref: SourceRef, prefs: SourcePreferences = cached
   if (e?.reaction === "hide") return -SOURCE_AFFINITY_CLAMP;
   let score = 0;
   if (e?.reaction === "love") score += LOVE_BOOST;
+  if (e?.reaction === "spark") score += SPARK_BOOST;
+  if (e?.reaction === "ask") score += ASK_BOOST;
   if (e?.reaction === "less") score += LESS_PENALTY;
   if (e?.saved) score += SAVED_BOOST;
   score += Math.min(OPEN_CAP, openWeight(e, now));

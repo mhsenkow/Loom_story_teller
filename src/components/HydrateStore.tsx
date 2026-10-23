@@ -39,6 +39,7 @@ import {
   setPersistedSourcePreferences,
   KEY_SOURCE_PREFERENCES,
 } from "@/lib/persist";
+import { DATA_LIBRARY_KEY, parseDataLibrary } from "@/lib/dataLibrary";
 import { parseSourcePreferences } from "@/lib/sourcePreferences";
 import type { ViewMode } from "@/lib/store";
 import { parseLastSessionViewMode } from "@/lib/persistValidation";
@@ -109,6 +110,25 @@ export function HydrateStore() {
       unsubscribe();
       window.removeEventListener("storage", onStorage);
     };
+  }, []);
+
+  useEffect(() => {
+    let adopting = false;
+    const adopt = () => {
+      adopting = true;
+      try { useLoomStore.setState({ dataLibrary: parseDataLibrary(JSON.parse(localStorage.getItem(DATA_LIBRARY_KEY) ?? 'null')) }); }
+      catch { /* Preserve the current library if storage cannot be read. */ }
+      adopting = false;
+    };
+    adopt();
+    const unsubscribe = useLoomStore.subscribe((s, prev) => {
+      if (adopting || s.dataLibrary === prev.dataLibrary) return;
+      try { localStorage.setItem(DATA_LIBRARY_KEY, JSON.stringify({ v: 1, data: s.dataLibrary })); }
+      catch { notifyStorageFailure(); }
+    });
+    const onStorage = (e: StorageEvent) => { if (e.key === DATA_LIBRARY_KEY || e.key === null) adopt(); };
+    window.addEventListener('storage', onStorage);
+    return () => { unsubscribe(); window.removeEventListener('storage', onStorage); };
   }, []);
 
   const skipFirstPersist = useRef({

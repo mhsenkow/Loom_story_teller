@@ -654,7 +654,7 @@ export function ExplorerView() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden animate-fade-in">
+    <div className="flex flex-col h-full w-full overflow-hidden animate-enter">
       <Dialog open={!!cellDetail} onClose={() => setCellDetail(null)} ariaLabel="Cell value">
         {cellDetail && (
           <div className="p-4 max-w-lg">
@@ -993,7 +993,7 @@ export function ExplorerView() {
           return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5);
         })();
         return (
-          <div className="px-3 py-2 border-b border-loom-border bg-loom-surface/80 text-2xs space-y-1 animate-fade-in">
+          <div className="px-3 py-2 border-b border-loom-border bg-loom-surface/80 text-2xs space-y-1 animate-enter">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-loom-text truncate min-w-0" title={profilingCol}>{profilingCol} <span className="font-normal text-loom-muted">{stat?.data_type ?? ""}</span></span>
               <button type="button" onClick={() => setProfilingCol(null)} className="text-loom-muted hover:text-loom-text min-w-6 min-h-6 shrink-0" aria-label={`Close ${profilingCol} profile`}>×</button>

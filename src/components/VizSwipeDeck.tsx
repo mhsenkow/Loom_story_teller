@@ -14,6 +14,7 @@ import { ChartCard } from "@/components/ChartCard";
 import { getRecommendationReason } from "@/lib/recommendations";
 import { chartKindLabel } from "@/lib/chartKindSearch";
 import { eventCount } from "@/lib/vizPreferences";
+import { EASE, MOTION_MS } from "@/lib/motion";
 import type { ChartRecommendation } from "@/lib/recommendations";
 
 const SWIPE_THRESHOLD = 88;
@@ -179,9 +180,9 @@ export function VizSwipeDeck() {
   const transition =
     reducedMotion || dragging || exitDir
       ? exitDir && !reducedMotion
-        ? `transform ${EXIT_MS}ms ease-in`
+        ? `transform ${EXIT_MS}ms ${EASE.exit}`
         : undefined
-      : "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)";
+      : `transform ${MOTION_MS.gentle}ms ${EASE.spring}`;
 
   const subtitle =
     status === "scanning"

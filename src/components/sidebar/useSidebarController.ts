@@ -111,6 +111,8 @@ export function useSidebarController() {
   ) {
     if (opts?.importId != null && !isActiveWebImport(opts.importId)) return;
     const prev = useLoomStore.getState();
+    const bookmarked = entry.sourceUrl ? prev.dataLibrary.assets.find(a => a.url === entry.sourceUrl) : undefined;
+    if (bookmarked) prev.rememberLibraryAsset({ ...bookmarked, file: entry });
     const cache = opts?.replaceCache
       ? { [entry.path]: inspect }
       : { ...prev.webFileCache, [entry.path]: inspect };
@@ -288,6 +290,13 @@ export function useSidebarController() {
     setOpeningRecentPath(file.path);
     setToast(`Opening ${file.name}…`);
     try {
+    if (file.path.startsWith('combination://')) {
+      const recipe = useLoomStore.getState().dataLibrary.combinations.find(c => file.path === `combination://${c.id}`);
+      if (!recipe) { setToast('This combination was removed. Create a new one in the Data library.'); return; }
+      try { await (await import('@/lib/dataLibraryRuntime')).openCombination(recipe); }
+      catch (error) { setToast(error instanceof Error ? error.message : 'Could not refresh the combination.'); }
+      return;
+    }
     // Live stream / poll source — reconnect and snapshot into Chart.
     if (file.path.startsWith("stream://")) {
       const kind = file.path.replace(/^stream:\/\//, "") as SourceKind | "wiki";
@@ -386,7 +395,9 @@ export function useSidebarController() {
         return;
       }
       if (file.path.startsWith("mock://")) {
-        handleUseDemoData();
+        const result = await inspectFile(file.path);
+        activateDataset({ file, stats: result.stats, sample: result.sample });
+        addRecentFile(file);
         leaveSourcesShowChart();
         return;
       }
@@ -445,6 +456,7 @@ export function useSidebarController() {
       const result = cached ?? await inspectFile(file.path, 500);
       if (useLoomStore.getState().selectedFile?.path !== file.path) return;
       activateDataset({ file, stats: result.stats, sample: result.sample, inspectingFilePath: null });
+      if (useLoomStore.getState().dataRegionOpen) { setDataRegionOpen(false); setDataSourcesExpanded(false); }
       // Only remember files that actually opened, so a broken file can't
       // become the session the next launch tries to resume.
       addRecentFile(file);
