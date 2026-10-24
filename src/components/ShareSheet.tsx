@@ -1069,12 +1069,15 @@ function ShareSheetBody() {
             <div className="min-h-0 overflow-hidden flex flex-col px-4 py-3 border-r border-loom-border/50">
               {previewBlock}
             </div>
-            <div className="min-h-0 overflow-y-auto overscroll-y-contain flex flex-col gap-4 px-4 py-3">
-              <section>
+            {/* Options keep their height; the (long) destination list scrolls in the space left. */}
+            <div className="min-h-0 overflow-hidden flex flex-col gap-4 px-4 py-3">
+              <section className="shrink-0">
                 {optionsBlock}
               </section>
-              <section className="mt-auto pt-3 border-t border-loom-border/60 sticky bottom-0 bg-loom-surface pb-0.5">
-                {actionsRail}
+              <section className="mt-auto min-h-0 flex flex-col pt-3 border-t border-loom-border/60">
+                <div className="min-h-0 overflow-y-auto overscroll-contain pb-0.5 -mr-2 pr-2">
+                  {actionsRail}
+                </div>
               </section>
             </div>
           </div>
