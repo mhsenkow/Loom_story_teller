@@ -29,6 +29,7 @@ export const CHANGELOG: ChangelogRelease[] = [
     date: "2026-10-24",
     title: "Six more charts from the classics",
     items: [
+      { title: "Browse every chart type", detail: "On a computer, the chart type picker opens a gallery: every type grouped by what it shows (compare, over time, spread, relationships…), each with a live preview of your data. Pick one and you get exactly what the preview showed." },
       { title: "Density curve", detail: "A smooth outline of where values pile up — no bin sizes to pick. Split by a group to compare shapes; small groups get a rug of the raw values." },
       { title: "Q–Q plot", detail: "Is it a bell curve? Sorted values against a normal curve, with the points that stray furthest highlighted." },
       { title: "Connected scatter", detail: "Two measures traced through time, with arrows and labeled start and end. Long histories fold into about 40 steps so the path stays readable." },

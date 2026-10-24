@@ -10,7 +10,10 @@
 // =================================================================
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { ChartKind } from "@/lib/recommendations";
+import type { ChartKind, ChartRecommendation } from "@/lib/recommendations";
+import type { QueryResult } from "@/lib/queryTypes";
+import { useMediaQuery } from "@/lib/useMediaQuery";
+import { ChartKindGallery } from "@/components/ChartKindGallery";
 import {
   CHART_KIND_CATALOG,
   CHART_KIND_GROUP_ORDER,
@@ -27,11 +30,21 @@ export function ChartKindPicker({
   value,
   onChange,
   support,
+  previewFor,
+  previewData = null,
 }: {
   value: ChartKind;
-  onChange: (kind: ChartKind) => void;
+  /** `previewed` is the exact chart the gallery tile showed, when picked there. */
+  onChange: (kind: ChartKind, previewed?: ChartRecommendation | null) => void;
   support: (kind: ChartKind) => Support;
+  /** Desktop gallery: the chart a pick would build, for live tile previews. */
+  previewFor?: (kind: ChartKind) => ChartRecommendation | null;
+  previewData?: QueryResult | null;
 }) {
+  // Wide screens with a mouse get the full gallery; phones / narrow panels keep the dropdown.
+  const galleryMode = useMediaQuery("(min-width: 1024px) and (pointer: fine)");
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [gallerySeed, setGallerySeed] = useState("");
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [fitsOnly, setFitsOnly] = useState(false);
@@ -69,6 +82,11 @@ export function ChartKindPicker({
   const selectable = (i: number) => !!ordered[i] && !!supportMap.get(ordered[i]!.value)?.ok;
 
   const openPicker = (seed = "") => {
+    if (galleryMode) {
+      setGallerySeed(seed);
+      setGalleryOpen(true);
+      return;
+    }
     setQuery(seed);
     setOpen(true);
   };
@@ -189,18 +207,31 @@ export function ChartKindPicker({
         ref={triggerRef}
         id="loom-chart-kind"
         type="button"
-        aria-haspopup="listbox"
-        aria-expanded={open}
+        aria-haspopup={galleryMode ? "dialog" : "listbox"}
+        aria-expanded={open || galleryOpen}
         aria-label={`Chart type: ${current?.label ?? value}`}
         onClick={() => (open ? close() : openPicker())}
         onKeyDown={onTriggerKey}
         className="loom-input w-full text-xs py-2 min-h-9 flex items-center gap-2 text-left"
-        title="Search chart types — type to filter"
+        title={galleryMode ? "Browse chart types — type to search" : "Search chart types — type to filter"}
       >
         <span className="min-w-0 flex-1 truncate text-loom-text">{current?.label ?? value}</span>
         {current && <span className="min-w-0 max-w-[42%] truncate text-2xs text-loom-muted">{current.group}</span>}
         <span className="shrink-0 text-loom-muted" aria-hidden>▾</span>
       </button>
+
+      {galleryMode && (
+        <ChartKindGallery
+          open={galleryOpen}
+          onClose={() => setGalleryOpen(false)}
+          value={value}
+          onPick={onChange}
+          support={support}
+          previewFor={previewFor}
+          data={previewData}
+          initialQuery={gallerySeed}
+        />
+      )}
 
       {open && (
         <div

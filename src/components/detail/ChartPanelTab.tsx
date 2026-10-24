@@ -69,6 +69,7 @@ import {
   recommendStorySequence,
   recommendStreamStory,
   type ChartKind,
+  type ChartRecommendation,
   type YAggregateOption,
   type EncodingShuffleLocks,
 } from "@/lib/recommendations";
@@ -1522,9 +1523,10 @@ export default function ChartPanelTab() {
     [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
-  const applyChartType = useCallback(
-    (kind: ChartKind) => {
-      if (!activeChart || columnStats.length === 0) return;
+  /** The chart a switch to `kind` builds: fitted encoding, then random retries when it can't. */
+  const buildRecForKind = useCallback(
+    (kind: ChartKind): ChartRecommendation | null => {
+      if (!activeChart || columnStats.length === 0) return null;
       const lockedColorField = useLoomStore.getState().lockedColorField;
       const fit = fitEncodingToKind(kind, columnStats, activeChart, { lockedColorField });
       const sanitized = extrasForKind(kind, extraFromChart());
@@ -1543,13 +1545,24 @@ export default function ChartPanelTab() {
           if (rec) break;
         }
       }
+      return rec;
+    },
+    [activeChart, columnStats, tableName, extraFromChart, extrasForKind],
+  );
+
+  const applyChartType = useCallback(
+    (kind: ChartKind, prebuilt?: ChartRecommendation | null) => {
+      const rec = prebuilt ?? buildRecForKind(kind);
       if (rec) commitRec(rec);
       else setToast(`Can’t build a ${kind} chart from these columns`);
     },
-    [activeChart, columnStats, tableName, extraFromChart, extrasForKind, setToast, commitRec],
+    [buildRecForKind, setToast, commitRec],
   );
 
   const kindSupport = useCallback((kind: ChartKind) => chartKindDataSupport(columnStats, kind), [columnStats]);
+
+  /** Gallery tile preview — the gallery hands the same chart back on pick. */
+  const kindPreview = buildRecForKind;
 
   const applyYAggregate = useCallback(
     (agg: YAggregateOption) => {
@@ -1928,9 +1941,11 @@ export default function ChartPanelTab() {
                   <ChartKindPicker
                     value={activeChart.kind}
                     support={kindSupport}
-                    onChange={(v) => {
+                    previewFor={kindPreview}
+                    previewData={sampleRows ?? null}
+                    onChange={(v, previewed) => {
                       if (!chartKindDataSupport(columnStats, v).ok) return;
-                      applyChartType(v);
+                      applyChartType(v, previewed);
                     }}
                   />
                 </div>
