@@ -5,6 +5,7 @@ import type { ChartRecommendation } from "./recs/types";
 import {
   NUMERIC_XY_KINDS,
   CATEGORY_Y_KINDS,
+  NUMERIC_X_KINDS,
   PART_TO_WHOLE_KINDS,
 } from "./recs/createChartRec";
 import { inferType, isRateLikeField } from "./recs/columns";
@@ -154,7 +155,7 @@ export function createDiscoverAssessor(
       const numericFields = new Set<string>();
       if (
         NUMERIC_XY_KINDS.has(chart.kind) ||
-        chart.kind === "histogram" ||
+        NUMERIC_X_KINDS.has(chart.kind) ||
         CATEGORY_Y_KINDS.has(chart.kind)
       )
         numericFields.add(chart.xField);
@@ -164,7 +165,8 @@ export function createDiscoverAssessor(
           (isNum(chart.yField) && chart.kind !== "dataCube"))
       )
         numericFields.add(chart.yField);
-      for (const f of [chart.sizeField, chart.y2Field])
+      // Connected scatter's Size slot is its Order — a date is the usual pick.
+      for (const f of [chart.kind === "connectedScatter" ? null : chart.sizeField, chart.y2Field])
         if (f) numericFields.add(f);
       let quality = 70;
       if (chart.emojiField) {
@@ -499,7 +501,7 @@ export function createDiscoverAssessor(
         }
       } else if (family === "distribution") {
         const field =
-          chart.kind === "histogram" || CATEGORY_Y_KINDS.has(chart.kind)
+          NUMERIC_X_KINDS.has(chart.kind) || CATEGORY_Y_KINDS.has(chart.kind)
             ? chart.xField
             : chart.yField;
         if (field) {

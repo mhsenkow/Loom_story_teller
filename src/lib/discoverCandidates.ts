@@ -87,6 +87,17 @@ export function enumerateDiscoverCharts(
   const movingEntity = trailCandidates.find((c) =>
     /(^|_)(id|icao|icao24|callsign|vehicle|flight|tail|mmsi|imo|craft|ship|train|bus|device|satellite|norad|object)($|\d)/i.test(c.name),
   );
+  const calendarDays = (() => {
+    if (!time || !sample) return time ? Number.POSITIVE_INFINITY : 0;
+    const ti = sample.columns.indexOf(time.name);
+    const days = new Set<number>();
+    for (const r of sample.rows) {
+      const v: unknown = r[ti];
+      const t = v instanceof Date ? v.getTime() : typeof v === "string" ? Date.parse(v) : typeof v === "number" && v > 1e9 ? (v < 1e11 ? v * 1000 : v) : NaN;
+      if (Number.isFinite(t)) days.add(Math.floor(t / 86_400_000));
+    }
+    return days.size;
+  })();
   const seeds = [...curated];
   const smallCategories = categories.filter((c) => c.distinct_count <= 20);
   const units = SOURCE_BY_KIND[source as SourceKind]?.units;
@@ -186,6 +197,13 @@ export function enumerateDiscoverCharts(
         ? defaultLineAreaAggregate(y, columns)
         : ("count" as const);
       if (PART_TO_WHOLE_KINDS.has(kind) && y) aggregate = "sum";
+      // Per-period views average a level (temperature, population) unless the measure adds up.
+      // Population, players, stations are stocks: summing a day's readings double-counts them.
+      if (
+        (kind === "stripes" || kind === "sparkGrid" || kind === "calendar") && y &&
+        (!isAdditiveDiscoverMeasure(source, y) || /population|players|owners|stations|capacity/i.test(y) || /^(people|players|owners|stations)$/.test(units?.[y] ?? ""))
+      ) aggregate = "mean";
+      if (kind === "wordCloud") aggregate = y ? "sum" : "count";
       if (kind === "dataCube") {
         const cube = pickDataCubeEncoding(columns);
         if (!cube) continue;
@@ -194,6 +212,39 @@ export function enumerateDiscoverCharts(
         z = cube.zField;
         size = cube.valueField;
         aggregate = cube.aggregate;
+        color = null;
+      }
+      // Gallery kinds: give each the encoding its renderer reads, nothing it ignores.
+      if (kind === "ecdf" || kind === "density") {
+        x = m?.name;
+        y = null;
+        color = categories.find((c) => c.distinct_count <= 6)?.name ?? null;
+      } else if (kind === "qq") {
+        x = m?.name;
+        y = null;
+        color = null;
+      } else if (kind === "connectedScatter") {
+        if (!time || !m || !n) continue;
+        x = m.name;
+        y = n.name;
+        size = time.name;
+        color = null;
+      } else if (kind === "calendar" || kind === "stripes") {
+        // A calendar of a few hours is one lonely square — need a week of days.
+        if (kind === "calendar" && calendarDays < 7) continue;
+        x = time?.name;
+        color = null;
+      } else if (kind === "errorBars") {
+        color = null;
+      } else if (kind === "wordCloud") {
+        // Words need variety: a label column with many values, sized by rows or an additive total.
+        const words = categories
+          .filter((c) => c.distinct_count >= 8 && c.distinct_count <= 400)
+          .sort((a, b) => b.distinct_count - a.distinct_count)[turn % 2] ??
+          categories.find((c) => c.distinct_count >= 8 && c.distinct_count <= 400);
+        if (!words) continue;
+        x = words.name;
+        y = measures.find((c) => isAdditiveDiscoverMeasure(source, c.name))?.name ?? null;
         color = null;
       }
       if (!x) continue;
@@ -263,12 +314,106 @@ export function enumerateDiscoverCharts(
   const expanded = expandRecommendationsWithExtras(seeds, columns, {
     exhaustive: true,
   });
+  const fits = galleryKindFit(columns, sample, source);
   return addDiscoverMarkerVariants(expanded, columns, source, sample).filter(
     (chart) => {
+      if (!fits(chart)) return false;
       const key = discoverRecipeKey(chart);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     },
   );
+}
+
+const TIMEISH_FIELD = /^(year|yr|month|day|week|hour|minute|doy|dow)$/i;
+
+/**
+ * Shape checks for the gallery kinds, on the real sample: each must have
+ * something to show, not just columns of the right type.
+ */
+export function galleryKindFit(
+  columns: ColumnInfo[],
+  sample?: QueryResult | null,
+  source = "",
+): (chart: ChartRecommendation) => boolean {
+  const distinct = (f: string | null | undefined) => columns.find((c) => c.name === f)?.distinct_count ?? 0;
+  const rows = sample?.rows ?? [];
+  const n = rows.length || Math.max(0, ...columns.map((c) => c.distinct_count + c.null_count));
+  const avgLabelLen = (f: string) => {
+    const i = sample?.columns.indexOf(f) ?? -1;
+    if (i < 0 || !rows.length) return 0;
+    const seen = new Set<string>();
+    for (const r of rows) {
+      seen.add(String(r[i] ?? ""));
+      if (seen.size >= 200) break;
+    }
+    return [...seen].reduce((a, s) => a + s.length, 0) / Math.max(1, seen.size);
+  };
+  // Days with data and how densely they fill their span (monthly data makes an empty calendar).
+  const dayCover = (f: string) => {
+    const i = sample?.columns.indexOf(f) ?? -1;
+    if (i < 0 || !rows.length) return { days: Number.POSITIVE_INFINITY, fill: 1 };
+    const days = new Set<number>();
+    for (const r of rows) {
+      const v: unknown = r[i];
+      const t = v instanceof Date ? v.getTime() : typeof v === "string" ? Date.parse(v) : NaN;
+      if (Number.isFinite(t)) days.add(Math.floor(t / 86_400_000));
+    }
+    if (!days.size) return { days: 0, fill: 0 };
+    const span = Math.max(...days) - Math.min(...days) + 1;
+    return { days: days.size, fill: days.size / span };
+  };
+  // Labels that are mostly bare numbers (app ids, codes) aren't words.
+  const numericLabels = (f: string) => {
+    const i = sample?.columns.indexOf(f) ?? -1;
+    if (i < 0 || !rows.length) return false;
+    const vals = rows.slice(0, 200).map((r) => String(r[i] ?? "").trim()).filter(Boolean);
+    return vals.length > 0 && vals.filter((v) => /^-?[\d.,]+$/.test(v)).length / vals.length > 0.5;
+  };
+  // Row counts per category that barely differ (one reading per city per hour) make flat petals / equal words.
+  const countsVary = (f: string) => {
+    const i = sample?.columns.indexOf(f) ?? -1;
+    if (i < 0 || !rows.length) return true;
+    const counts = new Map<string, number>();
+    for (const r of rows) counts.set(String(r[i] ?? ""), (counts.get(String(r[i] ?? "")) ?? 0) + 1);
+    const vals = [...counts.values()];
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
+    return mean > 0 && sd / mean >= 0.15;
+  };
+  return (chart) => {
+    switch (chart.kind) {
+      case "wordCloud": {
+        const d = distinct(chart.xField);
+        // Words, not headlines: many short labels.
+        if (/(^|_)(fips|code|id|zip|iso\d?|uuid)($|_)|id$/i.test(chart.xField) || numericLabels(chart.xField)) return false;
+        // Sizes add up words' totals, so the measure must be additive.
+        if (chart.yField && !isAdditiveDiscoverMeasure(source, chart.yField)) return false;
+        return d >= 8 && d <= 400 && avgLabelLen(chart.xField) <= 24 && (chart.yField != null || countsVary(chart.xField));
+      }
+      case "errorBars": {
+        const d = distinct(chart.xField);
+        // An interval needs several rows per group.
+        return d >= 2 && d <= 40 && n / Math.max(1, d) >= 3 && avgLabelLen(chart.xField) <= 32;
+      }
+      case "rose": {
+        const d = distinct(chart.xField);
+        // Counting one row per petal draws identical wedges.
+        return d >= 3 && d <= 24 && (chart.yField != null || (n / Math.max(1, d) >= 2 && countsVary(chart.xField)));
+      }
+      case "calendar": {
+        const c = dayCover(chart.xField);
+        return c.days >= 14 && c.fill >= 0.2;
+      }
+      case "sparkGrid": {
+        const d = distinct(chart.colorField);
+        return d >= 3 && d <= 24 && !/(^|_)(year|yr|fy_\w*|month)$/i.test(chart.yField ?? "");
+      }
+      case "connectedScatter":
+        return !!chart.sizeField && !TIMEISH_FIELD.test(chart.xField) && !TIMEISH_FIELD.test(chart.yField ?? "");
+      default:
+        return true;
+    }
+  };
 }

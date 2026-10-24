@@ -35,6 +35,7 @@ export const CHANGELOG: ChangelogRelease[] = [
       { title: "Warming stripes", detail: "One band per period, colored cool below the average and warm above — a whole series at a glance." },
       { title: "Word cloud", detail: "Category names sized by count or value, packed together. Bigger words really are bigger values." },
       { title: "Mean ± CI dots", detail: "Each group's average with a 95% interval over its raw rows, plus the overall average for reference." },
+      { title: "Discover finds them", detail: "Find something fun to chart now reaches all the newer chart types, and only offers each one where the data suits it: calendars for daily data, word clouds for real labels, intervals where groups have enough rows." },
       { title: "Sharper lines and dumbbells", detail: "A rolling mean now shows a ±1σ band around it, Compare Y shades who's ahead when both lines share a scale, and dumbbells point from start to end." },
     ],
   },
