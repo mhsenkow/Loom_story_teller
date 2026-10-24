@@ -25,6 +25,16 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-24c-share",
+    date: "2026-10-24",
+    title: "Links that show the chart",
+    items: [
+      { title: "Bigger chart in link previews", detail: "When you share a link on LinkedIn, X, Slack, iMessage and the rest, the preview card is now the chart drawn at the card's own wide shape, not a small copy of a tall chart in a big blank frame." },
+      { title: "Readable link titles", detail: "Shared links get a headline-style title with the data source, so “name sized by total” arrives as “Name sized by total · pokemon”." },
+      { title: "More places to share", detail: "X, Reddit, WhatsApp and Telegram join the share list, each opening with your caption and the chart card ready." },
+    ],
+  },
+  {
     id: "2026-10-24b-gallery",
     date: "2026-10-24",
     title: "Six more charts from the classics",

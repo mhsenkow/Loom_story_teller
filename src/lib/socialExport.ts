@@ -256,6 +256,40 @@ export function threadsShareHref(caption: string, pageUrl: string): string {
   return `https://www.threads.net/intent/post?text=${encodeURIComponent(threadsPostText(caption, pageUrl))}`;
 }
 
+/** X counts every link as 23 characters; the card comes from twitter:image. */
+export const X_TEXT_MAX = 280;
+export const X_LINK_WEIGHT = 23;
+
+/** X web intent: caption (clipped for the 280 limit) plus the link, which unfurls into the chart card. */
+export function xShareHref(caption: string, pageUrl: string): string {
+  const link = pageUrl.trim();
+  // Clip against X's fixed link weight, not the URL's real length.
+  const text = clipPostText(caption, "x".repeat(X_LINK_WEIGHT), X_TEXT_MAX).replace(/\n*x{23}$/, "").trim();
+  const params = new URLSearchParams();
+  if (text) params.set("text", text);
+  if (link) params.set("url", link);
+  return `https://x.com/intent/post?${params.toString()}`;
+}
+
+/** Reddit link submit: title + URL; the post thumbnail comes from og:image. */
+export function redditShareHref(title: string, pageUrl: string): string {
+  const params = new URLSearchParams({ url: pageUrl.trim(), title: title.trim().slice(0, 300) });
+  return `https://www.reddit.com/submit?${params.toString()}`;
+}
+
+/** WhatsApp: one text body; the link's preview card comes from og:image (keep it < ~300 KB). */
+export function whatsappShareHref(caption: string, pageUrl: string): string {
+  const text = [caption.trim(), pageUrl.trim()].filter(Boolean).join("\n\n");
+  return `https://wa.me/?text=${encodeURIComponent(text)}`;
+}
+
+/** Telegram share: URL plus caption; Telegram renders the Open Graph card. */
+export function telegramShareHref(caption: string, pageUrl: string): string {
+  const params = new URLSearchParams({ url: pageUrl.trim() });
+  if (caption.trim()) params.set("text", caption.trim());
+  return `https://t.me/share/url?${params.toString()}`;
+}
+
 /** Facebook's sharer only takes the page URL; the card comes from Open Graph. */
 export function facebookShareHref(pageUrl: string): string {
   return `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(pageUrl.trim())}`;
@@ -270,6 +304,25 @@ export function emailShareHref(subject: string, body: string): string {
   if (text) params.set("body", text);
   const q = params.toString();
   return q ? `mailto:?${q}` : "mailto:";
+}
+
+/**
+ * Headline for link cards (og:title, tab title): auto titles are built from raw
+ * column names ("name sized by total"), so read snake_case as words, lead with a
+ * capital, and name the source when there is one.
+ */
+export function shareHeadline(title: string, source?: string | null): string {
+  let t = (title || "").trim().replace(/([a-z0-9])_([a-z0-9])/gi, "$1 $2").replace(/\s+/g, " ");
+  if (!t) t = "Loom chart";
+  t = t.charAt(0).toUpperCase() + t.slice(1);
+  const src = (source || "")
+    .trim()
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.(csv|tsv|json|parquet|xlsx?)$/i, "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!src || t.toLowerCase().includes(src.toLowerCase())) return t.slice(0, 110);
+  return `${t} · ${src}`.slice(0, 110);
 }
 
 /** Short post caption ready to paste under a social image. */
@@ -547,7 +600,7 @@ export async function toLinkPreviewJpeg(
   blob: Blob,
   opts?: { quality?: number; fill?: string; title?: string; source?: string },
 ): Promise<string> {
-  const quality = opts?.quality ?? 0.92;
+  const quality = opts?.quality ?? 0.86;
   const fill = opts?.fill ?? "#0a0a0c";
   const { width: W, height: H } = LINK_PREVIEW_SIZE;
   try {

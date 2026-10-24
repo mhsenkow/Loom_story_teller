@@ -175,3 +175,27 @@ describe("Instagram story framing", () => {
   });
 });
 
+
+describe("link-card share targets", () => {
+  it("reads auto titles as headlines and names the source", async () => {
+    const { shareHeadline } = await import("../socialExport");
+    expect(shareHeadline("name sized by total", "pokemon.csv")).toBe("Name sized by total · pokemon");
+    expect(shareHeadline("peak_players by genre", null)).toBe("Peak players by genre");
+    // Source already in the title: don't repeat it.
+    expect(shareHeadline("Pokemon totals", "pokemon.csv")).toBe("Pokemon totals");
+    expect(shareHeadline("", "")).toBe("Loom chart");
+  });
+
+  it("builds X, Reddit, WhatsApp and Telegram composers with the link", async () => {
+    const { xShareHref, redditShareHref, whatsappShareHref, telegramShareHref } = await import("../socialExport");
+    const url = "https://loom.ibm.io/s/abc123";
+    const x = new URL(xShareHref("A".repeat(400), url));
+    expect(x.hostname).toBe("x.com");
+    expect(x.searchParams.get("url")).toBe(url);
+    // Room for X's fixed 23-char link weight plus a separator.
+    expect([...(x.searchParams.get("text") ?? "")].length).toBeLessThanOrEqual(280 - 23 - 2);
+    expect(new URL(redditShareHref("Title", url)).searchParams.get("url")).toBe(url);
+    expect(decodeURIComponent(whatsappShareHref("Hi", url))).toContain(`Hi\n\n${url}`);
+    expect(new URL(telegramShareHref("Hi", url)).searchParams.get("url")).toBe(url);
+  });
+});

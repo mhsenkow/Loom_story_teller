@@ -25,7 +25,12 @@ import {
   SEENU_URL,
   facebookShareHref,
   linkedInShareHref,
+  redditShareHref,
+  telegramShareHref,
+  whatsappShareHref,
+  xShareHref,
   publishStoryToWorker,
+  shareHeadline,
   slugifyFilename,
   threadsShareHref,
   toLinkPreviewJpeg,
@@ -120,6 +125,18 @@ function ShareSheetBody() {
   const [copied, setCopied] = useState<null | "caption" | "link">(null);
   const [includeData, setIncludeData] = useState(() => defaultIncludeShareData(selectedFile));
   const captureSeq = useRef(0);
+  /** 1200×627 render for link cards (LinkedIn, X, Slack, iMessage…) — its own memo, not the one-slot preview cache. */
+  const linkCardRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
+  const linkCardCapture = useCallback((): Promise<Blob | null> => {
+    const key = sharePreviewKeyFromStore("linkedin-og");
+    if (!key) return Promise.resolve(null);
+    if (linkCardRef.current?.key === key) return linkCardRef.current.promise;
+    const promise = import("@/lib/capturePlatformPng").then(({ capturePlatformPng }) =>
+      capturePlatformPng("linkedin-og", { supersample: 1 }),
+    );
+    linkCardRef.current = { key, promise };
+    return promise;
+  }, []);
   const panelRef = useRef<HTMLDivElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   /** Mac/Windows Tauri only — iPad app is not “desktop” for share labels / NeoSpace. */
@@ -197,6 +214,8 @@ function ShareSheetBody() {
     }
     const url = URL.createObjectURL(blob);
     setPreviewUrl(url);
+    // Once the visible frame is in, quietly render the link-card size so publishing doesn't wait.
+    void linkCardCapture();
     return () => URL.revokeObjectURL(url);
   }, [blob]);
 
@@ -279,11 +298,13 @@ function ShareSheetBody() {
     if (!blob) return null;
     const st = useLoomStore.getState();
     const fill = getThemeUiColors(st.appSettings.theme).bg;
-    // Letterbox into 1200×627 so Slack / iMessage / LinkedIn unfurls stay sharp.
-    const image = await toLinkPreviewJpeg(blob, {
+    // Link cards are 1.91:1 — re-render the chart at 1200×627 rather than shrinking
+    // a tall frame into the middle of a wide card. Fall back to the visible frame.
+    const cardBlob = (await linkCardCapture().catch(() => null)) ?? blob;
+    const headline = shareHeadline(chartTitle, selectedFile?.name);
+    const image = await toLinkPreviewJpeg(cardBlob, {
       fill,
-      quality: 0.92,
-      title: chartTitle,
+      title: headline,
       source: selectedFile?.name,
     });
     const chart = chartLinkFromState(st);
@@ -300,7 +321,7 @@ function ShareSheetBody() {
         : null;
     const { publicLoomWebOrigin } = await import("@/lib/publicOrigin");
     const html = buildChartSharePageHtml({
-      title: chartTitle,
+      title: headline,
       caption,
       imageDataUrl: image,
       sourceLabel: selectedFile?.name,
@@ -318,7 +339,7 @@ function ShareSheetBody() {
     });
     return publishStoryToWorker({
       html,
-      title: chartTitle,
+      title: headline,
       ogImageDataUrl: image,
       data: snapshot ?? undefined,
     });
@@ -400,6 +421,16 @@ function ShareSheetBody() {
           ? "LinkedIn opened — paste the caption above the chart card"
           : "Couldn’t open LinkedIn — caption copied",
       );
+    })();
+  };
+
+  /** Link-card destinations: open the composer, report whether it opened. */
+  const openLinkCard = (name: string, href: string, copyCaption = false) => {
+    if (!link) return;
+    void (async () => {
+      if (copyCaption && caption) await copyTextToClipboard(caption);
+      const opened = await openExternal(href);
+      setToast(opened ? `${name} opened with the chart card${copyCaption ? " — caption copied" : ""}` : `Couldn’t open ${name}`);
     })();
   };
 
@@ -795,6 +826,7 @@ function ShareSheetBody() {
             )}
           </div>
         ) : null}
+        {dest({ label: "X", hint: "Caption and chart card in a new post", onClick: () => link && openLinkCard("X", xShareHref(caption, link)), disabled: !linkReady })}
         {dest({ label: "Bluesky", hint: "Caption and link in a new post", onClick: openBluesky, disabled: !linkReady })}
         {dest({ label: "Threads", hint: "Caption and link in a new post", onClick: openThreads, disabled: !linkReady })}
         {dest({ label: "Mastodon", hint: mastodonServer ? `Caption and link on ${mastodonServer}` : "Caption and link on your server", onClick: openMastodon, disabled: !linkReady })}
@@ -825,6 +857,9 @@ function ShareSheetBody() {
         {dest({ label: "SeenU", hint: "Image, caption and link ready to post", onClick: () => void openSeenU(), disabled: !ready || !linkReady })}
         {dest({ label: "Facebook", hint: "Chart card · caption copied to paste", onClick: openFacebook, disabled: !linkReady })}
         {dest({ label: "LinkedIn", hint: "Chart card · caption copied to paste", onClick: openLinkedIn, disabled: !linkReady })}
+        {dest({ label: "Reddit", hint: "Link post with the chart thumbnail", onClick: () => link && openLinkCard("Reddit", redditShareHref(shareHeadline(chartTitle, selectedFile?.name), link), true), disabled: !linkReady })}
+        {dest({ label: "WhatsApp", hint: "Caption and chart card in a chat", onClick: () => link && openLinkCard("WhatsApp", whatsappShareHref(caption, link)), disabled: !linkReady })}
+        {dest({ label: "Telegram", hint: "Caption and chart card in a chat", onClick: () => link && openLinkCard("Telegram", telegramShareHref(caption, link)), disabled: !linkReady })}
         {dest({ label: "Email", hint: "Caption and link in a new message", onClick: openEmail, disabled: !linkReady })}
       </div>
       <p className="mt-2 px-1 text-2xs text-loom-muted">
