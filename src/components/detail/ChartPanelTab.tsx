@@ -3509,7 +3509,7 @@ export default function ChartPanelTab() {
                       value={chartVisualOverrides.pointSize ?? 12}
                       onChange={(e) => updateOverride("pointSize", Number(e.target.value))}
                     />
-                    <output>{chartVisualOverrides.pointSize ?? 12}</output>
+                    <span className="loom-slider-value">{chartVisualOverrides.pointSize ?? 12}</span>
                   </div>
                   <div>
                     <span className="block text-2xs text-loom-muted mb-1">Marker</span>
@@ -3617,7 +3617,7 @@ export default function ChartPanelTab() {
                       value={chartVisualOverrides.markJitter ?? 0}
                       onChange={(e) => updateOverride("markJitter", Number(e.target.value))}
                     />
-                    <output>{chartVisualOverrides.markJitter ?? 0}</output>
+                    <span className="loom-slider-value">{chartVisualOverrides.markJitter ?? 0}</span>
                   </div>
                   <div>
                     <label className="block text-2xs text-loom-muted mb-1">Size scale</label>
@@ -3654,7 +3654,7 @@ export default function ChartPanelTab() {
                     value={chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}
                     onChange={(e) => updateOverride("barCornerRadius", Number(e.target.value))}
                   />
-                  <output>{chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}</output>
+                  <span className="loom-slider-value">{chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}</span>
                 </div>
               )}
               {caps.lineMarks && (
@@ -3717,7 +3717,7 @@ export default function ChartPanelTab() {
                   value={chartVisualOverrides.axisLineWidth ?? 1}
                   onChange={(e) => updateOverride("axisLineWidth", Number(e.target.value))}
                 />
-                <output>{chartVisualOverrides.axisLineWidth ?? 1}</output>
+                <span className="loom-slider-value">{chartVisualOverrides.axisLineWidth ?? 1}</span>
               </div>
               <IconToggleGroup
                 label="Grid style"
@@ -3740,7 +3740,7 @@ export default function ChartPanelTab() {
                   value={chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5}
                   onChange={(e) => updateOverride("gridOpacity", Number(e.target.value))}
                 />
-                <output>{((chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5) * 100).toFixed(0)}%</output>
+                <span className="loom-slider-value">{((chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5) * 100).toFixed(0)}%</span>
               </div>
               <div className="loom-slider-row">
                 <span className="truncate text-2xs text-loom-muted">Tick count</span>
@@ -3751,7 +3751,7 @@ export default function ChartPanelTab() {
                   value={chartVisualOverrides.tickCount ?? 5}
                   onChange={(e) => updateOverride("tickCount", Number(e.target.value))}
                 />
-                <output>{chartVisualOverrides.tickCount ?? 5}</output>
+                <span className="loom-slider-value">{chartVisualOverrides.tickCount ?? 5}</span>
               </div>
               <ColorSwatchGroup
                 label="Axis label color"
@@ -3944,7 +3944,7 @@ export default function ChartPanelTab() {
                         value={chartVisualOverrides.glowIntensity ?? 8}
                         onChange={(e) => updateOverride("glowIntensity", Number(e.target.value))}
                       />
-                      <output>{chartVisualOverrides.glowIntensity ?? 8}</output>
+                      <span className="loom-slider-value">{chartVisualOverrides.glowIntensity ?? 8}</span>
                     </div>
                   )}
                 </>
@@ -3969,7 +3969,7 @@ export default function ChartPanelTab() {
                   value={chartVisualOverrides.opacity ?? 0.7}
                   onChange={(e) => updateOverride("opacity", Number(e.target.value))}
                 />
-                <output>{((chartVisualOverrides.opacity ?? 0.7) * 100).toFixed(0)}%</output>
+                <span className="loom-slider-value">{((chartVisualOverrides.opacity ?? 0.7) * 100).toFixed(0)}%</span>
               </div>
             </ChartInspectorSection>
 

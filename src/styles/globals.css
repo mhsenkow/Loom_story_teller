@@ -1420,7 +1420,7 @@ html {
     grid-template-columns: minmax(4.5rem, 6.5rem) minmax(0, 1fr) 2.75rem;
   }
   .loom-slider-row input[type="range"] { @apply h-1 w-full accent-loom-accent; }
-  .loom-slider-row output { @apply text-right font-mono text-2xs tabular-nums text-loom-muted; }
+  .loom-slider-row .loom-slider-value { @apply text-right font-mono text-2xs tabular-nums text-loom-muted; }
 
   .loom-input::placeholder {
     color: var(--loom-muted);
