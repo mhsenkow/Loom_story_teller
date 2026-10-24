@@ -31,6 +31,8 @@ export const CHANGELOG: ChangelogRelease[] = [
     items: [
       { title: "Bigger chart in link previews", detail: "When you share a link on LinkedIn, X, Slack, iMessage and the rest, the preview card is now the chart drawn at the card's own wide shape, not a small copy of a tall chart in a big blank frame." },
       { title: "Readable link titles", detail: "Shared links get a headline-style title with the data source, so “name sized by total” arrives as “Name sized by total · pokemon”." },
+      { title: "Mastodon, SeenU and Bluesky up front", detail: "The share list now leads with Mastodon, SeenU and Bluesky, then LinkedIn, then everywhere else in a compact grid." },
+      { title: "SeenU that works on a computer", detail: "SeenU gets a 4:5 image sized for its feed. On phones it goes through the share sheet to the SeenU app; on a computer the image saves, the caption and link copy, SeenU opens, and a short checklist stays put with copy and save-again buttons." },
       { title: "More places to share", detail: "X, Reddit, WhatsApp and Telegram join the share list, each opening with your caption and the chart card ready." },
     ],
   },

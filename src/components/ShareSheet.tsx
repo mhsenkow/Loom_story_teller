@@ -114,7 +114,9 @@ function ShareSheetBody() {
   });
   const [failed, setFailed] = useState(false);
   const [retry, setRetry] = useState(0);
-  const [busy, setBusy] = useState<null | "share" | "neospace" | "instagram">(null);
+  const [busy, setBusy] = useState<null | "share" | "neospace" | "instagram" | "seenu">(null);
+  /** After a desktop SeenU handoff: what landed, plus redo buttons. */
+  const [seenuHelp, setSeenuHelp] = useState<{ saved: boolean; copied: boolean } | null>(null);
   const [instagramOpen, setInstagramOpen] = useState(false);
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const [mastodonServer, setMastodonServer] = useState<string | null>(readMastodonServer);
@@ -127,6 +129,22 @@ function ShareSheetBody() {
   const captureSeq = useRef(0);
   /** 1200×627 render for link cards (LinkedIn, X, Slack, iMessage…) — its own memo, not the one-slot preview cache. */
   const linkCardRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
+  /** 4:5 render for photo feeds (SeenU) — warmed once the destinations show so the tap stays a tap. */
+  const portraitRef = useRef<{ key: string; promise: Promise<Blob | null> } | null>(null);
+  const portraitCapture = useCallback((): Promise<Blob | null> => {
+    const key = sharePreviewKeyFromStore("ig-portrait");
+    if (!key) return Promise.resolve(null);
+    if (portraitRef.current?.key === key) return portraitRef.current.promise;
+    const promise = import("@/lib/capturePlatformPng").then(({ capturePlatformPng }) =>
+      capturePlatformPng("ig-portrait", { supersample: useLoomStore.getState().exportSupersample === 2 ? 2 : 1 }),
+    );
+    portraitRef.current = { key, promise };
+    return promise;
+  }, []);
+  // Destinations are showing: render SeenU's 4:5 image next (captures run one at a time).
+  useEffect(() => {
+    if (destinations) void portraitCapture();
+  }, [destinations, portraitCapture]);
   const linkCardCapture = useCallback((): Promise<Blob | null> => {
     const key = sharePreviewKeyFromStore("linkedin-og");
     if (!key) return Promise.resolve(null);
@@ -612,15 +630,51 @@ function ShareSheetBody() {
     openMastodonOn(server);
   };
 
-  /** SeenU has no share link: image + caption go through the share sheet or clipboard. */
+  const seenuText = () => [caption.trim(), link ?? ""].filter(Boolean).join("\n\n");
+  const seenuFilename = `${slugifyFilename(chartTitle || "chart")}-seenu.png`;
+  const copySeenuText = async () => {
+    const ok = await copyTextToClipboard(seenuText());
+    setToast(ok ? "Caption and link copied" : "Couldn’t reach the clipboard");
+    return ok;
+  };
+  const saveSeenuImage = async () => {
+    const img = (await portraitCapture().catch(() => null)) ?? blob;
+    if (!img) return false;
+    const outcome = await downloadBlob(img, seenuFilename);
+    return outcome !== "unsupported" && outcome !== "cancelled";
+  };
+
+  /**
+   * SeenU has no web share link (no compose URL or share target), but its apps own
+   * every seenu.io link. Phones: the system share sheet hands the 4:5 image and
+   * caption to the SeenU app. Desktop web: the macOS / Windows sheet never lists
+   * SeenU, so save the image, copy the caption + link, and open SeenU.
+   */
   const openSeenU = async () => {
-    if (!blob || !link) return;
-    const text = [caption.trim(), link].filter(Boolean).join("\n\n");
-    await shareImage(blob, filename, text, {
-      webUrl: SEENU_URL,
-      desktop: "Image in Finder, caption and link copied — post them on SeenU",
-      saved: "Image saved, caption and link copied — post them on SeenU",
-    });
+    if (!blob || !link || busy) return;
+    const coarse = typeof window !== "undefined" && window.matchMedia?.("(pointer: coarse)").matches;
+    setBusy("seenu");
+    try {
+      const img = (await portraitCapture().catch(() => null)) ?? blob;
+      if (desktopApp || coarse) {
+        await shareImage(img, seenuFilename, seenuText(), {
+          webUrl: SEENU_URL,
+          desktop: "4:5 image in Finder, caption and link copied — post them on SeenU",
+          saved: "4:5 image saved, caption and link copied — post them on SeenU",
+        });
+        if (desktopApp) setSeenuHelp({ saved: true, copied: true });
+        return;
+      }
+      // Clipboard first, while this page still has focus; the new tab takes it.
+      const copied = await copyTextToClipboard(seenuText());
+      const outcome = await downloadBlob(img, seenuFilename);
+      const saved = outcome !== "unsupported" && outcome !== "cancelled";
+      setSeenuHelp({ saved, copied });
+      const opened = await openExternal(SEENU_URL);
+      setToast(opened ? "SeenU opened — attach the image and paste your caption" : "Image and caption ready — open SeenU from the steps below");
+    } finally {
+      setBusy(null);
+    }
   };
 
   const openMoreExports = () => {
@@ -774,13 +828,28 @@ function ShareSheetBody() {
   const linkReady = Boolean(link) && busy !== "share";
   const destClass =
     "w-full min-h-12 px-4 py-2 text-left hover:bg-loom-elevated/60 disabled:opacity-40 flex flex-col justify-center";
-  const dest = ({ label, hint, onClick, disabled, expanded }: { label: string; hint: string; onClick: () => void; disabled?: boolean; expanded?: boolean }) => (
-    <button key={label} type="button" onClick={onClick} disabled={disabled} className={destClass} aria-expanded={expanded}>
+  const dest = ({ label, hint, onClick, disabled, expanded, compact }: { label: string; hint: string; onClick: () => void; disabled?: boolean; expanded?: boolean; compact?: boolean }) => (
+    <button key={label} type="button" onClick={onClick} disabled={disabled} className={compact ? destCompactClass : destClass} aria-expanded={expanded}>
       <span className="text-sm text-loom-text flex items-center justify-between gap-2">
         {label}
         {expanded != null ? <span className="text-loom-muted text-xs" aria-hidden>{expanded ? "▾" : "▸"}</span> : null}
       </span>
       <span className="text-2xs text-loom-muted leading-snug">{hint}</span>
+    </button>
+  );
+  const destCompactClass =
+    "w-full min-h-11 px-3 py-1.5 text-left hover:bg-loom-elevated/60 disabled:opacity-40 flex flex-col justify-center";
+  /** Big tile for the featured networks. */
+  const feature = ({ label, hint, onClick, disabled }: { label: string; hint: string; onClick: () => void; disabled?: boolean }) => (
+    <button
+      key={label}
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className="min-h-16 rounded-[var(--radius-lg)] border border-loom-border bg-loom-elevated/40 px-3 py-2.5 text-left hover:border-loom-accent/60 hover:bg-loom-elevated disabled:opacity-40 flex flex-col justify-center gap-0.5 transition-colors"
+    >
+      <span className="text-sm font-semibold text-loom-text">{label}</span>
+      <span className="text-2xs text-loom-muted leading-snug truncate">{hint}</span>
     </button>
   );
   const chipClass =
@@ -789,16 +858,69 @@ function ShareSheetBody() {
 
   const destinationList = destinations ? (
     <div role="group" aria-label="Where to share">
-      <div className="rounded-[var(--radius-lg)] border border-loom-border overflow-hidden divide-y divide-loom-border/70">
+      {/* Featured: the open, people-first networks — then LinkedIn — then everywhere else. */}
+      <div className="grid grid-cols-3 gap-2" role="group" aria-label="Featured">
+        {feature({ label: "Mastodon", hint: mastodonServer ? `On ${mastodonServer}` : "On your server", onClick: openMastodon, disabled: !linkReady })}
+        {feature({ label: "SeenU", hint: busy === "seenu" ? "Sizing the image…" : "Image + caption", onClick: () => void openSeenU(), disabled: !ready || !linkReady || busy !== null })}
+        {feature({ label: "Bluesky", hint: "Caption + chart card", onClick: openBluesky, disabled: !linkReady })}
+      </div>
+        {mastodonAsk ? (
+          <form
+            className="mt-2 px-3 py-2.5 flex gap-2 rounded-[var(--radius-md)] border border-loom-border bg-loom-bg/40"
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveMastodonServer();
+            }}
+          >
+            <label className="sr-only" htmlFor="share-mastodon-server">Your Mastodon server</label>
+            <input
+              id="share-mastodon-server"
+              className="loom-input flex-1 min-w-0 text-sm"
+              placeholder="Your server, e.g. mastodon.social"
+              value={mastodonDraft}
+              onChange={(e) => setMastodonDraft(e.target.value)}
+              autoCapitalize="none"
+              autoCorrect="off"
+              inputMode="url"
+              enterKeyHint="go"
+              autoFocus
+            />
+            <button type="submit" className="loom-btn-primary min-h-10 px-3 text-sm rounded-md">Post</button>
+          </form>
+        ) : null}
+      {seenuHelp ? (
+        <div className="mt-2 rounded-[var(--radius-md)] border border-loom-border bg-loom-bg/40 px-3 py-2.5 text-2xs text-loom-muted leading-relaxed" role="status">
+          <p className="text-loom-text font-medium mb-1">Finish on SeenU</p>
+          <ol className="list-decimal pl-4 space-y-0.5">
+            <li>{seenuHelp.saved ? "The 4:5 chart image is in your Downloads." : "Save the chart image (button below)."}</li>
+            <li>{seenuHelp.copied ? "Caption and link are copied." : "Copy the caption and link."}</li>
+            <li>On SeenU, start a post, attach the image and paste.</li>
+          </ol>
+          <div className="mt-2 flex gap-3">
+            <button type="button" className="text-loom-accent min-h-8" onClick={() => void copySeenuText()}>Copy caption again</button>
+            <button type="button" className="text-loom-accent min-h-8" onClick={() => void saveSeenuImage()}>Save image again</button>
+            <a className="text-loom-accent min-h-8 inline-flex items-center" href={SEENU_URL} target="_blank" rel="noreferrer">Open SeenU</a>
+          </div>
+        </div>
+      ) : null}
+      <div className="mt-2 rounded-[var(--radius-lg)] border border-loom-border overflow-hidden">
+        {dest({ label: "LinkedIn", hint: "Chart card · caption copied to paste", onClick: openLinkedIn, disabled: !linkReady })}
+      </div>
+      <p className="mt-3 mb-1 px-1 text-2xs font-medium uppercase tracking-wider text-loom-muted">More places</p>
+      <div className="rounded-[var(--radius-lg)] border border-loom-border overflow-hidden grid grid-cols-2 [&>*]:border-loom-border/70 [&>*]:border-b [&>*:nth-child(odd)]:border-r">
+        {dest({ label: "X", hint: "Caption + chart card", onClick: () => link && openLinkCard("X", xShareHref(caption, link)), disabled: !linkReady, compact: true })}
+        {dest({ label: "Threads", hint: "Caption + link", onClick: openThreads, disabled: !linkReady, compact: true })}
         {dest({
           label: "Instagram",
-          hint: "Post, story or message — sized for each",
+          hint: "Post, story or message",
           onClick: () => setInstagramOpen((v) => !v),
           disabled: !ready,
           expanded: instagramOpen,
+          compact: true,
         })}
+        {dest({ label: "Facebook", hint: "Chart card", onClick: openFacebook, disabled: !linkReady, compact: true })}
         {instagramOpen ? (
-          <div className="px-3 py-2.5 space-y-2 bg-loom-bg/40">
+          <div className="col-span-2 px-3 py-2.5 space-y-2 bg-loom-bg/40">
             <div className="flex gap-2" role="group" aria-label="Instagram format">
               <button type="button" className={chipClass} disabled={!ready || busy !== null} onClick={() => void openInstagram("post")}>
                 <span className="font-medium">Post</span>
@@ -826,41 +948,10 @@ function ShareSheetBody() {
             )}
           </div>
         ) : null}
-        {dest({ label: "X", hint: "Caption and chart card in a new post", onClick: () => link && openLinkCard("X", xShareHref(caption, link)), disabled: !linkReady })}
-        {dest({ label: "Bluesky", hint: "Caption and link in a new post", onClick: openBluesky, disabled: !linkReady })}
-        {dest({ label: "Threads", hint: "Caption and link in a new post", onClick: openThreads, disabled: !linkReady })}
-        {dest({ label: "Mastodon", hint: mastodonServer ? `Caption and link on ${mastodonServer}` : "Caption and link on your server", onClick: openMastodon, disabled: !linkReady })}
-        {mastodonAsk ? (
-          <form
-            className="px-3 py-2.5 flex gap-2 bg-loom-bg/40"
-            onSubmit={(e) => {
-              e.preventDefault();
-              saveMastodonServer();
-            }}
-          >
-            <label className="sr-only" htmlFor="share-mastodon-server">Your Mastodon server</label>
-            <input
-              id="share-mastodon-server"
-              className="loom-input flex-1 min-w-0 text-sm"
-              placeholder="Your server, e.g. mastodon.social"
-              value={mastodonDraft}
-              onChange={(e) => setMastodonDraft(e.target.value)}
-              autoCapitalize="none"
-              autoCorrect="off"
-              inputMode="url"
-              enterKeyHint="go"
-              autoFocus
-            />
-            <button type="submit" className="loom-btn-primary min-h-10 px-3 text-sm rounded-md">Post</button>
-          </form>
-        ) : null}
-        {dest({ label: "SeenU", hint: "Image, caption and link ready to post", onClick: () => void openSeenU(), disabled: !ready || !linkReady })}
-        {dest({ label: "Facebook", hint: "Chart card · caption copied to paste", onClick: openFacebook, disabled: !linkReady })}
-        {dest({ label: "LinkedIn", hint: "Chart card · caption copied to paste", onClick: openLinkedIn, disabled: !linkReady })}
-        {dest({ label: "Reddit", hint: "Link post with the chart thumbnail", onClick: () => link && openLinkCard("Reddit", redditShareHref(shareHeadline(chartTitle, selectedFile?.name), link), true), disabled: !linkReady })}
-        {dest({ label: "WhatsApp", hint: "Caption and chart card in a chat", onClick: () => link && openLinkCard("WhatsApp", whatsappShareHref(caption, link)), disabled: !linkReady })}
-        {dest({ label: "Telegram", hint: "Caption and chart card in a chat", onClick: () => link && openLinkCard("Telegram", telegramShareHref(caption, link)), disabled: !linkReady })}
-        {dest({ label: "Email", hint: "Caption and link in a new message", onClick: openEmail, disabled: !linkReady })}
+        {dest({ label: "Reddit", hint: "Link post + thumbnail", onClick: () => link && openLinkCard("Reddit", redditShareHref(shareHeadline(chartTitle, selectedFile?.name), link), true), disabled: !linkReady, compact: true })}
+        {dest({ label: "WhatsApp", hint: "Chat + chart card", onClick: () => link && openLinkCard("WhatsApp", whatsappShareHref(caption, link)), disabled: !linkReady, compact: true })}
+        {dest({ label: "Telegram", hint: "Chat + chart card", onClick: () => link && openLinkCard("Telegram", telegramShareHref(caption, link)), disabled: !linkReady, compact: true })}
+        {dest({ label: "Email", hint: "Caption + link", onClick: openEmail, disabled: !linkReady, compact: true })}
       </div>
       <p className="mt-2 px-1 text-2xs text-loom-muted">
         {link ? "Same chart. The link carries the picture." : busy === "share" ? "Preparing the link…" : "The picture is ready. The link didn’t publish."}
