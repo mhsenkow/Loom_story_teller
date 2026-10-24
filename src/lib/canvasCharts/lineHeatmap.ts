@@ -14,7 +14,7 @@ import { sampleContinuous } from "../chartPalettes";
 import { type ChartRenderOpts } from "../chartRenderTypes";
 import { chartTypeRamp } from "../chartType";
 import { formatTooltipNumber } from "../chartTooltip";
-import { type SeriesNormalize, type YScaleKind, anomalyRowIndices, normalizeSeriesValues, rollingMean, scaleDomain, scaleY } from "../dsTransforms";
+import { type SeriesNormalize, type YScaleKind, anomalyRowIndices, normalizeSeriesValues, rollingMean, rollingStd, scaleDomain, scaleY } from "../dsTransforms";
 import { type YAggregateOption } from "../recommendations";
 import { axisFont, densityStops, drawXModelAxis, drawZeroLine, labelGutter, timeBuckets } from "./axisHelpers";
 import { applyLineDash, drawSmoothLine, numRange } from "./primitives";
@@ -77,7 +77,10 @@ export function renderFullLine(
       const pts = model.keys
         .filter((k) => byX.has(k) && (measureIdx < 0 || byX.get(k)!.length > 0))
         .map((k) => ({ key: k, t: posOf.get(k)!, v: aggregateValues(byX.get(k)!, agg) }));
-      return { name: nameSuffix ? `${name || "series"}${nameSuffix}` : name, pts, compare: !!nameSuffix, colorIndex: seriesIndex + (nameSuffix ? series.length : 0), measureIdx };
+      // Single series + Compare Y: name both lines by their fields, not "series".
+      const field = opts?.fieldNames?.[measureIdx];
+      const label = nameSuffix ? (name ? `${name}${nameSuffix}` : field ?? "Compare Y") : name || (y2Idx >= 0 && field ? field : name);
+      return { name: label, pts, compare: !!nameSuffix, colorIndex: seriesIndex + (nameSuffix ? series.length : 0), measureIdx };
     }).filter((s) => s.pts.length > 0);
 
   let data = seriesFrom(yi);
@@ -91,6 +94,14 @@ export function renderFullLine(
   // Rolling mean / rebase on primary series (not compare overlays)
   const rollW = opts?.rollingWindow ?? null;
   const normMode = (opts?.seriesNormalize ?? null) as SeriesNormalize | null;
+  // Bollinger-style ±1σ band around a single rolling mean (raw values, same window).
+  let rollBand: { t: number; lo: number; hi: number }[] | null = null;
+  if (rollW && !normMode && ci < 0 && data.length === 1 && data[0]!.pts.length >= 3) {
+    const raw = data[0]!.pts.map((p) => p.v);
+    const mean = rollingMean(raw, rollW);
+    const sd = rollingStd(raw, rollW);
+    rollBand = data[0]!.pts.map((p, i) => ({ t: p.t, lo: mean[i]! - sd[i]!, hi: mean[i]! + sd[i]! }));
+  }
   if (rollW || normMode) {
     data = data.map((s) => {
       let vals = s.pts.map((p) => p.v);
@@ -145,6 +156,7 @@ export function renderFullLine(
   let yMax = -Infinity;
   for (const s of data) for (const p of s.pts) { yMin = Math.min(yMin, p.v); yMax = Math.max(yMax, p.v); }
   for (const p of analysis.forecast?.points ?? []) { yMin = Math.min(yMin, p.lower); yMax = Math.max(yMax, p.upper); }
+  if (opts?.yScale !== "log") for (const b of rollBand ?? []) { yMin = Math.min(yMin, b.lo); yMax = Math.max(yMax, b.hi); }
   if (opts?.sharedValueDomain) {
     yMin = opts.sharedValueDomain.min;
     yMax = opts.sharedValueDomain.max;
@@ -184,6 +196,57 @@ export function renderFullLine(
   const symbols = markSymbols(opts, opts?.fieldNames, rows);
   const symbolOf = (s: { name: string; compare: boolean }) => symbols.of(seriesRows.get(s.name)?.[0]);
   const markR = Math.max(3, (opts?.pointSize ?? 10) * 0.45);
+  if (rollBand && rollBand.length >= 2) {
+    // Soft ±1σ envelope behind the rolling mean
+    ctx.beginPath();
+    rollBand.forEach((b, i) => (i ? ctx.lineTo(X(b.t), Y(b.hi)) : ctx.moveTo(X(b.t), Y(b.hi))));
+    for (let i = rollBand.length - 1; i >= 0; i--) ctx.lineTo(X(rollBand[i]!.t), Y(Math.max(ys.min, rollBand[i]!.lo)));
+    ctx.closePath();
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = cols[0]!;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // Difference chart: shade the gap between Y and Compare Y by which one leads.
+  const diffPair = ci < 0 && y2Idx >= 0 && !comparePrev ? [data.find((s) => !s.compare), data.find((s) => s.compare)] : null;
+  if (diffPair?.[0] && diffPair[1]) {
+    const bMap = new Map(diffPair[1].pts.map((p) => [p.key, p.v]));
+    let shared = diffPair[0].pts.filter((p) => bMap.has(p.key)).map((p) => ({ t: p.t, a: p.v, b: bMap.get(p.key)! }));
+    // Only meaningful when both measures live on the same scale (their ranges overlap).
+    const aLo = Math.min(...shared.map((p) => p.a));
+    const aHi = Math.max(...shared.map((p) => p.a));
+    const bLo = Math.min(...shared.map((p) => p.b));
+    const bHi = Math.max(...shared.map((p) => p.b));
+    if (!(Math.min(aHi, bHi) >= Math.max(aLo, bLo))) shared = [];
+    const aboveC = cols[diffPair[0].colorIndex % cols.length]!;
+    const belowC = cols[diffPair[1].colorIndex % cols.length]!;
+    ctx.globalAlpha = 0.22;
+    for (let i = 1; i < shared.length; i++) {
+      const p = shared[i - 1]!;
+      const q = shared[i]!;
+      const d0 = p.a - p.b;
+      const d1 = q.a - q.b;
+      const quad = (t0: number, a0: number, b0: number, t1: number, a1: number, b1: number, up: boolean) => {
+        ctx.beginPath();
+        ctx.moveTo(X(t0), Y(a0));
+        ctx.lineTo(X(t1), Y(a1));
+        ctx.lineTo(X(t1), Y(b1));
+        ctx.lineTo(X(t0), Y(b0));
+        ctx.closePath();
+        ctx.fillStyle = up ? aboveC : belowC;
+        ctx.fill();
+      };
+      if (d0 * d1 < 0) {
+        // Lines cross inside the segment — split at the crossing.
+        const f = d0 / (d0 - d1);
+        const tc = p.t + f * (q.t - p.t);
+        const vc = p.a + f * (q.a - p.a);
+        quad(p.t, p.a, p.b, tc, vc, vc, d0 > 0);
+        quad(tc, vc, vc, q.t, q.a, q.b, d1 > 0);
+      } else quad(p.t, p.a, p.b, q.t, q.a, q.b, d0 + d1 >= 0);
+    }
+    ctx.globalAlpha = 1;
+  }
   applyLineDash(ctx, opts?.lineStrokeStyle);
   data.forEach((s, si) => {
     const color = cols[s.colorIndex % cols.length]!;

@@ -79,6 +79,10 @@ describe("odd chart renderers", () => {
     calendar: [7, 2, -1, -1],
     ecdf: [2, -1, 1, -1],
     sparkGrid: [7, 2, 1, -1],
+    density: [2, -1, 1, -1],
+    qq: [2, -1, -1, -1],
+    connectedScatter: [2, 3, -1, 7],
+    stripes: [7, 2, -1, -1],
     spiral: [7, 2, -1, -1],
     voronoi: [2, 3, 1, -1],
     contour: [2, 3, -1, -1],
@@ -93,12 +97,13 @@ describe("odd chart renderers", () => {
       const [xi, yi, ci, si] = enc[kind] ?? [0, 2, 1, 3];
       const { ctx, rec } = mockCtx();
       renderOddChart(kind, ctx, rows, columns, xi, yi, ci, si, 640, 420, 56, { colors: ["#3366cc", "#dc3912", "#ff9900"], fontFamily: "Lora", axisFontSize: 16, ...theme }, false);
-      expect(rec.fills + rec.strokes).toBeGreaterThan(3);
+      // Word clouds mark with text itself.
+      expect(rec.fills + rec.strokes + (kind === "wordCloud" ? rec.texts.length : 0)).toBeGreaterThan(3);
       expect(minFontPx(rec.fonts)).toBeGreaterThanOrEqual(15);
       for (const font of rec.fonts) expect(font).toContain('"Lora"');
       const { ctx: mctx, rec: mrec } = mockCtx();
       renderOddChart(kind, mctx, rows, columns, xi, yi, ci, si, 180, 120, 6, { colors: ["#3366cc"] }, true);
-      expect(mrec.fills + mrec.strokes).toBeGreaterThan(0);
+      expect(mrec.fills + mrec.strokes + (kind === "wordCloud" ? mrec.texts.length : 0)).toBeGreaterThan(0);
     });
     it(`${kind} shows a message for empty data`, () => {
       const { ctx, rec } = mockCtx();

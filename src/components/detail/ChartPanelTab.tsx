@@ -1744,7 +1744,8 @@ export default function ChartPanelTab() {
     activeChart.kind === "isoScatter" ||
     activeChart.kind === "firefly" ||
     activeChart.kind === "scatter3d" ||
-    activeChart.kind === "loomWeave";
+    activeChart.kind === "loomWeave" ||
+    activeChart.kind === "connectedScatter";
   const kindBlurb = encodingKindBlurb(activeChart.kind);
   const isDataCube = activeChart.kind === "dataCube";
   const zChannelLabel =

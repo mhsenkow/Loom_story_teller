@@ -23,7 +23,7 @@ const KINDS_REQUIRING_Y_FIELD = new Set<string>([
   "scatter", "bubble", "heatmap", "strip", "box", "violin",
   "dumbbell", "ridgeline", "hexbin", "parallel",
   "beeswarm", "voronoi", "isoScatter", "contour", "pyramid", "slope", "bump", "stream", "horizon",
-  "dataCube", "sparkGrid",
+  "dataCube", "sparkGrid", "connectedScatter", "stripes", "errorBars",
 ]);
 
 /** Structural reasons the current chart cannot draw on the loaded sample. */
@@ -575,7 +575,7 @@ export { measureSuggestsGrowDown } from "./chartFieldHeuristics";
 
 /** Non-scatter kinds whose point marks read markSymbols (shape / emoji). */
 const SYMBOL_MARK_KINDS = new Set<ChartKind>([
-  "bubble", "line", "radar", "lollipop", "isoScatter", "beeswarm", "slope", "bump",
+  "bubble", "line", "radar", "lollipop", "isoScatter", "beeswarm", "slope", "bump", "connectedScatter", "errorBars",
 ]);
 
 /** Default Y aggregate when the chart has none set — matches each renderer's own fallback. */
@@ -586,7 +586,7 @@ export function defaultYAggregate(kind: ChartKind): "mean" | "sum" {
 /** Kinds whose renderer never draws a legend (so Legend position would do nothing). */
 const NO_LEGEND_KINDS = new Set<string>([
   "box", "ridgeline", "funnel", "sankey",
-  "isotype", "radialBar", "isoBars", "pyramid", "bump", "contour", "sparkGrid",
+  "isotype", "radialBar", "isoBars", "pyramid", "bump", "contour", "sparkGrid", "wordCloud", "connectedScatter",
 ]);
 
 /** Which Encoding / Visual controls actually affect this chart kind. */
@@ -601,7 +601,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     cartesian,
     // Radar/parallel draw every numeric column as an axis; only Color (series) is user-driven
     xChannel: kind !== "radar" && kind !== "parallel" && kind !== "corrMatrix",
-    yChannel: kind !== "histogram" && kind !== "ecdf" && kind !== "radar" && kind !== "parallel" && kind !== "corrMatrix",
+    yChannel: kind !== "histogram" && kind !== "ecdf" && kind !== "density" && kind !== "qq" && kind !== "radar" && kind !== "parallel" && kind !== "corrMatrix",
     zChannel: kind === "scatter3d" || kind === "dataCube" || kind === "quakeTerrain",
     // Show Color only when the canvas reads colorField / cIdx for this kind
     colorChannel: ![
@@ -612,7 +612,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       // Dual-measure kinds: Size carries the second measure; Color slot is hidden in UI
       "pyramid", "slope",
       // Renderers paint one series / a ramp and never read a color column
-      "waffle", "isotype", "horizon", "radialBar", "isoBars", "contour", "geoHex", "calendar",
+      "waffle", "isotype", "horizon", "radialBar", "isoBars", "contour", "geoHex", "calendar", "qq", "stripes", "wordCloud", "connectedScatter",
     ].includes(kind),
     // Size: bubble/scatter + endpoint kinds + geo + GPU (terrain uses Z/Height, not Size)
     sizeChannel:
@@ -629,13 +629,14 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       kind === "flower" ||
       kind === "geoBubbles" ||
       kind === "geoPoints" ||
+      kind === "connectedScatter" ||
       kind === "globe" ||
       kind === "globeTrail" ||
       (gpu && kind !== "quakeTerrain"),
-    aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid", "heatmap", "hexbin", "choropleth", "calendar", "rose", "sparkGrid"].includes(kind),
+    aggregate: ["bar", "pareto", "line", "area", "pie", "waterfall", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "dumbbell", "waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid", "heatmap", "hexbin", "choropleth", "calendar", "rose", "sparkGrid", "stripes", "wordCloud"].includes(kind),
     facetRow: kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble",
     // Only kinds whose canvas path actually ranks/caps categories (see ChartView / oddCharts).
-    topN: kind === "bar" || kind === "pareto" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle" || kind === "isotype" || kind === "radialBar" || kind === "isoBars" || kind === "pyramid" || kind === "rose" || kind === "sparkGrid",
+    topN: kind === "bar" || kind === "pareto" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle" || kind === "isotype" || kind === "radialBar" || kind === "isoBars" || kind === "pyramid" || kind === "rose" || kind === "sparkGrid" || kind === "wordCloud" || kind === "errorBars",
     compareY: kind === "line" || kind === "area",
     comparePrevious: kind === "line" || kind === "area" || kind === "bar",
     deltaDisplay: kind === "dumbbell" || kind === "slope" || kind === "pyramid",
@@ -646,13 +647,13 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     opacityChannel: scatterLike || kind === "strip",
     // Per-row glow / outline fields
     glowOutline: scatterLike,
-    markMotif: cartesian && !["ecdf", "histogram", "waterfall", "pyramid", "stream", "horizon", "heatmap", "hexbin", "choropleth", "strip", "box", "violin", "ridgeline", "dumbbell", "contour", "voronoi", "corrMatrix"].includes(kind) && !gpu && !(GEO_MAP_NON_CARTESIAN as Set<string>).has(kind),
+    markMotif: cartesian && !["ecdf", "density", "qq", "histogram", "waterfall", "pyramid", "stream", "horizon", "heatmap", "hexbin", "choropleth", "strip", "box", "violin", "ridgeline", "dumbbell", "contour", "voronoi", "corrMatrix"].includes(kind) && !gpu && !(GEO_MAP_NON_CARTESIAN as Set<string>).has(kind),
     // barCornerRadius is only read by renderFullBar / pareto
     barMarks: kind === "bar" || kind === "pareto",
     // lineStrokeStyle / smooth / width — line + area canvas only
     lineMarks: kind === "line" || kind === "area",
     // Kinds that check opts.showDataLabels (or odd env.opts.showDataLabels)
-    dataLabels: ["bar", "rose", "waterfall", "pie", "lollipop", "radialBar", "pyramid", "isoBars", "corrMatrix", "heatmap", "hexbin"].includes(kind),
+    dataLabels: ["bar", "rose", "errorBars", "waterfall", "pie", "lollipop", "radialBar", "pyramid", "isoBars", "corrMatrix", "heatmap", "hexbin"].includes(kind),
     legend:
       !NO_LEGEND_KINDS.has(kind) &&
       ((cartesian && !["histogram", "corrMatrix"].includes(kind)) || (isGeoMapKind(kind) && kind !== "geoHex") || kind === "radar" || kind === "pie" || kind === "treemap" || kind === "forceBubble" || kind === "network" || kind === "arcDiagram" || kind === "parallel" || kind === "pareto" || odd || gpu),
@@ -672,7 +673,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       "scatter", "bubble", "hexbin", "histogram", "heatmap", "strip",
       "dumbbell", "ridgeline", "corrMatrix",
       // Odd kinds that draw continuous X ticks via drawChartTicks
-      "voronoi", "contour", "ecdf",
+      "voronoi", "contour", "ecdf", "density", "qq", "connectedScatter",
     ].includes(kind),
     rollingWindow: kind === "line" || kind === "area",
     seriesNormalize: kind === "line" || kind === "area",
@@ -779,6 +780,18 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
       return base("Value", "Share", "Series");
     case "sparkGrid":
       return base("Order", "Value", "Panel");
+    case "density":
+      return base("Value", "Density", "Series");
+    case "qq":
+      return base("Value", "Quantile", "Color");
+    case "connectedScatter":
+      return base("X", "Y", "Color", "Order");
+    case "stripes":
+      return base("Order", "Value", "Color");
+    case "wordCloud":
+      return base("Word", "Size by", "Color");
+    case "errorBars":
+      return base("Group", "Value", "Color");
     case "scatter3d":
     case "firefly":
       return base("X", "Y", "Color", "Size");
@@ -865,6 +878,18 @@ export function encodingKindBlurb(kind: ChartKind): string | null {
       return "Each line climbs from 0% to 100% as Value grows — read the median at 50%. Series (Color) compares groups.";
     case "sparkGrid":
       return "Order on X, Value on Y, one mini chart per Panel (Color). Each panel has its own scale; Top N caps the panels.";
+    case "density":
+      return "A smoothed histogram of Value — no bins to pick. Series (Color) overlays one curve per group; the rug marks raw values.";
+    case "qq":
+      return "Sorted Value against a normal bell curve. Points hugging the dashed line ≈ normal; an S-bend means heavy tails, a curve means skew.";
+    case "connectedScatter":
+      return "X × Y points joined in Order (a date or number) — or row order when Order is empty. Start and end are labeled.";
+    case "stripes":
+      return "One stripe per Order step, colored by how far Value sits above (warm) or below (cool) its own average.";
+    case "wordCloud":
+      return "Each Word sized by row count, or by Size by when set. Top N caps how many words.";
+    case "errorBars":
+      return "Dot = group mean, whiskers = 95% confidence interval, faint dots = raw rows. Dashed line is the overall mean.";
     case "bucketField":
       return "Bucket splits the canvas into paddocks; Value/Size/Color decorate dots inside each.";
     default:

@@ -946,6 +946,9 @@ export function pickCanvasTooltipRowIndex(
     case "isoScatter":
     case "contour":
     case "ecdf":
+    case "density":
+    case "qq":
+    case "connectedScatter":
       return pickScatterCanvasNearest(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
     case "waffle":
     case "isotype":
@@ -960,6 +963,9 @@ export function pickCanvasTooltipRowIndex(
     case "calendar":
     case "rose":
     case "sparkGrid":
+    case "stripes":
+    case "wordCloud":
+    case "errorBars":
     case "chord":
     case "bump":
     case "stream":

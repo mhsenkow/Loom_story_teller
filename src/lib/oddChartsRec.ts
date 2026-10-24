@@ -31,6 +31,12 @@ export const ODD_CHART_KINDS = [
   "rose",
   "ecdf",
   "sparkGrid",
+  "density",
+  "qq",
+  "connectedScatter",
+  "stripes",
+  "wordCloud",
+  "errorBars",
 ] as const;
 
 export type OddChartKind = (typeof ODD_CHART_KINDS)[number];
@@ -60,6 +66,12 @@ export const ODD_CHART_KIND_OPTIONS: { value: OddChartKind; label: string }[] = 
   { value: "rose", label: "Nightingale rose" },
   { value: "ecdf", label: "ECDF (cumulative)" },
   { value: "sparkGrid", label: "Sparkline grid" },
+  { value: "density", label: "Density curve" },
+  { value: "qq", label: "Q–Q plot" },
+  { value: "connectedScatter", label: "Connected scatter" },
+  { value: "stripes", label: "Warming stripes" },
+  { value: "wordCloud", label: "Word cloud" },
+  { value: "errorBars", label: "Mean ± CI dots" },
 ];
 
 export function isOddChartKind(kind: string): kind is OddChartKind {
@@ -82,6 +94,8 @@ export const ODD_NON_CARTESIAN = new Set<string>([
   "calendar",
   "rose",
   "sparkGrid",
+  "stripes",
+  "wordCloud",
 ]);
 
 export interface OddRenderOpts {
@@ -272,9 +286,27 @@ export function oddChartDataSupport(
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need a numeric column" };
     case "sparkGrid":
+    case "stripes":
       return (time.length > 0 || nom.length > 0) && num.length >= 1
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need a time/order column + numeric" };
+    case "density":
+    case "qq":
+      return num.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a numeric column" };
+    case "connectedScatter":
+      return num.length >= 2
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need ≥2 numeric columns" };
+    case "wordCloud":
+      return nom.filter((c) => c.distinct_count >= 5).length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a text column with at least five distinct values" };
+    case "errorBars":
+      return nomN(2, 40).length >= 1 && num.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a category (2–40) + numeric" };
     default:
       return { ok: false, reason: "Unknown odd chart" };
   }
@@ -394,6 +426,41 @@ export function getOddRandomEncoding(
       if (!x || !y) return null;
       const color = pick(nomN(2, 24).filter((c) => c.name !== x.name)) ?? null;
       return { xField: x.name, yField: y.name, colorField: color?.name ?? null };
+    }
+    case "density": {
+      const x = pick(num);
+      if (!x) return null;
+      const color = Math.random() > 0.4 ? pick(nomN(2, 5)) ?? null : null;
+      return { xField: x.name, yField: null, colorField: color?.name ?? null };
+    }
+    case "qq": {
+      const x = pick(num);
+      return x ? { xField: x.name, yField: null, colorField: null } : null;
+    }
+    case "connectedScatter": {
+      if (num.length < 2) return null;
+      const a = pick(num)!;
+      const b = pick(num.filter((c) => c.name !== a.name))!;
+      const order = pick(time) ?? null;
+      return { xField: a.name, yField: b.name, colorField: null, sizeField: order?.name ?? null };
+    }
+    case "stripes": {
+      const x = pick(time.length ? time : nom);
+      const y = pick(num);
+      if (!x || !y) return null;
+      return { xField: x.name, yField: y.name, colorField: null };
+    }
+    case "wordCloud": {
+      const x = pick(nom.filter((c) => c.distinct_count >= 5));
+      if (!x) return null;
+      const y = num.length && Math.random() > 0.5 ? pick(num)! : null;
+      return { xField: x.name, yField: y?.name ?? null, colorField: null };
+    }
+    case "errorBars": {
+      const x = pick(nomN(2, 40));
+      const y = pick(num);
+      if (!x || !y) return null;
+      return { xField: x.name, yField: y.name, colorField: null };
     }
     case "isoScatter": {
       if (num.length < 2) return null;
@@ -529,6 +596,30 @@ export function buildOddChartRec(
       title: colorField ? `${yField} over ${xField} for each ${colorField}` : `${yField} over ${xField}`,
       subtitle: "small-multiple sparklines — shape over scale",
     },
+    density: {
+      title: colorField ? `Distribution of ${xField} by ${colorField}` : `Distribution of ${xField}`,
+      subtitle: "smoothed density — where values pile up",
+    },
+    qq: {
+      title: `Is ${xField} normally distributed?`,
+      subtitle: "Q–Q plot — points on the line mean a bell curve",
+    },
+    connectedScatter: {
+      title: yField ? `${xField} and ${yField} over ${sizeField ?? "time"}` : `Connected scatter`,
+      subtitle: "a path through two measures — where it went, step by step",
+    },
+    stripes: {
+      title: yField ? `${yField} stripes over ${xField}` : `Stripes`,
+      subtitle: "one band per period — warm above average, cool below",
+    },
+    wordCloud: {
+      title: yField ? `${xField} sized by ${yField}` : `Most common ${xField}`,
+      subtitle: "word cloud — bigger means more",
+    },
+    errorBars: {
+      title: yField ? `Average ${yField} by ${xField}` : `Averages by ${xField}`,
+      subtitle: "mean with 95% confidence interval — overlap means maybe no real difference",
+    },
   };
 
   const meta = titles[kind];
@@ -542,7 +633,7 @@ export function buildOddChartRec(
   if ((kind === "chord" || kind === "mosaic") && (!colorField || !nom.some((c) => c.name === colorField))) {
     return null;
   }
-  if ((kind === "voronoi" || kind === "isoScatter" || kind === "contour" || kind === "sparkGrid") && !yField) return null;
+  if ((kind === "voronoi" || kind === "isoScatter" || kind === "contour" || kind === "sparkGrid" || kind === "connectedScatter" || kind === "stripes" || kind === "errorBars") && !yField) return null;
 
   const enc: Record<string, unknown> = {
     x: { field: xField, type: "nominal" },
@@ -577,9 +668,9 @@ export function buildOddChartRec(
           (num.find((c) => c.name !== yField && !/^(year|yr|month|day|week|hour)$/i.test(c.name)) ??
             num.find((c) => c.name !== yField))?.name ?? null
         : undefined),
-    yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid", "calendar", "rose"].includes(kind)
+    yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid", "calendar", "rose", "wordCloud"].includes(kind)
       ? (!yField ? "count" : (yAggregate ?? "sum"))
-      : kind === "sparkGrid"
+      : kind === "sparkGrid" || kind === "stripes"
         ? (yAggregate ?? "mean")
         : undefined,
   };
@@ -611,6 +702,12 @@ export function oddRecommendationReason(kind: OddChartKind): string {
     rose: "Polar wedges whose area tracks value — stack a second category inside",
     ecdf: "Cumulative distribution — compare medians and tails across groups without binning",
     sparkGrid: "One tiny trend per group — compare shapes, not just totals",
+    density: "A smooth curve of the distribution — no bin-size guessing, compare groups by overlap",
+    qq: "Check normality: sample quantiles vs a bell curve; bends reveal skew and heavy tails",
+    connectedScatter: "Two measures traced through time — loops, reversals and drift jump out",
+    stripes: "Ed Hawkins-style stripes — a long series as one band of warm and cool",
+    wordCloud: "Category labels sized by count or value — a playful top-N",
+    errorBars: "Group means with 95% intervals over the raw dots — honest comparisons",
   };
   return map[kind] ?? "An unconventional view that fits your columns";
 }

@@ -63,7 +63,7 @@ const DIRECTION_RANDOM_KINDS = new Set<ChartKind>([
 const DIRECTION_RANDOM_PICKS = ["up", "down", "right", "left"] as const;
 
 export const FACET_RANDOM_KINDS = new Set<ChartKind>(["bar", "line", "area", "scatter", "bubble"]);
-export const TOP_N_RANDOM_KINDS = new Set<ChartKind>(["bar", "pareto", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "waffle", "isotype", "radialBar", "isoBars", "pyramid", "rose"]);
+export const TOP_N_RANDOM_KINDS = new Set<ChartKind>(["bar", "pareto", "lollipop", "treemap", "sunburst", "forceBubble", "funnel", "waffle", "isotype", "radialBar", "isoBars", "pyramid", "rose", "wordCloud"]);
 export const COMPARE_RANDOM_KINDS = new Set<ChartKind>(["line", "area"]);
 export const TOP_N_RANDOM_PICKS = [10, 15, 20, 30] as const;
 

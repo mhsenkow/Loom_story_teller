@@ -318,13 +318,31 @@ export function renderFullDumbbell(
     centers.push(cy);
     const x0 = X(e.start);
     const x1 = X(e.end);
-    ctx.strokeStyle = opts?.axisLabelColor ?? "#6b6b78";
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.5;
+    // Arrow from start → end: reads direction without a legend lookup (Plot's arrow chart).
+    const dir = Math.sign(x1 - x0);
+    const len = Math.abs(x1 - x0);
+    const grad = ctx.createLinearGradient(x0, cy, x1 || x0 + 1, cy);
+    grad.addColorStop(0, startColor);
+    grad.addColorStop(1, endColor);
+    ctx.strokeStyle = grad;
+    ctx.fillStyle = endColor;
+    ctx.lineWidth = Math.max(1.5, Math.min(3, dotR * 0.55));
+    ctx.lineCap = "round";
+    ctx.globalAlpha = 0.6;
+    const head = Math.min(dotR * 1.6, len * 0.45);
     ctx.beginPath();
-    ctx.moveTo(x0, cy);
-    ctx.lineTo(x1, cy);
+    ctx.moveTo(x0 + dir * dotR, cy);
+    ctx.lineTo(x1 - dir * (dotR + head * 0.6), cy);
     ctx.stroke();
+    if (dir !== 0 && len > dotR * 3) {
+      const tipX = x1 - dir * (dotR + 1);
+      ctx.beginPath();
+      ctx.moveTo(tipX, cy);
+      ctx.lineTo(tipX - dir * head, cy - head * 0.55);
+      ctx.lineTo(tipX - dir * head, cy + head * 0.55);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.globalAlpha = alpha;
     ctx.fillStyle = startColor;
     ctx.beginPath();

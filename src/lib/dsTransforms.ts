@@ -42,6 +42,28 @@ export function rollingMean(values: number[], window: number): number[] {
   return out;
 }
 
+/** Trailing-window standard deviation (population), aligned with rollingMean. */
+export function rollingStd(values: number[], window: number): number[] {
+  const w = Math.max(1, Math.floor(window));
+  const out: number[] = [];
+  let sum = 0;
+  let sq = 0;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i]!;
+    sum += v;
+    sq += v * v;
+    if (i >= w) {
+      const o = values[i - w]!;
+      sum -= o;
+      sq -= o * o;
+    }
+    const n = Math.min(i + 1, w);
+    const mean = sum / n;
+    out.push(Math.sqrt(Math.max(0, sq / n - mean * mean)));
+  }
+  return out;
+}
+
 /** Rebase a series to index=100 at first finite point, or to z-scores. */
 export function normalizeSeriesValues(values: number[], mode: SeriesNormalize): number[] {
   if (mode === "index100") {

@@ -25,6 +25,20 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-24b-gallery",
+    date: "2026-10-24",
+    title: "Six more charts from the classics",
+    items: [
+      { title: "Density curve", detail: "A smooth outline of where values pile up — no bin sizes to pick. Split by a group to compare shapes; small groups get a rug of the raw values." },
+      { title: "Q–Q plot", detail: "Is it a bell curve? Sorted values against a normal curve, with the points that stray furthest highlighted." },
+      { title: "Connected scatter", detail: "Two measures traced through time, with arrows and labeled start and end. Long histories fold into about 40 steps so the path stays readable." },
+      { title: "Warming stripes", detail: "One band per period, colored cool below the average and warm above — a whole series at a glance." },
+      { title: "Word cloud", detail: "Category names sized by count or value, packed together. Bigger words really are bigger values." },
+      { title: "Mean ± CI dots", detail: "Each group's average with a 95% interval over its raw rows, plus the overall average for reference." },
+      { title: "Sharper lines and dumbbells", detail: "A rolling mean now shows a ±1σ band around it, Compare Y shades who's ahead when both lines share a scale, and dumbbells point from start to end." },
+    ],
+  },
+  {
     id: "2026-10-24a-charts",
     date: "2026-10-24",
     title: "Four new charts, tidier controls",

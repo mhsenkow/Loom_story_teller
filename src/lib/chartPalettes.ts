@@ -438,7 +438,7 @@ function pickAutoPaletteId(
   }
   if (kind === "waterfall") return "semantic";
   // r runs −1…+1 around a meaningful zero
-  if (kind === "corrMatrix") return "div-cool-warm";
+  if (kind === "corrMatrix" || kind === "stripes") return "div-cool-warm";
   if (colorFieldType === "quantitative" || colorFieldType === "ordinal") return "theme-sequential";
   return "theme";
 }

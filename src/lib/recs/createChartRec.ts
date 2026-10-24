@@ -104,7 +104,7 @@ export function createScatterRec(
 /** Kinds whose X (or slice / stage / identity) is a category. */
 export const CATEGORY_X_KINDS = new Set<string>([
   "bar", "pareto", "lollipop", "pie", "treemap", "sunburst", "forceBubble", "funnel", "waterfall", "box", "violin",
-  "beeswarm", "dumbbell", "pyramid", "slope", "radialBar", "waffle", "isotype", "isoBars", "mosaic", "rose",
+  "beeswarm", "dumbbell", "pyramid", "slope", "radialBar", "waffle", "isotype", "isoBars", "mosaic", "rose", "errorBars", "wordCloud",
   "chord", "sankey", "network", "arcDiagram", "bucketField",
 ]);
 /** One glyph per row/entity — an identity column (country, name) rather than a few groups. */
@@ -112,14 +112,14 @@ export const IDENTITY_X_KINDS = new Set<string>(["chernoff", "glyphStar", "flowe
 /** Kinds whose Y is the group axis. */
 export const CATEGORY_Y_KINDS = new Set<string>(["strip", "ridgeline"]);
 /** Kinds whose X is an ordering — time reads best. */
-export const ORDERED_X_KINDS = new Set<string>(["line", "area", "bump", "stream", "horizon", "spiral", "calendar", "sparkGrid"]);
+export const ORDERED_X_KINDS = new Set<string>(["line", "area", "bump", "stream", "horizon", "spiral", "calendar", "sparkGrid", "stripes"]);
 /** Kinds that place marks on two continuous axes (density, territories, points). */
-export const NUMERIC_XY_KINDS = new Set<string>(["scatter", "bubble", "hexbin", "contour", "isoScatter", "voronoi"]);
+export const NUMERIC_XY_KINDS = new Set<string>(["scatter", "bubble", "hexbin", "contour", "isoScatter", "voronoi", "connectedScatter"]);
 /** Kinds that bin a numeric X (Y is a count). */
-export const NUMERIC_X_KINDS = new Set<string>(["histogram", "ecdf"]);
+export const NUMERIC_X_KINDS = new Set<string>(["histogram", "ecdf", "density", "qq"]);
 /** Kinds that plot a numeric Y against their X (no count fallback). */
 export const NUMERIC_Y_KINDS = new Set<string>([
-  "line", "area", "bump", "stream", "horizon", "spiral", "sparkGrid", "box", "violin", "beeswarm", "dumbbell", "slope", "pyramid",
+  "line", "area", "bump", "stream", "horizon", "spiral", "sparkGrid", "stripes", "errorBars", "box", "violin", "beeswarm", "dumbbell", "slope", "pyramid",
 ]);
 /** Kinds that split a whole into parts — slice sizes need non-negative totals. */
 export const PART_TO_WHOLE_KINDS = new Set<string>([
