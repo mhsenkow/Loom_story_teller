@@ -76,6 +76,7 @@ import {
   computeDataQualityHints,
   formatChartAggregationSummary,
   chartCapabilities,
+  defaultYAggregate,
   encodingChannelLabels,
   encodingDirectionTip,
   encodingDirectionTitle,
@@ -441,7 +442,7 @@ function IconToggleGroup<T extends string | number>({
         {label}
       </p>
       <div
-        className="flex flex-wrap gap-1"
+        className="loom-seg"
         role="radiogroup"
         aria-labelledby={`icon-toggle-${label.replace(/\s+/g, "-").toLowerCase()}`}
         onKeyDown={(e) => {
@@ -474,16 +475,11 @@ function IconToggleGroup<T extends string | number>({
               aria-checked={active}
               tabIndex={active ? 0 : -1}
               onClick={() => onChange(opt.value)}
-              className={`
-                min-h-11 min-w-11 px-2 py-1.5 rounded-md border flex flex-col gap-1 items-center justify-center transition-colors
-                focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent/50
-                ${active
-                  ? "border-loom-accent bg-loom-accent/15 text-loom-text"
-                  : "border-loom-border text-loom-muted hover:border-loom-accent/40 hover:text-loom-text hover:bg-loom-elevated"}
-              `}
+              data-active={active}
+              className="loom-seg-item loom-seg-btn"
             >
               {opt.icon}
-              <span className="text-2xs leading-tight">{opt.label}</span>
+              {opt.icon && options.length > 4 ? null : <span className="leading-none">{opt.label}</span>}
             </button>
           );
         })}
@@ -1759,7 +1755,7 @@ export default function ChartPanelTab() {
   const aggregateField = isHeat ? activeChart.colorField : activeChart.yField;
   const effectiveAggregate: YAggregateOption = !aggregateField
     ? "count"
-    : (activeChart.yAggregate ?? (activeChart.kind === "line" || isHeat ? "mean" : "sum"));
+    : (activeChart.yAggregate ?? defaultYAggregate(activeChart.kind));
   const showRow = caps.facetRow;
   const showTopN = caps.topN;
   const showCompareY = caps.compareY;
@@ -1881,14 +1877,14 @@ export default function ChartPanelTab() {
                 }
               }}
               className={`
-                flex-1 min-w-0 min-h-12 flex flex-col items-center justify-center gap-1 px-1 py-2 text-xs font-medium rounded transition-colors
+                flex-1 min-w-0 h-8 inline-flex items-center justify-center gap-1 px-1.5 text-2xs font-medium rounded transition-colors
                 ${chartPanelSection === sec.id
                   ? "bg-loom-surface text-loom-text shadow-sm border border-loom-border"
                   : "text-loom-muted hover:text-loom-text border border-transparent"}
               `}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={sec.path} /></svg>
-              {sec.label}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0"><path d={sec.path} /></svg>
+              <span className="truncate">{sec.label}</span>
             </button>
           ))}
         </div>
@@ -1940,27 +1936,23 @@ export default function ChartPanelTab() {
                 {kindBlurb ? (
                   <EncodingInfoTip label="About this chart type" text={kindBlurb} />
                 ) : null}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={handleRandomizeEncoding}
-                  className="min-h-9 rounded-md border border-loom-border text-xs text-loom-muted hover:text-loom-text hover:bg-loom-elevated transition-colors inline-flex items-center justify-center gap-1.5"
-                  title="Shuffle fields — respects locked channels below. Chart type stays."
+                  className="loom-btn-ghost h-8 w-8 p-0 shrink-0 border border-loom-border"
+                  title="Shuffle fields — respects kept channels below. Chart type stays."
                   aria-label="Shuffle fields"
                 >
-                  <span aria-hidden>⟳</span>
-                  Shuffle
+                  <span aria-hidden className="text-sm leading-none">⟳</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleRandomize}
-                  className="min-h-9 rounded-md border border-loom-border text-xs text-loom-muted hover:text-loom-accent hover:bg-loom-elevated transition-colors inline-flex items-center justify-center gap-1.5"
-                  title="Random chart — respects locked channels below."
+                  className="loom-btn-ghost h-8 w-8 p-0 shrink-0 border border-loom-border hover:text-loom-accent"
+                  title="Random chart — respects kept channels below."
                   aria-label="Randomize chart"
                 >
-                  <span aria-hidden>✦</span>
-                  Random
+                  <span aria-hidden className="text-sm leading-none">✦</span>
                 </button>
               </div>
             </div>
@@ -2033,7 +2025,7 @@ export default function ChartPanelTab() {
                         id="loom-y-agg"
                         value={effectiveAggregate}
                         onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)}
-                        className="loom-input flex-1 w-full text-xs py-1.5 min-h-9 px-2"
+                        className="loom-input loom-panel-select flex-1 w-full"
                         title="How values are summarized"
                       >
                         {Y_AGGREGATE_OPTIONS.map((opt) => (
@@ -2084,7 +2076,7 @@ export default function ChartPanelTab() {
                       <div className="flex items-center gap-1.5 flex-wrap pl-0.5 pt-0.5">
                           <>
                             <span className="text-2xs text-loom-muted shrink-0">Layout</span>
-                            <div className="flex gap-1 flex-wrap">
+                            <div className="loom-seg" role="group" aria-label="Bar layout">
                               {(["grouped", "stacked", "percent"] as const).map((m) => (
                                 <button
                                   key={m}
@@ -2104,11 +2096,7 @@ export default function ChartPanelTab() {
                                     );
                                     if (rec) commitRec(rec);
                                   }}
-                                  className={`min-h-8 px-2.5 text-2xs rounded-md capitalize ${
-                                    barStackMode === m
-                                      ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                                      : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                                  }`}
+ className="loom-seg-item loom-seg-btn capitalize"
                                 >
                                   {m}
                                 </button>
@@ -2122,7 +2110,7 @@ export default function ChartPanelTab() {
               )}
               {isHeat && (
                 <EncodingSelectSlot label="Heat agg" htmlFor="loom-heat-agg" title="How each cell summarizes its heat measure">
-                  <select id="loom-heat-agg" value={effectiveAggregate} onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)} className="loom-input flex-1 w-full text-xs py-1.5 min-h-9 px-2">
+                  <select id="loom-heat-agg" value={effectiveAggregate} onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)} className="loom-input loom-panel-select flex-1 w-full">
                     {Y_AGGREGATE_OPTIONS.map((opt) => <option key={opt.value} value={opt.value} disabled={!aggregateField && opt.value !== "count"}>{opt.label}</option>)}
                   </select>
                 </EncodingSelectSlot>
@@ -2149,7 +2137,7 @@ export default function ChartPanelTab() {
                         text="Same field as Color or Facet — Color overlays, Facet splits panels, Both colors within each facet."
                       />
                     </span>
-                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Color versus facet split">
+                    <div className="loom-seg" role="group" aria-label="Color versus facet split">
                       {(
                         [
                           ["color", "Color"],
@@ -2162,11 +2150,7 @@ export default function ChartPanelTab() {
                           type="button"
                           aria-pressed={splitMode === mode}
                           onClick={() => applySplitMode(mode)}
-                          className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                            splitMode === mode
-                              ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                              : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                          }`}
+ className="loom-seg-item loom-seg-btn"
                           title={
                             mode === "color"
                               ? "Overlay series by color in one plot"
@@ -2196,7 +2180,7 @@ export default function ChartPanelTab() {
                       id="loom-top-n"
                       value={clampTopN(activeChart.topN, DEFAULT_TOP_N)}
                       onChange={(e) => applyTopN(Number(e.target.value))}
-                      className="loom-input flex-1 text-xs py-1.5 min-h-8"
+                      className="loom-input loom-panel-select flex-1"
                       title="How many categories to keep (ranked by value)"
                     >
                       {(topNChoices.length > 0 ? topNChoices : TOP_N_OPTIONS).map((opt) => (
@@ -2226,7 +2210,7 @@ export default function ChartPanelTab() {
                         text={encodingDirectionTip(activeChart.kind)}
                       />
                     </span>
-                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Chart direction">
+                    <div className="loom-seg" role="group" aria-label="Chart direction">
                       {CHART_LAYOUT_DIRECTIONS.map((d) => {
                         const cur = activeChart.layoutDirection ?? "auto";
                         const on = cur === d.value;
@@ -2235,11 +2219,7 @@ export default function ChartPanelTab() {
                             key={d.value}
                             type="button"
                             onClick={() => applyLayoutDirection(d.value)}
-                            className={`min-h-8 min-w-8 px-2 text-2xs rounded-md ${
-                              on
-                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                            }`}
+                            className="loom-seg-item loom-seg-btn"
                             title={encodingDirectionTitle(activeChart.kind, d.value)}
                             aria-pressed={on}
                           >
@@ -2267,7 +2247,7 @@ export default function ChartPanelTab() {
                       text="Log and symlog stretch tall ranges so small values stay readable. Symlog keeps zero; log needs positive values."
                     />
                   </span>
-                  <div className="flex gap-1 flex-wrap" role="group" aria-label="Y axis scale">
+                  <div className="loom-seg" role="group" aria-label="Y axis scale">
                     {CHART_Y_SCALE_OPTIONS.map((s) => {
                       const cur = activeChart.yScale ?? "linear";
                       const on = cur === s.value;
@@ -2276,11 +2256,7 @@ export default function ChartPanelTab() {
                           key={s.value}
                           type="button"
                           onClick={() => applyYScale(s.value)}
-                          className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                            on
-                              ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                              : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                          }`}
+                          className="loom-seg-item loom-seg-btn"
                           title={s.title}
                           aria-pressed={on}
                         >
@@ -2324,7 +2300,7 @@ export default function ChartPanelTab() {
                     label="About delta"
                     text="Annotate each row with the change from Start→End or Left→Right: signed difference (Δ) or percent change. Works on dumbbell, slope, and mirror pyramid."
                   />
-                  <div className="flex gap-1 flex-wrap" role="group" aria-label="Delta display">
+                  <div className="loom-seg" role="group" aria-label="Delta display">
                     {(
                       [
                         ["off", "Off"],
@@ -2340,11 +2316,7 @@ export default function ChartPanelTab() {
                           type="button"
                           aria-pressed={on}
                           onClick={() => patchChartExtra({ deltaDisplay: mode })}
-                          className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                            on
-                              ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                              : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                          }`}
+                          className="loom-seg-item loom-seg-btn"
                         >
                           {label}
                         </button>
@@ -2385,11 +2357,7 @@ export default function ChartPanelTab() {
                             aria-pressed={on}
                             disabled={!timeFieldActive && r !== "all"}
                             onClick={() => applyTimeWindow({ field: timeFieldActive, range: r })}
-                            className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                              on
-                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                            }`}
+                            className="loom-seg-item loom-seg-btn"
                             title={spec?.label ?? r}
                           >
                             {spec?.short ?? r}
@@ -2490,7 +2458,7 @@ export default function ChartPanelTab() {
                         value={cubeAggregate}
                         onChange={(e) => applyYAggregate(e.target.value as YAggregateOption)}
                         disabled={!activeChart.sizeField}
-                        className="loom-input flex-1 w-full text-xs py-1.5 min-h-9 px-2"
+                        className="loom-input loom-panel-select flex-1 w-full"
                         title="How each cell's rows are summarized"
                       >
                         {Y_AGGREGATE_OPTIONS.filter((opt) => opt.value !== "count" || !activeChart.sizeField).map((opt) => (
@@ -2652,7 +2620,7 @@ export default function ChartPanelTab() {
                 {caps.rollingWindow && (
                   <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
                     <span className="text-2xs text-loom-muted shrink-0">Rolling</span>
-                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Rolling mean window">
+                    <div className="loom-seg" role="group" aria-label="Rolling mean window">
                       {(
                         [
                           [null, "Off"],
@@ -2667,11 +2635,7 @@ export default function ChartPanelTab() {
                             type="button"
                             aria-pressed={on}
                             onClick={() => patchChartExtra({ rollingWindow: w })}
-                            className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                              on
-                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                            }`}
+                            className="loom-seg-item loom-seg-btn"
                             title={w ? `${w}-point rolling mean along X` : "No rolling mean"}
                           >
                             {label}
@@ -2684,7 +2648,7 @@ export default function ChartPanelTab() {
                 {caps.seriesNormalize && (
                   <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
                     <span className="text-2xs text-loom-muted shrink-0">Normalize</span>
-                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Series normalize">
+                    <div className="loom-seg" role="group" aria-label="Series normalize">
                       {(
                         [
                           [null, "Off"],
@@ -2699,11 +2663,7 @@ export default function ChartPanelTab() {
                             type="button"
                             aria-pressed={on}
                             onClick={() => patchChartExtra({ seriesNormalize: mode })}
-                            className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                              on
-                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                            }`}
+                            className="loom-seg-item loom-seg-btn"
                             title={
                               mode === "index100"
                                 ? "Rebase each series so the first point is 100"
@@ -2756,7 +2716,7 @@ export default function ChartPanelTab() {
                 {caps.bumpMode && (
                   <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
                     <span className="text-2xs text-loom-muted shrink-0">Bump</span>
-                    <div className="flex gap-1 flex-wrap" role="group" aria-label="Bump mode">
+                    <div className="loom-seg" role="group" aria-label="Bump mode">
                       {(
                         [
                           ["rank", "Rank"],
@@ -2771,11 +2731,7 @@ export default function ChartPanelTab() {
                             type="button"
                             aria-pressed={on}
                             onClick={() => patchChartExtra({ bumpMode: mode })}
-                            className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                              on
-                                ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                                : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                            }`}
+                            className="loom-seg-item loom-seg-btn"
                           >
                             {label}
                           </button>
@@ -2792,7 +2748,7 @@ export default function ChartPanelTab() {
                         label="About mirror scales"
                         text="Same scale makes Left and Right bar lengths comparable. Separate scales keep each arm readable when magnitudes differ (e.g. cases vs deaths). Auto picks separate when one side is ~5× the other."
                       />
-                      <div className="flex gap-1 flex-wrap" role="group" aria-label="Pyramid scale mode">
+                      <div className="loom-seg" role="group" aria-label="Pyramid scale mode">
                         {(
                           [
                             ["auto", "Auto"],
@@ -2808,11 +2764,7 @@ export default function ChartPanelTab() {
                               type="button"
                               aria-pressed={on}
                               onClick={() => patchChartExtra({ pyramidScaleMode: mode })}
-                              className={`min-h-8 px-2.5 text-2xs rounded-md ${
-                                on
-                                  ? "bg-loom-accent/20 text-loom-text border border-loom-accent/50"
-                                  : "text-loom-muted border border-loom-border hover:border-loom-accent/40"
-                              }`}
+                              className="loom-seg-item loom-seg-btn"
                             >
                               {label}
                             </button>
@@ -3219,7 +3171,7 @@ export default function ChartPanelTab() {
             {/* Look spectrum — only controls that affect this chart kind */}
             <ChartInspectorSection title="Composition" open={!!visualSections.look} onToggle={() => toggleVisualSection("look")}>
               {activeChart && ["bar", "pie"].includes(activeChart.kind) && <label className="block text-2xs text-loom-muted">Mark material
-                <select aria-label="Mark material" className="loom-input w-full mt-1" value={chartVisualOverrides.markMaterial ?? "auto"} onChange={(event) => updateOverride("markMaterial", event.target.value === "auto" ? undefined : event.target.value as ChartVisualOverrides["markMaterial"])}>
+                <select aria-label="Mark material" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.markMaterial ?? "auto"} onChange={(event) => updateOverride("markMaterial", event.target.value === "auto" ? undefined : event.target.value as ChartVisualOverrides["markMaterial"])}>
                   <option value="auto">Follow theme · {inheritedStyle.markMaterial}</option>
                   <option value="flat">Flat</option><option value="glaze">Glaze</option><option value="satin">Satin</option><option value="ink">Printed edge</option><option value="etched">Etched edge</option>
                 </select>
@@ -3318,7 +3270,7 @@ export default function ChartPanelTab() {
                   />
                 </p>
                 <select
-                  className="loom-input text-2xs w-full py-1.5"
+                  className="loom-input loom-panel-select w-full"
                   value={chartVisualOverrides.sourceFootnote ?? "credit"}
                   onChange={(e) =>
                     updateOverride(
@@ -3338,7 +3290,7 @@ export default function ChartPanelTab() {
                     <label className="block text-2xs text-loom-muted">
                       Place
                       <select
-                        className="loom-input text-2xs w-full py-1.5 mt-1"
+                        className="loom-input loom-panel-select w-full"
                         value={chartVisualOverrides.chromeInfoBand ?? "footer"}
                         onChange={(e) =>
                           updateOverride(
@@ -3408,7 +3360,7 @@ export default function ChartPanelTab() {
                 <select aria-label="Font family"
                   value={chartVisualOverrides.fontFamily ?? "inherit"}
                   onChange={(e) => updateOverride("fontFamily", e.target.value === "inherit" ? undefined : e.target.value)}
-                  className="loom-input w-full text-xs py-1.5"
+                  className="loom-input loom-panel-select w-full"
                 >
                   <option value="inherit">App typeface</option>
                   {customFont && <option value={chartVisualOverrides.fontFamily}>{chartVisualOverrides.fontFamily}</option>}
@@ -3424,7 +3376,7 @@ export default function ChartPanelTab() {
                 <select id="chart-text-size" aria-label="Chart text size"
                   value={resolveChartAxisFontSize(chartVisualOverrides.axisFontSize)}
                   onChange={(e) => updateOverride("axisFontSize", Number(e.target.value))}
-                  className="loom-input w-full text-xs py-1.5"
+                  className="loom-input loom-panel-select w-full"
                 >
                   <option value={11}>11 px · Compact</option>
                   <option value={12}>12 px · Balanced</option>
@@ -3548,17 +3500,16 @@ export default function ChartPanelTab() {
 
               {caps.pointMarker && (
                 <>
-                  <div>
-                    <label className="block text-2xs text-loom-muted mb-1">Point size</label>
+                  <div className="loom-slider-row">
+                    <span className="truncate text-2xs text-loom-muted">Point size</span>
                     <input aria-label="Point size"
                       type="range"
                       min={2}
                       max={24}
                       value={chartVisualOverrides.pointSize ?? 12}
                       onChange={(e) => updateOverride("pointSize", Number(e.target.value))}
-                      className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                     />
-                    <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.pointSize ?? 12}</span>
+                    <output>{chartVisualOverrides.pointSize ?? 12}</output>
                   </div>
                   <div>
                     <span className="block text-2xs text-loom-muted mb-1">Marker</span>
@@ -3649,7 +3600,7 @@ export default function ChartPanelTab() {
                           step={0.5}
                           value={chartVisualOverrides.markStrokeWidth ?? 1}
                           onChange={(e) => updateOverride("markStrokeWidth", Number(e.target.value) || undefined)}
-                          className="loom-input w-full text-xs py-1"
+                          className="loom-input w-full text-xs h-8 py-0"
                         />
                       </div>
                       <p className="text-2xs text-loom-muted">Outline color{!chartVisualOverrides.markStrokeColor || chartVisualOverrides.markStrokeColor === "auto" ? " · follows each mark" : " · custom"}</p>
@@ -3657,17 +3608,16 @@ export default function ChartPanelTab() {
                       <button type="button" className="loom-btn-ghost text-2xs min-h-9" onClick={() => updateOverride("markStrokeColor", undefined)}>Match mark color</button>
                     </div>
                   )}
-                  <div>
-                    <label className="block text-2xs text-loom-muted mb-1">Jitter (px)</label>
+                  <div className="loom-slider-row">
+                    <span className="truncate text-2xs text-loom-muted">Jitter (px)</span>
                     <input aria-label="Jitter (px)"
                       type="range"
                       min={0}
                       max={10}
                       value={chartVisualOverrides.markJitter ?? 0}
                       onChange={(e) => updateOverride("markJitter", Number(e.target.value))}
-                      className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                     />
-                    <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.markJitter ?? 0}</span>
+                    <output>{chartVisualOverrides.markJitter ?? 0}</output>
                   </div>
                   <div>
                     <label className="block text-2xs text-loom-muted mb-1">Size scale</label>
@@ -3695,17 +3645,16 @@ export default function ChartPanelTab() {
                 </>
               )}
               {caps.barMarks && (
-                <div>
-                  <label className="block text-2xs text-loom-muted mb-1">Bar corner radius (px)</label>
+                <div className="loom-slider-row">
+                  <span className="truncate text-2xs text-loom-muted">Bar corner radius (px)</span>
                   <input aria-label="Bar corner radius (px)"
                     type="range"
                     min={0}
                     max={12}
                     value={chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}
                     onChange={(e) => updateOverride("barCornerRadius", Number(e.target.value))}
-                    className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                   />
-                  <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}</span>
+                  <output>{chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}</output>
                 </div>
               )}
               {caps.lineMarks && (
@@ -3722,13 +3671,13 @@ export default function ChartPanelTab() {
                   />
                   <div className="grid grid-cols-2 gap-2">
                     <label className="text-2xs text-loom-label">Line endings
-                      <select aria-label="Line endings" className="loom-input w-full mt-1" value={chartVisualOverrides.lineCap ?? "theme"}
+                      <select aria-label="Line endings" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.lineCap ?? "theme"}
                         onChange={(e) => updateOverride("lineCap", e.target.value === "theme" ? undefined : e.target.value as "round" | "butt" | "square")}>
                         <option value="theme">Follow theme</option><option value="round">Rounded</option><option value="butt">Flat</option><option value="square">Square</option>
                       </select>
                     </label>
                     <label className="text-2xs text-loom-label">Line corners
-                      <select aria-label="Line corners" className="loom-input w-full mt-1" value={chartVisualOverrides.lineJoin ?? "theme"}
+                      <select aria-label="Line corners" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.lineJoin ?? "theme"}
                         onChange={(e) => updateOverride("lineJoin", e.target.value === "theme" ? undefined : e.target.value as "round" | "bevel" | "miter")}>
                         <option value="theme">Follow theme</option><option value="round">Rounded</option><option value="bevel">Beveled</option><option value="miter">Sharp</option>
                       </select>
@@ -3758,8 +3707,8 @@ export default function ChartPanelTab() {
                 onChange={(v) => updateOverride("axisLineColor", v === "theme" ? undefined : v)}
                 options={AXIS_LINE_COLOR_SWATCHES}
               />
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Axis line width</label>
+              <div className="loom-slider-row">
+                <span className="truncate text-2xs text-loom-muted">Axis line width</span>
                 <input aria-label="Axis line width"
                   type="range"
                   min={0.5}
@@ -3767,9 +3716,8 @@ export default function ChartPanelTab() {
                   step={0.5}
                   value={chartVisualOverrides.axisLineWidth ?? 1}
                   onChange={(e) => updateOverride("axisLineWidth", Number(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                 />
-                <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.axisLineWidth ?? 1}</span>
+                <output>{chartVisualOverrides.axisLineWidth ?? 1}</output>
               </div>
               <IconToggleGroup
                 label="Grid style"
@@ -3782,8 +3730,8 @@ export default function ChartPanelTab() {
                   { value: "none", label: "None", icon: Ico.none },
                 ]}
               />
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Grid opacity</label>
+              <div className="loom-slider-row">
+                <span className="truncate text-2xs text-loom-muted">Grid opacity</span>
                 <input aria-label="Grid opacity"
                   type="range"
                   min={0}
@@ -3791,21 +3739,19 @@ export default function ChartPanelTab() {
                   step={0.1}
                   value={chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5}
                   onChange={(e) => updateOverride("gridOpacity", Number(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                 />
-                <span className="text-2xs font-mono text-loom-muted ml-2">{((chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5) * 100).toFixed(0)}%</span>
+                <output>{((chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5) * 100).toFixed(0)}%</output>
               </div>
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Tick count</label>
+              <div className="loom-slider-row">
+                <span className="truncate text-2xs text-loom-muted">Tick count</span>
                 <input aria-label="Tick count"
                   type="range"
                   min={3}
                   max={10}
                   value={chartVisualOverrides.tickCount ?? 5}
                   onChange={(e) => updateOverride("tickCount", Number(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                 />
-                <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.tickCount ?? 5}</span>
+                <output>{chartVisualOverrides.tickCount ?? 5}</output>
               </div>
               <ColorSwatchGroup
                 label="Axis label color"
@@ -3837,7 +3783,7 @@ export default function ChartPanelTab() {
             <ChartInspectorSection title="Layout" open={!!visualSections.layout} onToggle={() => toggleVisualSection("layout")}>
               <div>
                 <label htmlFor="chart-space-use" className="block text-2xs text-loom-muted mb-1">Space use</label>
-                <select id="chart-space-use" className="loom-input w-full text-xs py-1.5" value={chartVisualOverrides.spaceUse ?? "auto"} onChange={(e) => updateOverride("spaceUse", e.target.value === "auto" ? undefined : e.target.value as "fill" | "roomy")}>
+                <select id="chart-space-use" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.spaceUse ?? "auto"} onChange={(e) => updateOverride("spaceUse", e.target.value === "auto" ? undefined : e.target.value as "fill" | "roomy")}>
                   <option value="auto">Auto · use available room</option>
                   <option value="fill">Fill · larger plot</option>
                   <option value="roomy">Roomy · more breathing room</option>
@@ -3890,7 +3836,7 @@ export default function ChartPanelTab() {
                       });
                     }
                   }}
-                  className="loom-input w-full text-xs py-1.5"
+                  className="loom-input loom-panel-select w-full"
                   disabled={!caps.legend}
                 >
                   {(isHeat ? [["auto", "Show color scale"], ["none", "Hide color scale"]] : [
@@ -3947,7 +3893,7 @@ export default function ChartPanelTab() {
                 <select aria-label="Background"
                   value={chartVisualOverrides.backgroundStyle ?? "default"}
                   onChange={(e) => updateOverride("backgroundStyle", e.target.value)}
-                  className="loom-input w-full text-xs py-1.5"
+                  className="loom-input loom-panel-select w-full"
                 >
                   {["default", "tufte", "newsprint", "bauhaus", "carbon", "blueprint", "ruled", "gradient", "paper", "transparent"].map((b) => (
                     <option key={b} value={b}>
@@ -3970,7 +3916,7 @@ export default function ChartPanelTab() {
                 <select aria-label="Blend mode"
                   value={chartVisualOverrides.blendMode ?? "source-over"}
                   onChange={(e) => updateOverride("blendMode", e.target.value as GlobalCompositeOperation)}
-                  className="loom-input w-full text-xs py-1.5"
+                  className="loom-input loom-panel-select w-full"
                 >
                   {BLEND_MODE_OPTIONS.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
@@ -3989,17 +3935,16 @@ export default function ChartPanelTab() {
                     Glow on marks
                   </label>
                   {chartVisualOverrides.glowEnabled && (
-                    <div>
-                      <label className="block text-2xs text-loom-muted mb-1">Glow intensity</label>
+                    <div className="loom-slider-row">
+                      <span className="truncate text-2xs text-loom-muted">Glow intensity</span>
                       <input aria-label="Glow intensity"
                         type="range"
                         min={1}
                         max={20}
                         value={chartVisualOverrides.glowIntensity ?? 8}
                         onChange={(e) => updateOverride("glowIntensity", Number(e.target.value))}
-                        className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                       />
-                      <span className="text-2xs font-mono text-loom-muted ml-2">{chartVisualOverrides.glowIntensity ?? 8}</span>
+                      <output>{chartVisualOverrides.glowIntensity ?? 8}</output>
                     </div>
                   )}
                 </>
@@ -4014,8 +3959,8 @@ export default function ChartPanelTab() {
                 Animate entrance
               </label>
 
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Opacity</label>
+              <div className="loom-slider-row">
+                <span className="truncate text-2xs text-loom-muted">Opacity</span>
                 <input aria-label="Opacity"
                   type="range"
                   min={0.2}
@@ -4023,9 +3968,8 @@ export default function ChartPanelTab() {
                   step={0.05}
                   value={chartVisualOverrides.opacity ?? 0.7}
                   onChange={(e) => updateOverride("opacity", Number(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
                 />
-                <span className="text-2xs font-mono text-loom-muted ml-2">{((chartVisualOverrides.opacity ?? 0.7) * 100).toFixed(0)}%</span>
+                <output>{((chartVisualOverrides.opacity ?? 0.7) * 100).toFixed(0)}%</output>
               </div>
             </ChartInspectorSection>
 

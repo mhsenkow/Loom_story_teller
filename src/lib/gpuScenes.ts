@@ -22,6 +22,8 @@ import {
 } from "./chartLooks";
 import {
   resolveChartInk,
+  inkHighlight,
+  inkShadow,
   inkTint,
   mixColor,
   withAlpha,
@@ -264,7 +266,7 @@ function drawFireflyField(
     const r = base * density * (0.8 + p.size * 1.8);
     const a = Math.min(1, opacity * crowd.alpha * (ink.light ? 0.75 : 0.6) * (0.3 + p.size * 0.9));
     const g = ctx.createRadialGradient(px, py, 0, px, py, r * 2.6);
-    g.addColorStop(0, withAlpha(ink.light ? col : mixColor(col, "#ffffff", 0.35 * p.size), a));
+    g.addColorStop(0, withAlpha(ink.light ? col : mixColor(col, inkHighlight(ink), 0.35 * p.size), a));
     g.addColorStop(0.3, withAlpha(col, a * 0.5));
     g.addColorStop(1, withAlpha(col, 0));
     ctx.fillStyle = g;
@@ -681,7 +683,7 @@ function drawQuakeTerrain(
 
   const stops = sequentialStops(ink, opts.continuousStops);
   const colorAt = (t: number) => rampColor(stops, 0.12 + 0.88 * t);
-  const shadeTo = "#000000";
+  const shadeTo = inkShadow(ink);
   cells.sort((a, b) => {
     const ao = orientIsoCell(a.c, a.r, cols, rows, floorOrient);
     const bo = orientIsoCell(b.c, b.r, cols, rows, floorOrient);

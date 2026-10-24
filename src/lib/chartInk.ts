@@ -124,6 +124,16 @@ export function inkTint(ink: ChartInk, amount: number): string {
   return mixColor(ink.bg, ink.text, amount);
 }
 
+/** Darkest theme ink — what extruded side faces shade toward (bg on dark themes, text on light). */
+export function inkShadow(ink: ChartInk): string {
+  return ink.light ? ink.text : ink.bg;
+}
+
+/** Lightest theme ink — what lit top faces and glow cores lift toward. */
+export function inkHighlight(ink: ChartInk): string {
+  return ink.light ? ink.bg : ink.text;
+}
+
 export function fontOf(size: number, family = "Inter", weight: number | string = 400): string {
   return chartFont(size, family, weight);
 }

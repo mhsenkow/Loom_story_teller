@@ -38,7 +38,7 @@ import { aspectLabel, fitChartFrame } from "@/lib/chartViewport";
 import { automaticPlotBounds, chartSpacePadding, chartStageGutter } from "@/lib/chartSpace";
 import { type ChartRecommendation, createChartRec, getBestSuggestion, getRecommendationReason, getTopSuggestions, recommend, recommendStorySequence, tryBuildRandomChartRec, type YAggregateOption } from "@/lib/recommendations";
 import { chartNumber } from "@/lib/chartNumbers";
-import { chartCapabilities, encodingChannelLabels, formatChartAggregationSummary, getChartRenderIssue, resolveLayoutDirection, svgExportMode } from "@/lib/chartSupport";
+import { chartCapabilities, defaultYAggregate, encodingChannelLabels, formatChartAggregationSummary, getChartRenderIssue, resolveLayoutDirection, svgExportMode } from "@/lib/chartSupport";
 import { canUseWebGpuScatter } from "@/lib/webGpuScatterEligibility";
 import { notifyChartPainted } from "@/lib/chartPaintSignal";
 import { drawCanvasAnnotations } from "@/lib/canvasAnnotationDraw";
@@ -685,7 +685,7 @@ export function ChartView() {
       yAggregate: (() => {
         if (!activeChart) return undefined;
         if (!activeChart.yField) return "count" as YAggregateOption;
-        return activeChart.yAggregate ?? (activeChart.kind === "line" ? "mean" : "sum");
+        return activeChart.yAggregate ?? defaultYAggregate(activeChart.kind);
       })(),
       barStackMode: activeChart?.kind === "bar" ? barStackMode : undefined,
       topN: activeChart?.topN ?? undefined,
@@ -3379,6 +3379,7 @@ export function ChartView() {
                   opacity: opts.opacity,
                   fontFamily: opts.fontFamily,
                   axisFontSize: opts.axisFontSize,
+                  tickRotation: opts.tickRotation,
                   axisLabelColor: opts.axisLabelColor,
                   themeText: opts.themeText,
                   themeMuted: opts.themeMuted,

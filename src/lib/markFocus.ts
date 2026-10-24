@@ -28,10 +28,10 @@ const POINT_KINDS = new Set([
   "hexbin", "beeswarm", "chernoff", "glyphStar", "flower", "isoScatter", "bump", "slope", "spiral",
   "voronoi", "contour", "bucketField", "geoPoints", "geoBubbles", "geoHex", "globe", "globeTrail", "arcMap",
   "trailRibbon", "quakeTerrain", "loomWeave", "waffle", "isotype", "stream", "horizon", "chord", "mosaic",
-  "radialBar", "isoBars",
+  "radialBar", "isoBars", "rose", "ecdf", "sparkGrid",
 ]);
 const BAND_KINDS = new Set(["area", "box", "violin", "ridgeline", "dumbbell", "strip", "parallel"]);
-const CELL_KINDS = new Set(["heatmap", "corrMatrix", "treemap", "choropleth", "sankey"]);
+const CELL_KINDS = new Set(["calendar", "heatmap", "corrMatrix", "treemap", "choropleth", "sankey"]);
 
 /** Theme the focus treatment to how the chart draws its marks. */
 export function markFocusStyle(kind: string, hit: HitTarget): MarkFocusStyle {

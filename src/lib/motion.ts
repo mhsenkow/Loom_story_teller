@@ -55,7 +55,7 @@ export type ChartEntranceReveal = "rise" | "flow" | "radial";
 
 /** Marks with no baseline — they open from the middle. */
 const RADIAL_KINDS = new Set([
-  "pie", "sunburst", "radar", "radialBar", "forceBubble", "arcDiagram",
+  "pie", "sunburst", "radar", "radialBar", "rose", "forceBubble", "arcDiagram",
   "network", "treemap", "waffle", "globe", "scatter3d", "firefly",
 ]);
 

@@ -425,6 +425,7 @@ function pickAutoPaletteId(
   const kind = chartKind ?? "";
   if (
     kind === "contour" ||
+    kind === "calendar" ||
     kind === "heatmap" ||
     kind === "choropleth" ||
     kind === "dataCube" ||

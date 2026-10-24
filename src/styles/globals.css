@@ -1406,6 +1406,22 @@ html {
     border-radius: var(--btn-radius);
     transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   }
+  /* Chart panel: compact size for .loom-seg-item (sliding thumb comes from .loom-seg). */
+  .loom-seg-btn {
+    @apply h-7 min-w-7 px-2 py-0 text-2xs;
+  }
+  .loom-seg-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+  /* Chart panel: one select / input height everywhere. */
+  .loom-panel-select {
+    @apply h-8 py-0 pl-2 pr-6 text-xs;
+  }
+  .loom-slider-row {
+    @apply grid h-7 items-center gap-2;
+    grid-template-columns: minmax(4.5rem, 6.5rem) minmax(0, 1fr) 2.75rem;
+  }
+  .loom-slider-row input[type="range"] { @apply h-1 w-full accent-loom-accent; }
+  .loom-slider-row output { @apply text-right font-mono text-2xs tabular-nums text-loom-muted; }
+
   .loom-input::placeholder {
     color: var(--loom-muted);
     opacity: 0.9;
@@ -2412,4 +2428,8 @@ html[data-theme="nes"] .discover-header { border-bottom: 3px solid var(--chart-3
 }
 @container (max-width: 640px) {
   .library-wide .library-feed-count { padding-right: 4rem; }
+}
+@media (pointer: coarse) {
+  .loom-seg-btn { min-height: 2.25rem; min-width: 2.25rem; }
+  .loom-panel-select { height: 2.25rem; }
 }

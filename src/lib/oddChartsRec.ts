@@ -27,6 +27,10 @@ export const ODD_CHART_KINDS = [
   "flower",
   "mosaic",
   "contour",
+  "calendar",
+  "rose",
+  "ecdf",
+  "sparkGrid",
 ] as const;
 
 export type OddChartKind = (typeof ODD_CHART_KINDS)[number];
@@ -52,6 +56,10 @@ export const ODD_CHART_KIND_OPTIONS: { value: OddChartKind; label: string }[] = 
   { value: "flower", label: "Flower petals" },
   { value: "mosaic", label: "Mosaic" },
   { value: "contour", label: "Density contour" },
+  { value: "calendar", label: "Calendar heatmap" },
+  { value: "rose", label: "Nightingale rose" },
+  { value: "ecdf", label: "ECDF (cumulative)" },
+  { value: "sparkGrid", label: "Sparkline grid" },
 ];
 
 export function isOddChartKind(kind: string): kind is OddChartKind {
@@ -71,6 +79,9 @@ export const ODD_NON_CARTESIAN = new Set<string>([
   "isoBars",
   "isoScatter",
   "mosaic",
+  "calendar",
+  "rose",
+  "sparkGrid",
 ]);
 
 export interface OddRenderOpts {
@@ -81,6 +92,8 @@ export interface OddRenderOpts {
   fontFamily?: string;
   axisLabelColor?: string;
   axisFontSize?: number;
+  /** Visual → tick label rotation (degrees) for continuous X ticks. */
+  tickRotation?: number;
   themeText?: string;
   themeMuted?: string;
   themeBorder?: string;
@@ -246,6 +259,22 @@ export function oddChartDataSupport(
       return num.length >= 2
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need ≥2 numeric columns" };
+    case "calendar":
+      return time.length > 0
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a date column" };
+    case "rose":
+      return nomN(2, 40).length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a category (2–40)" };
+    case "ecdf":
+      return num.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a numeric column" };
+    case "sparkGrid":
+      return (time.length > 0 || nom.length > 0) && num.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a time/order column + numeric" };
     default:
       return { ok: false, reason: "Unknown odd chart" };
   }
@@ -339,6 +368,32 @@ export function getOddRandomEncoding(
       const b = pick(num.filter((c) => c.name !== a.name))!;
       const color = pick(nomN(2, 12)) ?? null;
       return { xField: a.name, yField: b.name, colorField: color?.name ?? null };
+    }
+    case "calendar": {
+      const x = pick(time);
+      if (!x) return null;
+      const y = num.length && Math.random() > 0.25 ? pick(num)! : null;
+      return { xField: x.name, yField: y?.name ?? null, colorField: null };
+    }
+    case "rose": {
+      const x = pick(nomN(2, 24)) ?? pick(nomN(2, 40));
+      if (!x) return null;
+      const y = num.length ? pick(num)! : null;
+      const color = Math.random() > 0.5 ? pick(nomN(2, 6).filter((c) => c.name !== x.name)) ?? null : null;
+      return { xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null };
+    }
+    case "ecdf": {
+      const x = pick(num);
+      if (!x) return null;
+      const color = Math.random() > 0.35 ? pick(nomN(2, 6)) ?? null : null;
+      return { xField: x.name, yField: null, colorField: color?.name ?? null };
+    }
+    case "sparkGrid": {
+      const x = pick(time.length ? time : nom);
+      const y = pick(num);
+      if (!x || !y) return null;
+      const color = pick(nomN(2, 24).filter((c) => c.name !== x.name)) ?? null;
+      return { xField: x.name, yField: y.name, colorField: color?.name ?? null };
     }
     case "isoScatter": {
       if (num.length < 2) return null;
@@ -458,6 +513,22 @@ export function buildOddChartRec(
       title: yField ? `Density of ${xField} × ${yField}` : `Contour`,
       subtitle: "smooth hills where points pile up",
     },
+    calendar: {
+      title: yField ? `${yField} by day` : `Activity by day`,
+      subtitle: "a year of days — weekdays down, weeks across",
+    },
+    rose: {
+      title: yField ? `${yField} rose by ${xField}` : `Rose of ${xField}`,
+      subtitle: "Nightingale petals — wedge area is the value",
+    },
+    ecdf: {
+      title: colorField ? `How ${xField} accumulates by ${colorField}` : `How ${xField} accumulates`,
+      subtitle: "cumulative share of rows at or below each value",
+    },
+    sparkGrid: {
+      title: colorField ? `${yField} over ${xField} for each ${colorField}` : `${yField} over ${xField}`,
+      subtitle: "small-multiple sparklines — shape over scale",
+    },
   };
 
   const meta = titles[kind];
@@ -471,7 +542,7 @@ export function buildOddChartRec(
   if ((kind === "chord" || kind === "mosaic") && (!colorField || !nom.some((c) => c.name === colorField))) {
     return null;
   }
-  if ((kind === "voronoi" || kind === "isoScatter" || kind === "contour") && !yField) return null;
+  if ((kind === "voronoi" || kind === "isoScatter" || kind === "contour" || kind === "sparkGrid") && !yField) return null;
 
   const enc: Record<string, unknown> = {
     x: { field: xField, type: "nominal" },
@@ -506,9 +577,11 @@ export function buildOddChartRec(
           (num.find((c) => c.name !== yField && !/^(year|yr|month|day|week|hour)$/i.test(c.name)) ??
             num.find((c) => c.name !== yField))?.name ?? null
         : undefined),
-    yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid"].includes(kind)
+    yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid", "calendar", "rose"].includes(kind)
       ? (!yField ? "count" : (yAggregate ?? "sum"))
-      : undefined,
+      : kind === "sparkGrid"
+        ? (yAggregate ?? "mean")
+        : undefined,
   };
 }
 
@@ -534,6 +607,10 @@ export function oddRecommendationReason(kind: OddChartKind): string {
     flower: "A garden of multivariate blooms — one flower per group",
     mosaic: "Rectangle areas show joint category shares",
     contour: "Smooth density hills where observations cluster",
+    calendar: "Every day as a cell — weekly rhythms and busy stretches pop",
+    rose: "Polar wedges whose area tracks value — stack a second category inside",
+    ecdf: "Cumulative distribution — compare medians and tails across groups without binning",
+    sparkGrid: "One tiny trend per group — compare shapes, not just totals",
   };
   return map[kind] ?? "An unconventional view that fits your columns";
 }

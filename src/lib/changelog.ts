@@ -25,6 +25,19 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-24a-charts",
+    date: "2026-10-24",
+    title: "Four new charts, tidier controls",
+    items: [
+      { title: "Calendar heatmap", detail: "Every day as a square — weeks across, weekdays down — so busy stretches and weekly rhythms stand out." },
+      { title: "Nightingale rose", detail: "Polar wedges whose area tracks the value. Add a second category to stack it inside each petal." },
+      { title: "ECDF", detail: "See what share of rows falls at or below each value, and compare medians and tails across groups without picking bin sizes." },
+      { title: "Sparkline grid", detail: "One small trend per group, each on its own scale, so you compare shapes at a glance. Top N sets how many panels." },
+      { title: "Slopes show direction", detail: "Slope lines that rise and fall now get their own colors, with a key that counts each. 3D bars, terrain, and firefly glows shade with your theme instead of plain black and white." },
+      { title: "Controls that do something", detail: "The chart panel only shows options the current chart actually uses. Choices sit in compact segmented rows, sliders show their value beside them, and every dropdown is the same height." },
+    ],
+  },
+  {
     id: "2026-10-23a-library",
     date: "2026-10-23",
     title: "A home for your data",

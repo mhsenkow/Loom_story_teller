@@ -15,6 +15,7 @@ const NON_CARTESIAN = new Set<ChartKind>([
   "scatter3d", "trailRibbon", "quakeTerrain", "firefly", "loomWeave", "dataCube",
   // Glyph / radial creative kinds
   "chernoff", "glyphStar", "flower", "waffle", "isotype", "spiral", "radialBar", "chord",
+  "calendar", "rose", "sparkGrid",
 ]);
 
 /** Bottom of title band (px from canvas top) for each title layout. */
