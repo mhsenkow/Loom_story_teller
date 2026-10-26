@@ -99,6 +99,7 @@ export interface ChartRenderOpts {
   anomalyHighlight?: boolean | null;
   layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
   bumpMode?: "rank" | "delta" | null;
+  wordCloudMode?: "cloud" | "compare" | "grid" | null;
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   /** Dual-measure delta ink: off / signed diff / percent. */
   deltaDisplay?: "off" | "diff" | "pct" | null;

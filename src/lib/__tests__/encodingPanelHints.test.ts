@@ -77,6 +77,12 @@ describe("encodingPanelHints", () => {
       stats,
     );
     expect(hints.some((h) => h.id === "color-high-cardinality")).toBe(true);
+    expect(hints.some((h) => h.message.includes("Group into"))).toBe(true);
+    const grouped = encodingPanelHints(
+      rec({ kind: "scatter", xField: "x", yField: "y", colorField: "id", groupInto: 10 }),
+      stats,
+    );
+    expect(grouped.some((h) => h.id === "color-high-cardinality")).toBe(false);
   });
 
   it("suggests log when Y is skewed and still linear", () => {

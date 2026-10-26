@@ -229,6 +229,7 @@ export function ChartCard({
         residualOverlay: !!rec.residualOverlay,
         anomalyHighlight: !!rec.anomalyHighlight,
         bumpMode: rec.bumpMode ?? null,
+        wordCloudMode: rec.wordCloudMode ?? null,
         pyramidScaleMode: rec.pyramidScaleMode,
         deltaDisplay: rec.deltaDisplay,
         // Terrain Height is Z; older recs may still carry it on sizeField.
@@ -422,6 +423,7 @@ export function ChartCard({
             rec.residualOverlay ||
             rec.anomalyHighlight ||
             rec.bumpMode === "delta" ||
+            (rec.wordCloudMode && rec.wordCloudMode !== "cloud") ||
             rec.kind === "pareto" ||
             rec.kind === "corrMatrix" ||
             (rec.timeWindow && rec.timeWindow !== "all")) && (
@@ -479,6 +481,16 @@ export function ChartCard({
             {rec.bumpMode === "delta" && (
               <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 Δ rank
+              </span>
+            )}
+            {rec.wordCloudMode === "compare" && (
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
+                Compare
+              </span>
+            )}
+            {rec.wordCloudMode === "grid" && (
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
+                Grid
               </span>
             )}
             {rec.kind === "pareto" && (
@@ -549,6 +561,7 @@ type PaintArgs = {
   residualOverlay?: boolean;
   anomalyHighlight?: boolean;
   bumpMode?: "rank" | "delta" | null;
+  wordCloudMode?: "cloud" | "compare" | "grid" | null;
   pyramidScaleMode?: ChartRecommendation["pyramidScaleMode"];
   deltaDisplay?: ChartRecommendation["deltaDisplay"];
   zField?: string | null;
@@ -755,6 +768,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         topN: a.topN,
         legendPosition: "none",
         bumpMode: a.bumpMode ?? undefined,
+        wordCloudMode: a.wordCloudMode ?? undefined,
         pyramidScaleMode: a.pyramidScaleMode ?? undefined,
         deltaDisplay: a.deltaDisplay ?? undefined,
         layoutDirection: a.layoutDirection,

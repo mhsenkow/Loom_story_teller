@@ -6,6 +6,8 @@
 // hours are "resting": discover skips them and Digest leaves them out, so
 // nobody taps Connect only to wait for an error. Health is advisory — if
 // /api/health can't be reached, every feed stays available.
+// Desktop does not call the Worker. It reads source status already in the
+// store (DuckDB polls) and never marks a feed resting from that.
 // =================================================================
 
 export type FeedHealthState = "ok" | "degraded" | "resting" | "unknown";
@@ -38,9 +40,39 @@ export function parseFeedHealth(body: unknown): Record<string, FeedHealth> {
   return out;
 }
 
-/** Fetch /api/health (deduped, cached 5 min) and publish it to the store. Never throws. */
+/** Desktop has no Worker KV. A live error is degraded; never-started feeds stay unknown so Discover still probes them. */
+export function feedHealthFromSourceStatus(st: {
+  running?: boolean;
+  buffer_rows?: number;
+  last_error?: string | null;
+  /** Unix seconds (desktop) or omit when only `last_success_at` is known. */
+  last_ok_at?: number | null;
+  last_success_at?: number | null;
+} | null | undefined): FeedHealth {
+  if (!st) return { state: "unknown" };
+  const lastOk = typeof st.last_ok_at === "number"
+    ? st.last_ok_at * 1000
+    : typeof st.last_success_at === "number"
+      ? st.last_success_at
+      : undefined;
+  const touched = !!st.running || (st.buffer_rows ?? 0) > 0 || lastOk != null || !!st.last_error;
+  if (!touched) return { state: "unknown" };
+  if (st.last_error) return { state: "degraded", lastOk, error: st.last_error };
+  return { state: "ok", lastOk };
+}
+
+/** Fetch /api/health (deduped, cached 5 min) and publish it to the store. Never throws. Desktop reads local source status instead. */
 export async function loadFeedHealth(opts: { force?: boolean; timeoutMs?: number } = {}): Promise<Record<string, FeedHealth>> {
   const { useLoomStore } = await import("./store");
+  const { isDesktop } = await import("./tauri");
+  if (isDesktop()) {
+    const health: Record<string, FeedHealth> = {};
+    for (const [kind, st] of Object.entries(useLoomStore.getState().sourceStatuses)) {
+      health[kind] = feedHealthFromSourceStatus(st);
+    }
+    useLoomStore.getState().setFeedHealth(health);
+    return health;
+  }
   if (!opts.force && Date.now() - loadedAt < FRESH_MS) return useLoomStore.getState().feedHealth;
   inflight ??= (async () => {
     try {

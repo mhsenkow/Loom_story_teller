@@ -12,6 +12,15 @@ describe("chartCapabilities", () => {
     }
   });
 
+  it("offers grouping on discrete color and shape, not on heat ramps", () => {
+    expect(chartCapabilities("beeswarm").groupChannels).toBe(true);
+    expect(chartCapabilities("scatter").groupChannels).toBe(true);
+    expect(chartCapabilities("bar").groupChannels).toBe(true);
+    expect(chartCapabilities("heatmap").groupChannels).toBe(false);
+    expect(chartCapabilities("hexbin").groupChannels).toBe(false);
+    expect(chartCapabilities("waffle").groupChannels).toBe(false);
+  });
+
   it("shows controls the renderer honors", () => {
     expect(chartCapabilities("geoPoints").sizeChannel).toBe(true);
     expect(chartCapabilities("choropleth").aggregate).toBe(true);

@@ -25,6 +25,28 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-26a-wordcloud",
+    date: "2026-10-26",
+    title: "Compare word clouds",
+    items: [
+      {
+        title: "Cloud, Compare, or Grid",
+        detail: "A word cloud can stay one spiral, lean each word toward the group where it counts more, or show one cloud per group on the same size scale. Pick Compare by, then Layout, in Encoding.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-25a-group",
+    date: "2026-10-25",
+    title: "Group a crowded color",
+    items: [
+      {
+        title: "Group into",
+        detail: "When color or shape has a hundred values, Encoding can chunk them. Numbers become ranges — 10 groups instead of every calorie. Categories keep the largest names and roll the rest into Other. The same control shows up on every chart that uses those channels, and it rides along in the share link.",
+      },
+    ],
+  },
+  {
     id: "2026-10-24c-share",
     date: "2026-10-24",
     title: "Links that show the chart",

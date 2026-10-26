@@ -10,7 +10,8 @@
 // =================================================================
 
 "use client";
-import { radiusFromPointSize } from "@/lib/chartInk";
+import { categoryIndex, radiusFromPointSize } from "@/lib/chartInk";
+import { groupChartChannels } from "@/lib/channelGroups";
 import { useChartTheme } from "@/components/useChartTheme";
 import { resolveRuntimeTheme } from "@/lib/resolveEffectiveTheme";
 import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
@@ -697,6 +698,7 @@ export function ChartView() {
       residualOverlay: activeChart?.residualOverlay ?? undefined,
       anomalyHighlight: activeChart?.anomalyHighlight ?? undefined,
       bumpMode: activeChart?.bumpMode ?? undefined,
+      wordCloudMode: activeChart?.wordCloudMode ?? undefined,
       pyramidScaleMode: activeChart?.pyramidScaleMode ?? undefined,
       deltaDisplay: activeChart?.deltaDisplay ?? undefined,
       layoutDirection: activeChart?.layoutDirection ?? undefined,
@@ -2595,18 +2597,22 @@ export function ChartView() {
     const yFieldName = encoding?.y?.field ?? activeChart.yField;
     if (!xFieldName || !yFieldName) return null;
 
-    const xIdx = chartSampleRows.columns.indexOf(xFieldName);
-    const yIdx = chartSampleRows.columns.indexOf(yFieldName);
+    const grouped = groupChartChannels(chartSampleRows.rows, chartSampleRows.columns, activeChart);
+    const xIdx = grouped.columns.indexOf(xFieldName);
+    const yIdx = grouped.columns.indexOf(yFieldName);
     const colorField =
-      (encoding?.color as { field?: string } | undefined)?.field ?? activeChart.colorField ?? undefined;
+      grouped.colorField ??
+      (encoding?.color as { field?: string } | undefined)?.field ??
+      activeChart.colorField ??
+      undefined;
     const sizeField = (encoding?.size as { field?: string } | undefined)?.field ?? activeChart.sizeField;
-    const cIdx = colorField ? chartSampleRows.columns.indexOf(colorField) : -1;
-    const sizeIdx = sizeField ? chartSampleRows.columns.indexOf(sizeField) : -1;
+    const cIdx = colorField ? grouped.columns.indexOf(colorField) : -1;
+    const sizeIdx = sizeField ? grouped.columns.indexOf(sizeField) : -1;
     if (xIdx === -1 || yIdx === -1) return null;
 
     let sizeMin = Infinity, sizeMax = -Infinity;
     if (sizeIdx >= 0) {
-      for (const row of chartSampleRows.rows) {
+      for (const row of grouped.rows) {
         const v = chartNumber(row[sizeIdx]);
         if (!isNaN(v)) { sizeMin = Math.min(sizeMin, v); sizeMax = Math.max(sizeMax, v); }
       }
@@ -2622,7 +2628,7 @@ export function ChartView() {
     let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
 
     const rowSource = chartSampleRows.rowSourceIndices;
-    chartSampleRows.rows.forEach((row, rowIndex) => {
+    grouped.rows.forEach((row, rowIndex) => {
       const x = chartNumber(row[xIdx]), y = chartNumber(row[yIdx]);
       if (isNaN(x) || isNaN(y) || (activeChart.yScale === "log" && y <= 0)) return;
       let cat = 0;
@@ -2812,14 +2818,17 @@ export function ChartView() {
       // Title + credit live on the axes overlay (raised above the GPU canvas) and are
       // painted by the overlay effect — don't clear it here, or orbiting the scene
       // (which re-runs this effect, not that one) would wipe the title.
+      const sceneRows = chartSampleRows?.rows ?? sampleRows.rows;
+      const sceneCols = chartSampleRows?.columns ?? sampleRows.columns;
+      const groupedScene = groupChartChannels(sceneRows, sceneCols, activeChart);
       const packed = extractGpuScenePoints(
-        chartSampleRows?.rows ?? sampleRows.rows,
-        sampleRows.columns,
+        groupedScene.rows,
+        groupedScene.columns,
         {
           xField: activeChart.xField,
           yField: activeChart.yField,
           zField: activeChart.zField,
-          colorField: activeChart.colorField,
+          colorField: groupedScene.colorField,
           sizeField: activeChart.sizeField,
           timeField: activeChart.timeField,
           trailId: activeChart.trailId,
@@ -2927,23 +2936,25 @@ export function ChartView() {
     const h = hFull - footBand;
 
     const rowsAll = chartSampleRows?.rows;
-    const cols = chartSampleRows?.columns;
-    if (!Array.isArray(rowsAll) || !Array.isArray(cols)) return;
+    const sourceCols = chartSampleRows?.columns;
+    if (!Array.isArray(rowsAll) || !Array.isArray(sourceCols)) return;
 
     const zoomScale = activeChart.kind === "scatter" ? scatterView.scale : 1;
     const densityKinds =
       activeChart.kind === "scatter" || activeChart.kind === "bubble" || activeChart.kind === "parallel";
     const sourceIndices = chartSampleRows?.rowSourceIndices;
+    const grouped = groupChartChannels(rowsAll, sourceCols, activeChart);
     const sub = densityKinds
-      ? subsampleRowsForDensity(rowsAll, densityPointBudget(isMobile), zoomScale, sourceIndices)
+      ? subsampleRowsForDensity(grouped.rows, densityPointBudget(isMobile), zoomScale, sourceIndices)
       : {
-          rows: rowsAll,
+          rows: grouped.rows,
           sourceIndices,
           sampled: false,
-          shown: rowsAll.length,
-          total: rowsAll.length,
+          shown: grouped.rows.length,
+          total: grouped.rows.length,
         };
     const rows = sub.rows;
+    const cols = grouped.columns;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, hFull);
@@ -2983,10 +2994,10 @@ export function ChartView() {
     const xIdx = cols.indexOf(activeChart.xField);
     const yIdx = activeChart.yField ? cols.indexOf(activeChart.yField) : -1;
     const symbolSeriesField = SYMBOL_SERIES_KINDS.has(activeChart.kind)
-      ? (activeChart.emojiField ?? activeChart.shapeField)
+      ? (activeChart.emojiField ?? grouped.shapeField)
       : null;
-    const cIdx = activeChart.colorField
-      ? cols.indexOf(activeChart.colorField)
+    const cIdx = grouped.colorField
+      ? cols.indexOf(grouped.colorField)
       : symbolSeriesField
         ? cols.indexOf(symbolSeriesField)
         : -1;
@@ -3016,8 +3027,8 @@ export function ChartView() {
           ...opts,
           hits,
           analysis: !analysisUnavailable(activeChart) && smartResults?.analysis?.scope === analysisScope(activeChart) ? smartResults.analysis : undefined,
-          fieldNames: cols,
-          colorField: activeChart.colorField,
+          fieldNames: cols.filter((name) => !name.includes("\u0000")),
+          colorField: activeChart.kind === "heatmap" || activeChart.kind === "hexbin" ? activeChart.colorField : grouped.colorField,
           legend: null,
           scales: null,
           connectTrail: connectScatterTrail,
@@ -3236,7 +3247,7 @@ export function ChartView() {
               {
                 xField: activeChart.xField,
                 yField: activeChart.yField,
-                colorField: activeChart.colorField,
+                colorField: grouped.colorField,
                 sizeField: activeChart.sizeField,
               },
               w,
@@ -3256,7 +3267,7 @@ export function ChartView() {
                 markShape: opts.markShape,
                 markerMode: opts.markerMode,
                 markEmoji: opts.markEmoji,
-                shapeField: activeChart.shapeField,
+                shapeField: grouped.shapeField,
                 emojiField: activeChart.emojiField,
                 emojiMap: activeChart.emojiMap,
                 yAggregate: opts.yAggregate,
@@ -3286,7 +3297,7 @@ export function ChartView() {
                 {
                   xField: activeChart.xField,
                   yField: activeChart.yField,
-                  colorField: activeChart.colorField,
+                  colorField: grouped.colorField,
                   sizeField: activeChart.sizeField,
                 },
                 w,
@@ -3306,7 +3317,7 @@ export function ChartView() {
                   markShape: opts.markShape,
                   markerMode: opts.markerMode,
                   markEmoji: opts.markEmoji,
-                  shapeField: activeChart.shapeField,
+                  shapeField: grouped.shapeField,
                   emojiField: activeChart.emojiField,
                   emojiMap: activeChart.emojiMap,
                   yAggregate: opts.yAggregate,
@@ -3330,7 +3341,7 @@ export function ChartView() {
                   zField:
                     activeChart.zField ??
                     (activeChart.kind === "quakeTerrain" ? activeChart.sizeField : null),
-                  colorField: activeChart.colorField,
+                  colorField: grouped.colorField,
                   sizeField: activeChart.sizeField,
                   timeField: activeChart.timeField,
                   trailId: activeChart.trailId,
@@ -3389,7 +3400,7 @@ export function ChartView() {
                   markShape: opts.markShape,
                   markerMode: opts.markerMode,
                   markEmoji: opts.markEmoji,
-                  shapeField: activeChart.shapeField,
+                  shapeField: grouped.shapeField,
                   emojiField: activeChart.emojiField,
                   emojiMap: activeChart.emojiMap,
                   continuousStops: opts.continuousStops,
@@ -3399,6 +3410,7 @@ export function ChartView() {
                   legendPosition: opts.legendPosition,
                   topN: opts.topN,
                   bumpMode: opts.bumpMode ?? activeChart.bumpMode ?? undefined,
+                  wordCloudMode: opts.wordCloudMode ?? activeChart.wordCloudMode ?? undefined,
                   pyramidScaleMode: opts.pyramidScaleMode ?? activeChart.pyramidScaleMode ?? undefined,
                   deltaDisplay: opts.deltaDisplay ?? activeChart.deltaDisplay ?? undefined,
                   layoutDirection: activeChart.layoutDirection,
@@ -3437,7 +3449,7 @@ export function ChartView() {
         const symbolField = activeChart.emojiField ?? activeChart.shapeField;
         if (legendEntries == null && symbolField && (categoricalMap || kind === "scatter")) {
           const symbols = markSymbols(
-            { ...opts, shapeField: activeChart.shapeField, emojiField: activeChart.emojiField, emojiMap: activeChart.emojiMap },
+            { ...opts, shapeField: grouped.shapeField, emojiField: activeChart.emojiField, emojiMap: activeChart.emojiMap },
             cols,
             rows,
             rows.length,
@@ -3449,11 +3461,7 @@ export function ChartView() {
           );
         }
         if (legendEntries == null && cIdx >= 0 && (!paintsOwnBackground || categoricalMap) && !isOddChartKind(kind)) {
-          const seen = new Map<string, number>();
-          for (const r of rows) {
-            const k = String(r[cIdx]);
-            if (!seen.has(k)) seen.set(k, seen.size);
-          }
+          const seen = categoryIndex(rows, cIdx);
           legendEntries = [...seen.entries()].map(([label, i]) => ({ label, color: opts.colors[i % opts.colors.length]! }));
         }
         const legendPos = opts.legendPosition ?? "auto";
@@ -3779,10 +3787,13 @@ export function ChartView() {
       const ui = getThemeUiColors(effectiveTheme);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       if (activeChart.kind === "firefly" && sampleRows) {
-        const packed = extractGpuScenePoints(chartSampleRows?.rows ?? sampleRows.rows, sampleRows.columns, {
+        const flyRows = chartSampleRows?.rows ?? sampleRows.rows;
+        const flyCols = chartSampleRows?.columns ?? sampleRows.columns;
+        const groupedFly = groupChartChannels(flyRows, flyCols, activeChart);
+        const packed = extractGpuScenePoints(groupedFly.rows, groupedFly.columns, {
           xField: activeChart.xField,
           yField: activeChart.yField,
-          colorField: activeChart.colorField,
+          colorField: groupedFly.colorField,
           sizeField: activeChart.sizeField,
           timeField: activeChart.timeField,
         });
@@ -3888,8 +3899,11 @@ export function ChartView() {
       drawGridLines(ctx, eff.xMin, eff.xMax, yMin, yMax, w, h, overlayPad, overlayOpts);
     }
     drawAxisTicks(ctx, eff.xMin, eff.xMax, yMin, yMax, w, h, overlayPad, overlayOpts);
-    const cIdx = sampleRows?.columns.findIndex((c) => c === activeChart.colorField) ?? -1;
-    const legendEntries = buildCategoricalLegendEntries(sampleRows?.rows ?? [], cIdx, chartRenderOpts.colors);
+    const legendRows = chartSampleRows?.rows ?? sampleRows?.rows ?? [];
+    const legendCols = chartSampleRows?.columns ?? sampleRows?.columns ?? [];
+    const groupedLegend = groupChartChannels(legendRows, legendCols, activeChart);
+    const cIdx = groupedLegend.colorField ? groupedLegend.columns.indexOf(groupedLegend.colorField) : -1;
+    const legendEntries = buildCategoricalLegendEntries(groupedLegend.rows, cIdx, chartRenderOpts.colors);
     const legendPos = chartRenderOpts.legendPosition ?? "auto";
     if (legendPos !== "none" && legendEntries && legendEntries.length > 1) {
       drawLegend(

@@ -202,6 +202,7 @@ export function mergeStoryCharts(
       r.residualOverlay ? "1" : "",
       r.anomalyHighlight ? "1" : "",
       r.bumpMode ?? "",
+      r.wordCloudMode ?? "",
       r.pyramidScaleMode ?? "",
       r.deltaDisplay ?? "",
       r.comparePrevious ? "1" : "",

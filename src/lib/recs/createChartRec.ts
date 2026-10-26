@@ -3,6 +3,7 @@
 // (split from recommendations.ts — LOOM-195; public API re-exported there)
 // =================================================================
 
+import { clampGroupInto } from "../channelGroups";
 import { chartTimeWindowLabel, fieldLooksFutureDated } from "../chartTime";
 import { parseChartEmojiMap, type ChartEmojiMap } from "../chartEmoji";
 import { COLORS, defaultLineAreaAggregate, inferType, measureColumns } from "./columns";
@@ -296,6 +297,7 @@ export function createChartRec(
     emojiMap?: ChartEmojiMap | null;
     yAggregate?: YAggregateOption | null;
     topN?: number | null;
+    groupInto?: number | null;
     y2Field?: string | null;
     comparePrevious?: boolean | null;
     tooltipFields?: string[] | null;
@@ -307,6 +309,7 @@ export function createChartRec(
     residualOverlay?: boolean | null;
     anomalyHighlight?: boolean | null;
     bumpMode?: "rank" | "delta" | null;
+    wordCloudMode?: "cloud" | "compare" | "grid" | null;
     pyramidScaleMode?: "auto" | "shared" | "independent" | null;
     deltaDisplay?: "off" | "diff" | "pct" | null;
     timeWindowField?: string | null;
@@ -329,6 +332,8 @@ export function createChartRec(
   const emojiMap = extra?.emojiMap?.field === emojiField ? parseChartEmojiMap(extra.emojiMap) : undefined;
   const yAggregate = extra?.yAggregate ?? null;
   const topN = extra?.topN ?? null;
+  const groupInto = clampGroupInto(extra?.groupInto) ?? undefined;
+  const withGroup = <T extends ChartRecommendation>(rec: T): T => (groupInto ? { ...rec, groupInto } : rec);
   const y2Field = extra?.y2Field && numCols.some((c) => c.name === extra.y2Field) ? extra.y2Field : null;
   const comparePrevious = extra?.comparePrevious ?? null;
   const barStackMode = extra?.barStackMode ?? "grouped";
@@ -338,6 +343,10 @@ export function createChartRec(
   const residualOverlay = extra?.residualOverlay ?? null;
   const anomalyHighlight = extra?.anomalyHighlight ?? null;
   const bumpMode = extra?.bumpMode ?? null;
+  const wordCloudMode =
+    extra?.wordCloudMode === "compare" || extra?.wordCloudMode === "grid" || extra?.wordCloudMode === "cloud"
+      ? extra.wordCloudMode
+      : null;
   const pyramidScaleMode =
     extra?.pyramidScaleMode === "shared" ||
     extra?.pyramidScaleMode === "independent" ||
@@ -370,7 +379,7 @@ export function createChartRec(
       tooltipFields: extra?.tooltipFields,
       tooltipKeyField: extra?.tooltipKeyField ?? undefined,
     });
-    return {
+    return withGroup({
       ...scatter,
       shapeField: shapeField || undefined,
       emojiField: emojiField || undefined,
@@ -387,13 +396,13 @@ export function createChartRec(
         yScale && yScale !== "linear" ? `${yScale} Y` : null,
         timeBit,
       ].filter(Boolean).join(" · "),
-    };
+    });
   }
 
   if (kind === "corrMatrix") {
     if (numCols.length < 3) return null;
     const labels = numCols.slice(0, 8).map((c) => c.name);
-    return {
+    return withGroup({
       id: `corrMatrix-${labels.join("-")}`,
       kind: "corrMatrix",
       title: "Correlation matrix",
@@ -408,7 +417,7 @@ export function createChartRec(
       subtitle: timeBit
         ? `Pearson r across ${labels.length} measures · ${timeBit}`
         : `Pearson r across ${labels.length} measures`,
-    };
+    });
   }
 
   const barFacetId =
@@ -764,7 +773,7 @@ export function createChartRec(
           yAggregate,
         });
         if (!gpu) return null;
-        return {
+        return withGroup({
           ...gpu,
           tooltipFields: extra?.tooltipFields,
           tooltipKeyField: extra?.tooltipKeyField,
@@ -772,7 +781,7 @@ export function createChartRec(
           timeWindow: timeWindow || undefined,
           // Direction rotates the isometric floor (terrain) — must survive GPU early-return.
           layoutDirection: layoutDirection || undefined,
-        };
+        });
       }
       if (isGeoMapKind(kind)) {
         const geo = buildGeoMapRec(kind, columns, xField, yField, colorField, {
@@ -780,7 +789,7 @@ export function createChartRec(
           yAggregate,
         });
         if (!geo) return null;
-        return {
+        return withGroup({
           ...geo,
           // Trails / arcs connect one entity's rows in time order — keep those picks.
           trailId: extra?.trailId ?? geo.trailId,
@@ -792,7 +801,7 @@ export function createChartRec(
           tooltipKeyField: extra?.tooltipKeyField,
           timeWindowField: timeWindowField || undefined,
           timeWindow: timeWindow || undefined,
-        };
+        });
       }
       if (isOddChartKind(kind)) {
         const odd = buildOddChartRec(kind, columns, xField, yField, colorField, tableName, {
@@ -801,10 +810,23 @@ export function createChartRec(
         });
         if (!odd) return null;
         // Preserve Encoding extras the odd builder doesn't know about (Top N, Direction, tooltips).
-        return {
+        const cloudMode = kind === "wordCloud" && (wordCloudMode === "compare" || wordCloudMode === "grid") ? wordCloudMode : null;
+        return withGroup({
           ...odd,
+          id: cloudMode ? `${odd.id}-${cloudMode}` : odd.id,
+          title: cloudMode === "compare" && colorField
+            ? `${xField} compared by ${colorField}`
+            : cloudMode === "grid" && colorField
+              ? `${xField} for each ${colorField}`
+              : odd.title,
+          subtitle: cloudMode === "compare"
+            ? "words lean to the group where they count more"
+            : cloudMode === "grid"
+              ? "one cloud per group — same size means the same total"
+              : odd.subtitle,
           topN: topN ?? undefined,
           bumpMode: bumpMode || undefined,
+          wordCloudMode: cloudMode || undefined,
           pyramidScaleMode: kind === "pyramid" ? (pyramidScaleMode || "auto") : undefined,
           deltaDisplay:
             kind === "pyramid" || kind === "slope"
@@ -820,7 +842,7 @@ export function createChartRec(
           shapeField: shapeField || undefined,
           emojiField: emojiField || undefined,
           emojiMap,
-        };
+        });
       }
       return null;
     }
@@ -889,7 +911,7 @@ export function createChartRec(
     subtitle = subtitle ? `${subtitle} · ${timeBit}` : timeBit;
   }
 
-  return {
+  return withGroup({
     id,
     kind,
     title,
@@ -932,5 +954,5 @@ export function createChartRec(
     tooltipFields: extra?.tooltipFields,
     tooltipKeyField: extra?.tooltipKeyField,
     layoutDirection: layoutDirection || undefined,
-  };
+  });
 }

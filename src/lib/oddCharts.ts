@@ -56,7 +56,19 @@ import {
 
 export * from "./oddChartsRec";
 import type { OddChartKind, OddRenderOpts } from "./oddChartsRec";
-import { toNum, groupSum, agg, numColsOf, nomColsOf, timeColsOf, inferType, jitter } from "./oddChartsRec";
+import {
+  toNum,
+  groupSum,
+  agg,
+  numColsOf,
+  nomColsOf,
+  timeColsOf,
+  inferType,
+  jitter,
+  assignWordCloudCompare,
+  topGroupsByWeight,
+  wordTotalsByGroup,
+} from "./oddChartsRec";
 import { resolveLayoutDirection } from "./chartSupport";
 import { resolveIsoFloorOrient } from "./isoOrient";
 import { resolvePyramidScaleMode } from "./pyramidScale";
@@ -406,7 +418,7 @@ function drawPanelLegend(
   // Visual → Legend corner overrides the renderer's preferred corner.
   const lp = env.opts.legendPosition;
   if (lp === "top-right" || lp === "top-left" || lp === "bottom-right" || lp === "bottom-left") corner = lp;
-  const maxRows = 8;
+  const maxRows = entries.length <= 12 ? entries.length : 8;
   const shown = entries.slice(0, maxRows);
   const extra = entries.length - shown.length;
   const lineH = chartTypeRamp(env.opts.axisFontSize).legend + 6;
@@ -3510,78 +3522,274 @@ function drawStripes(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 
 // ---- word cloud ------------------------------------------------------------
 
-function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number) {
-  if (xi < 0) return "Word cloud needs a text or category column";
-  const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
-  const cap = env.opts.topN != null ? Math.max(5, Math.min(150, Math.round(env.opts.topN))) : env.mini ? 30 : 80;
-  const words = groupSum(rows, xi, yi, how).filter(([k, v]) => v > 0 && k.trim() !== "" && k !== "null").slice(0, cap);
-  if (!words.length) return "No positive values to size words by";
-  const { mini, ink } = env;
-  const plot = basePlot(env);
+type WordBox = { x: number; y: number; w: number; h: number };
+type CloudWord = { word: string; v: number; color: string; group: string; rank: number };
+type PlacedCloudWord = CloudWord & { f: number; x: number; y: number; box: WordBox };
+
+function cloudFontLimits(env: OddEnv, plot: PlotRect): { minF: number; maxF: number } {
+  const ph = Math.max(1, plot.bottom - plot.top);
+  const { mini } = env;
+  const mark = chartTypeRamp(env.opts.axisFontSize).mark;
+  const minF = Math.min(mini ? 6 : Math.max(11, mark), Math.max(8, ph / 5));
+  const maxF = Math.max(minF + 4, Math.min(mini ? 22 : 64, ph / 4));
+  return { minF, maxF };
+}
+
+/** Room for a group name or “groups left out” line. Matches the font `oddFont` actually paints. */
+function cloudChrome(env: OddEnv): number {
+  if (env.mini) return 0;
+  return chartTypeRamp(env.opts.axisFontSize).mark + 6;
+}
+
+function cloudWeight(rank: number): number {
+  return rank < 3 ? 700 : rank < 12 ? 600 : 400;
+}
+
+/** How many words a region can hold before the spiral is mostly misses. */
+function cloudWordCap(env: OddEnv, plot: PlotRect): number {
+  const base = env.opts.topN != null ? Math.max(5, Math.min(150, Math.round(env.opts.topN))) : env.mini ? 30 : 80;
+  const area = Math.max(1, (plot.right - plot.left) * (plot.bottom - plot.top));
+  return Math.min(base, Math.max(5, Math.round(area / 1800)));
+}
+
+/** Spiral-pack words inside `plot`. Font size uses the shared `vmax` and `maxF`. */
+function packWordCloud(
+  ctx: CanvasRenderingContext2D,
+  env: OddEnv,
+  words: CloudWord[],
+  plot: PlotRect,
+  vmax: number,
+  minF: number,
+  maxF: number,
+): PlacedCloudWord[] {
   const pw = plot.right - plot.left;
   const ph = plot.bottom - plot.top;
+  if (pw < 8 || ph < 8 || !(vmax > 0)) return [];
   const cx = (plot.left + plot.right) / 2;
   const cy = (plot.top + plot.bottom) / 2;
-  const vmax = words[0]![1];
-  const minF = mini ? 6 : Math.max(11, chartTypeRamp(env.opts.axisFontSize).mark);
-  let maxF = Math.max(minF + 4, Math.min(mini ? 22 : 64, ph / 4));
-  type Box = { x: number; y: number; w: number; h: number };
-  let placed: { word: string; v: number; f: number; x: number; y: number; box: Box; i: number }[] = [];
-  const fontFor = (f: number, i: number) => oddFont(env, f, i < 3 ? 700 : i < 12 ? 600 : 400);
-  // Shrink until most words fit (≤ 3 attempts).
-  for (let attempt = 0; attempt < 3; attempt++) {
-    placed = [];
-    const boxes: Box[] = [];
-    words.forEach(([word, v], i) => {
-      // Zero-based: a word's area tracks its value, so near-ties look like ties.
-      let f = Math.round(Math.max(minF, maxF * Math.sqrt(v / vmax)));
-      ctx.font = fontFor(f, i);
-      // Too wide for the stage: shrink the type rather than cut the word.
-      const natural = ctx.measureText(word).width;
-      if (natural > pw * 0.92) {
-        f = Math.max(minF, Math.floor((f * pw * 0.92) / natural));
-        ctx.font = fontFor(f, i);
-      }
-      const tw = Math.min(ctx.measureText(word).width, pw * 0.92);
-      const box = { w: tw + 4, h: f * 1.05 };
-      // Archimedean spiral, stretched to the plot's aspect.
-      const ax = pw / Math.max(1, ph);
-      for (let s = 0; s < 1600; s++) {
-        const ang = s * 0.32;
-        const rad = 1.6 * Math.sqrt(s) * Math.max(2, f * 0.18);
-        const x = cx + Math.cos(ang) * rad * Math.sqrt(ax) - box.w / 2;
-        const y = cy + Math.sin(ang) * rad / Math.sqrt(ax) - box.h / 2;
-        if (x < plot.left || y < plot.top || x + box.w > plot.right || y + box.h > plot.bottom) continue;
-        const b = { x, y, ...box };
-        if (boxes.some((o) => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y)) continue;
-        boxes.push(b);
-        placed.push({ word, v, f, x: x + box.w / 2, y: y + box.h / 2, box: b, i });
-        return;
-      }
-    });
-    if (placed.length >= words.length * 0.9) break;
-    maxF *= 0.8;
-  }
+  const ax = pw / Math.max(1, ph);
+  const placed: PlacedCloudWord[] = [];
+  const boxes: WordBox[] = [];
+  const floor = Math.max(11, chartTypeRamp(env.opts.axisFontSize).mark);
+  words.forEach((word) => {
+    let f = Math.round(Math.max(minF, maxF * Math.sqrt(word.v / vmax)));
+    // oddFont never paints below the mark size — measure and collide at that size.
+    const paintAt = (n: number) => Math.max(floor, n);
+    // Weight follows the word's rank, the same weight paint uses — a bolder face is wider.
+    ctx.font = oddFont(env, paintAt(f), cloudWeight(word.rank));
+    const natural = ctx.measureText(word.word).width;
+    if (natural > pw * 0.92) {
+      f = Math.max(minF, Math.floor((f * pw * 0.92) / Math.max(1, natural)));
+      ctx.font = oddFont(env, paintAt(f), cloudWeight(word.rank));
+    }
+    f = paintAt(f);
+    const tw = Math.min(ctx.measureText(word.word).width, pw * 0.92);
+    const box = { w: tw + 4, h: f * 1.15 };
+    for (let s = 0; s < 900; s++) {
+      const ang = s * 0.32;
+      const rad = 1.6 * Math.sqrt(s) * Math.max(2, f * 0.18);
+      const x = cx + Math.cos(ang) * rad * Math.sqrt(ax) - box.w / 2;
+      const y = cy + Math.sin(ang) * rad / Math.sqrt(ax) - box.h / 2;
+      if (x < plot.left || y < plot.top || x + box.w > plot.right || y + box.h > plot.bottom) continue;
+      const b = { x, y, ...box };
+      if (boxes.some((o) => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y)) continue;
+      boxes.push(b);
+      placed.push({ ...word, f, x: x + box.w / 2, y: y + box.h / 2, box: b });
+      return;
+    }
+  });
+  return placed;
+}
+
+function paintPackedWords(
+  ctx: CanvasRenderingContext2D,
+  env: OddEnv,
+  rows: unknown[][],
+  placed: PlacedCloudWord[],
+  xi: number,
+  yi: number,
+  ci: number,
+  how: YAggregateOption,
+  plotWidth: number,
+): void {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   for (const p of placed) {
-    ctx.font = fontFor(p.f, p.i);
-    ctx.fillStyle = env.colors[p.i % env.colors.length]!;
-    ctx.globalAlpha = p.i < 12 ? 1 : Math.max(0.7, env.alpha);
-    ctx.fillText(fitTextEllipsis(ctx, p.word, pw * 0.92), p.x, p.y);
-    hitRect(env, p.box.x, p.box.y, p.box.w, p.box.h, [[xi, p.word]], firstRowIndex(rows, xi, p.word), {
-      columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null), "rank"],
-      row: [p.word, p.v, `#${p.i + 1}`],
+    ctx.font = oddFont(env, p.f, cloudWeight(p.rank));
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = p.rank < 12 ? 1 : Math.max(0.7, env.alpha);
+    ctx.fillText(fitTextEllipsis(ctx, p.word, Math.min(p.box.w, plotWidth * 0.92)), p.x, p.y);
+    const match: [number, string][] = [[xi, p.word]];
+    if (ci >= 0 && p.group && p.group !== "tie") match.push([ci, p.group]);
+    const rowIndex = rows.findIndex(
+      (r) =>
+        String(r[xi] ?? "") === p.word &&
+        (ci < 0 || !p.group || p.group === "tie" || String(r[ci] ?? "") === p.group),
+    );
+    hitRect(env, p.box.x, p.box.y, p.box.w, p.box.h, match, rowIndex >= 0 ? rowIndex : undefined, {
+      columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null), "group", "rank"],
+      row: [p.word, p.v, p.group, `#${p.rank + 1}`],
     });
   }
   ctx.globalAlpha = 1;
-  const dropped = words.length - placed.length;
-  if (!mini && dropped > 0) {
+}
+
+function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
+  if (xi < 0) return "Word cloud needs a text or category column";
+  const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
+  const mode = env.opts.wordCloudMode === "compare" || env.opts.wordCloudMode === "grid" ? env.opts.wordCloudMode : "cloud";
+  const { mini, ink } = env;
+  const plot = basePlot(env);
+
+  if (mode === "cloud") {
+    const words = groupSum(rows, xi, yi, how)
+      .filter(([k, v]) => v > 0 && k.trim() !== "" && k !== "null")
+      .slice(0, cloudWordCap(env, plot));
+    if (!words.length) return "No positive values to size words by";
+    const limits = cloudFontLimits(env, plot);
+    const vmax = words[0]![1];
+    let maxF = limits.maxF;
+    const cloudWords: CloudWord[] = words.map(([word, v], rank) => ({
+      word,
+      v,
+      color: env.colors[rank % env.colors.length]!,
+      group: "",
+      rank,
+    }));
+    let placed: PlacedCloudWord[] = [];
+    for (let attempt = 0; attempt < 3; attempt++) {
+      placed = packWordCloud(ctx, env, cloudWords, plot, vmax, limits.minF, maxF);
+      if (placed.length >= cloudWords.length * 0.9) break;
+      maxF *= 0.8;
+    }
+    paintPackedWords(ctx, env, rows, placed, xi, yi, -1, how, plot.right - plot.left);
+    const dropped = cloudWords.length - placed.length;
+    if (!mini && dropped > 0) {
+      ctx.font = oddFont(env, 10);
+      ctx.fillStyle = ink.muted;
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(`${dropped} smaller word${dropped === 1 ? "" : "s"} didn’t fit`, plot.right, plot.bottom);
+    }
+    return;
+  }
+
+  if (ci < 0) return "Pick a Compare by column to compare word clouds";
+  const { byWord, groupWeight } = wordTotalsByGroup(rows, xi, yi, ci, how);
+  const groups = topGroupsByWeight(groupWeight, mode === "compare" ? 2 : 8);
+  if (groups.length < 2) return "Compare by needs at least two groups";
+
+  if (mode === "compare") {
+    const leftName = groups[0]!;
+    const rightName = groups[1]!;
+    const hidden = groupWeight.size - 2;
+    const assigned = assignWordCloudCompare(byWord, leftName, rightName).slice(0, cloudWordCap(env, plot));
+    if (!assigned.length) return "No positive values to size words by";
+    const chrome = cloudChrome(env);
+    const footer = hidden > 0 ? chrome : 0;
+    const header = chrome;
+    const stage: PlotRect = { ...plot, top: plot.top + header, bottom: plot.bottom - footer };
+    const pw = stage.right - stage.left;
+    const centerW = Math.min(pw * 0.2, 110);
+    const cx = (stage.left + stage.right) / 2;
+    const leftPlot: PlotRect = { ...stage, right: cx - centerW / 2 };
+    const rightPlot: PlotRect = { ...stage, left: cx + centerW / 2 };
+    const centerPlot: PlotRect = { ...stage, left: cx - centerW / 2, right: cx + centerW / 2 };
+    const sideCap = (region: PlotRect) => cloudWordCap(env, region);
+    const leftWords = assigned.filter((w) => w.side === "left").slice(0, sideCap(leftPlot));
+    const rightWords = assigned.filter((w) => w.side === "right").slice(0, sideCap(rightPlot));
+    const centerWords = assigned.filter((w) => w.side === "center").slice(0, sideCap(centerPlot));
+    const shown = [...leftWords, ...rightWords, ...centerWords];
+    const vmax = Math.max(...shown.map((w) => w.value));
+    const limits = cloudFontLimits(env, stage);
+    const toCloud = (list: typeof shown, color: string): CloudWord[] =>
+      list.map((w) => ({ word: w.word, v: w.value, color, group: w.group, rank: assigned.findIndex((a) => a.word === w.word) }));
+    const placed = [
+      ...packWordCloud(ctx, env, toCloud(leftWords, env.colors[0]!), leftPlot, vmax, limits.minF, limits.maxF),
+      ...packWordCloud(ctx, env, toCloud(rightWords, env.colors[1 % env.colors.length]!), rightPlot, vmax, limits.minF, limits.maxF),
+      ...packWordCloud(ctx, env, toCloud(centerWords, ink.muted), centerPlot, vmax, limits.minF, limits.maxF),
+    ];
+    if (!placed.length) return "No positive values to size words by";
+    paintPackedWords(ctx, env, rows, placed, xi, yi, ci, how, Math.max(leftPlot.right - leftPlot.left, rightPlot.right - rightPlot.left));
+    if (!mini) {
+      ctx.font = oddFont(env, 11, 600);
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      ctx.fillStyle = env.colors[0]!;
+      ctx.fillText(fitTextEllipsis(ctx, leftName, leftPlot.right - leftPlot.left), leftPlot.left, plot.top);
+      ctx.textAlign = "right";
+      ctx.fillStyle = env.colors[1 % env.colors.length]!;
+      ctx.fillText(fitTextEllipsis(ctx, rightName, rightPlot.right - rightPlot.left), rightPlot.right, plot.top);
+      if (hidden > 0) {
+        ctx.font = oddFont(env, 10);
+        ctx.fillStyle = ink.muted;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(
+          fitTextEllipsis(
+            ctx,
+            `Comparing ${leftName} and ${rightName} · ${hidden} other group${hidden === 1 ? "" : "s"} left out`,
+            plot.right - plot.left,
+          ),
+          plot.left,
+          plot.bottom,
+        );
+      }
+    }
+    return;
+  }
+
+  const hidden = groupWeight.size - groups.length;
+  const chrome = cloudChrome(env);
+  const headH = chrome;
+  const gridPlot: PlotRect = { ...plot, bottom: plot.bottom - (hidden > 0 ? chrome : 0) };
+  const grid = multiplesGrid(groups.length, gridPlot);
+  const panels = groups.map((name) => {
+    const words = [...byWord.entries()]
+      .map(([word, totals]) => [word, totals.get(name) ?? 0] as [string, number])
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1]);
+    return { name, words };
+  });
+  const cellPlot = (idx: number): PlotRect => {
+    const gx = gridPlot.left + (idx % grid.cols) * grid.cw;
+    const gy = gridPlot.top + Math.floor(idx / grid.cols) * grid.ch;
+    return { left: gx + 4, right: gx + grid.cw - 4, top: gy + headH + 2, bottom: gy + grid.ch - 4 };
+  };
+  const capped = panels.map((panel, idx) => ({
+    ...panel,
+    words: panel.words.slice(0, cloudWordCap(env, cellPlot(idx))),
+  }));
+  const vmax = Math.max(1, ...capped.flatMap((p) => p.words.map(([, v]) => v)));
+  const limits = cloudFontLimits(env, cellPlot(0));
+  const placed: PlacedCloudWord[] = [];
+  capped.forEach((panel, idx) => {
+    const region = cellPlot(idx);
+    const color = env.colors[idx % env.colors.length]!;
+    const cloudWords: CloudWord[] = panel.words.map(([word, v], rank) => ({ word, v, color, group: panel.name, rank }));
+    placed.push(...packWordCloud(ctx, env, cloudWords, region, vmax, limits.minF, limits.maxF));
+    if (!mini) {
+      ctx.font = oddFont(env, 11, 600);
+      ctx.fillStyle = color;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      const gx = gridPlot.left + (idx % grid.cols) * grid.cw;
+      const gy = gridPlot.top + Math.floor(idx / grid.cols) * grid.ch;
+      ctx.fillText(fitTextEllipsis(ctx, panel.name, grid.cw - 10), gx + 4, gy + 2);
+    }
+  });
+  if (!placed.length) return "No positive values to size words by";
+  paintPackedWords(ctx, env, rows, placed, xi, yi, ci, how, grid.cw - 8);
+  if (!mini && hidden > 0) {
     ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
     ctx.textAlign = "right";
     ctx.textBaseline = "bottom";
-    ctx.fillText(`${dropped} smaller word${dropped === 1 ? "" : "s"} didn’t fit`, plot.right, plot.bottom);
+    ctx.fillText(
+      fitTextEllipsis(ctx, `${hidden} smaller group${hidden === 1 ? "" : "s"} hidden`, plot.right - plot.left),
+      plot.right,
+      plot.bottom,
+    );
   }
 }
 

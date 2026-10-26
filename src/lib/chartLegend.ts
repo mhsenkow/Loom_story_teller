@@ -6,6 +6,7 @@ import { fitTextEllipsis } from "./chartLayout";
 import type { ChartChromeLayout } from "./chartChromeLink";
 import { chartFont, chartTypeRamp } from "./chartType";
 import { drawMarkerPath } from "./chartMarks";
+import { categoryIndex } from "./chartInk";
 
 export type ChartLegendEntry = { label: string; color: string; shape?: string; glyph?: string };
 
@@ -28,11 +29,7 @@ export function buildCategoricalLegendEntries(
   colors: string[],
 ): { label: string; color: string }[] | null {
   if (cIdx < 0) return null;
-  const seen = new Map<string, number>();
-  for (const r of rows) {
-    const k = String(r[cIdx]);
-    if (!seen.has(k)) seen.set(k, seen.size);
-  }
+  const seen = categoryIndex(rows, cIdx);
   if (seen.size <= 1) return null;
   return [...seen.entries()].map(([label, i]) => ({ label, color: colors[i % colors.length]! }));
 }
@@ -62,7 +59,7 @@ export function drawLegend(
   const plot = typeof pad === "number" ? { left: pad, top: pad, right: w - pad, bottom: h - pad } : pad;
   const availableH = Math.min(h - 8, Math.max(64, plot.bottom - plot.top));
   const requestedH = Math.min(availableH, offsets?.height == null ? 232 : Math.max(64, offsets.height * h));
-  const maxRows = Math.max(1, Math.min(offsets?.height == null ? 10 : entries.length, Math.floor((requestedH - 10) / lineH) - (title ? 1 : 0) - 1));
+  const maxRows = Math.max(1, Math.min(offsets?.height == null ? 12 : entries.length, Math.floor((requestedH - 10) / lineH) - (title ? 1 : 0) - 1));
   const shown = entries.slice(0, maxRows);
   const extra = entries.length - shown.length;
   const font = chartFont(type.legend, fontFamily);

@@ -43,6 +43,7 @@ export type RandomEncoding = {
   residualOverlay?: boolean | null;
   anomalyHighlight?: boolean | null;
   bumpMode?: "rank" | "delta" | null;
+  wordCloudMode?: "cloud" | "compare" | "grid" | null;
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   barStackMode?: "grouped" | "stacked" | "percent" | null;
   timeWindowField?: string | null;
@@ -121,6 +122,7 @@ export function withRandomEncodingExtras(
   let residualOverlay: boolean | null = null;
   let anomalyHighlight: boolean | null = null;
   let bumpMode: "rank" | "delta" | null = null;
+  let wordCloudMode: "cloud" | "compare" | "grid" | null = null;
   let pyramidScaleMode: "auto" | "shared" | "independent" | null = null;
   let timeWindowField: string | null = null;
   let timeWindow: ChartTimeRange | null = null;
@@ -176,6 +178,10 @@ export function withRandomEncodingExtras(
   if (yScale === "log" && !yFieldSupportsLogScale(base.yField, columns)) yScale = null;
 
   if (kind === "bump" && Math.random() < 0.4) bumpMode = "delta";
+  if (kind === "wordCloud" && base.colorField) {
+    const distinct = columns.find((c) => c.name === base.colorField)?.distinct_count ?? 0;
+    wordCloudMode = distinct === 2 ? "compare" : distinct >= 3 && distinct <= 8 ? "grid" : null;
+  }
   if (kind === "pyramid" && Math.random() < 0.55) {
     pyramidScaleMode = pick(["shared", "independent", "auto"] as const) ?? "auto";
   }
@@ -205,6 +211,7 @@ export function withRandomEncodingExtras(
     residualOverlay,
     anomalyHighlight,
     bumpMode,
+    wordCloudMode,
     pyramidScaleMode,
     timeWindowField,
     timeWindow,
@@ -418,7 +425,11 @@ export function getRandomEncoding(
     default:
       if (isGpuSceneKind(kind)) return getGpuRandomEncoding(columns, kind);
       if (isGeoMapKind(kind)) return getGeoMapRandomEncoding(columns, kind);
-      if (isOddChartKind(kind)) return getOddRandomEncoding(columns, kind);
+      if (isOddChartKind(kind)) {
+        const enc = getOddRandomEncoding(columns, kind);
+        if (!enc) return null;
+        return kind === "wordCloud" ? finish(enc) : enc;
+      }
       return null;
   }
 }
@@ -591,6 +602,7 @@ export function getRandomChartAndEncoding(
     residualOverlay: rec.residualOverlay ?? undefined,
     anomalyHighlight: rec.anomalyHighlight ?? undefined,
     bumpMode: rec.bumpMode ?? undefined,
+    wordCloudMode: rec.wordCloudMode ?? undefined,
     pyramidScaleMode: rec.pyramidScaleMode ?? undefined,
     barStackMode: rec.barStackMode ?? undefined,
   };
@@ -611,6 +623,7 @@ export function randomEncodingToExtra(enc: RandomEncoding): NonNullable<Paramete
     residualOverlay: enc.residualOverlay ?? null,
     anomalyHighlight: enc.anomalyHighlight ?? null,
     bumpMode: enc.bumpMode ?? null,
+    wordCloudMode: enc.wordCloudMode ?? null,
     pyramidScaleMode: enc.pyramidScaleMode ?? null,
     barStackMode: enc.barStackMode ?? undefined,
     timeWindowField: enc.timeWindowField ?? null,

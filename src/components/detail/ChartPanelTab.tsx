@@ -103,6 +103,7 @@ import {
   type DataProvenance,
 } from "@/lib/dataProvenance";
 import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
+import { GROUP_INTO_CHOICES, clampGroupInto } from "@/lib/channelGroups";
 import {
   CHART_TIME_RANGES,
   applyChartTimeWindow,
@@ -1126,6 +1127,7 @@ export default function ChartPanelTab() {
       emojiMap: activeChart?.emojiMap,
       yAggregate: activeChart?.yAggregate ?? null,
       topN: activeChart?.topN ?? null,
+      groupInto: activeChart?.groupInto ?? null,
       y2Field: activeChart?.y2Field ?? null,
       comparePrevious: activeChart?.comparePrevious ?? null,
       rollingWindow: activeChart?.rollingWindow ?? null,
@@ -1134,6 +1136,7 @@ export default function ChartPanelTab() {
       residualOverlay: activeChart?.residualOverlay ?? null,
       anomalyHighlight: activeChart?.anomalyHighlight ?? null,
       bumpMode: activeChart?.bumpMode ?? null,
+      wordCloudMode: activeChart?.wordCloudMode ?? null,
       pyramidScaleMode: activeChart?.pyramidScaleMode ?? null,
       deltaDisplay: activeChart?.deltaDisplay ?? null,
       timeWindowField: activeChart?.timeWindowField ?? null,
@@ -1157,6 +1160,7 @@ export default function ChartPanelTab() {
       activeChart?.yAggregate,
       activeChart?.emojiMap,
       activeChart?.topN,
+      activeChart?.groupInto,
       activeChart?.y2Field,
       activeChart?.comparePrevious,
       activeChart?.rollingWindow,
@@ -1165,6 +1169,7 @@ export default function ChartPanelTab() {
       activeChart?.residualOverlay,
       activeChart?.anomalyHighlight,
       activeChart?.bumpMode,
+      activeChart?.wordCloudMode,
       activeChart?.pyramidScaleMode,
       activeChart?.deltaDisplay,
       activeChart?.timeWindowField,
@@ -1369,6 +1374,23 @@ export default function ChartPanelTab() {
     [activeChart, columnStats, tableName, extraFromChart, commitRec],
   );
 
+  const applyGroupInto = useCallback(
+    (n: number | null) => {
+      if (!activeChart || columnStats.length === 0) return;
+      const rec = createChartRec(
+        activeChart.kind,
+        columnStats,
+        activeChart.xField,
+        activeChart.yField,
+        activeChart.colorField,
+        tableName,
+        { ...extraFromChart(), groupInto: clampGroupInto(n) },
+      );
+      if (rec) commitRec(rec);
+    },
+    [activeChart, columnStats, tableName, extraFromChart, commitRec],
+  );
+
   const applyTopN = useCallback(
     (n: number) => {
       if (!activeChart || columnStats.length === 0) return;
@@ -1443,6 +1465,7 @@ export default function ChartPanelTab() {
         ...base,
         rowField: caps.facetRow ? base.rowField : null,
         topN: caps.topN ? base.topN : null,
+        groupInto: caps.groupChannels ? base.groupInto : null,
         y2Field: caps.compareY ? base.y2Field : null,
         comparePrevious: caps.comparePrevious ? base.comparePrevious : null,
         deltaDisplay: caps.deltaDisplay ? base.deltaDisplay : null,
@@ -1461,6 +1484,7 @@ export default function ChartPanelTab() {
         residualOverlay: caps.residualOverlay ? base.residualOverlay : null,
         anomalyHighlight: caps.anomalyHighlight ? base.anomalyHighlight : null,
         bumpMode: caps.bumpMode ? base.bumpMode : null,
+        wordCloudMode: caps.wordCloudMode ? base.wordCloudMode : null,
         pyramidScaleMode: caps.pyramidScaleMode ? base.pyramidScaleMode : null,
         // Slices of averages / maxima don't add up to a whole — part-to-whole kinds sum
         yAggregate:
@@ -1691,6 +1715,7 @@ export default function ChartPanelTab() {
           rec.residualOverlay ? "residuals" : null,
           rec.anomalyHighlight ? "anomalies" : null,
           rec.bumpMode === "delta" ? "Δ rank" : null,
+          rec.wordCloudMode === "compare" ? "compare clouds" : rec.wordCloudMode === "grid" ? "cloud grid" : null,
           rec.kind === "pyramid" && rec.pyramidScaleMode === "shared"
             ? "same scale"
             : rec.kind === "pyramid" && rec.pyramidScaleMode === "independent"
@@ -1772,6 +1797,19 @@ export default function ChartPanelTab() {
     : (activeChart.yAggregate ?? defaultYAggregate(activeChart.kind));
   const showRow = caps.facetRow;
   const showTopN = caps.topN;
+  const groupIntoValue = clampGroupInto(activeChart.groupInto);
+  const groupFieldNote = (() => {
+    if (!caps.groupChannels) return null;
+    const names = [
+      caps.colorChannel && activeChart.kind !== "heatmap" && activeChart.kind !== "hexbin" ? activeChart.colorField : null,
+      activeChart.shapeField,
+    ].filter((name): name is string => !!name);
+    const crowded = [...new Set(names)]
+      .map((name) => ({ name, n: columnStats.find((c) => c.name === name)?.distinct_count ?? 0 }))
+      .filter((g) => g.n > (groupIntoValue ?? 12));
+    if (crowded.length === 0) return null;
+    return crowded.map((g) => `${g.name} has ${g.n} values`).join(" · ");
+  })();
   const showCompareY = caps.compareY;
   const showMarkPoints = caps.markPoints;
   const showSymbolEnc = caps.symbolChannel;
@@ -1855,6 +1893,7 @@ export default function ChartPanelTab() {
     caps.residualOverlay ||
     caps.anomalyHighlight ||
     caps.bumpMode ||
+    caps.wordCloudMode ||
     caps.pyramidScaleMode;
   const xDistinct = columnStats.find((c) => c.name === activeChart.xField)?.distinct_count ?? 0;
   const topNChoices = TOP_N_OPTIONS.filter((opt) => xDistinct <= 0 || opt.value <= Math.max(xDistinct, 10));
@@ -2123,6 +2162,39 @@ export default function ChartPanelTab() {
                     ) : undefined
                   }
                 />
+              )}
+              {caps.groupChannels && (
+                <div className="space-y-1 pl-0.5">
+                  <div className="flex items-center gap-2">
+                    <label className="text-2xs text-loom-muted shrink-0 flex items-center gap-1" htmlFor="loom-group-into">
+                      Group into
+                      <EncodingInfoTip
+                        label="About grouping"
+                        text="Chunk a color or shape field that has many values. Numbers become ranges — a hundred values can become 10 bands. Categories keep the largest names and roll the rest into Other."
+                      />
+                    </label>
+                    <select
+                      id="loom-group-into"
+                      value={groupIntoValue ?? ""}
+                      onChange={(e) => applyGroupInto(e.target.value === "" ? null : Number(e.target.value))}
+                      className="loom-input loom-panel-select flex-1"
+                      title="How many groups color and shape collapse into"
+                    >
+                      <option value="">Each value</option>
+                      {GROUP_INTO_CHOICES.map((n) => (
+                        <option key={n} value={n}>
+                          {n} groups
+                        </option>
+                      ))}
+                      {groupIntoValue != null && !(GROUP_INTO_CHOICES as readonly number[]).includes(groupIntoValue) && (
+                        <option value={groupIntoValue}>{groupIntoValue} groups</option>
+                      )}
+                    </select>
+                  </div>
+                  {groupFieldNote && (
+                    <p className="text-2xs text-loom-muted pl-0.5">{groupFieldNote}</p>
+                  )}
+                </div>
               )}
               {isHeat && (
                 <EncodingSelectSlot label="Heat agg" htmlFor="loom-heat-agg" title="How each cell summarizes its heat measure">
@@ -2728,6 +2800,34 @@ export default function ChartPanelTab() {
                       />
                     </span>
                   </label>
+                )}
+                {caps.wordCloudMode && (
+                  <div className="flex items-center gap-1.5 flex-wrap pl-0.5">
+                    <span className="text-2xs text-loom-muted shrink-0">Layout</span>
+                    <div className="loom-seg" role="group" aria-label="Word cloud layout">
+                      {(
+                        [
+                          ["cloud", "Cloud"],
+                          ["compare", "Compare"],
+                          ["grid", "Grid"],
+                        ] as const
+                      ).map(([mode, label]) => {
+                        const cur = activeChart.wordCloudMode ?? "cloud";
+                        const on = cur === mode;
+                        return (
+                          <button
+                            key={mode}
+                            type="button"
+                            aria-pressed={on}
+                            onClick={() => patchChartExtra({ wordCloudMode: mode === "cloud" ? null : mode })}
+                            className="loom-seg-item loom-seg-btn"
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
                 {caps.bumpMode && (
                   <div className="flex items-center gap-1.5 flex-wrap pl-0.5">

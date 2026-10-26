@@ -151,6 +151,7 @@ export function PreviewFooter() {
       residualOverlay: activeChart.residualOverlay ?? null,
       anomalyHighlight: activeChart.anomalyHighlight ?? null,
       bumpMode: activeChart.bumpMode ?? null,
+      wordCloudMode: activeChart.wordCloudMode ?? null,
       timeWindowField: activeChart.timeWindowField ?? null,
       timeWindow: activeChart.timeWindow ?? null,
       tooltipFields: activeChart.tooltipFields,

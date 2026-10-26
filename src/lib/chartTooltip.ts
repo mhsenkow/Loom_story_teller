@@ -273,11 +273,11 @@ export function allowedRowIndices(
 
 /** Default tooltip columns: encoding fields that exist in the table, de-duplicated. */
 export function resolveTooltipFieldNames(chart: ChartRecommendation, allColumns: string[]): string[] {
-  const fromChart = chart.tooltipFields?.filter((n) => allColumns.includes(n));
+  const fromChart = chart.tooltipFields?.filter((n) => allColumns.includes(n) && !n.includes("\u0000"));
   if (fromChart && fromChart.length > 0) return fromChart;
   const names: string[] = [];
   const push = (n: string | null | undefined) => {
-    if (!n || !allColumns.includes(n)) return;
+    if (!n || n.includes("\u0000") || !allColumns.includes(n)) return;
     if (!names.includes(n)) names.push(n);
   };
   push(chart.xField);
@@ -291,7 +291,7 @@ export function resolveTooltipFieldNames(chart: ChartRecommendation, allColumns:
   push(chart.opacityField);
   push(chart.shapeField);
   push(chart.emojiField);
-  return names.length > 0 ? names : [...allColumns].slice(0, 8);
+  return names.length > 0 ? names : [...allColumns].filter((n) => !n.includes("\u0000")).slice(0, 8);
 }
 
 export function projectRowForTooltip(

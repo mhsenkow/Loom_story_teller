@@ -261,6 +261,17 @@ describe("chart links", () => {
     expect(restoreChartRec(link, columns, [story], "usgs")).toEqual(story);
   });
 
+  it("keeps group into across a share link", () => {
+    const tweaked = createChartRec("scatter", columns, "units", "revenue", "region", "sales", { groupInto: 10 })!;
+    expect(tweaked.groupInto).toBe(10);
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: tweaked,
+    })!;
+    const rec = restoreChartRec(decodeChartLink(encodeChartLink(link))!, columns, [], "sales")!;
+    expect(rec.groupInto).toBe(10);
+  });
+
   it("keeps the sender's log Y and top N when the rail holds the untweaked rec", () => {
     const original = createChartRec("bar", columns, "region", "revenue", null, "sales")!;
     const tweaked = createChartRec("bar", columns, "region", "revenue", null, "sales", { yScale: "log", topN: 10 })!;

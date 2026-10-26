@@ -26,6 +26,7 @@ import type { ColumnInfo, QueryResult } from "./queryTypes";
 import { addDiscoverMarkerVariants } from "./discoverMarkers";
 import { SOURCE_BY_KIND, type SourceKind } from "./sourceRegistry";
 import { isAdditiveDiscoverMeasure } from "./discoverChartQuality";
+import { wordCloudCompareColumn } from "./oddChartsRec";
 
 export function enumerateDiscoverCharts(
   columns: ColumnInfo[],
@@ -280,6 +281,22 @@ export function enumerateDiscoverCharts(
           score: 72,
           id: `${source}-discover-${kind}-${turn}`,
         });
+      if (rec && kind === "wordCloud" && turn === 0) {
+        const group = wordCloudCompareColumn(columns, enc.xField);
+        if (group) {
+          const cmp = createChartRec(kind, columns, enc.xField, enc.yField, group.name, source, {
+            yAggregate: aggregate,
+            topN: 15,
+            wordCloudMode: group.mode,
+          });
+          if (cmp)
+            seeds.push({
+              ...cmp,
+              score: 74,
+              id: `${source}-discover-wordCloud-${group.mode}`,
+            });
+        }
+      }
     }
     if (
       [

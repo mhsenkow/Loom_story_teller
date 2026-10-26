@@ -149,6 +149,33 @@ it("keeps accessible Auto and explicit palette selection connected to undo", () 
 
 });
 
+it("chunks color from Encoding → Group into", () => {
+  useLoomStore.setState({
+    chartPanelSection: "encoding",
+    activeChart: {
+      id: "swarm",
+      kind: "beeswarm",
+      title: "Swarm",
+      subtitle: "",
+      score: 80,
+      xField: "city",
+      yField: "revenue",
+      colorField: "sku",
+      spec: {},
+    },
+    columnStats: [
+      { name: "city", data_type: "VARCHAR", null_count: 0, distinct_count: 4, min_value: null, max_value: null },
+      { name: "revenue", data_type: "DOUBLE", null_count: 0, distinct_count: 20, min_value: "1", max_value: "20" },
+      { name: "sku", data_type: "VARCHAR", null_count: 0, distinct_count: 140, min_value: null, max_value: null },
+    ],
+  });
+  render(<ChartPanelTab />);
+  expect(screen.getByText("sku has 140 values")).toBeTruthy();
+  fireEvent.change(screen.getByRole("combobox", { name: /Group into/ }), { target: { value: "10" } });
+  expect(useLoomStore.getState().activeChart?.groupInto).toBe(10);
+  expect(useLoomStore.getState().activeChart?.colorField).toBe("sku");
+});
+
 it("keeps Analyze and Overlays in the chart section navigation with icons and keyboard access", async () => {
   render(<ChartPanelTab />);
   for (const name of ["Encoding", "Visual", "Analyze", "Overlays"]) {

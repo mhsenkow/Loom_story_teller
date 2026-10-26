@@ -130,6 +130,8 @@ export interface OddRenderOpts {
   topN?: number | null;
   /** Bump: absolute rank or Δrank over time. */
   bumpMode?: "rank" | "delta" | null;
+  /** Word cloud layout. Null and "cloud" are the single spiral. */
+  wordCloudMode?: "cloud" | "compare" | "grid" | null;
   /** Pyramid: shared vs independent arm domains (auto picks by magnitude ratio). */
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   /** Show signed Δ or % between Left/Right or Start/End. */
@@ -205,6 +207,97 @@ export function groupSum(
   return [...m.entries()]
     .map(([k, vs]) => [k, agg(vs.filter((v) => !isNaN(v)), how)] as [string, number])
     .sort((a, b) => b[1] - a[1]);
+}
+
+export type WordCloudSide = "left" | "right" | "center";
+
+export interface WordCloudCompareWord {
+  word: string;
+  /** Value that sizes the word: the winning side, or either side when they tie. */
+  value: number;
+  side: WordCloudSide;
+  /** Winning group, or "tie" when the two sides are equal. */
+  group: string;
+}
+
+/** Per-word totals for each Compare-by group, plus each group's overall weight. */
+export function wordTotalsByGroup(
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  how: YAggregateOption = "sum",
+): { byWord: Map<string, Map<string, number>>; groupWeight: Map<string, number> } {
+  const raw = new Map<string, Map<string, number[]>>();
+  for (const r of rows) {
+    const word = String(r[xi] ?? "");
+    const group = String(r[ci] ?? "");
+    if (!word.trim() || word === "null" || !group.trim() || group === "null") continue;
+    const v = yi >= 0 ? toNum(r[yi]) : 1;
+    if (!Number.isFinite(v)) continue;
+    let groups = raw.get(word);
+    if (!groups) raw.set(word, (groups = new Map()));
+    const bucket = groups.get(group);
+    if (bucket) bucket.push(v);
+    else groups.set(group, [v]);
+  }
+  const byWord = new Map<string, Map<string, number>>();
+  const groupWeight = new Map<string, number>();
+  for (const [word, groups] of raw) {
+    const summed = new Map<string, number>();
+    for (const [group, vs] of groups) {
+      const n = agg(vs, how);
+      if (!(n > 0)) continue;
+      summed.set(group, n);
+      groupWeight.set(group, (groupWeight.get(group) ?? 0) + n);
+    }
+    if (summed.size) byWord.set(word, summed);
+  }
+  return { byWord, groupWeight };
+}
+
+/** Groups with the largest totals, heaviest first. */
+export function topGroupsByWeight(weight: Map<string, number>, cap: number): string[] {
+  return [...weight.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, Math.max(0, cap))
+    .map(([name]) => name);
+}
+
+/**
+ * Place each word on the side where its total is larger.
+ * Equal totals stay in the center. `leftGroup` is the first of the two groups.
+ */
+export function assignWordCloudCompare(
+  byWord: Map<string, Map<string, number>>,
+  leftGroup: string,
+  rightGroup: string,
+): WordCloudCompareWord[] {
+  const out: WordCloudCompareWord[] = [];
+  for (const [word, groups] of byWord) {
+    const left = groups.get(leftGroup) ?? 0;
+    const right = groups.get(rightGroup) ?? 0;
+    if (left <= 0 && right <= 0) continue;
+    if (left === right) out.push({ word, value: left, side: "center", group: "tie" });
+    else if (left > right) out.push({ word, value: left, side: "left", group: leftGroup });
+    else out.push({ word, value: right, side: "right", group: rightGroup });
+  }
+  out.sort((a, b) => b.value - a.value || a.word.localeCompare(b.word));
+  return out;
+}
+
+/** A low-cardinality column to compare a word cloud against. Two values → Compare; 3–8 → Grid. */
+export function wordCloudCompareColumn(
+  columns: ColumnInfo[],
+  wordField: string,
+): { name: string; mode: "compare" | "grid" } | null {
+  const groups = nomColsOf(columns).filter(
+    (c) => c.name !== wordField && c.distinct_count >= 2 && c.distinct_count <= 8,
+  );
+  const two = groups.find((c) => c.distinct_count === 2);
+  if (two) return { name: two.name, mode: "compare" };
+  const grid = [...groups].sort((a, b) => a.distinct_count - b.distinct_count || a.name.localeCompare(b.name))[0];
+  return grid ? { name: grid.name, mode: "grid" } : null;
 }
 
 /** Strict numeric parse: null / "" / non-numeric strings are NaN (Number(null) would be 0). */
@@ -454,7 +547,10 @@ export function getOddRandomEncoding(
       const x = pick(nom.filter((c) => c.distinct_count >= 5));
       if (!x) return null;
       const y = num.length && Math.random() > 0.5 ? pick(num)! : null;
-      return { xField: x.name, yField: y?.name ?? null, colorField: null };
+      const color = Math.random() > 0.45
+        ? pick(nom.filter((c) => c.name !== x.name && c.distinct_count >= 2 && c.distinct_count <= 8)) ?? null
+        : null;
+      return { xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null };
     }
     case "errorBars": {
       const x = pick(nomN(2, 40));
@@ -706,7 +802,7 @@ export function oddRecommendationReason(kind: OddChartKind): string {
     qq: "Check normality: sample quantiles vs a bell curve; bends reveal skew and heavy tails",
     connectedScatter: "Two measures traced through time — loops, reversals and drift jump out",
     stripes: "Ed Hawkins-style stripes — a long series as one band of warm and cool",
-    wordCloud: "Category labels sized by count or value — a playful top-N",
+    wordCloud: "Category labels sized by count or value — compare two groups or lay out one cloud per group",
     errorBars: "Group means with 95% intervals over the raw dots — honest comparisons",
   };
   return map[kind] ?? "An unconventional view that fits your columns";

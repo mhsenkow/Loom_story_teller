@@ -8,7 +8,7 @@ import { chartTimeWindowLabel, fieldLooksFutureDated, pickDefaultTimeField, sugg
 import { inferType, measureColumns, yFieldSupportsLogScale } from "./columns";
 import { geoMapRecommendationReason, isGeoMapKind } from "../geoMapsRec";
 import { gpuSceneRecommendationReason, isGpuSceneKind } from "../gpuScenesRec";
-import { buildOddChartRec, isOddChartKind, oddChartDataSupport, oddRecommendationReason } from "../oddChartsRec";
+import { buildOddChartRec, isOddChartKind, oddChartDataSupport, oddRecommendationReason, wordCloudCompareColumn } from "../oddChartsRec";
 import { type ColumnInfo } from "../queryTypes";
 import { FACET_RANDOM_KINDS } from "./random";
 import { type ChartRecommendation } from "./types";
@@ -354,6 +354,23 @@ export function expandRecommendationsWithExtras(
           id: `${rec.id}-contour`,
           score: Math.max(54, rec.score - 3),
           subtitle: "2D density contours",
+        });
+      }
+    }
+
+    if (rec.kind === "wordCloud" && rec.wordCloudMode !== "compare" && rec.wordCloudMode !== "grid") {
+      const group = wordCloudCompareColumn(columns, rec.xField);
+      if (group) {
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-${group.mode}`,
+          colorField: group.name,
+          wordCloudMode: group.mode,
+          title: group.mode === "compare" ? `${rec.xField} compared by ${group.name}` : `${rec.xField} for each ${group.name}`,
+          subtitle: group.mode === "compare"
+            ? "words lean to the group where they count more"
+            : "one cloud per group — same size means the same total",
+          score: Math.max(50, rec.score - 2),
         });
       }
     }

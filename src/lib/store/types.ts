@@ -332,6 +332,8 @@ export interface LoomState extends MonitorState, DataLibrarySlice {
       buffer_rows: number;
       started_at: number | null;
       last_error?: string | null;
+      /** Desktop poll success, Unix seconds. */
+      last_ok_at?: number | null;
       last_success_at?: number | null;
       snapshot_stale?: boolean;
       snapshot_captured_at?: number | null;
@@ -537,6 +539,7 @@ export interface LoomState extends MonitorState, DataLibrarySlice {
       buffer_rows: number;
       started_at: number | null;
       last_error?: string | null;
+      last_ok_at?: number | null;
       last_success_at?: number | null;
       snapshot_stale?: boolean;
       snapshot_captured_at?: number | null;

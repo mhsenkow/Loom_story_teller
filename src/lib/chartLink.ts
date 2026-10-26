@@ -22,6 +22,7 @@ import type { AppSettings, ChartVisualOverrides, ColumnInfo, FileEntry } from ".
 import { sanitizeChartVisualOverrides } from "./chartVisualSanitize";
 import { packChannelInvert, unpackChannelInvert } from "./channelInvert";
 import { parseChartEmojiMap, type ChartEmojiMap } from "./chartEmoji";
+import { clampGroupInto } from "./channelGroups";
 
 export const CHART_LINK_VERSION = 1;
 
@@ -47,6 +48,8 @@ export interface ChartLinkChart {
   emojiMap?: ChartEmojiMap;
   yAggregate?: YAggregateOption;
   topN?: number;
+  /** Chunk color / shape into this many groups. */
+  groupInto?: number;
   y2Field?: string;
   comparePrevious?: boolean;
   rollingWindow?: 7 | 30;
@@ -55,6 +58,7 @@ export interface ChartLinkChart {
   residualOverlay?: boolean;
   anomalyHighlight?: boolean;
   bumpMode?: "rank" | "delta";
+  wordCloudMode?: "cloud" | "compare" | "grid";
   pyramidScaleMode?: "auto" | "shared" | "independent";
   deltaDisplay?: "diff" | "pct";
   timeWindowField?: string;
@@ -158,6 +162,7 @@ function cleanVisual(v: ChartVisualOverrides | undefined): Record<string, Primit
 
 const LINK_OPTION_FIELDS = [
   "topN",
+  "groupInto",
   "comparePrevious",
   "rollingWindow",
   "yScale",
@@ -165,6 +170,7 @@ const LINK_OPTION_FIELDS = [
   "residualOverlay",
   "anomalyHighlight",
   "bumpMode",
+  "wordCloudMode",
   "pyramidScaleMode",
   "deltaDisplay",
 ] as const;
@@ -176,6 +182,7 @@ function linkChartOptions(
 ): Pick<ChartLinkChart, LinkOptionField> {
   return {
     topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
+    groupInto: clampGroupInto(rec.groupInto) ?? undefined,
     comparePrevious: rec.comparePrevious || undefined,
     rollingWindow: rec.rollingWindow === 7 || rec.rollingWindow === 30 ? rec.rollingWindow : undefined,
     yScale: rec.yScale && rec.yScale !== "linear" ? rec.yScale : undefined,
@@ -183,6 +190,7 @@ function linkChartOptions(
     residualOverlay: rec.residualOverlay || undefined,
     anomalyHighlight: rec.anomalyHighlight || undefined,
     bumpMode: rec.bumpMode === "delta" || rec.bumpMode === "rank" ? rec.bumpMode : undefined,
+    wordCloudMode: rec.wordCloudMode === "compare" || rec.wordCloudMode === "grid" ? rec.wordCloudMode : undefined,
     pyramidScaleMode:
       rec.pyramidScaleMode === "shared" ||
       rec.pyramidScaleMode === "independent" ||
@@ -301,6 +309,7 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["emojiMap", "emv"],
   ["yAggregate", "a"],
   ["topN", "tn"],
+  ["groupInto", "gi"],
   ["y2Field", "y2"],
   ["comparePrevious", "cp"],
   ["rollingWindow", "rw"],
@@ -309,6 +318,7 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["residualOverlay", "ro"],
   ["anomalyHighlight", "ah"],
   ["bumpMode", "bm"],
+  ["wordCloudMode", "wm"],
   ["pyramidScaleMode", "ps"],
   ["deltaDisplay", "dd"],
   ["timeWindowField", "twf"],
@@ -391,6 +401,7 @@ export function decodeChartLink(hash: string): ChartLink | null {
       f === "tooltipFields" ||
       f === "emojiMap" ||
       f === "topN" ||
+      f === "groupInto" ||
       f === "comparePrevious" ||
       f === "rollingWindow" ||
       f === "yScale" ||
@@ -398,6 +409,7 @@ export function decodeChartLink(hash: string): ChartLink | null {
       f === "residualOverlay" ||
       f === "anomalyHighlight" ||
       f === "bumpMode" ||
+      f === "wordCloudMode" ||
       f === "pyramidScaleMode" ||
       f === "deltaDisplay" ||
       f === "timeWindow" ||
@@ -412,6 +424,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
   const emojiMap = parseChartEmojiMap(cr.emv);
   if (emojiMap?.field === chart.emojiField) chart.emojiMap = emojiMap;
   if (typeof cr.tn === "number" && Number.isFinite(cr.tn)) chart.topN = Math.max(3, Math.min(50, Math.round(cr.tn)));
+  const grouped = clampGroupInto(typeof cr.gi === "number" ? cr.gi : null);
+  if (grouped) chart.groupInto = grouped;
   if (cr.cp === true) chart.comparePrevious = true;
   if (cr.rw === 7 || cr.rw === 30) chart.rollingWindow = cr.rw;
   if (cr.ys === "log" || cr.ys === "symlog" || cr.ys === "linear") chart.yScale = cr.ys;
@@ -419,6 +433,7 @@ export function decodeChartLink(hash: string): ChartLink | null {
   if (cr.ro === true) chart.residualOverlay = true;
   if (cr.ah === true) chart.anomalyHighlight = true;
   if (cr.bm === "delta" || cr.bm === "rank") chart.bumpMode = cr.bm;
+  if (cr.wm === "cloud" || cr.wm === "compare" || cr.wm === "grid") chart.wordCloudMode = cr.wm;
   if (cr.ps === "shared" || cr.ps === "independent" || cr.ps === "auto") chart.pyramidScaleMode = cr.ps;
   if (cr.dd === "diff" || cr.dd === "pct") chart.deltaDisplay = cr.dd;
   if (typeof cr.tw === "string" && TIME_WINDOWS.has(cr.tw) && cr.tw !== "all") {
@@ -518,6 +533,7 @@ export function restoreChartRec(
       emojiMap: c.emojiMap,
       yAggregate: c.yAggregate ?? null,
       topN: c.topN ?? null,
+      groupInto: c.groupInto ?? null,
       y2Field: c.y2Field ?? null,
       comparePrevious: c.comparePrevious ?? null,
       rollingWindow: c.rollingWindow ?? null,
@@ -526,6 +542,7 @@ export function restoreChartRec(
       residualOverlay: c.residualOverlay ?? null,
       anomalyHighlight: c.anomalyHighlight ?? null,
       bumpMode: c.bumpMode ?? null,
+      wordCloudMode: c.wordCloudMode ?? null,
       pyramidScaleMode: c.pyramidScaleMode ?? null,
       deltaDisplay: c.deltaDisplay ?? null,
       timeWindowField: c.timeWindowField ?? null,
@@ -559,6 +576,7 @@ export function restoreChartRec(
     if (v !== undefined) (out as unknown as Record<string, unknown>)[f] = v;
   }
   if (c.yAggregate) out.yAggregate = c.yAggregate;
+  if (c.groupInto) out.groupInto = c.groupInto;
   if (c.tooltipFields) out.tooltipFields = c.tooltipFields;
   if (c.tooltipKeyField) out.tooltipKeyField = c.tooltipKeyField;
   if (c.layoutDirection) out.layoutDirection = c.layoutDirection;
@@ -567,5 +585,6 @@ export function restoreChartRec(
   if (c.title) out.title = c.title;
   if (c.subtitle !== undefined) out.subtitle = c.subtitle;
   if (c.timeWindow) out.timeWindow = c.timeWindow;
+  if (c.wordCloudMode) out.wordCloudMode = c.wordCloudMode;
   return out;
 }

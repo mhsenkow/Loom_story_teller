@@ -296,6 +296,8 @@ export interface ChartCapabilities {
   facetRow: boolean;
   /** Top-N category limit control (bar and other aggregated category charts). */
   topN: boolean;
+  /** Group into N — chunk a discrete color or shape field. */
+  groupChannels: boolean;
   /** Second Y measure overlay (line / area). */
   compareY: boolean;
   /** Overlay earlier half of ordered X (line / area / bar). */
@@ -339,6 +341,8 @@ export interface ChartCapabilities {
   anomalyHighlight: boolean;
   /** Bump chart Δrank vs absolute rank. */
   bumpMode: boolean;
+  /** Word cloud: Cloud / Compare / Grid. */
+  wordCloudMode: boolean;
   /** Mirror pyramid: same scale vs separate scales vs auto. */
   pyramidScaleMode: boolean;
 }
@@ -405,11 +409,11 @@ export function encodingPanelHints(
   if (chart.colorField && chart.kind !== "heatmap" && chart.kind !== "hexbin") {
     const cCol = byName.get(chart.colorField);
     const distinct = cCol?.distinct_count ?? 0;
-    if (distinct > 24) {
+    if (distinct > 24 && !chart.groupInto) {
       hints.push({
         id: "color-high-cardinality",
         level: "warn",
-        message: `“${chart.colorField}” has ${distinct} values — legend and color will be hard to read. Prefer Facet, Top N, or a coarser group.`,
+        message: `“${chart.colorField}” has ${distinct} values — the legend will be hard to read. Group into fewer chunks, or use Facet or Top N.`,
       });
     }
   }
@@ -612,7 +616,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
       // Dual-measure kinds: Size carries the second measure; Color slot is hidden in UI
       "pyramid", "slope",
       // Renderers paint one series / a ramp and never read a color column
-      "waffle", "isotype", "horizon", "radialBar", "isoBars", "contour", "geoHex", "calendar", "qq", "stripes", "wordCloud", "connectedScatter",
+      "waffle", "isotype", "horizon", "radialBar", "isoBars", "contour", "geoHex", "calendar", "qq", "stripes", "connectedScatter",
     ].includes(kind),
     // Size: bubble/scatter + endpoint kinds + geo + GPU (terrain uses Z/Height, not Size)
     sizeChannel:
@@ -637,6 +641,19 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     facetRow: kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble",
     // Only kinds whose canvas path actually ranks/caps categories (see ChartView / oddCharts).
     topN: kind === "bar" || kind === "pareto" || kind === "lollipop" || kind === "treemap" || kind === "sunburst" || kind === "forceBubble" || kind === "funnel" || kind === "waffle" || kind === "isotype" || kind === "radialBar" || kind === "isoBars" || kind === "pyramid" || kind === "rose" || kind === "sparkGrid" || kind === "wordCloud" || kind === "errorBars",
+    groupChannels:
+      (kind !== "heatmap" &&
+        kind !== "hexbin" &&
+        ![
+          "histogram", "pie", "box", "waterfall", "choropleth", "ridgeline", "dataCube",
+          "corrMatrix", "pareto",
+          "dumbbell", "funnel",
+          "pyramid", "slope",
+          "waffle", "isotype", "horizon", "radialBar", "isoBars", "contour", "geoHex", "calendar", "qq", "stripes", "wordCloud", "connectedScatter",
+        ].includes(kind)) ||
+      scatterLike ||
+      mapPoints ||
+      SYMBOL_MARK_KINDS.has(kind),
     compareY: kind === "line" || kind === "area",
     comparePrevious: kind === "line" || kind === "area" || kind === "bar",
     deltaDisplay: kind === "dumbbell" || kind === "slope" || kind === "pyramid",
@@ -680,6 +697,7 @@ export function chartCapabilities(kind: ChartKind): ChartCapabilities {
     residualOverlay: scatterLike,
     anomalyHighlight: scatterLike || kind === "line" || kind === "area",
     bumpMode: kind === "bump",
+    wordCloudMode: kind === "wordCloud",
     pyramidScaleMode: kind === "pyramid",
   };
 }
@@ -789,7 +807,7 @@ export function encodingChannelLabels(kind: ChartKind): { x: string; y: string; 
     case "stripes":
       return base("Order", "Value", "Color");
     case "wordCloud":
-      return base("Word", "Size by", "Color");
+      return base("Word", "Size by", "Compare by");
     case "errorBars":
       return base("Group", "Value", "Color");
     case "scatter3d":
@@ -887,7 +905,7 @@ export function encodingKindBlurb(kind: ChartKind): string | null {
     case "stripes":
       return "One stripe per Order step, colored by how far Value sits above (warm) or below (cool) its own average.";
     case "wordCloud":
-      return "Each Word sized by row count, or by Size by when set. Top N caps how many words.";
+      return "Each Word sized by row count, or by Size by when set. Layout is one cloud, a two-sided comparison, or a grid of clouds. Compare by picks the groups. Top N caps how many words.";
     case "errorBars":
       return "Dot = group mean, whiskers = 95% confidence interval, faint dots = raw rows. Dashed line is the overall mean.";
     case "bucketField":

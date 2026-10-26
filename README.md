@@ -240,7 +240,7 @@ To use **Suggest with AI** in the Chart view:
    ```bash
    OLLAMA_ORIGINS="*" ollama serve
    ```
-   Or set `OLLAMA_ORIGINS` to your dev URL (e.g. `http://localhost:1337`).
+   Or set `OLLAMA_ORIGINS` to your dev URL (e.g. `http://localhost:1420`).
 
 Hover **Why?** on a suggestion to see the reason (heuristic or AI).
 
@@ -438,4 +438,4 @@ Theme mark materials apply to Canvas bars and pies (including previews): flat, g
 
 Firefly plots keep observations on fixed X/Y axes. Size encodes steady glow intensity; without Size, an encoded time field supplies recency. Without either, every observation has equal weight. Missing timestamps never become row-order recency. Colored cores and source-over halos remain readable on light and dark themes. Axis and grid styling applies to the live chart and Canvas captures. No perpetual twinkle runs, so static data does not imply change and idle charts spend no animation frames.
 
-Chart → Visual → Color keeps Auto and the existing presets, with independent search and category/gradient browsing. Customize up to 16 swatches or gradient stops using native color wells and hex entry; fit the number of colors to a field’s distinct values, reverse the scale, or restore the preset. Swatches follow each chart’s category order (not named category assignments); extra groups repeat the palette. Counts describe the loaded field, before chart-specific Top N or grouping. Custom colors are included in Undo/Redo, saved looks, share links, PNG and SVG; SVG remains an approximation for chart types already marked as such. Axis lines, labels and mark outlines also accept custom colors.
+Chart → Visual → Color keeps Auto and the existing presets, with independent search and category/gradient browsing. Customize up to 16 swatches or gradient stops using native color wells and hex entry; fit the number of colors to a field’s distinct values, reverse the scale, or restore the preset. Swatches follow each chart’s category order (not named category assignments); extra groups repeat the palette. Counts describe the loaded field, before chart-specific Top N or grouping. Encoding → Group into chunks a crowded color or shape into ranges (numbers) or the largest categories plus Other, on every chart that uses those channels. Custom colors are included in Undo/Redo, saved looks, share links, PNG and SVG; SVG remains an approximation for chart types already marked as such. Axis lines, labels and mark outlines also accept custom colors.

@@ -540,7 +540,26 @@ export function dodgeLabels(ys: number[], gap: number, lo: number, hi: number): 
   return res;
 }
 
-/** Category → palette index in first-appearance row order (matches ChartView's legend). */
+const BIN_RANGE = /^-?\d+(?:\.\d+)?–-?\d+(?:\.\d+)?$/;
+const BIN_POINT = /^-?\d+(?:\.\d+)?$/;
+
+/** Low-to-high order for chunked range labels; everything else stays first-seen. */
+function rankBinnedCategories(m: Map<string, number>): Map<string, number> {
+  const keys = [...m.keys()];
+  if (keys.length < 2 || !keys.some((k) => BIN_RANGE.test(k))) return m;
+  if (!keys.every((k) => k === "Missing" || k === "Other" || BIN_RANGE.test(k) || BIN_POINT.test(k))) return m;
+  const rank = (k: string) => {
+    if (k === "Other" || k === "Missing") return Number.POSITIVE_INFINITY;
+    const n = Number(k.split("–")[0]);
+    return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+  };
+  const sorted = [...keys].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const out = new Map<string, number>();
+  sorted.forEach((k, i) => out.set(k, i));
+  return out;
+}
+
+/** Category → palette index. First-seen, except chunked numeric ranges which run low to high. */
 export function categoryIndex(rows: unknown[][], ci: number): Map<string, number> {
   const m = new Map<string, number>();
   if (ci < 0) return m;
@@ -548,7 +567,7 @@ export function categoryIndex(rows: unknown[][], ci: number): Map<string, number
     const k = String(r[ci]);
     if (!m.has(k)) m.set(k, m.size);
   }
-  return m;
+  return rankBinnedCategories(m);
 }
 
 /**

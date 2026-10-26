@@ -122,10 +122,10 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
     setStreamStatus: (status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; wikis_seen: number; started_at: number | null }) =>
       set({ streamRunning: status.running, streamTotalEvents: status.total_events, streamEventsPerSec: status.events_per_sec, streamBufferRows: status.buffer_rows, streamWikisSeen: status.wikis_seen, streamStartedAt: status.started_at }),
     setFeedHealth: (health: LoomState["feedHealth"]) => set({ feedHealth: health }),
-    setSourceStatus: (kind: string, status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; last_error?: string | null; last_success_at?: number | null; snapshot_stale?: boolean; snapshot_captured_at?: number | null }) =>
+    setSourceStatus: (kind: string, status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; last_error?: string | null; last_ok_at?: number | null; last_success_at?: number | null; snapshot_stale?: boolean; snapshot_captured_at?: number | null }) =>
       set((s) => {
         const prev = s.sourceStatuses[kind];
-        if (prev && prev.running === status.running && prev.total_events === status.total_events && prev.events_per_sec === status.events_per_sec && prev.buffer_rows === status.buffer_rows && prev.started_at === status.started_at && (prev.last_error ?? null) === (status.last_error ?? null)) return s;
+        if (prev && prev.running === status.running && prev.total_events === status.total_events && prev.events_per_sec === status.events_per_sec && prev.buffer_rows === status.buffer_rows && prev.started_at === status.started_at && (prev.last_error ?? null) === (status.last_error ?? null) && (prev.last_ok_at ?? null) === (status.last_ok_at ?? null) && (prev.last_success_at ?? null) === (status.last_success_at ?? null)) return s;
         return { sourceStatuses: { ...s.sourceStatuses, [kind]: { ...status } } };
       }),
     setVizPreferences: (model: VizPreferenceModel) => { setCachedVizPreferences(model); set({ vizPreferences: model }); },

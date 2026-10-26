@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { feedHealthNote, isFeedResting, parseFeedHealth } from "../sourceHealth";
+import { feedHealthFromSourceStatus, feedHealthNote, isFeedResting, parseFeedHealth } from "../sourceHealth";
 import { digestEntries } from "../feedBrowser";
 import { sourceCatalog } from "../sourceCatalog";
 import { emptySourcePreferences, setSourceReaction } from "../sourcePreferences";
@@ -16,6 +16,13 @@ describe("feed health (client)", () => {
     expect(isFeedResting("met", h)).toBe(true);
     expect(isFeedResting("usgs", h)).toBe(false);
     expect(isFeedResting("unknown_kind", h)).toBe(false);
+  });
+
+  it("derives desktop health from local status and does not call a feed resting", () => {
+    expect(feedHealthFromSourceStatus(undefined)).toEqual({ state: "unknown" });
+    expect(feedHealthFromSourceStatus({ running: false, buffer_rows: 0 })).toEqual({ state: "unknown" });
+    expect(feedHealthFromSourceStatus({ running: true, buffer_rows: 12, last_ok_at: 1_700_000_000 }).state).toBe("ok");
+    expect(feedHealthFromSourceStatus({ running: true, last_error: "HTTP 503", last_ok_at: 1_700_000_000 }).state).toBe("degraded");
   });
 
   it("explains resting and patchy feeds, says nothing for healthy ones", () => {

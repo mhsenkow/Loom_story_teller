@@ -122,6 +122,11 @@ export interface ChartRecommendation {
   yAggregate?: YAggregateOption | null;
   /** Cap categories by value rank (bar and similar). Null = default. */
   topN?: number | null;
+  /**
+   * Chunk color and shape into this many groups. Numbers become ranges;
+   * categories keep the largest and roll the rest into Other. Null = each value.
+   */
+  groupInto?: number | null;
   /** Second numeric measure drawn as a dashed overlay (line / area). */
   y2Field?: string | null;
   /** Overlay the earlier half of a time series as “previous” (line / area). */
@@ -140,6 +145,8 @@ export interface ChartRecommendation {
   anomalyHighlight?: boolean | null;
   /** Bump: plot Δrank instead of absolute rank. */
   bumpMode?: "rank" | "delta" | null;
+  /** Word cloud: one spiral, a two-sided comparison, or one cloud per group. */
+  wordCloudMode?: "cloud" | "compare" | "grid" | null;
   /** Pyramid: shared / independent / auto arm scales. */
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   /** Dual-measure / compare: show signed Δ or % change on marks. */
