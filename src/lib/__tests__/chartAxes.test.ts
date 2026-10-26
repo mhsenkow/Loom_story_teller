@@ -166,6 +166,47 @@ describe("hit targets", () => {
     expect(pickHitTarget(targets, 50, 50)).toBeNull();
   });
 
+  it("uses the representative row when the mark label is not a cell value", () => {
+    const t: HitTarget = {
+      shape: "rect",
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      match: [[0, "Bitcoin"], [1, "Higher market_cap"]],
+      rowIndex: 0,
+      summary: { columns: ["word", "size"], row: ["Bitcoin", 1600] },
+    };
+    expect(rowForHitTarget(t, [["Bitcoin", 1600], ["Ethereum", 400]])).toBe(0);
+  });
+
+  it("shows the summary when a bin label matches no row", () => {
+    const t: HitTarget = {
+      shape: "rect",
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      match: [[0, "10–20"]],
+      summary: { columns: ["bin", "count"], row: ["10–20", 4] },
+    };
+    expect(rowForHitTarget(t, [["1"], ["2"]])).toBe(-1);
+  });
+
+  it("does not fall back through a tooltip link filter", () => {
+    const t: HitTarget = {
+      shape: "rect",
+      x: 0,
+      y: 0,
+      w: 10,
+      h: 10,
+      match: [[0, "nope"]],
+      rowIndex: 0,
+      summary: { columns: ["k"], row: ["nope"] },
+    };
+    expect(rowForHitTarget(t, [["a"], ["b"]], new Set([1]))).toBeNull();
+  });
+
   it("summary-only targets resolve as -1 without a row match", () => {
     const summaryTarget: HitTarget = {
       shape: "rect",

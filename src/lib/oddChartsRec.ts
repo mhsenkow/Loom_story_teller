@@ -132,6 +132,13 @@ export interface OddRenderOpts {
   bumpMode?: "rank" | "delta" | null;
   /** Word cloud layout. Null and "cloud" are the single spiral. */
   wordCloudMode?: "cloud" | "compare" | "grid" | null;
+  /** Face for the words themselves. Empty uses the chart font. */
+  wordCloudFont?: string | null;
+  /** Spiral from the center, horizontal rows, or vertical columns. */
+  wordCloudArrange?: "spiral" | "rows" | "columns" | null;
+  /** Largest-word size, 0.6–1.6. */
+  wordCloudScale?: number | null;
+  wordCloudWeight?: "ranked" | "even" | "heavy" | null;
   /** Pyramid: shared vs independent arm domains (auto picks by magnitude ratio). */
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   /** Show signed Δ or % between Left/Right or Start/End. */
@@ -209,17 +216,6 @@ export function groupSum(
     .sort((a, b) => b[1] - a[1]);
 }
 
-export type WordCloudSide = "left" | "right" | "center";
-
-export interface WordCloudCompareWord {
-  word: string;
-  /** Value that sizes the word: the winning side, or either side when they tie. */
-  value: number;
-  side: WordCloudSide;
-  /** Winning group, or "tie" when the two sides are equal. */
-  group: string;
-}
-
 /** Per-word totals for each Compare-by group, plus each group's overall weight. */
 export function wordTotalsByGroup(
   rows: unknown[][],
@@ -264,26 +260,46 @@ export function topGroupsByWeight(weight: Map<string, number>, cap: number): str
     .map(([name]) => name);
 }
 
-/**
- * Place each word on the side where its total is larger.
- * Equal totals stay in the center. `leftGroup` is the first of the two groups.
- */
-export function assignWordCloudCompare(
+/** One group's words, heaviest first. A word can belong to more than one group. */
+export function wordsForCloudGroup(
   byWord: Map<string, Map<string, number>>,
-  leftGroup: string,
-  rightGroup: string,
-): WordCloudCompareWord[] {
-  const out: WordCloudCompareWord[] = [];
+  group: string,
+): [string, number][] {
+  return [...byWord.entries()]
+    .map(([word, totals]) => [word, totals.get(group) ?? 0] as [string, number])
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/**
+ * Two clouds when Compare by is not a small set of groups (a market-cap
+ * column has one value per name). Higher half on the left, lower on the right.
+ * Size stays the group's total; the split uses that total, or the numeric
+ * group label when every label is a number.
+ */
+export function splitWordCloudHalves(
+  byWord: Map<string, Map<string, number>>,
+): { higher: [string, number][]; lower: [string, number][] } {
+  const ranked: { word: string; size: number; stat: number }[] = [];
   for (const [word, groups] of byWord) {
-    const left = groups.get(leftGroup) ?? 0;
-    const right = groups.get(rightGroup) ?? 0;
-    if (left <= 0 && right <= 0) continue;
-    if (left === right) out.push({ word, value: left, side: "center", group: "tie" });
-    else if (left > right) out.push({ word, value: left, side: "left", group: leftGroup });
-    else out.push({ word, value: right, side: "right", group: rightGroup });
+    let size = 0;
+    const keyNums: number[] = [];
+    for (const [group, v] of groups) {
+      size += v;
+      const n = Number(String(group).replace(/,/g, ""));
+      if (Number.isFinite(n)) keyNums.push(n);
+    }
+    if (!(size > 0)) continue;
+    const stat = keyNums.length === groups.size && keyNums.length > 0 ? Math.max(...keyNums) : size;
+    ranked.push({ word, size, stat });
   }
-  out.sort((a, b) => b.value - a.value || a.word.localeCompare(b.word));
-  return out;
+  ranked.sort((a, b) => b.stat - a.stat || b.size - a.size || a.word.localeCompare(b.word));
+  const mid = Math.ceil(ranked.length / 2);
+  const toPairs = (list: typeof ranked): [string, number][] =>
+    list
+      .map((w) => [w.word, w.size] as [string, number])
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return { higher: toPairs(ranked.slice(0, mid)), lower: toPairs(ranked.slice(mid)) };
 }
 
 /** A low-cardinality column to compare a word cloud against. Two values → Compare; 3–8 → Grid. */

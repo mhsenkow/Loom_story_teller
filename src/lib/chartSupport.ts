@@ -905,7 +905,7 @@ export function encodingKindBlurb(kind: ChartKind): string | null {
     case "stripes":
       return "One stripe per Order step, colored by how far Value sits above (warm) or below (cool) its own average.";
     case "wordCloud":
-      return "Each Word sized by row count, or by Size by when set. Layout is one cloud, a two-sided comparison, or a grid of clouds. Compare by picks the groups. Top N caps how many words.";
+      return "Each Word sized by row count, or by Size by when set. Compare draws two clouds: one for each group when Compare by has a few groups, or a higher cloud and a lower cloud when it is a statistic such as market cap. Grid lays out up to eight groups. Top N caps how many words. Visual → Word cloud sets the word font, spiral, rows, or columns, and how large the words grow.";
     case "errorBars":
       return "Dot = group mean, whiskers = 95% confidence interval, faint dots = raw rows. Dashed line is the overall mean.";
     case "bucketField":

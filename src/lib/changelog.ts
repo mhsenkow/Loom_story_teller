@@ -25,6 +25,17 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-26c-cloud-look",
+    date: "2026-10-26",
+    title: "Word cloud look",
+    items: [
+      {
+        title: "A look of its own",
+        detail: "Word clouds open a Visual section for the word font, a spiral, rows, or columns, how large the words grow, and whether weight follows rank. Bars, lines, points, and maps keep the controls that belong to them.",
+      },
+    ],
+  },
+  {
     id: "2026-10-26b-library",
     date: "2026-10-26",
     title: "Safer saved files",
@@ -46,7 +57,7 @@ export const CHANGELOG: ChangelogRelease[] = [
     items: [
       {
         title: "Cloud, Compare, or Grid",
-        detail: "A word cloud can stay one spiral, lean each word toward the group where it counts more, or show one cloud per group on the same size scale. Pick Compare by, then Layout, in Encoding.",
+        detail: "A word cloud can stay one spiral, sit as two clouds side by side, or lay out one cloud per group. Two groups get a cloud each. A statistic such as market cap splits into a higher cloud and a lower cloud. The same size means the same total.",
       },
     ],
   },

@@ -3189,8 +3189,8 @@ export default function ChartPanelTab() {
             <div className="flex items-center justify-between gap-2">
               <span className="text-2xs text-loom-muted">Your chart, your style</span>
               <div className="flex gap-1">
-                <button type="button" onClick={() => setVisualSections(Object.fromEntries(["design", "personal", "color", "look", "type", "marks", "axes", "layout", "atmosphere", "notes"].map((key) => [key, true])))} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Expand all</button>
-                <button type="button" onClick={() => setVisualSections({})} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Collapse all</button>
+                <button type="button" onClick={() => setVisualSections(Object.fromEntries(["design", "personal", "color", "look", "type", "cloud", "map", "marks", "axes", "layout", "atmosphere", "notes"].map((key) => [key, true])))} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Expand all</button>
+                <button type="button" onClick={() => setVisualSections({ cloud: false, map: false })} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Collapse all</button>
               </div>
             </div>
             <ChartInspectorSection title="My looks" open={!!visualSections.personal} onToggle={() => toggleVisualSection("personal")}>
@@ -3198,7 +3198,7 @@ export default function ChartPanelTab() {
             </ChartInspectorSection>
             {(!caps.cartesian || !caps.markPoints) && (
               <p className="text-2xs text-loom-muted leading-snug rounded-md border border-loom-border/60 bg-loom-elevated/40 px-2.5 py-2">
-                Controls that don’t affect {activeChart.kind} are hidden
+                Controls that don’t affect {chartKindLabel(activeChart.kind)} are hidden
                 {!caps.cartesian ? " (no axes / grid)" : ""}
                 {!caps.markPoints && caps.cartesian ? " · mark shape / jitter apply to scatter" : ""}
                 .
@@ -3468,6 +3468,77 @@ export default function ChartPanelTab() {
                 </div>
               )}
             </ChartInspectorSection>
+            {activeChart.kind === "wordCloud" && (
+              <ChartInspectorSection
+                title="Word cloud"
+                open={visualSections.cloud !== false}
+                onToggle={() => setVisualSections((prev) => ({ ...prev, cloud: prev.cloud === false }))}
+              >
+                <div>
+                  <label className="block text-2xs text-loom-muted mb-1">Word font</label>
+                  <select
+                    aria-label="Word font"
+                    value={chartVisualOverrides.wordCloudFont ?? "inherit"}
+                    onChange={(e) => updateOverride("wordCloudFont", e.target.value === "inherit" ? undefined : e.target.value)}
+                    className="loom-input loom-panel-select w-full"
+                  >
+                    <option value="inherit">Same as chart</option>
+                    {chartVisualOverrides.wordCloudFont && chartVisualOverrides.wordCloudFont !== "inherit" && !Object.values(FONT_CHOICES).some((font) => font.family === chartVisualOverrides.wordCloudFont) && (
+                      <option value={chartVisualOverrides.wordCloudFont}>{chartVisualOverrides.wordCloudFont}</option>
+                    )}
+                    {FONT_GROUPS.map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.fonts.map((id) => <option key={id} value={FONT_CHOICES[id].family}>{FONT_CHOICES[id].family}</option>)}
+                      </optgroup>
+                    ))}
+                  </select>
+                  <p className="text-2xs text-loom-muted mt-1">The words use this face. Titles and axes keep the chart font.</p>
+                </div>
+                <IconToggleGroup
+                  label="Arrangement"
+                  value={chartVisualOverrides.wordCloudArrange ?? "spiral"}
+                  options={[
+                    { value: "spiral", label: "Spiral", icon: "◎" },
+                    { value: "rows", label: "Rows", icon: "≡" },
+                    { value: "columns", label: "Columns", icon: "❙" },
+                  ]}
+                  onChange={(value) => updateOverride("wordCloudArrange", value === "spiral" ? undefined : value)}
+                />
+                <div className="loom-slider-row">
+                  <span className="truncate text-2xs text-loom-muted">Word size</span>
+                  <input
+                    aria-label="Word size"
+                    type="range"
+                    min={60}
+                    max={160}
+                    step={5}
+                    value={Math.round((chartVisualOverrides.wordCloudScale ?? 1) * 100)}
+                    onChange={(e) => updateOverride("wordCloudScale", Number(e.target.value) / 100)}
+                  />
+                  <span className="loom-slider-value">{Math.round((chartVisualOverrides.wordCloudScale ?? 1) * 100)}%</span>
+                </div>
+                <IconToggleGroup
+                  label="Weight"
+                  value={chartVisualOverrides.wordCloudWeight ?? "ranked"}
+                  options={[
+                    { value: "ranked", label: "Ranked", icon: "A" },
+                    { value: "even", label: "Even", icon: "A" },
+                    { value: "heavy", label: "Heavy", icon: "A" },
+                  ]}
+                  onChange={(value) => updateOverride("wordCloudWeight", value === "ranked" ? undefined : value)}
+                />
+                <p
+                  className="text-sm text-loom-text leading-snug"
+                  style={{
+                    fontFamily: chartFontStack(chartVisualOverrides.wordCloudFont || previewFont),
+                    fontWeight: chartVisualOverrides.wordCloudWeight === "heavy" ? 700 : chartVisualOverrides.wordCloudWeight === "even" ? 500 : 650,
+                  }}
+                >
+                  {activeChart.xField || "Words"} sized across the cloud
+                </p>
+              </ChartInspectorSection>
+            )}
+
             {/* Typography */}
             <ChartInspectorSection title="Typography" open={!!visualSections.type} onToggle={() => toggleVisualSection("type")}>
 
@@ -3612,7 +3683,7 @@ export default function ChartPanelTab() {
 
             {/* Marks — only for kinds that draw marks this way */}
             {(caps.pointMarker || caps.barMarks || caps.lineMarks) && (
-            <ChartInspectorSection title="Marks" open={!!visualSections.marks} onToggle={() => toggleVisualSection("marks")}>
+            <ChartInspectorSection title={caps.barMarks ? "Bars" : caps.lineMarks ? (activeChart.kind === "area" ? "Area" : "Lines") : caps.pointMarker ? "Points" : "Marks"} open={!!visualSections.marks} onToggle={() => toggleVisualSection("marks")}>
 
               {caps.pointMarker && (
                 <>

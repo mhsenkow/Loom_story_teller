@@ -368,7 +368,7 @@ export function expandRecommendationsWithExtras(
           wordCloudMode: group.mode,
           title: group.mode === "compare" ? `${rec.xField} compared by ${group.name}` : `${rec.xField} for each ${group.name}`,
           subtitle: group.mode === "compare"
-            ? "words lean to the group where they count more"
+            ? "one cloud per side — same size means the same total"
             : "one cloud per group — same size means the same total",
           score: Math.max(50, rec.score - 2),
         });

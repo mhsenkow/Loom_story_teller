@@ -699,6 +699,10 @@ export function ChartView() {
       anomalyHighlight: activeChart?.anomalyHighlight ?? undefined,
       bumpMode: activeChart?.bumpMode ?? undefined,
       wordCloudMode: activeChart?.wordCloudMode ?? undefined,
+      wordCloudFont: chartVisualOverrides.wordCloudFont,
+      wordCloudArrange: chartVisualOverrides.wordCloudArrange,
+      wordCloudScale: chartVisualOverrides.wordCloudScale,
+      wordCloudWeight: chartVisualOverrides.wordCloudWeight,
       pyramidScaleMode: activeChart?.pyramidScaleMode ?? undefined,
       deltaDisplay: activeChart?.deltaDisplay ?? undefined,
       layoutDirection: activeChart?.layoutDirection ?? undefined,
@@ -1896,6 +1900,8 @@ export function ChartView() {
   );
   /** Glass / dock stay put on touch — finger leave shouldn't wipe the readout. */
   const stickyTooltip = tooltipPresentation === "glass" || tooltipPresentation === "dock";
+  /** Scatter and the other canvases keep separate hover state. Show only the active one. */
+  const hoverTip = activeChart?.kind === "scatter" ? scatterTooltip : chartTooltip;
   /** Height of the carved footer info band (source footnote / colour stops); overlays sit above it. */
   const footerBandPx =
     (chartFootnoteText || chartColorInfo?.stops?.length) && (chartVisualOverrides.chromeInfoBand ?? "footer") === "footer"
@@ -2209,10 +2215,14 @@ export function ChartView() {
     ],
   );
   // A new chart starts with no focus (pins stay per chart id).
+  // Drop the previous chart's hover readout so a scatter tip cannot sit on a bar.
   useEffect(() => {
     setHoverMark(null);
     setKeyboardMarkIndex(-1);
-  }, [activeChart?.id]);
+    setScatterTooltip(null);
+    setChartTooltip(null);
+    setHoveredRowIndex(null);
+  }, [activeChart?.id, setHoveredRowIndex]);
 
   // Focus layer: pinned marks (solid) + hover / keyboard focus (lighter), then
   // pinned callouts on top. Redraws whenever marks are repainted (hitsVersion).
@@ -3411,6 +3421,10 @@ export function ChartView() {
                   topN: opts.topN,
                   bumpMode: opts.bumpMode ?? activeChart.bumpMode ?? undefined,
                   wordCloudMode: opts.wordCloudMode ?? activeChart.wordCloudMode ?? undefined,
+                  wordCloudFont: opts.wordCloudFont,
+                  wordCloudArrange: opts.wordCloudArrange,
+                  wordCloudScale: opts.wordCloudScale,
+                  wordCloudWeight: opts.wordCloudWeight,
                   pyramidScaleMode: opts.pyramidScaleMode ?? activeChart.pyramidScaleMode ?? undefined,
                   deltaDisplay: opts.deltaDisplay ?? activeChart.deltaDisplay ?? undefined,
                   layoutDirection: activeChart.layoutDirection,
@@ -5020,11 +5034,11 @@ export function ChartView() {
           )}
           </div>
         </div>
-        {!readoutsObscured && tooltipPresentation !== "off" && (scatterTooltip || chartTooltip) && (
+        {!readoutsObscured && tooltipPresentation !== "off" && hoverTip && (
           <ChartTooltipCard
             fontFamily={chartFontFamily}
             axisFontSize={chartRenderOpts.axisFontSize}
-            tip={(scatterTooltip ?? chartTooltip)!}
+            tip={hoverTip}
             presentation={tooltipPresentation}
             link={tooltipLink}
             // Hover readouts stay silent; keyboard steps are announced by markAnnouncement.
@@ -5033,7 +5047,7 @@ export function ChartView() {
               hoverMark
                 ? () => {
                     const wasPinned = !!hoverRef && pinnedTooltips.some((t) => t.chartId === activeChart?.id && sameMark(t.ref, hoverRef));
-                    pinMark(hoverMark, (scatterTooltip ?? chartTooltip)!);
+                    pinMark(hoverMark, hoverTip);
                     // Glass/dock cards stay open on touch; once pinned, the canvas callout carries the readout.
                     if (stickyTooltip && !wasPinned) {
                       setScatterTooltip(null);

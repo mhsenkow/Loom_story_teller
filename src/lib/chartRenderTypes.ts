@@ -100,6 +100,10 @@ export interface ChartRenderOpts {
   layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
   bumpMode?: "rank" | "delta" | null;
   wordCloudMode?: "cloud" | "compare" | "grid" | null;
+  wordCloudFont?: string | null;
+  wordCloudArrange?: "spiral" | "rows" | "columns" | null;
+  wordCloudScale?: number | null;
+  wordCloudWeight?: "ranked" | "even" | "heavy" | null;
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   /** Dual-measure delta ink: off / signed diff / percent. */
   deltaDisplay?: "off" | "diff" | "pct" | null;

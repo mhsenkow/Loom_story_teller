@@ -80,4 +80,12 @@ export interface ChartVisualOverrides {
   tooltipMode?: "auto" | "hover" | "glass" | "dock" | "compact" | "off";
   /** Geographic basemap; `auto` picks from the region column / chart kind. */
   geoAtlas?: "auto" | "world" | "worldDetail" | "us" | "usCounties";
+  /** Word-cloud face. Empty uses the chart font. Titles and axes stay on `fontFamily`. */
+  wordCloudFont?: string;
+  /** Word-cloud packing. Empty is the center spiral. */
+  wordCloudArrange?: "spiral" | "rows" | "columns";
+  /** Multiplier on the largest word. 1 is the fit for the plot. */
+  wordCloudScale?: number;
+  /** How word weight follows rank. Empty is ranked (largest words heaviest). */
+  wordCloudWeight?: "ranked" | "even" | "heavy";
 }

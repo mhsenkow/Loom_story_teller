@@ -74,6 +74,22 @@ describe("sanitizeChartVisualOverrides", () => {
     });
   });
 
+  it("keeps word-cloud look and drops a bad arrangement", () => {
+    const out = sanitizeChartVisualOverrides({
+      wordCloudFont: "Lora",
+      wordCloudArrange: "rows",
+      wordCloudScale: 4,
+      wordCloudWeight: "heavy",
+    });
+    expect(out).toMatchObject({
+      wordCloudFont: "Lora",
+      wordCloudArrange: "rows",
+      wordCloudScale: 1.6,
+      wordCloudWeight: "heavy",
+    });
+    expect(sanitizeChartVisualOverrides({ wordCloudArrange: "circle" as never })?.wordCloudArrange).toBeUndefined();
+  });
+
   it("drops custom legend geometry when position is not custom", () => {
     const out = sanitizeChartVisualOverrides({
       legendPosition: "top-right",

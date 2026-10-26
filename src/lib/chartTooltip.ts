@@ -196,6 +196,12 @@ export function rowForHitTarget(
     const r = rows[i]!;
     if (target.match.every(([ci, v]) => String(r[ci]) === v)) return i;
   }
+  // A bin, a pyramid side, or a word-cloud half labels the mark with text
+  // that is not a raw cell. The renderer still stored the representative row
+  // and the readout. A tooltip link stays strict: no fallback past the filter.
+  if (allowed) return null;
+  if (target.rowIndex != null && target.rowIndex >= 0 && target.rowIndex < rows.length) return target.rowIndex;
+  if (target.summary) return -1;
   return null;
 }
 

@@ -820,7 +820,7 @@ export function createChartRec(
               ? `${xField} for each ${colorField}`
               : odd.title,
           subtitle: cloudMode === "compare"
-            ? "words lean to the group where they count more"
+            ? "one cloud per side — same size means the same total"
             : cloudMode === "grid"
               ? "one cloud per group — same size means the same total"
               : odd.subtitle,
