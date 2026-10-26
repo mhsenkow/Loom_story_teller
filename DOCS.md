@@ -46,6 +46,8 @@ When `isDesktop()` is false, there is no DuckDB folder scan. Own-data flows use 
 
 **Desktop DuckDB lifetime:** The Tauri backend uses `Connection::open_in_memory()` (`src-tauri/src/db.rs`). Poll/stream tables are created once at app startup via `ensure_tables` / `ensure_stream_table`; schema-drift repair (drop + recreate when column names/types no longer match `sourceRegistry.ts`) therefore only applies **within a running session**, not across app restarts. `source_start` does not re-run full migration — tables already exist from setup.
 
+Durable uploads validate string column names/types, finite scalar cells, row widths and safe total counts before hydration. Unversioned and v1/v2 records remain supported; unknown payload versions are skipped without deleting them. Eviction, reopening, and deletion share `webFileStorageAliases`: a legacy `web://name` key and a flat `web://file/name` key protect each other, while nested paths stay distinct.
+
 ### Cloudflare Worker (`workers/catalog-proxy.ts`)
 
 Serves the static export (`ASSETS`) and JSON/HTML API routes: `/api/catalog/us|uk`, `/api/fetch-csv` (SSRF-guarded, origin-gated), `/api/source/<kind>` (cached upstream proxies), `/api/stories` + `/s/<id>` (published stories), `/api/feedback`, `/api/monitors` (always-on monitors; the `scheduled` handler runs `workers/monitorCron.ts` every 5 min, see [docs/MONITORING.md](docs/MONITORING.md)). Policy helpers live in `src/lib/workerCatalogPolicy.ts` (cache schema version, catalog row clamps, story byte limits). Local full-stack preview: `npm run build` + `wrangler dev` (Docker `serve out` alone has no `/api/*`).
@@ -59,6 +61,8 @@ Serves the static export (`ASSETS`) and JSON/HTML API routes: `/api/catalog/us|u
 `DataRegionView` now presents My data, Bookmarks, Combinations and Discover, with Add data as a focused import task. Catalogs mount/fetch only when selected, with 12 government results initially visible. `dataLibrary.ts` and `store/dataLibrarySlice.ts` store source descriptors and two-source lookup recipes; `sourcePrefs.saved` remains the bookmark authority. `HydrateStore` persists the versioned library locally and workspace backups include it without dataset rows. Bookmarked uploads and recipe inputs are excluded from routine IndexedDB LRU eviction (the 24-entry cap is soft when protected).
 
 `dataLibraryRuntime.ts` resolves existing feed, file and remote CSV paths. Recipes rebuild on open, require unique lookup keys, report match coverage and partial inputs, and cap output at one million cells. Results use `combination://<id>` paths and the existing dataset activation pipeline. Explorer, Chart and Dive can use the result; SQL requires a CSV export. Open charts do not continuously recompute. No new IPC or Worker route is involved. See [Data library design and extension points](docs/DATA_LIBRARY.md).
+
+Combination cell budgets apply to emitted rows: inner joins can scan larger inputs when their matched output fits. Output rows are normalized to each input's declared column width, with missing cells filled by null. Recipe upload protection resolves both file references and attached asset paths. IndexedDB eviction reads library and preference metadata independently so a malformed record does not discard the other record's protection; metadata is read only when eviction is needed.
 
 ## State (Zustand)
 

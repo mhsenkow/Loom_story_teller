@@ -1,6 +1,10 @@
 # Performance budgets (LOOM-698)
 
+**Combination reliability (2026-10-26):** Joins retain linear lookup/scan cost and the one-million-output-cell cap. Each emitted row allocates one schema-sized array; unmatched inner-join rows allocate none. Storage cleanup reads protection metadata only above its 24-entry threshold. These changes do not affect chart render loops; device timings have not been measured.
+
 Proposed targets — measure with `npm run build` transfer sizes, Vitest perf helpers, and manual Lighthouse on `out/` + local Worker. Not current production SLAs.
+
+**Durable upload validation (2026-10-26):** Reopening now validates each stored cell in O(cells) time without copying row arrays, in addition to existing schema/width checks. Legacy protection expands at most two storage candidates per reference, only during eviction. No chart rendering work is added; device hydration timing remains unmeasured.
 
 | Journey step | Target (desktop) | Target (phone) | Owner module |
 |--------------|------------------|----------------|--------------|

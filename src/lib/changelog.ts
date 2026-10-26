@@ -25,6 +25,21 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-26b-library",
+    date: "2026-10-26",
+    title: "Safer saved files",
+    items: [
+      {
+        title: "Safer reopening of saved files",
+        detail: "Older file references keep their storage protection, late saves no longer restore files deleted through an older reference, and damaged saved data is skipped when reopening your library.",
+      },
+      {
+        title: "More reliable saved combinations",
+        detail: "Matching-only combinations now use their result size for the preview limit. Uneven source rows keep values under the right columns, and saved recipe inputs are better protected from routine local storage cleanup.",
+      },
+    ],
+  },
+  {
     id: "2026-10-26a-wordcloud",
     date: "2026-10-26",
     title: "Compare word clouds",

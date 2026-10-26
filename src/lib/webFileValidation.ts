@@ -25,9 +25,20 @@ function isQueryResult(v: unknown): v is QueryResult {
   const q = v as QueryResult;
   if (!Array.isArray(q.columns) || !Array.isArray(q.types) || !Array.isArray(q.rows)) return false;
   if (q.columns.length !== q.types.length) return false;
+  for (const name of q.columns) if (typeof name !== "string") return false;
+  for (const type of q.types) if (typeof type !== "string") return false;
+  if (!Number.isSafeInteger(q.total_rows) || q.total_rows < q.rows.length) return false;
   const w = q.columns.length;
   for (const row of q.rows) {
     if (!Array.isArray(row) || row.length !== w) return false;
+    for (const cell of row) {
+      if (
+        cell !== null &&
+        typeof cell !== "string" &&
+        typeof cell !== "boolean" &&
+        !(typeof cell === "number" && Number.isFinite(cell))
+      ) return false;
+    }
   }
   return true;
 }
@@ -36,6 +47,11 @@ function isQueryResult(v: unknown): v is QueryResult {
 export function parseWebFilePersist(raw: unknown): WebFilePersist | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
+  if (
+    "payloadVersion" in r &&
+    r.payloadVersion !== 1 &&
+    r.payloadVersion !== WEB_FILE_PAYLOAD_VERSION
+  ) return null;
   if (typeof r.path !== "string" || !r.path) return null;
   if (typeof r.name !== "string" || typeof r.extension !== "string") return null;
   if (typeof r.sizeBytes !== "number" || !Number.isFinite(r.sizeBytes)) return null;

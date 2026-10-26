@@ -3,6 +3,7 @@ import {
   webFileDisplayName,
   webFileStablePath,
   webFileStablePathFromFile,
+  webFileStorageAliases,
   webFileStoragePathCandidates,
   legacyWebUploadPath,
 } from "../webFileIdentity";
@@ -28,6 +29,22 @@ describe("webFileIdentity", () => {
     expect(webFileStoragePathCandidates("web://solo.csv")).toEqual([
       "web://file/solo.csv",
       "web://solo.csv",
+    ]);
+  });
+
+  it("pairs a flat stable key with its legacy alias, and leaves nested files alone", () => {
+    expect(webFileStorageAliases("web://file/solo.csv")).toEqual([
+      "web://file/solo.csv",
+      "web://solo.csv",
+    ]);
+    expect(webFileStorageAliases("web://solo.csv")).toEqual([
+      "web://solo.csv",
+      "web://file/solo.csv",
+    ]);
+    expect(webFileStorageAliases("web://file/east/data.csv")).toEqual(["web://file/east/data.csv"]);
+    expect(webFileStorageAliases(webFileStablePath("a b.csv"))).toEqual([
+      "web://file/a%20b.csv",
+      "web://a b.csv",
     ]);
   });
 

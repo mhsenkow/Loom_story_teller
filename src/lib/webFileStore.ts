@@ -12,7 +12,7 @@ import { parseSourcePreferences } from "./sourcePreferences";
 // =================================================================
 
 import type { ColumnInfo, QueryResult } from "./store";
-import { webFileStoragePathCandidates } from "./webFileIdentity";
+import { webFileStorageAliases } from "./webFileIdentity";
 import { parseWebFilePersist } from "./webFileValidation";
 
 const DB_NAME = "loom-web-files";
@@ -114,13 +114,24 @@ function idbReq<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
-async function evictOldestEntries(store: IDBObjectStore, keepPath: string): Promise<void> {
-  let pinned = new Set<string>();
+function readStoredMetadata(key: string): unknown {
   try {
-    pinned = pinnedLibraryPaths(parseDataLibrary(JSON.parse(localStorage.getItem(DATA_LIBRARY_KEY) ?? 'null')), parseSourcePreferences(JSON.parse(localStorage.getItem('loom-source-preferences') ?? 'null')));
-  } catch { /* Storage unavailable: retain the normal LRU policy. */ }
+    return JSON.parse(localStorage.getItem(key) ?? "null");
+  } catch {
+    return null;
+  }
+}
+
+async function evictOldestEntries(store: IDBObjectStore, keepPath: string): Promise<void> {
   const count = await idbReq(store.count());
   if (count <= MAX_ENTRIES) return;
+  const pinned = pinnedLibraryPaths(
+    parseDataLibrary(readStoredMetadata(DATA_LIBRARY_KEY)),
+    parseSourcePreferences(readStoredMetadata("loom-source-preferences")),
+  );
+  const aliases = new Set<string>();
+  for (const path of pinned) for (const alias of webFileStorageAliases(path)) aliases.add(alias);
+  for (const alias of aliases) pinned.add(alias);
   const toDrop = count - MAX_ENTRIES;
   const idx = store.index(INDEX_UPDATED);
   let dropped = 0;
@@ -177,7 +188,7 @@ export async function getWebFileInspect(path: string): Promise<WebFilePersist | 
     const tx = db.transaction(STORE, "readonly");
     const store = tx.objectStore(STORE);
     const txDone = waitTx(tx);
-    for (const key of webFileStoragePathCandidates(path)) {
+    for (const key of webFileStorageAliases(path)) {
       const raw = await idbReq(store.get(key));
       const row = parseWebFilePersist(raw);
       if (row) {
@@ -229,12 +240,14 @@ export async function deleteWebFileInspect(path: string): Promise<void> {
   let db: IDBDatabase | null = null;
   try {
     const revision = nextRevision(Date.now());
-    deletedTombstones.set(path, { deletedAt: Date.now(), revision });
+    const paths = webFileStorageAliases(path);
+    const tombstone = { deletedAt: Date.now(), revision };
+    for (const key of paths) deletedTombstones.set(key, tombstone);
     db = await openDb();
     const tx = db.transaction(STORE, "readwrite");
     const store = tx.objectStore(STORE);
     const txDone = waitTx(tx);
-    for (const key of webFileStoragePathCandidates(path)) {
+    for (const key of paths) {
       store.delete(key);
     }
     await txDone;

@@ -54,3 +54,36 @@ export function webFileStoragePathCandidates(pathOrName: string): string[] {
   const stable = webFileStablePath(pathOrName);
   return [stable, legacyWebUploadPath(pathOrName.split(/[/\\]/).pop() ?? pathOrName)];
 }
+
+/**
+ * Every IndexedDB key for one upload, starting with `path`.
+ * A flat stable key (`web://file/solo.csv`) also covers its legacy alias
+ * (`web://solo.csv`). Nested keys stay distinct so two folders that share
+ * a filename do not protect or delete each other.
+ */
+export function webFileStorageAliases(path: string): string[] {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  const queue = [path];
+  while (queue.length) {
+    const cur = queue.shift()!;
+    if (seen.has(cur)) continue;
+    seen.add(cur);
+    ordered.push(cur);
+    const more = webFileStoragePathCandidates(cur);
+    if (cur.startsWith(WEB_FILE_STABLE_PREFIX)) {
+      const rest = cur.slice(WEB_FILE_STABLE_PREFIX.length);
+      if (rest && !rest.includes("/")) {
+        let name = rest;
+        try {
+          name = decodeURIComponent(rest);
+        } catch {
+          /* keep the raw segment */
+        }
+        more.push(legacyWebUploadPath(name));
+      }
+    }
+    for (const next of more) if (!seen.has(next)) queue.push(next);
+  }
+  return ordered;
+}

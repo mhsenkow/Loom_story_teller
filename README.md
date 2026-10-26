@@ -24,6 +24,8 @@ The desktop app (Tauri + DuckDB) adds folder mounting, millions of rows, SQL ove
 - **Share** — the **Share** button renders the chart at Square / Portrait / Story / Wide sizes with feed-sized type, then opens the phone’s share sheet (or saves the image). **Get link** publishes a chart page that unfurls with a preview image in iMessage, Slack, X, etc. (kept 7 days). **Copy chart link** (and the address bar in Chart view, `#chart=…`) reopens the exact chart — dataset, chart type, encodings, headline, look, and framing; live feeds, demo files, and open-data CSVs reopen on load, local files wait for the recipient to open a file with the same name.
 
 ### Explorer
+- **Reliable combinations** — Matching-only combinations count the result toward the one-million-cell preview limit. Saved recipe uploads stay protected during routine local storage cleanup, including recipes stored with only a file reference.
+- **Saved file recovery** — Older upload references retain storage protection. Reopening skips damaged or unsupported saved payloads without deleting them, and late saves cannot restore a file just deleted through its older reference.
 - **Touch controls** — On phones, reorder columns with ← / → in the Columns menu. Dive offers Keep only / Exclude for value taps, and cube axes can be swapped by tapping two chips.
 - **Mount a folder** — Point at a directory of CSV/Parquet files; Loom scans and exposes them in the sidebar. Search files by name.
 - **Data table** — Virtualized table with sort, column reorder (drag headers), show/hide columns, per-column text and range filters. Sparklines, value bars, heat tint, trend cues, and null % in headers. Date columns auto-formatted.

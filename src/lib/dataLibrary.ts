@@ -249,10 +249,12 @@ export function combineData(
     ...left.columns.map((c) => `left_${c}`),
     ...right.columns.map((c) => `right_${c}`),
   ];
-  if (left.rows.length * columns.length > COMBINATION_MAX_CELLS)
-    throw new Error(
+  const maxRows = Math.floor(COMBINATION_MAX_CELLS / columns.length);
+  const tooLarge = () =>
+    new Error(
       "This combination is too large for an on-device preview. Use smaller sources.",
     );
+  if (mode === "left" && left.rows.length > maxRows) throw tooLarge();
   const index = new Map<string, QueryResult["rows"][number]>();
   for (const row of right.rows) {
     const key = matchKey(row[ri]);
@@ -273,13 +275,18 @@ export function combineData(
     const other = key === null ? undefined : index.get(key);
     if (other) {
       matched++;
-      rows.push([...row, ...other]);
     } else {
       unmatched++;
       if (key === null) missingKeys++;
       else if (examples.size < 5) examples.add(key.slice(0, 80));
-      if (mode === "left")
-        rows.push([...row, ...right.columns.map(() => null)]);
+    }
+    if (other || mode === "left") {
+      if (rows.length >= maxRows) throw tooLarge();
+      const combined: QueryResult["rows"][number] = new Array(columns.length);
+      for (let i = 0; i < left.columns.length; i++) combined[i] = row[i] ?? null;
+      for (let i = 0; i < right.columns.length; i++)
+        combined[left.columns.length + i] = other?.[i] ?? null;
+      rows.push(combined);
     }
   }
   return {
@@ -322,8 +329,10 @@ export function pinnedLibraryPaths(
     if (prefs.entries[asset.ref]?.saved && asset.file?.path.startsWith("web://"))
       paths.add(asset.file.path);
   for (const recipe of library.combinations)
-    for (const asset of [recipe.left, recipe.right])
+    for (const asset of [recipe.left, recipe.right]) {
+      pinRef(asset.ref);
       if (asset.file?.path.startsWith("web://")) paths.add(asset.file.path);
+    }
   return paths;
 }
 

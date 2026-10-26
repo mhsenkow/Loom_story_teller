@@ -24,6 +24,8 @@ The result opens in Explorer and can be charted, exported or analyzed in Dive. I
 
 ## Storage and architecture
 
+The one-million-cell limit applies to output rows, so an inner join can accept a larger primary input when only a small subset matches. Short rows are padded with null and extra cells outside the declared schema are omitted to keep columns aligned. Recipe upload protection includes file references without embedded file metadata. Corrupt library or preference JSON is handled independently, preserving protection from whichever record remains valid.
+
 - `dataLibrary.ts`: serializable `LibraryAsset` and `DataCombination` models, parsing, inventory merging, protected upload paths, exact lookup engine.
 - `store/dataLibrarySlice.ts`: library metadata and section selection in the existing Zustand store.
 - `dataLibraryRuntime.ts`: read inputs through typed Tauri/web loaders and activate results through `datasetPipeline`.
@@ -33,6 +35,8 @@ The result opens in Explorer and can be charted, exported or analyzed in Dive. I
 - `workspaceBackup`: optional backward-compatible library metadata; imports preserve current items on identity collisions. Dataset rows remain outside the backup; file dependencies appear in the manifest.
 
 No Worker routes, Rust commands, server storage, SQL engine or global row cache were added. Desktop, browser and iOS use the same bounded TypeScript join engine. Browser and native source loaders retain their existing differences.
+
+Legacy upload references and flat stable keys (`web://file/name.csv`) share one alias set for eviction protection, reopening, and deletion. Nested paths stay distinct so two folders with the same filename do not protect or delete each other. Deleting either alias blocks a stale in-flight save of the other; a newer re-import remains allowed. Payload validation skips corrupt or unsupported records without wiping the underlying IndexedDB entry.
 
 ## Next increments
 

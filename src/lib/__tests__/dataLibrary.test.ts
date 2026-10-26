@@ -3,6 +3,7 @@ import {
   assetForFile,
   browseLibrary,
   combineData,
+  COMBINATION_MAX_CELLS,
   DEFAULT_LIBRARY_BROWSE,
   emptyDataLibrary,
   libraryAssets,
@@ -149,6 +150,30 @@ describe("data library combinations", () => {
       ),
     ).toThrow(/too large/);
   });
+  it("budgets inner joins by output rows, while still counting every unmatched input", () => {
+    const columns = ["id", ...Array.from({ length: 99 }, (_, i) => `value_${i}`)];
+    const count = Math.floor(COMBINATION_MAX_CELLS / (columns.length + 1));
+    const left = data(columns, Array.from({ length: count + 1 }, (_, i) => [i]));
+    const result = combineData(left, data(["id"], [[0]]), "id", "id", "inner");
+    expect(result.sample.rows).toHaveLength(1);
+    expect(result.matched).toBe(1);
+    expect(result.unmatched).toBe(count);
+    expect(combineData(left, data(["id"], [[-1]]), "id", "id", "inner").sample.rows).toEqual([]);
+    expect(() => combineData(left, data(["id"], left.rows), "id", "id", "inner")).toThrow(/too large/);
+    expect(combineData(data(columns, left.rows.slice(0, count)), data(["id"], left.rows), "id", "id", "inner").sample.rows).toHaveLength(count);
+  });
+  it("keeps values aligned with declared columns for short and overlong source rows", () => {
+    const left = data(["id", "value"], [["A"], ["B", false, "extra"], ["C"]]);
+    const right = data(["id", "value"], [["A", 0, "extra"], ["B"]]);
+    const result = combineData(left, right, "id", "id", "left");
+    expect(result.sample.rows).toEqual([
+      ["A", null, "A", 0],
+      ["B", false, "B", null],
+      ["C", null, null, null],
+    ]);
+    expect(left.rows).toEqual([["A"], ["B", false, "extra"], ["C"]]);
+    expect(right.rows).toEqual([["A", 0, "extra"], ["B"]]);
+  });
 });
 
 describe("library persistence", () => {
@@ -201,6 +226,17 @@ describe("library persistence", () => {
       name: "Catalog name",
       file: { path: a.file!.path },
     });
+  });
+  it("protects recipe uploads resolved through file refs or saved asset metadata", () => {
+    const refOnly = {
+      ...recipe,
+      left: { ref: a.ref, name: a.name },
+      right: { ref: "ckan:data.gov/example", name: "Remote copy" },
+    };
+    expect([...pinnedLibraryPaths({
+      assets: [{ ...b, ref: refOnly.right.ref }],
+      combinations: [refOnly],
+    }, { entries: {} })]).toEqual([a.file!.path, b.file!.path]);
   });
   it("round trips a recipe-only backup and keeps local recipes on import collisions", () => {
     const bundle = buildWorkspaceBundle({
