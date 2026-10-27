@@ -87,8 +87,10 @@ xcrun altool --upload-app --type macos \
 
 Signing: **Apple Distribution** (app) + **3rd Party Mac Developer Installer** (pkg). Identity overrides: `APPLE_DISTRIBUTION_IDENTITY`, `APPLE_INSTALLER_IDENTITY`.
 
-## Build attached (2026-10-20)
-- **Build:** CFBundleVersion `10` (upload UUID `aee538a5-44c1-4a78-b94b-23fe051a8a4f`) — Monitor: Quick Watch, moments, phone / browser push, public page + RSS, 18 new feeds
+## Build attached (2026-10-27)
+- **Build:** CFBundleVersion `12` (delivery `69cbd01e-d0f8-4158-b2ac-0883cf4b2d2a`) — ChartView LOOM-141 split + draw wiring; web deploy same day
+- **Action:** macOS 1.0 is Waiting for Review — cancel/remove that submission, attach **12**, resubmit (TestFlight Ready-to-Submit builds do not auto-replace review).
+- Prior (2026-10-20): CFBundleVersion `10` (upload UUID `aee538a5-44c1-4a78-b94b-23fe051a8a4f`) — Monitor: Quick Watch, moments, phone / browser push, public page + RSS, 18 new feeds
 - Prior: CFBundleVersion `9` (upload UUID `9077327a-bcd4-4dfc-968b-dd844e90803d`) — forecast methods in a focus curtain
 - Prior: CFBundleVersion `8` (upload UUID `602f6059-faac-470d-9fd1-ad2aa5f0ab48`) — forecast, anomaly, and event overlays
 - Prior: CFBundleVersion `7` (upload UUID `078c8561-4e4a-4fc5-9fbf-45f4a46c76c6`) — theme release

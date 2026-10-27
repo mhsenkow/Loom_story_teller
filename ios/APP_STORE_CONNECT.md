@@ -68,8 +68,10 @@ Privacy: https://loom.ibm.io/privacy
 ## Icon / logo
 Yes — build **22** includes App Icon appearance themes (Any / Dark / Tinted) from `ios/App/.../AppIcon.appiconset` (`AppIcon-1024.png`, `-dark`, `-tinted`). Canonical mark: `brand/loom-icon-1024.png`. Regenerate with `node scripts/prepare-app-icons.mjs` then `npx tauri icon brand/loom-icon-1024.png`.
 
-## Live ASC status (2026-10-15)
-- Version **1.0** · build **26** uploaded (UUID `03f4582a-61c7-40b9-a583-455ffc1b112e`) — Claude chart, Discover, and share updates · prior **25** uploaded (UUID `d68710bb-4f54-44e1-b500-343aa549949f`)
+## Live ASC status (2026-10-27)
+- Version **1.0** · build **33** uploaded (delivery `49f1264e-c474-4308-baa8-161d5ee4e2bd`) — ChartView LOOM-141 split + draw wiring fixes · prior TestFlight **32** still Testing
+- **Action:** App Review is Waiting for Review on an older build — cancel/remove that submission (or reject and resubmit), attach **33**, then resubmit. TestFlight uploads alone do not change what's in review.
+- Prior (2026-10-15): build **26** uploaded (UUID `03f4582a-61c7-40b9-a583-455ffc1b112e`) — Claude chart, Discover, and share updates · prior **25** uploaded (UUID `d68710bb-4f54-44e1-b500-343aa549949f`)
 - App Icon: traditional `ios-marketing` + Dark/Tinted (`brand/loom-icon-1024.png`)
 - Screenshots: iPhone 6.7" ×6 + iPad 13" ×6 (incl. `06-phone`)
 - App preview videos: `preview-iphone67.mp4`, `preview-ipad13.mp4` (15s+, AAC) — rebuild via `node scripts/build-app-previews.mjs`
