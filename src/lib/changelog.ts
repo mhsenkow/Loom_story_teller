@@ -25,6 +25,17 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-10-27-chart-engine",
+    date: "2026-10-27",
+    title: "Chart engine cleanup",
+    items: [
+      {
+        title: "More reliable chart drawing",
+        detail: "The chart stage was split into smaller pieces so paint, export, and interactions stay in sync. Globe and map exports, arrangement layout, and idea-rail toggles no longer trip over missing wiring after a refresh.",
+      },
+    ],
+  },
+  {
     id: "2026-10-26c-cloud-look",
     date: "2026-10-26",
     title: "Word cloud look",
