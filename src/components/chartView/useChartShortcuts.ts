@@ -1,5 +1,5 @@
 // LOOM-141
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useEffect } from "react";
 
 export function useChartShortcuts(ctx: {

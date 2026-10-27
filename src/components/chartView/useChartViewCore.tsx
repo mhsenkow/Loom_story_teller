@@ -1,5 +1,5 @@
 // LOOM-141 — ChartView orchestration (state, effects, layout)
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 "use client";
 import type { ReactNode } from "react";
 import { GPU_GLOBE_ENABLED, stageDpr } from "./constants";
@@ -1270,6 +1270,7 @@ export function useChartViewCore(): ReactNode | null {
     fontEpoch,
     chartFontFamily,
     effectiveTheme,
+    colorblindCharts: !!appSettings.colorblindCharts,
     refreshKey,
     reportArrangementLayout,
     setHitsVersion,

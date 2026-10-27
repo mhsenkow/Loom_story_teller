@@ -1,5 +1,5 @@
 // Canvas 2D axes/title/legend overlay above WebGPU scatter and scenes (LOOM-141).
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useEffect } from "react";
 import type { MutableRefObject, RefObject } from "react";
 import { groupChartChannels } from "@/lib/channelGroups";

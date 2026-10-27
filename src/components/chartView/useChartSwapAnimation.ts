@@ -1,5 +1,5 @@
 // Chart-kind swap entrance on canvas layers (LOOM-141).
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { playChartSwap } from "@/lib/motion";

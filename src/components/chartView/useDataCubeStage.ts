@@ -1,5 +1,5 @@
 // Data cube build, pivot table, axis swaps, and depth keyboard (LOOM-141).
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useCallback, useEffect, useMemo } from "react";
 import type { CubeAxisSlot } from "@/components/DataCubePivot";
 import { buildDataCube, buildPivotTable, cubeCellCenter, cubeCellKey, type DataCube } from "@/lib/dataCube";

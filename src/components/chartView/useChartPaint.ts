@@ -57,6 +57,7 @@ export function useChartPaint(args: UseChartPaintArgs): void {
     fontEpoch,
     chartFontFamily,
     effectiveTheme,
+    colorblindCharts,
     forceCanvasCapture,
     socialExportReady,
     refreshKey,
@@ -115,6 +116,7 @@ export function useChartPaint(args: UseChartPaintArgs): void {
       fontEpoch,
       chartFontFamily,
       effectiveTheme,
+      colorblindCharts,
       reportArrangementLayout,
       setHitsVersion,
       setChartDrawError,
@@ -171,6 +173,7 @@ export function useChartPaint(args: UseChartPaintArgs): void {
     // refs.* are stable React refs — do not depend on the bag object (new each render).
     chartFontFamily,
     effectiveTheme,
+    colorblindCharts,
     chartVisualOverrides,
     reportArrangementLayout,
     setHitsVersion,

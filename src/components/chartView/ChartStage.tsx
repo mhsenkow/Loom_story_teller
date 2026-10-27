@@ -1,5 +1,5 @@
 // Main chart stage layout — canvases, overlays, status bar (LOOM-141).
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 "use client";
 import { ViewCohortBar } from "@/components/ViewCohortBar";
 import { ScatterModeBar, ChartToolRail } from "./ChartToolbar";

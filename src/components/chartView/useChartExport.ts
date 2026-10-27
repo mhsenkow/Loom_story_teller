@@ -1,5 +1,5 @@
 // LOOM-141
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useEffect } from "react";
 import { useLoomStore } from "@/lib/store";
 import { canUseWebGpuScatter } from "@/lib/webGpuScatterEligibility";

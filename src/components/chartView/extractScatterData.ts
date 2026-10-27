@@ -1,5 +1,5 @@
 // Scatter point packing for WebGPU upload and axes overlay (LOOM-141).
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useCallback } from "react";
 import { groupChartChannels } from "@/lib/channelGroups";
 import { chartNumber } from "@/lib/chartNumbers";

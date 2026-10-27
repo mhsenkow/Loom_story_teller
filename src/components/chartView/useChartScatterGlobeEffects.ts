@@ -1,5 +1,5 @@
 // Reset scatter view on chart change; aim globe camera at data (LOOM-141).
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useEffect } from "react";
 import { globeCameraForData } from "@/lib/geoMaps";
 import { useLoomStore } from "@/lib/store";

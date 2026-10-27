@@ -1,5 +1,5 @@
 // ChartRenderOpts memo from visual overrides + active chart (LOOM-141).
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useMemo } from "react";
 import { chartSpacePadding } from "@/lib/chartSpace";
 import { chartCapabilities, defaultYAggregate, type YAggregateOption } from "@/lib/chartSupport";

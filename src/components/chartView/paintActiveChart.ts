@@ -1,5 +1,5 @@
 // Active chart paint pass (extracted from ChartView useEffect — LOOM-141)
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { categoryIndex, radiusFromPointSize } from "@/lib/chartInk";
 import { groupChartChannels } from "@/lib/channelGroups";
 import { chartEntranceKey, markChartEntrancePlayed, shouldPlayChartEntrance } from "@/lib/chartEntranceOnce";
@@ -52,7 +52,7 @@ import { drawFireflyChrome, extractGpuScenePoints, fireflyDensity, fireflyGlowPo
 import { isGeoMapKind, isWebGpuGlobeKind, renderGeoMapCanvas } from "@/lib/geoMaps";
 import { cubeCellCenter, cubeCellKey, dataCubeChartView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
 import { isOddChartKind, renderOddChart } from "@/lib/oddCharts";
-import type { HitTarget } from "@/lib/chartTooltip";
+import { buildBarFacetGrid, type Canvas2DHitContext, type HitTarget } from "@/lib/chartTooltip";
 import type { ChartRecommendation } from "@/lib/recommendations";
 import type { SmartResults } from "@/lib/store";
 import { FRAMED_KINDS, OWN_FRAME_KINDS, SYMBOL_SERIES_KINDS, stageDpr } from "./constants";
@@ -116,6 +116,7 @@ export type ChartPaintParams = {
   fontEpoch: number;
   chartFontFamily: string;
   effectiveTheme: string;
+  colorblindCharts: boolean;
   reportArrangementLayout: (layout: ChartChromeLayout) => void;
   setHitsVersion: Dispatch<SetStateAction<number>>;
   setChartDrawError: Dispatch<SetStateAction<string | null>>;
@@ -180,6 +181,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
     fontEpoch,
     chartFontFamily,
     effectiveTheme,
+    colorblindCharts,
     reportArrangementLayout: reportArrangementLayoutArg,
     setHitsVersion,
     setChartDrawError,
@@ -1028,7 +1030,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
           activeChart,
           smartResults,
           ropts,
-          smartOverlayPalette(themeUi, appSettings.colorblindCharts),
+          smartOverlayPalette(themeUi, colorblindCharts),
         );
       }
   

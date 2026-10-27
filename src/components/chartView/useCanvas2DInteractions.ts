@@ -1,5 +1,5 @@
 // Canvas 2D mark hover, keyboard focus, pins, and tooltip picking (LOOM-141).
-// @ts-nocheck
+// @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useCallback, useEffect, useMemo, type MutableRefObject, type RefObject } from "react";
 import type React from "react";
 import { stageDpr } from "./constants";
