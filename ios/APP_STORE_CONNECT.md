@@ -69,8 +69,9 @@ Privacy: https://loom.ibm.io/privacy
 Yes — build **22** includes App Icon appearance themes (Any / Dark / Tinted) from `ios/App/.../AppIcon.appiconset` (`AppIcon-1024.png`, `-dark`, `-tinted`). Canonical mark: `brand/loom-icon-1024.png`. Regenerate with `node scripts/prepare-app-icons.mjs` then `npx tauri icon brand/loom-icon-1024.png`.
 
 ## Build uploaded (2026-11-12)
-- Tauri IPA via `make tablet-weave` + `./scripts/ios-submit.sh upload` — delivery `3edb9aa9-fd7e-4bdb-9537-82d87cbc49ec` (shell-plugin link fix; opener for external URLs)
-- Attach in ASC when processing finishes; Capacitor build **33** remains the prior review binary until swapped
+- Tauri IPA `0.1.2` (`CFBundleVersion` `0.1.2`) via `make tablet-weave` — delivery `a9297ffe-78c9-4a90-8075-681a59347cb4` (themes, public tables on the first look, phone and iPad pass). Signed `Apple Distribution: Michael Senkow (WC44W2QVE4)`.
+- Earlier the same day: delivery `3edb9aa9-fd7e-4bdb-9537-82d87cbc49ec` (`0.1.1`, shell-plugin link fix)
+- Attach `0.1.2` in App Store Connect when processing finishes; Capacitor build **33** remains the prior review binary until swapped
 
 ## Live ASC status (2026-10-27)
 - Version **1.0** · build **33** attached · **WAITING_FOR_REVIEW** (submission `dee02292-0cf1-48c0-95ab-3bd8002b91f7`, submitted 2026-10-27T17:56:56Z)
