@@ -245,7 +245,7 @@ export function SuggestionsEmptyRail({ suggestionsRailOpen, restoreTab, header }
         <div className="flex-1 flex items-center justify-center p-4">
           <div className="text-center">
             <p className="text-sm text-loom-muted">No ideas yet</p>
-            <p className="text-xs text-loom-muted mt-1">Needs at least 1 numeric or temporal column</p>
+            <p className="text-xs text-loom-muted mt-1">Ideas need a column of numbers or dates. Try another dataset, or pick fields in the Chart panel.</p>
           </div>
         </div>
       </div>
@@ -280,9 +280,9 @@ export function SuggestionRailPanel(props: SuggestionRailPanelProps): ReactNode 
       {header}
       <div
         className={`
-            loom-stagger flex-1 min-h-0
+            loom-ideas-previews loom-stagger flex-1 min-h-0
             ${suggestionsExpanded
-            ? "overflow-y-auto p-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 content-start"
+            ? "overflow-y-auto p-3 grid grid-cols-[repeat(auto-fill,minmax(min(100%,10rem),1fr))] gap-3 content-start"
             : mobileRail
               ? "overflow-x-auto overflow-y-hidden overscroll-x-contain flex flex-row gap-3 px-3 pt-1.5 pb-2.5 scrollbar-none snap-x snap-mandatory touch-pan-x"
               : "overflow-y-auto p-2 grid grid-cols-1 gap-2"}

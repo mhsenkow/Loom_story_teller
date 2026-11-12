@@ -106,7 +106,7 @@ function asTime(v: unknown): number {
 }
 
 function isBlank(v: unknown): boolean {
-  return v == null || (typeof v === "string" && v.trim() === "");
+  return v == null || (typeof v === "number" && !Number.isFinite(v)) || (typeof v === "string" && v.trim() === "");
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -574,16 +574,42 @@ export function sortCellsBackToFront(cube: DataCube, v: CubeView, style?: CubeCe
 
 /** Front-most voxel under a CSS-pixel point, or null. Ghosted (out-of-slice) voxels are skipped. */
 export function pickDataCubeCell(cube: DataCube, v: CubeView, px: number, py: number, style?: CubeCellStyle): CubeCell | null {
+  if (!Number.isFinite(px) || !Number.isFinite(py) || v.w <= 0 || v.h <= 0) return null;
+  // Intersect the perspective ray with the actual voxel boxes. A center-radius
+  // test missed visible corners, selected gaps, and chose the wrong overlapping
+  // voxel when a larger cell's front face lay ahead of a nearer cell's center.
+  const m = v.m;
+  const nx = px / v.w * 2 - 1, ny = 1 - py / v.h * 2;
+  const a = [0, 4, 8].map(i => m[i]! - nx * m[i + 3]!);
+  const b = [0, 4, 8].map(i => m[i + 1]! - ny * m[i + 3]!);
+  const ray = [a[1]! * b[2]! - a[2]! * b[1]!, a[2]! * b[0]! - a[0]! * b[2]!, a[0]! * b[1]! - a[1]! * b[0]!];
+  const eye = [3, 7, 11].map(i => -m[i]! * m[15]!);
+  if (ray.reduce((sum, d, i) => sum + d * eye[i]!, 0) > 0) {
+    for (let i = 0; i < 3; i++) ray[i] = -ray[i]!;
+  }
   let best: CubeCell | null = null;
   let bestDepth = Infinity;
   for (const cell of cube.cells) {
     if (cubeCellAlphaScale(cell, style) < 1) continue;
-    const [x, y, z] = cubeCellPosition(cube, cell, style);
-    const p = projectCube(v, x, y, z);
-    const radius = Math.max(4, ((cubeVoxelHalf(cube, cell) * v.fy * v.h) / 2 / p.depth) * 1.25);
-    if (Math.hypot(px - p.sx, py - p.sy) <= radius && p.depth < bestDepth) {
+    const center = cubeCellPosition(cube, cell, style);
+    const half = cubeVoxelHalf(cube, cell);
+    let enter = 0, leave = Infinity;
+    for (let axis = 0; axis < 3; axis++) {
+      const lo = center[axis]! - half - eye[axis]!;
+      const hi = center[axis]! + half - eye[axis]!;
+      const direction = ray[axis]!;
+      if (Math.abs(direction) < 1e-12) {
+        if (lo > 0 || hi < 0) { leave = -1; break; }
+      } else {
+        const t0 = lo / direction, t1 = hi / direction;
+        enter = Math.max(enter, Math.min(t0, t1));
+        leave = Math.min(leave, Math.max(t0, t1));
+      }
+      if (enter > leave) break;
+    }
+    if (enter <= leave && enter < bestDepth) {
       best = cell;
-      bestDepth = p.depth;
+      bestDepth = enter;
     }
   }
   return best;
@@ -641,9 +667,11 @@ export function dataCubeChartView(cube: DataCube, w: number, h: number, opts: Da
   const type = chartTypeRamp(opts.axisFontSize);
   const optional = opts.spaceUse === "roomy" ? 20 : 0;
   const side = Math.min(w * 0.32, (opts.spaceUse === "fill" ? 80 : 104) + type.tick + optional);
-  const top = Math.max(opts.contentInsets?.top ?? 0, opts.showLegend !== false ? type.tick * 5 : 0) + type.tick * 2 + 12 + optional;
+  const legendReserve = opts.showLegend !== false ? Math.min(type.tick * 5, h < 360 ? h * 0.15 : Infinity) : 0;
+  const top = Math.max(opts.contentInsets?.top ?? 0, legendReserve) + type.tick * 2 + 12 + optional;
   // Slanted floor labels and their field titles need more depth than a single tick row.
-  const bottom = Math.max(opts.contentInsets?.bottom ?? 0, opts.footerReserve ?? 0) + Math.max(64, type.tick * (opts.spaceUse === "fill" ? 4 : 5.5)) + (h >= 400 && !opts.contentInsets?.bottom ? type.footnote * 2 + 12 : 12) + optional;
+  const axisReserve = Math.min(Math.max(64, type.tick * (opts.spaceUse === "fill" ? 4 : 5.5)), h < 360 ? h * 0.22 : Infinity);
+  const bottom = Math.max(opts.contentInsets?.bottom ?? 0, opts.footerReserve ?? 0) + axisReserve + (h >= 400 && !opts.contentInsets?.bottom ? type.footnote * 2 + 12 : 12) + optional;
   const availableHeight = Math.max(24, h - top - bottom);
   const base = cubeView({ ...opts.camera, zoom: 1, offsetY: 0 }, w, h);
   const { ex, ey, ez } = cubeExtents(cube);

@@ -29,6 +29,7 @@ import type { SourceRef } from "../sourceRef";
 import type { ChartVisualOverrides } from "../chartVisualTypes";
 import type { ColumnInfo, QueryResult } from "../queryTypes";
 import type { MonitorState } from "./monitorSlice";
+import type { SocialState } from "./socialSlice";
 
 export type { ChartAspectId, ChartDeviceId };
 export type { ChartVisualOverrides } from "../chartVisualTypes";
@@ -189,7 +190,7 @@ export interface PinnedMark {
   columns: string[];
 }
 
-export interface LoomState extends MonitorState, DataLibrarySlice {
+export interface LoomState extends MonitorState, SocialState, DataLibrarySlice {
   // Folder
   mountedFolder: string | null;
   files: FileEntry[];

@@ -305,7 +305,7 @@ export function useSidebarController() {
           await streamStart();
           const snap = await streamSnapshot(500);
           if (!snap.sample.rows.length) {
-            setToast("Wikipedia stream is warm — tap Explore in Live Streams when events appear");
+            setToast("Wikipedia Live is starting — tap Chart it in the Data library in a few seconds");
             setDataRegionOpen(true);
             setDataSourcesExpanded(true);
             return;
@@ -323,7 +323,7 @@ export function useSidebarController() {
         await sourceStart(kind);
         const snap = await sourceSnapshot(kind, SOURCE_EXPLORE_ROWS);
         if (!snap.sample.rows.length) {
-          setToast(`${file.name} is connecting — tap Explore when rows appear`);
+          setToast(`${file.name} is connecting — tap Chart it when rows appear`);
           setDataRegionOpen(true);
           setDataSourcesExpanded(true);
           return;
@@ -404,7 +404,7 @@ export function useSidebarController() {
       // Dead recent (local upload or pre-sourceUrl catalog) — prune so it stops teasing.
       const pruned = state.recentFiles.filter((f) => f.path !== file.path);
       useLoomStore.getState().setRecentFiles(pruned);
-      setToast("That recent file can’t be reopened here — Explore it again from Data & sources.");
+      setToast("That recent file can’t be reopened here — open it again from the Data library.");
       return;
     }
 

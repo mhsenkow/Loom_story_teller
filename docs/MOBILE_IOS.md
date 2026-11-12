@@ -36,6 +36,10 @@ Use Capacitor only when explicitly testing Capacitor plugins. Release ownership 
 | Native share / export fallbacks | Web Share + download | Same |
 | TestFlight automation | `scripts/ios-submit.sh` | Manual Xcode |
 
+## Android (sibling)
+
+Play Store uses Capacitor Android (`android/`), not Tauri. See [MOBILE_ANDROID.md](./MOBILE_ANDROID.md) and [android/PLAY_STORE.md](../android/PLAY_STORE.md). Same `com.loom.storyteller` application id; do not treat Capacitor iOS as the App Store owner.
+
 ## Before each mobile release
 
 1. `./scripts/ios-version-check.sh`

@@ -27,7 +27,8 @@ export function pushHit(opts: ChartRenderOpts | undefined, t: HitTarget) {
 }
 
 export function fieldLabel(opts: ChartRenderOpts | undefined, idx: number, fallback = "value"): string {
-  return (idx >= 0 ? opts?.fieldNames?.[idx] : undefined) ?? fallback;
+  const name = idx >= 0 ? (opts?.fieldDisplayNames?.[idx] ?? opts?.fieldNames?.[idx]) : undefined;
+  return (name ?? fallback).replaceAll("\u0000", "");
 }
 
 export function valueTitle(opts: ChartRenderOpts | undefined, yi: number, fallbackAgg: YAggregateOption = "sum"): string {

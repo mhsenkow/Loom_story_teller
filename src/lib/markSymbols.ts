@@ -20,6 +20,7 @@ export interface MarkSymbolOpts {
   shapeField?: string | null;
   emojiField?: string | null;
   emojiMap?: ChartEmojiMap | null;
+  symbolIndices?: ReadonlyMap<string, number>;
 }
 
 export interface MarkSymbol {
@@ -75,7 +76,7 @@ export function markSymbols(
       const mapped = Object.hasOwn(mapping.values, key) ? firstGrapheme(mapping.values[key]) : null;
       glyph = mapped && isEmojiGlyph(mapped) ? mapped : null;
     } else {
-      glyph = (isEmojiGlyph(key) ? firstGrapheme(key) : null) ?? fallbackEmoji(glyphs.size);
+      glyph = (isEmojiGlyph(key) ? firstGrapheme(key) : null) ?? fallbackEmoji(opts?.symbolIndices?.get(key) ?? glyphs.size);
     }
     glyphs.set(key, glyph);
     return glyph;
@@ -87,7 +88,7 @@ export function markSymbols(
     if (!firstRow.has(key)) {
       firstRow.set(key, row);
       if (emojiIdx >= 0) glyphFor(key);
-      else shapes.set(key, shapes.size);
+      else shapes.set(key, opts?.symbolIndices?.get(key) ?? shapes.size);
     }
     return key;
   };

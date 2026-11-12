@@ -53,11 +53,11 @@ export const Y_AGGREGATE_OPTIONS: { value: YAggregateOption; label: string }[] =
 
 /** Display options for chart-type selector (dot/line/rect/pie etc). */
 export const CHART_KIND_OPTIONS: { value: ChartKind; label: string }[] = [
-  { value: "scatter", label: "Dot (scatter)" },
+  { value: "scatter", label: "Scatter" },
   { value: "bubble", label: "Bubble" },
   { value: "hexbin", label: "Hexbin" },
   { value: "line", label: "Line" },
-  { value: "bar", label: "Bar (rect)" },
+  { value: "bar", label: "Bar" },
   { value: "lollipop", label: "Lollipop" },
   { value: "dumbbell", label: "Dumbbell" },
   { value: "area", label: "Area" },

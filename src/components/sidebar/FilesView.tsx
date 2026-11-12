@@ -336,9 +336,15 @@ export function FilesView({
       <div className="flex-1 overflow-y-auto py-1 min-h-0">
         {files.length === 0 && !isScanning && (
           <div className="px-4 py-8 text-center">
-            <p className="text-sm text-loom-muted">{isWeb ? "Nothing open yet" : "No data files found"}</p>
+            <p className="text-sm text-loom-muted">
+              {!isWeb ? "No data files found" : selectedFile ? "No files of your own yet" : "Nothing open yet"}
+            </p>
             <p className="text-xs text-loom-muted mt-1">
-              {isWeb ? "Try a live feed or curated pack in " : "Mount a folder or open "}
+              {!isWeb
+                ? "Mount a folder or open "
+                : selectedFile
+                  ? "Add one above, or find more feeds in "
+                  : "Try a live feed or curated pack in "}
               <button type="button" onClick={onOpenDataRegion} className="text-loom-accent hover:underline">Data library</button>
             </p>
           </div>

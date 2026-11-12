@@ -63,7 +63,10 @@ export function markRefForHit(
     return normalize(hit.match.flatMap(([ci, v]) => (columns[ci] ? [[columns[ci]!, String(v)] as [string, string]] : [])));
   }
   if (hit.summary && hit.summary.row.length) {
-    return normalize([[`#${hit.summary.columns[0] ?? "label"}`, String(hit.summary.row[0])]]);
+    return normalize([
+      [`#${hit.summary.columns[0] ?? "label"}`, String(hit.summary.row[0])],
+      ...(hit.reading?.series ? [["#series", hit.reading.series] as [string, string]] : []),
+    ]);
   }
   if (hit.rowIndex != null && hit.rowIndex >= 0) return markRefForRow(hit.rowIndex, columns, rows, identity);
   return null;

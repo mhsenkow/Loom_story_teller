@@ -31,6 +31,9 @@ struct Uniforms {
   plot_right: f32,
   plot_bottom: f32,
   glow_density: f32,
+  orbit_cx: f32,
+  orbit_cy: f32,
+  orbit_scale: f32,
 }
 
 struct DataPoint {
@@ -78,10 +81,10 @@ fn project(nx: f32, ny: f32, nz: f32) -> vec3<f32> {
   // unit cube fills the stage without clipping at any orbit angle, with mild perspective.
   // (It used to be ~3× smaller, so 3D scatter and firefly rendered as a speck.)
   let persp = 3.2 / (3.2 + z2);
-  let scale = (min(uniforms.viewport_width, uniforms.viewport_height) / 2.0 / 2.1) * uniforms.zoom * persp;
+  let scale = uniforms.orbit_scale * persp;
   // Return NDC-ish xy and depth
-  let ndc_x = (x1 * scale) / (uniforms.viewport_width * 0.5);
-  let ndc_y = (y2 * scale) / (uniforms.viewport_height * 0.5);
+  let ndc_x = (uniforms.orbit_cx + x1 * scale) / (uniforms.viewport_width * 0.5) - 1.0;
+  let ndc_y = 1.0 - (uniforms.orbit_cy - y2 * scale) / (uniforms.viewport_height * 0.5);
   return vec3<f32>(ndc_x, ndc_y, z2);
 }
 
@@ -130,6 +133,13 @@ fn compute_positions(@builtin(global_invocation_id) gid: vec3<u32>) {
   let color = get_color(dp.category);
   var pixel_size = uniforms.point_size * (0.4 + 0.6 * dp.size_norm) * uniforms.size_scale;
   var alpha = uniforms.opacity;
+
+  if (mode == 0) {
+    let near = clamp(1.0 - (depth + 1.8) / 3.6, 0.0, 1.0);
+    let sized = select(1.0, 0.7 + dp.size_norm * 1.4, uniforms.glow_density > 0.5);
+    pixel_size = max(4.0, uniforms.point_size * uniforms.size_scale * sized * (0.85 + 0.3 * near));
+    alpha *= 0.6 + 0.4 * near;
+  }
 
   if (mode == 1) {
     // Steady intensity encodes the selected measure (or actual recency).

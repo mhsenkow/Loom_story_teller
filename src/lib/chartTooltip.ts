@@ -80,10 +80,14 @@ export function buildBarFacetGrid(
 }
 
 export type Canvas2DHitContext = {
+  /** Recipe used for the current paint; prevents stale reading cards during chart switches. */
+  readingChart?: ChartRecommendation;
   frameH?: number;
   kind: ChartKind;
   rows: (string | number | boolean | null)[][];
   columns: string[];
+  /** Map painted rows back to the loaded sample after filtering or thinning. */
+  rowSourceIndices?: number[];
   pad: number;
   w: number;
   h: number;
@@ -124,6 +128,10 @@ export type HitTarget = (
    */
   mark?: { x: number; y: number; w: number; h: number };
   summary?: { columns: string[]; row: (string | number | null)[] };
+  /** Exact plotted value for plain-language readings; never parse formatted tooltip strings. */
+  reading?: { label: string; value: number; measure: string; series?: string; order?: number };
+  /** A duplicate readout such as an endpoint key, rather than another observation. */
+  auxiliary?: boolean;
 };
 
 function hitDistance(t: HitTarget, x: number, y: number): number | null {
@@ -203,6 +211,31 @@ export function rowForHitTarget(
   if (target.rowIndex != null && target.rowIndex >= 0 && target.rowIndex < rows.length) return target.rowIndex;
   if (target.summary) return -1;
   return null;
+}
+
+/** Resolve against the painted groups, then read raw fields from the source row. */
+export function canvasHitReadout(
+  frame: Canvas2DHitContext,
+  target: HitTarget,
+  sample: { columns: string[]; rows: (string | number | boolean | null)[][] },
+  chart: ChartRecommendation,
+  link: TooltipLink | null = null,
+): { rowIndex: number; columns: string[]; row: (string | number | boolean | null)[] } | null {
+  const sourceIndex = (i: number) => frame.rowSourceIndices?.[i] ?? i;
+  const allowed = link ? new Set(frame.rows.flatMap((_, i) => {
+    const raw = sample.rows[sourceIndex(i)];
+    return raw && rowMatchesTooltipLink(sample.columns, raw, link) ? [i] : [];
+  })) : null;
+  const local = rowForHitTarget(target, frame.rows, allowed);
+  if (local == null) return null;
+  if (local < 0) return target.summary ? { rowIndex: -1, ...target.summary } : null;
+  const rowIndex = sourceIndex(local);
+  const raw = sample.rows[rowIndex];
+  if (!raw) return null;
+  return {
+    rowIndex,
+    ...mergeChartTooltip(target.summary, sample.columns, raw, resolveTooltipFieldNames(chart, sample.columns)),
+  };
 }
 
 /** Number for tooltips: grouped thousands, ≤2 decimals. */

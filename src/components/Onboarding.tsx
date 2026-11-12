@@ -81,6 +81,15 @@ import {
   shouldOpenOnboarding,
 } from "@/lib/startupIntent";
 import { getLastSession } from "@/lib/persist";
+import { socialKey } from "@/lib/socialKey";
+import {
+  COMMUNITY_SORTS,
+  COMMUNITY_SORT_LABELS,
+  communityBoost,
+  sortByCommunity,
+  type CommunitySort,
+} from "@/lib/socialRank";
+import { CommunityStrip } from "@/components/CommunityStrip";
 import { editorialDiscoverStory } from "@/lib/discoverEditorial";
 import {
   planDiscoverRefresh,
@@ -160,6 +169,7 @@ const SIZE_OPTIONS: {
 ];
 const SORT_LABELS: Record<SortMode, string> = {
   score: "Recommended",
+  ...COMMUNITY_SORT_LABELS,
   category: "Category",
   source: "Source",
   chart: "Chart type",
@@ -214,6 +224,16 @@ export function Onboarding() {
   const setDataRegionOpen = useLoomStore((s) => s.setDataRegionOpen);
   const setDataSourcesExpanded = useLoomStore((s) => s.setDataSourcesExpanded);
   const setToast = useLoomStore((s) => s.setToast);
+  const socialEnabled = useLoomStore((s) => s.socialEnabled);
+  const liveSocial = useLoomStore((s) => (s.socialEnabled ? s.socialSummary : null));
+  // Order by the votes as they stood when the page was arranged. Cards keep showing live
+  // counts, but a tap on ▲ never makes the card you're looking at jump away.
+  const [rankSocial, setRankSocial] = useState(liveSocial);
+  const liveSocialRef = useRef(liveSocial);
+  liveSocialRef.current = liveSocial;
+  const socialCounts = rankSocial?.counts;
+  const socialLatest = rankSocial?.latest;
+  const loadSocialSummary = useLoomStore((s) => s.loadSocialSummary);
   const scanAbortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const galleryRef = useRef<HTMLUListElement>(null);
@@ -223,6 +243,20 @@ export function Onboarding() {
   useEffect(() => {
     showRef.current = show;
   }, [show]);
+
+  // Re-arrange with fresh votes when stories are accepted, the sort changes, the page
+  // opens, or community first loads (or is switched off).
+  useEffect(() => {
+    setRankSocial(liveSocialRef.current);
+  }, [rankedAt, sortMode, show, !liveSocial]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Community votes + fresh comments ride alongside the scan (never block it).
+  useEffect(() => {
+    if (!show || !socialEnabled) return;
+    void loadSocialSummary();
+    const id = window.setInterval(() => void loadSocialSummary(), 60_000);
+    return () => window.clearInterval(id);
+  }, [show, socialEnabled, loadSocialSummary]);
 
   useEffect(() => {
     browseRef.current = {
@@ -532,8 +566,19 @@ export function Onboarding() {
           return b.score - a.score;
       }
     });
+    if ((COMMUNITY_SORTS as readonly string[]).includes(sortMode)) {
+      const keyOf = (s: DiscoverStory) => socialKey(s.kind, s.chart);
+      return sortByCommunity(
+        sorted,
+        sortMode as CommunitySort,
+        (s) => socialCounts?.[keyOf(s)],
+        (s) => socialLatest?.[keyOf(s)]?.at ?? 0,
+      );
+    }
     return sorted;
   }, [
+    socialCounts,
+    socialLatest,
     stories,
     sourceAffinity,
     hiddenSourceCount,
@@ -562,10 +607,15 @@ export function Onboarding() {
           ) * 4
         : 0;
       // Rank the question by its best variant, not whichever story leads the card.
-      const best = Math.max(...byStory.get(story)!.stories.map((s) => s.score));
-      return best + (affinity === HIDDEN_RANK_PENALTY ? 0 : affinity) + fresh;
+      const variants = byStory.get(story)!.stories;
+      const best = Math.max(...variants.map((s) => s.score));
+      // Community: the best-received variant nudges the card up; a buried one sinks it.
+      const community = socialCounts
+        ? Math.max(...variants.map((s) => communityBoost(socialCounts[socialKey(s.kind, s.chart)])))
+        : 0;
+      return best + (affinity === HIDDEN_RANK_PENALTY ? 0 : affinity) + fresh + community;
     }).map((story) => byStory.get(story)!);
-  }, [visible, sortMode, sourceAffinity, rankedAt]);
+  }, [visible, sortMode, sourceAffinity, rankedAt, socialCounts]);
   const spotlights = useMemo(
     () => discoverSpotlights(groups.map((g) => g.stories[0]!)),
     [groups],
@@ -694,7 +744,8 @@ export function Onboarding() {
           }
         })();
       } catch (e) {
-        setToast(`Couldn’t open: ${e instanceof Error ? e.message : e}`);
+        console.warn("Open story failed:", e);
+        setToast("Couldn’t open this story — try again, or pick another");
       } finally {
         openingRef.current = false;
         setOpeningId(null);
@@ -1195,7 +1246,9 @@ export function Onboarding() {
                     setSortMode(event.target.value as SortMode)
                   }
                 >
-                  {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+                  {(Object.keys(SORT_LABELS) as SortMode[])
+                    .filter((mode) => socialEnabled || !(COMMUNITY_SORTS as readonly string[]).includes(mode))
+                    .map((mode) => (
                     <option key={mode} value={mode}>
                       {SORT_LABELS[mode]}
                     </option>
@@ -1296,6 +1349,14 @@ export function Onboarding() {
         )}
         {displayed.length > 0 && (
           <>
+            {!filtersActive && (
+              <CommunityStrip
+                stories={stories}
+                onOpenStory={(story) => openStory(story)}
+                onBrowse={(mode) => setSortMode(mode)}
+                onDismissDiscover={dismiss}
+              />
+            )}
             <ul
               ref={galleryRef}
               id="onboarding-stories"
@@ -1395,6 +1456,23 @@ export function Onboarding() {
                 {showHiddenSources
                   ? "Hide hidden"
                   : `${hiddenSourceCount} hidden · Show`}
+              </button>
+            )}
+            {groups.length > 3 && (
+              <button
+                type="button"
+                className="discover-header-link"
+                disabled={!!openingId}
+                title="Open a random story from the better half of today’s picks"
+                onClick={() => {
+                  // The better half of what's on offer, never the card already leading the page.
+                  const pool = groups.slice(1, Math.max(4, Math.ceil(groups.length / 2)));
+                  const pick = pool[Math.floor(Math.random() * pool.length)];
+                  const story = pick && (pick.stories.find((s) => s.id === chosenVariants[pick.id]) ?? pick.stories[0]);
+                  if (story) openStory(story);
+                }}
+              >
+                <span aria-hidden>⚄</span> Surprise me
               </button>
             )}
             <button

@@ -79,6 +79,12 @@ export const APP_FONTS = [
   "geist",
   "jetbrains-mono",
   "fira-code",
+  "atkinson-hyperlegible-next",
+  "dm-sans",
+  "space-grotesk",
+  "manrope",
+  "fraunces",
+  "ibm-plex-serif",
 ] as const;
 
 export type AppFont = (typeof APP_FONTS)[number];
@@ -94,6 +100,12 @@ export const APP_FONT_LABEL: Record<AppFont, string> = {
   geist: "Geist",
   "jetbrains-mono": "JetBrains Mono",
   "fira-code": "Fira Code",
+  "atkinson-hyperlegible-next": "Atkinson Hyperlegible Next",
+  "dm-sans": "DM Sans",
+  "space-grotesk": "Space Grotesk",
+  "manrope": "Manrope",
+  "fraunces": "Fraunces",
+  "ibm-plex-serif": "IBM Plex Serif",
 };
 
 export const FONT_LEGACY: Record<string, AppFont> = {
@@ -107,8 +119,8 @@ export const FONT_LEGACY: Record<string, AppFont> = {
   Inter: "inter",
   "JetBrains Mono": "jetbrains-mono",
   "Instrument Serif": "libre-baskerville",
-  "Space Grotesk": "geist",
-  "DM Sans": "inter",
+  "Space Grotesk": "space-grotesk",
+  "DM Sans": "dm-sans",
 };
 
 export const FACES_SOURCES = ["auto", "web", "local"] as const;
@@ -655,7 +667,7 @@ const SECTION_KEYS: Record<VisualShuffleSection, (keyof ChartVisualOverrides)[]>
 
 export const CHART_VISUAL_OVERRIDE_KEYS: (keyof ChartVisualOverrides)[] = (
   Object.values(SECTION_KEYS) as (keyof ChartVisualOverrides)[][]
-).flat().concat(["sourceFootnote", "sourceFootnoteAlign", "chromeInfoBand", "tooltipMode", "geoAtlas", "wordCloudFont", "wordCloudArrange", "wordCloudScale", "wordCloudWeight", "canvasWidth", "canvasHeight", "plotX", "plotY", "plotWidth", "plotHeight", "titleX", "titleY", "titleWidth", "titleScale", "legendWidth", "legendHeight"]);
+).flat().concat(["sourceFootnote", "sourceFootnoteAlign", "chromeInfoBand", "tooltipMode", "geoAtlas", "wordCloudFont", "wordCloudArrange", "wordCloudScale", "wordCloudWeight", "wordCloudGap", "wordCloudSizing", "canvasWidth", "canvasHeight", "plotX", "plotY", "plotWidth", "plotHeight", "titleX", "titleY", "titleWidth", "titleScale", "legendWidth", "legendHeight"]);
 
 function pickOne<T>(arr: readonly T[]): T {
   return arr[Math.floor(Math.random() * arr.length)]!;

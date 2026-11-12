@@ -14,7 +14,7 @@ import { isGpuSceneKind, extractGpuScenePoints, renderGpuSceneCanvas, type GpuSc
 import { isWebGpuGlobeKind } from "@/lib/geoMaps";
 import { hasCanvasArrangement } from "@/lib/canvasArrangement";
 import { renderDataCubeCanvas } from "@/lib/dataCube";
-import { resolveChartFontFamily } from "@/lib/fontCatalog";
+import { ensureChartFontLoaded, resolveChartFontFamily } from "@/lib/fontCatalog";
 import { resolveChartAxisFontSize } from "@/lib/chartType";
 import { applyChartSpecColors } from "@/lib/chartSpecColors";
 import { svgExportMode } from "@/lib/chartSupport";
@@ -65,6 +65,13 @@ export function useChartExport(ctx: {
         const axesOverlay = axesOverlayRef.current;
         if (!canvas || !canvas2D || !ac) return null;
         const st = useLoomStore.getState();
+        const family = resolveChartFontFamily(overrides.fontFamily, st.appSettings.font, st.appSettings.faces);
+        await Promise.all([
+          ensureChartFontLoaded(family, st.appSettings.faces, overrides.titleFontWeight ?? 600),
+          ...(ac.kind === "wordCloud" ? [ensureChartFontLoaded(overrides.wordCloudFont || family, st.appSettings.faces, 500)] : []),
+        ]);
+        // Font loading triggers the chart repaint; capture after React and canvas have painted.
+        await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         const capturing =
           !!st.previewCapture || !!st.socialExportTarget || st.socialExportReady;
         const smart = st.smartResults;
@@ -262,6 +269,7 @@ export function useChartExport(ctx: {
           const { vegaExportConfigForTheme } = await import("@/lib/vegaThemeConfig");
           const current = useLoomStore.getState();
           const visual = resolveThemeChartStyle(resolveRuntimeTheme(current.appSettings.theme), current.chartVisualOverrides);
+          await ensureChartFontLoaded(resolveChartFontFamily(visual.fontFamily, current.appSettings.font, current.appSettings.faces), current.appSettings.faces, visual.titleFontWeight ?? 600);
           const exportConfig = vegaExportConfigForTheme(resolveRuntimeTheme(current.appSettings.theme), { ...visual, colorblindCharts: current.appSettings.colorblindCharts, fontFamily: resolveChartFontFamily(visual.fontFamily, current.appSettings.font, current.appSettings.faces) });
           const base = (spec as { config?: Record<string, unknown> }).config ?? {};
           const specWithData = {

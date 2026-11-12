@@ -1,7 +1,13 @@
 // Main chart stage layout — canvases, overlays, status bar (LOOM-141).
 // @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 "use client";
+import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
 import { ViewCohortBar } from "@/components/ViewCohortBar";
+import { ChartReading } from "@/components/ChartReading";
+import { SceneCameraControls } from "@/components/SceneCameraControls";
+import { useEffect } from "react";
+import { orbitCameraKey, orbitRotation, orbitZoom } from "@/lib/orbitCamera";
+import { dataCubeChartView, pickDataCubeCell } from "@/lib/dataCube";
 import { ScatterModeBar, ChartToolRail } from "./ChartToolbar";
 import { ChartHoverTooltip, CrosshairTooltip } from "./ChartTooltip";
 import { CanvasArrangeOverlay } from "@/components/CanvasArrangeOverlay";
@@ -14,7 +20,7 @@ import { aspectLabel } from "@/lib/chartViewport";
 import { chartFontStack } from "@/lib/fontCatalog";
 import { chartTypeRamp } from "@/lib/chartType";
 import { CHART_KIND_CATALOG } from "@/lib/chartKindSearch";
-import { sameMark } from "@/lib/markFocus";
+import { markRefForHit, sameMark } from "@/lib/markFocus";
 import { useLoomStore } from "@/lib/store";
 import type { ChartViewRuntime } from "./chartViewRuntime";
 
@@ -48,6 +54,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
     chartDrawError,
     chartDataTableOpen,
     dataTableRows,
+    chartReading,
     setChartDataTableOpen,
     chartToolRailProps,
     containerRef,
@@ -56,6 +63,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
     orbitEnabled,
     sceneOrbit,
     sceneOrbitDragRef,
+    cubeFrameRef,
     setSceneOrbit,
     cubeHover,
     setCubeSlice,
@@ -153,6 +161,22 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
     setTooltipLink,
   } = d;
 
+  // React delegates wheel listeners passively. Attach locally so zoom can
+  // consume the gesture without scrolling the page or emitting passive errors.
+  useEffect(() => {
+    const stage = containerRef.current;
+    if (!stage || !orbitEnabled || arranging) return;
+    const wheel = (event: WheelEvent) => {
+      if (event.deltaY === 0 || (event.target as HTMLElement).closest(".loom-cube-type, button, input, select, textarea, a")) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const pixels = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 300 : 1);
+      setSceneOrbit(camera => ({ ...camera, zoom: orbitZoom(camera.zoom * Math.exp(-Math.max(-120, Math.min(120, pixels)) * 0.002)) }));
+    };
+    stage.addEventListener("wheel", wheel, { passive: false });
+    return () => stage.removeEventListener("wheel", wheel);
+  }, [containerRef, orbitEnabled, arranging, setSceneOrbit]);
+
   return (
       <div
         className={`
@@ -165,6 +189,21 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
         `}
       >
         {!socialExportReady && !liveEdit && <ViewCohortBar surface="chart" />}
+        {chartReading && !socialExportReady && !socialExportTarget && !previewCaptureActive && !liveEdit && !arranging && (
+          <ChartReading key={activeChart.id} reading={chartReading}
+            isPinned={(hit) => {
+              const source = canvas2DHitRef.current;
+              if (!source) return false;
+              const ref = markRefForHit(hit, source.columns, source.rows, []);
+              return pinnedTooltips.some((pin) => pin.chartId === activeChart.id && sameMark(pin.ref, ref));
+            }}
+            onShow={(hit) => {
+              if (!hit.summary) return;
+              pinMark(hit, { clientX: 0, clientY: 0, rowIndex: hit.rowIndex ?? -1, row: hit.summary.row, columns: hit.summary.columns });
+            }}
+            onTable={() => setChartDataTableOpen(true)}
+          />
+        )}
         {!socialExportReady && titleEditing && (
           <div className="flex items-center gap-2 px-3 py-1.5 border-b border-loom-border bg-loom-surface/60">
             <input
@@ -180,7 +219,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
             />
           </div>
         )}
-        {!socialExportReady && activeChart?.kind === "scatter" && (
+        {!socialExportReady && usesScatterNavigation(activeChart) && (
           <ScatterModeBar
             isMobile={isMobile}
             chartInteractionMode={chartInteractionMode}
@@ -190,6 +229,9 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
           />
         )}
 
+        {orbitEnabled && !socialExportReady && !previewCaptureActive && !arranging && (
+          <SceneCameraControls camera={sceneOrbit} onChange={setSceneOrbit} />
+        )}
         <div
           ref={stageHostRef}
           className={`flex-1 relative min-h-0 min-h-[200px] flex items-center justify-center ${socialExportReady ? "overflow-auto" : ""}`}
@@ -243,6 +285,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
           </div>
           <p id="loom-chart-keys-hint" className="sr-only">
             Arrow keys move between marks, Enter pins, Escape clears.
+            {orbitEnabled && " Shift plus arrows rotates the camera, plus and minus zoom, zero resets the view. Drag to rotate or pinch to zoom."}
           </p>
           {loadingSample && (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-loom-bg/70" role="status">
@@ -275,7 +318,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
               </div>
               {dataTableRows.length === 0 ? (
                 <p className="px-3 py-3 text-2xs text-loom-muted leading-relaxed">
-                  No mark summaries yet — wait for the chart to finish painting, then try Refresh.
+                  Nothing to list yet. Wait for the chart to finish drawing, then tap Redraw chart.
                 </p>
               ) : (
                 <table className="w-full text-2xs font-mono text-loom-text">
@@ -315,13 +358,17 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
           <div
             ref={containerRef}
             // Not role=img: the stage holds real buttons, and arrow keys must reach handleMarkKeyDown.
-            role={arranging ? "group" : activeChart && activeChart.kind !== "scatter" ? "application" : "group"}
+            role={arranging ? "group" : activeChart && !usesScatterNavigation(activeChart) ? "application" : "group"}
             aria-roledescription="chart"
             aria-describedby="loom-chart-keys-hint"
             aria-label={chartA11yLabel}
-            tabIndex={activeChart && activeChart.kind !== "scatter" ? 0 : undefined}
+            tabIndex={activeChart && !usesScatterNavigation(activeChart) ? 0 : undefined}
             onKeyDown={(e) => {
-              if (activeChart?.kind === "scatter") return;
+              if (orbitEnabled && !arranging && e.target === e.currentTarget && !e.metaKey && !e.ctrlKey && !e.altKey) {
+                const camera = orbitCameraKey(sceneOrbit, e.key, e.shiftKey);
+                if (camera) { e.preventDefault(); e.stopPropagation(); setSceneOrbit(camera); return; }
+              }
+              if (usesScatterNavigation(activeChart)) return;
               handleMarkKeyDown(e);
             }}
             className={`relative overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-loom-accent/60 ${
@@ -330,7 +377,9 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
                 : ""
             } ${orbitEnabled ? "cursor-grab active:cursor-grabbing" : ""}`}
             onPointerDown={(e) => {
-              if (!orbitEnabled || arranging) return;
+              if (!orbitEnabled || arranging || !e.isPrimary || e.button !== 0) return;
+              if ((e.target as HTMLElement).closest("button, input, select, textarea, a, [role='dialog']")) return;
+              e.currentTarget.focus({ preventScroll: true });
               (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
               sceneOrbitDragRef.current = {
                 x: e.clientX,
@@ -346,8 +395,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
               const dy = e.clientY - drag.y;
               setSceneOrbit((o) => ({
                 ...o,
-                yaw: drag.yaw + dx * 0.008,
-                pitch: Math.max(-1.2, Math.min(1.2, drag.pitch + dy * 0.008)),
+                ...orbitRotation(drag.yaw + dx * 0.008, drag.pitch + dy * 0.008),
               }));
             }}
             onPointerUp={(e) => {
@@ -355,24 +403,20 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
               sceneOrbitDragRef.current = null;
               // A click (not a drag) on the cube slices to that voxel's depth layer; empty space clears.
               if (activeChart?.kind === "dataCube" && drag && Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 4) {
-                const hz = cubeHover?.zi;
+                const frame = cubeFrameRef.current;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const cell = frame && pickDataCubeCell(frame.cube, dataCubeChartView(frame.cube, frame.w, frame.h, frame.opts),
+                  (e.clientX - rect.left) / rect.width * frame.w, (e.clientY - rect.top) / rect.height * frame.h, frame.opts);
+                const hz = cell?.zi;
                 setCubeSlice((s) => (hz == null ? null : s === hz ? null : hz));
               }
             }}
             onPointerCancel={() => {
               sceneOrbitDragRef.current = null;
             }}
-            onWheel={(e) => {
-              if (!orbitEnabled || arranging) return;
-              e.preventDefault();
-              e.stopPropagation();
-              setSceneOrbit((o) => ({
-                ...o,
-                zoom: Math.max(0.4, Math.min(3, o.zoom * (e.deltaY > 0 ? 0.92 : 1.08))),
-              }));
-            }}
+            onLostPointerCapture={() => { sceneOrbitDragRef.current = null; }}
             onTouchStart={(e) => {
-              if (!orbitEnabled || e.touches.length !== 2) return;
+              if (!orbitEnabled || arranging || e.touches.length !== 2) return;
               sceneOrbitDragRef.current = null;
               const [a, b] = [e.touches[0]!, e.touches[1]!];
               scenePinchRef.current = {
@@ -381,8 +425,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
               };
             }}
             onTouchMove={(e) => {
-              if (!orbitEnabled || e.touches.length !== 2 || !scenePinchRef.current) return;
-              e.preventDefault();
+              if (!orbitEnabled || arranging || e.touches.length !== 2 || !scenePinchRef.current) return;
               const [a, b] = [e.touches[0]!, e.touches[1]!];
               const dist = touchDistance(a, b);
               if (scenePinchRef.current.dist < 1) return;
@@ -390,12 +433,13 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
               const base = scenePinchRef.current.zoom;
               setSceneOrbit((o) => ({
                 ...o,
-                zoom: Math.max(0.4, Math.min(3, base * factor)),
+                zoom: orbitZoom(base * factor),
               }));
             }}
             onTouchEnd={() => {
               scenePinchRef.current = null;
             }}
+            onTouchCancel={() => { scenePinchRef.current = null; sceneOrbitDragRef.current = null; }}
             style={{
               width: chartFrameSize.width,
               height: chartFrameSize.height,
@@ -471,13 +515,13 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
                     }}
                     className="text-2xs py-1.5 px-3 rounded border border-loom-border text-loom-muted hover:border-loom-accent hover:text-loom-text"
                   >
-                    Open Encoding
+                    Open Fields
                   </button>
                 </div>
               </div>
             </div>
           )}
-          {activeChart?.kind === "scatter" && (
+          {usesScatterNavigation(activeChart) && (
             <div
               ref={overlayRef}
               className="absolute inset-0 w-full h-full outline-none focus-visible:ring-2 focus-visible:ring-loom-accent/70 focus-visible:ring-offset-2 focus-visible:ring-offset-loom-bg"
@@ -574,7 +618,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
               }}
             />
           )}
-          {activeChart && activeChart.kind !== "scatter" && (
+          {activeChart && !usesScatterNavigation(activeChart) && (
             <div
               className="absolute inset-0 w-full h-full"
               // Pointer events + touch-action:none let a finger drag scrub the tooltip
@@ -720,7 +764,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
             </div>
           )}
           {/* Mini-map when zoomed */}
-          {activeChart?.kind === "scatter" && scatterView.scale > 1.5 && scatterDataRef.current && (() => {
+          {usesScatterNavigation(activeChart) && scatterView.scale > 1.5 && scatterDataRef.current && (() => {
             const MH = 60, MW = 80;
             const sd = scatterDataRef.current;
             const xRange = sd.xMax - sd.xMin || 1, yRange = sd.yMax - sd.yMin || 1;

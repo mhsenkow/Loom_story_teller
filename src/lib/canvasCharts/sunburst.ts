@@ -41,7 +41,7 @@ export function renderFullSunburst(
     const innerMap = outerGroups.get(outer)!;
     if (!innerMap.has(inner)) innerMap.set(inner, { vals: [] });
     const node = innerMap.get(inner)!;
-    if (yi < 0) node.vals.push(1);
+    if (yi < 0 || agg === "count") node.vals.push(1);
     else {
       const v = chartNumber(r[yi]);
       if (!isNaN(v)) node.vals.push(v);
@@ -54,12 +54,12 @@ export function renderFullSunburst(
       const children = [...innerMap.entries()]
         .map(([k, n]) => ({
           label: k,
-          value: Math.abs(aggregateValues(n.vals, agg)),
+          value: aggregateValues(n.vals, agg),
         }))
         .filter((c) => c.value > 0 && (ci >= 0 ? c.label !== "__all__" : true));
       return {
         label,
-        total: Math.abs(aggregateValues(outerVals, agg)),
+        total: aggregateValues(outerVals, agg),
         children,
       };
     })
@@ -81,6 +81,7 @@ export function renderFullSunburst(
   const share = (v: number) => `${((v / grandTotal) * 100).toFixed(1)}%`;
 
   const wedgeLabel = (text: string, a0: number, sweep: number, r0: number, r1: number, fill: string) => {
+    if (opts?.mini) return;
     const rm = (r0 + r1) / 2;
     const arcLen = sweep * rm;
     const depth = r1 - r0;
@@ -179,14 +180,17 @@ export function renderFullSunburst(
   });
 
   ctx.globalAlpha = 1;
+  if (opts?.mini) { setLegend(opts, []); return; }
   ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.font = chartFont(Math.max(chartTypeRamp(opts?.axisFontSize).titleCompact, Math.min(20, innerR * 0.36)), fontFamily, 600);
-  ctx.fillText(formatDataValue(grandTotal), cx, cy - innerR * 0.08);
+  ctx.fillText(fitTextEllipsis(ctx, formatDataValue(grandTotal), innerR * 1.65), cx, cy - chartTypeRamp(opts?.axisFontSize).titleCompact * 0.4);
   ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
   ctx.font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily);
-  ctx.fillText("total", cx, cy + innerR * 0.3);
+  if (innerR * 2 > chartTypeRamp(opts?.axisFontSize).mark * 2.8) {
+    ctx.fillText("total", cx, cy + chartTypeRamp(opts?.axisFontSize).mark * 0.85);
+  }
   ctx.textBaseline = "alphabetic";
   setLegend(opts, []);
 }

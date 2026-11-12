@@ -42,7 +42,7 @@ export function renderFullPareto(
   for (const r of rows) {
     const k = String(r[xi]);
     if (!byCat.has(k)) byCat.set(k, []);
-    if (yi < 0) byCat.get(k)!.push(1);
+    if (yi < 0 || agg === "count") byCat.get(k)!.push(1);
     else {
       const v = chartNumber(r[yi]);
       if (!isNaN(v)) byCat.get(k)!.push(v);
@@ -160,7 +160,7 @@ export function renderFullCorrMatrix(
       let hits = 0;
       const probe = Math.min(rows.length, 40);
       for (let r = 0; r < probe; r++) {
-        const v = Number(rows[r]![i]);
+        const v = chartNumber(rows[r]![i]);
         if (Number.isFinite(v)) hits++;
       }
       if (!(probe > 0 && hits / probe >= 0.5 && name.length > 0)) return false;
@@ -275,8 +275,8 @@ export function renderFullDumbbell(
   const groups = new Map<string, { start: number[]; end: number[] }>();
   for (const r of rows) {
     const k = String(r[xi]);
-    const a = chartNumber(r[yi]);
-    const b = chartNumber(r[si]);
+    const a = agg === "count" ? 1 : chartNumber(r[yi]);
+    const b = agg === "count" ? 1 : chartNumber(r[si]);
     if (isNaN(a) || isNaN(b)) continue;
     if (!groups.has(k)) groups.set(k, { start: [], end: [] });
     const g = groups.get(k)!;
@@ -582,8 +582,10 @@ export function renderFullFunnel(
   const groups = new Map<string, number[]>();
   for (const r of rows) {
     const k = String(r[xi]);
+    const value = agg === "count" ? 1 : chartNumber(r[yi]);
+    if (!Number.isFinite(value)) continue;
     if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? chartNumber(r[yi]) : 1);
+    groups.get(k)!.push(value);
   }
   const entries = [...groups.entries()]
     .map(([label, vals]) => ({ label, value: aggregateValues(vals.filter(v => !isNaN(v)), agg) }))
@@ -630,9 +632,11 @@ export function renderFullFunnel(
     ctx.textBaseline = "middle";
     ctx.globalAlpha = 1;
     const inner = Math.min(topW, botW) - 12;
-    if (ctx.measureText(text).width <= inner) {
+    if (inner >= ctx.measureText(formatDataValue(e.value)).width + 30) {
       ctx.fillStyle = ink;
-      ctx.fillText(text, cx, (y0 + y1) / 2);
+      const metric = ` · ${formatDataValue(e.value)}`;
+      const fitted = ctx.measureText(text).width <= inner ? text : `${fitTextEllipsis(ctx, e.label, inner - ctx.measureText(metric).width)}${metric}`;
+      ctx.fillText(fitted, cx, (y0 + y1) / 2);
     } else {
       // Too narrow: label beside the stage
       ctx.fillStyle = opts?.themeText ?? "#e8e8ec";

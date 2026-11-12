@@ -65,7 +65,12 @@ export interface ChartRenderOpts {
   chartPadding?: number;
   spaceUse?: "auto" | "fill" | "roomy";
   rowSourceIndices?: number[];
+  /** Shared category order across small multiples; never persisted in a recipe. */
+  seriesIndices?: ReadonlyMap<string, number>;
+  symbolIndices?: ReadonlyMap<string, number>;
   legendPosition?: string;
+  /** Automatic endpoint keys may reserve space unless the plot was manually arranged. */
+  lineEndLabels?: boolean;
   showDataLabels?: boolean;
   backgroundStyle?: string;
   blendMode?: string;
@@ -104,11 +109,15 @@ export interface ChartRenderOpts {
   wordCloudArrange?: "spiral" | "rows" | "columns" | null;
   wordCloudScale?: number | null;
   wordCloudWeight?: "ranked" | "even" | "heavy" | null;
+  wordCloudGap?: number;
+  wordCloudSizing?: "sqrt" | "linear" | "log";
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   /** Dual-measure delta ink: off / signed diff / percent. */
   deltaDisplay?: "off" | "diff" | "pct" | null;
   hits?: HitTarget[];
   fieldNames?: string[];
+  /** Reader-facing names parallel to fieldNames (axes, legends, tooltips). Never used for lookup. */
+  fieldDisplayNames?: string[];
   /** Numeric heat measure for heatmap / hexbin; absent means row count. */
   colorField?: string | null;
   legend?: { label: string; color: string; shape?: string; glyph?: string }[] | null;

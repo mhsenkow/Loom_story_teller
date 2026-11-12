@@ -19,6 +19,9 @@
     "tablet": "npm run tauri ios dev",
     "tablet:build": "npm run tauri ios build -- --export-method app-store-connect",
     "tablet:xcode": "npm run tauri ios build -- --open",
+    "phone": "./scripts/android-play-aab.sh open",
+    "phone:build": "./scripts/android-play-aab.sh",
+    "phone:sync": "./scripts/android-play-aab.sh sync",
     "thread": "npm run dev",
     "spool": "python3 scripts/generate_data.py",
     "spool:small": "python3 scripts/generate_data.py --size small",
@@ -42,6 +45,7 @@
     "vapid:keys": "node scripts/generate-vapid.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.3",
     "@capacitor/cli": "^8.5.3",
     "@capacitor/core": "^8.5.3",
     "@capacitor/ios": "^8.5.3",

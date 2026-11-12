@@ -11,13 +11,18 @@ import {
 import { inferType, isRateLikeField } from "./recs/columns";
 import { applyChartTimeWindow, parseChartTime } from "./chartTime";
 import { discoverFamily } from "./discoverChartCatalog";
-import { discoverFieldLabel } from "./discoverEditorial";
+import { discoverFieldLabel, formatDiscoverValue } from "./discoverEditorial";
 import { formatChartNumber } from "./formatChartNumber";
 import { chartEmoji, isEmojiGlyph } from "./chartEmoji";
+import { SOURCE_BY_KIND, type SourceKind } from "./sourceRegistry";
 
 export interface DiscoverInsight {
   label: string;
   detail: string;
+  /** The finding as a short headline ("Wildfires: 98% of all events"), when there is one. */
+  headline?: string;
+  /** What the chart lets you ask ("Which event shows up most?"), for when the finding is already told. */
+  question?: string;
   /** Strength for editorial ranking, not a probability. */
   strength: number;
 }
@@ -32,6 +37,14 @@ const numeric = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 const numFormat = (n: number) => formatChartNumber(n);
+/** Category values that are really an aggregate of the other rows ("all posts", "Total"). */
+const TOTAL_LIKE_LABEL = /^(all|total|overall|grand total|all [a-z]+)$/i;
+const cap = (text: string) => text.replace(/^\p{Ll}/u, (c) => c.toUpperCase());
+/** Kinds whose marks are group averages even when no aggregate is set. */
+const MEAN_BY_DEFAULT = new Set<string>(["errorBars"]);
+/** "true" / "false" categories read as a yes/no answer to their column. */
+const groupName = (raw: string, field: string) =>
+  /^(true|false)$/i.test(raw) ? `${discoverFieldLabel(field)}: ${/^true$/i.test(raw) ? "yes" : "no"}` : raw;
 
 export function createDiscoverAssessor(
   stats: ColumnInfo[],
@@ -53,6 +66,9 @@ export function createDiscoverAssessor(
     }
   >();
   const results = new Map<string, DiscoverAssessment | null>();
+  const grain = SOURCE_BY_KIND[source as SourceKind]?.grain;
+  /** What one row is, for count headlines. */
+  const rowNoun = grain === "event" ? "events" : grain === "reading" ? "readings" : "entries";
   const rowsFor = (chart: ChartRecommendation) => {
     const key = `${chart.timeWindowField ?? ""}|${chart.timeWindow ?? "all"}`;
     if (!windows.has(key))
@@ -433,12 +449,20 @@ export function createDiscoverAssessor(
         const rho = sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
         const outlierDriven = Math.abs(r) - Math.abs(rho) > 0.3;
         const shown = outlierDriven ? rho : r;
+        const xName = discoverFieldLabel(chart.xField);
+        const yName = discoverFieldLabel(chart.yField!);
+        const tie = Math.min(Math.abs(r), Math.abs(rho));
         if (n >= 8)
           insight = {
-            label:
-              Math.min(Math.abs(r), Math.abs(rho)) >= 0.65
-                ? "Clear relationship"
-                : "Explore the relationship",
+            label: tie >= 0.65 ? "Clear relationship" : "Explore the relationship",
+            headline:
+              tie >= 0.65
+                ? shown > 0
+                  ? `${cap(xName)} and ${yName} rise together`
+                  : `${cap(yName)} falls as ${xName} rises`
+                : tie >= 0.3
+                  ? `Do ${xName} and ${yName} move together?`
+                  : `${cap(xName)} tells you little about ${yName}`,
             detail: outlierDriven
               ? `${discoverFieldLabel(chart.xField)} × ${discoverFieldLabel(chart.yField!)}: rank correlation ${shown.toFixed(2)} across ${n.toLocaleString()} pairs (r = ${r.toFixed(2)} is driven by a few extreme values).`
               : `${discoverFieldLabel(chart.xField)} × ${discoverFieldLabel(chart.yField!)}: r = ${r.toFixed(2)} across ${n.toLocaleString()} paired observations.`,
@@ -447,6 +471,7 @@ export function createDiscoverAssessor(
       } else if (chart.anomalyHighlight && measure) {
         insight = {
           label: "Outliers worth a look",
+          headline: `${measure.outliers} unusual ${measure.outliers === 1 ? "reading" : "readings"} in ${discoverFieldLabel(chart.yField!)}`,
           detail: `${measure.outliers} of ${measure.values.length.toLocaleString()} readings sit more than 2.5 standard deviations from the mean.`,
           strength: 0.8,
         };
@@ -490,12 +515,19 @@ export function createDiscoverAssessor(
           );
           if (strength <= strongest) continue;
           strongest = strength;
+          const valueField = chart.yAggregate === "count" ? null : chart.yField;
+          const subject = `${label ? `${groupName(label, chart.colorField ?? chart.rowField ?? "").slice(0, 40)}: ` : ""}${chart.yAggregate === "count" ? `number of ${rowNoun}` : discoverFieldLabel(chart.yField)}`;
+          const pct = first > 0 && last >= 0 ? Math.round(Math.abs(last / first - 1) * 100) : 0;
           insight = {
             label:
               Math.abs(last - first) > 1e-9
                 ? "Change over the observed period"
                 : "A steady series",
-            detail: `${label ? `${label.slice(0, 60)}: ` : ""}${discoverFieldLabel(chart.yField)} goes from ${numFormat(first)} to ${numFormat(last)} across ${ordered.length.toLocaleString()} observed time points.`,
+            headline:
+              Math.abs(last - first) > 1e-9
+                ? `${cap(subject)} ${last > first ? "rose" : "fell"} from ${formatDiscoverValue(first, valueField, source)} to ${formatDiscoverValue(last, valueField, source)}${pct >= 5 && pct <= 900 ? `, ${last > first ? "up" : "down"} ${pct}%` : ""}`
+                : `${cap(subject)} holds steady at ${formatDiscoverValue(first, valueField, source)}`,
+            detail: `${label ? `${label.slice(0, 60)}: ` : ""}${discoverFieldLabel(chart.yField)} goes from ${formatDiscoverValue(first, chart.yAggregate === "count" ? null : chart.yField, source)} to ${formatDiscoverValue(last, chart.yAggregate === "count" ? null : chart.yField, source)} across ${ordered.length.toLocaleString()} observed time points.`,
             strength,
           };
         }
@@ -509,7 +541,8 @@ export function createDiscoverAssessor(
           if (p.values.length)
             insight = {
               label: "See the spread",
-              detail: `${discoverFieldLabel(field)} ranges from ${numFormat(p.min)} to ${numFormat(p.max)} across ${p.values.length.toLocaleString()} readings.`,
+              headline: `${cap(discoverFieldLabel(field))}: ${formatDiscoverValue(p.min, field, source)} to ${formatDiscoverValue(p.max, field, source)}${p.outliers ? `, with ${p.outliers} far from the rest` : ""}`,
+              detail: `${discoverFieldLabel(field)} ranges from ${formatDiscoverValue(p.min, field, source)} to ${formatDiscoverValue(p.max, field, source)} across ${p.values.length.toLocaleString()} readings.`,
               strength: p.outliers ? 0.75 : 0.45,
             };
         }
@@ -530,18 +563,24 @@ export function createDiscoverAssessor(
           group.push(value);
           groups.set(label, group);
         }
+        const how = chart.yAggregate ?? (MEAN_BY_DEFAULT.has(chart.kind) ? "mean" : undefined);
         const agg = (values: number[]) =>
-          chart.yAggregate === "mean"
+          how === "mean"
             ? values.reduce((a, b) => a + b, 0) / values.length
-            : chart.yAggregate === "min"
+            : how === "min"
               ? Math.min(...values)
-              : chart.yAggregate === "max"
+              : how === "max"
                 ? Math.max(...values)
                 : values.reduce((a, b) => a + b, 0);
         const ordered = [...groups]
           .map(([label, values]) => ({ label, value: agg(values) }))
           .sort((a, b) => b.value - a.value);
         if (ordered.length < 2) return null;
+        // A "total" row beside its parts double-counts in any sum, share, or Pareto.
+        const sums =
+          !chart.yField || chart.yAggregate === "sum" || chart.yAggregate === "count";
+        if (sums && ordered.some((g) => TOTAL_LIKE_LABEL.test(g.label.trim())))
+          return null;
         const first = ordered[0]!;
         const total = ordered.reduce((s, g) => s + g.value, 0);
         const share =
@@ -557,15 +596,49 @@ export function createDiscoverAssessor(
         const k = ordered.length;
         const excess = k > 1 ? (share - 1 / k) / (1 - 1 / k) : 0;
         const concentrated = additive && k >= 3 && excess >= 0.35;
+        const leader = groupName(first.label, chart.xField);
+        const counted = !chart.yField || chart.yAggregate === "count";
+        const leadValue = counted ? numFormat(first.value) : formatDiscoverValue(first.value, chart.yField, source);
+        const measureName = chart.yField ? discoverFieldLabel(chart.yField) : "";
         insight = {
           label: concentrated ? "Concentrated at the top" : "See who leads",
+          headline: concentrated
+            ? `${cap(leader.slice(0, 60))}: ${Math.round(share * 100)}% of ${counted ? "the total" : `all ${measureName}`}`
+            : counted
+              ? `${cap(leader.slice(0, 60))} leads with ${leadValue}`
+              : how === "mean"
+                ? `${cap(leader.slice(0, 60))} has the highest average ${measureName}: ${leadValue}`
+                : how === "max"
+                  ? `${cap(leader.slice(0, 60))} has the highest ${measureName}: ${leadValue}`
+                  : how === "min"
+                    ? `${cap(leader.slice(0, 60))} has the highest low for ${measureName}: ${leadValue}`
+                    : `${cap(leader.slice(0, 60))} leads in ${measureName}: ${leadValue}`,
           detail: concentrated
-            ? `${first.label.slice(0, 80)} accounts for ${(share * 100).toFixed(1)}% of the observed total across ${k} groups.`
-            : `${first.label.slice(0, 80)} leads ${k} groups at ${numFormat(first.value)}${chart.yField ? ` (${discoverFieldLabel(chart.yField)})` : " rows"}.`,
+            ? `${leader.slice(0, 80)} accounts for ${(share * 100).toFixed(1)}% of the observed total across ${k} groups.`
+            : `${leader.slice(0, 80)} leads ${k} groups at ${leadValue}${chart.yField ? ` (${how === "mean" ? "average " : ""}${measureName})` : ` ${rowNoun}`}.`,
           strength: additive ? (concentrated ? Math.min(0.9, 0.4 + excess * 0.5) : 0.3) : 0.4,
         };
       }
-      return { quality: Math.min(100, Math.max(0, quality)), insight };
+      const xLabel = discoverFieldLabel(chart.xField);
+      const yLabel = chart.yField ? discoverFieldLabel(chart.yField) : "";
+      const counts = !chart.yField || chart.yAggregate === "count";
+      const question =
+        family === "relationship" && chart.yField && chart.yField !== chart.xField
+          ? `How do ${xLabel} and ${yLabel} relate?`
+          : family === "connections" && chart.colorField
+            ? `How do ${xLabel} and ${discoverFieldLabel(chart.colorField)} connect?`
+            : family === "trend"
+              ? counts
+                ? "How has activity changed over time?"
+                : `How has ${yLabel} changed over time?`
+              : family === "distribution"
+                ? `How is ${discoverFieldLabel(NUMERIC_X_KINDS.has(chart.kind) || CATEGORY_Y_KINDS.has(chart.kind) || !chart.yField ? chart.xField : chart.yField)} spread out?`
+                : family === "comparison" || family === "composition"
+                  ? counts
+                    ? `Which ${xLabel} shows up most?`
+                    : `Which ${xLabel} has the most ${yLabel}?`
+                  : undefined;
+      return { quality: Math.min(100, Math.max(0, quality)), insight: { ...insight, question } };
     };
     const result = assess();
     results.set(resultKey, result);

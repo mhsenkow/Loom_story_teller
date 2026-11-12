@@ -149,18 +149,18 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           <span aria-hidden>←</span><span className="hidden 2xl:inline ml-1 text-xs">Stories</span>
         </button>
       )}
-      <nav className="loom-seg shrink-0" aria-label="View mode">
+      <nav className="loom-seg min-w-0 shrink overflow-x-auto scrollbar-none" aria-label="View mode">
         {VIEW_MODES.map((mode) => (
           <button
             key={mode.key}
             type="button"
             onClick={() => { setViewMode(mode.key); if (dataSourcesExpanded) useLoomStore.getState().setDataSourcesExpanded(false); }}
             aria-current={viewMode === mode.key ? "page" : undefined}
-            className="loom-seg-item min-h-9 sm:min-h-0 px-1.5 sm:px-3"
+            className="loom-seg-item shrink-0 min-h-9 sm:min-h-0 px-1.5 xl:px-3"
           >
-            <span className="sm:hidden">{mode.short}</span>
-            <span className="hidden sm:inline">{mode.label}</span>
-            <span className="ml-1 text-2xs opacity-50 font-mono hidden md:inline">{mode.shortcut}</span>
+            <span className="xl:hidden">{mode.short}</span>
+            <span className="hidden xl:inline">{mode.label}</span>
+            <span className="ml-1 text-2xs opacity-50 font-mono hidden xl:inline">{mode.shortcut}</span>
             {mode.key === "monitor" && firingCount > 0 && (
               <span className="ml-1 inline-flex min-w-4 h-4 px-1 items-center justify-center rounded-full bg-loom-error text-2xs font-semibold text-[color:var(--on-error)]" aria-label={`${firingCount} open alerts`}>
                 {firingCount}
@@ -213,7 +213,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           </div>
 
           <div
-            className="hidden md:flex loom-seg shrink-0"
+            className="hidden lg:flex loom-seg shrink-0"
             role="group"
             aria-label="Chart width preview"
           >
@@ -294,7 +294,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
           </svg>
-          <span>Share</span>
+          <span className="hidden sm:inline">Share</span>
         </button>
       )}
 
@@ -318,7 +318,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         type="button"
         onClick={openPanel}
         className={`loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 items-center justify-center text-xs px-2 rounded-md ${viewMode === "chart" ? "hidden md:flex" : "flex"}`}
-        title={viewMode === "chart" ? "Chart encoding & visual" : "Toggle Detail Panel"}
+        title={viewMode === "chart" ? "Chart fields & look" : "Toggle detail panel"}
         aria-label={viewMode === "chart" ? "Open chart panel" : "Toggle detail panel"}
         aria-expanded={panelOpen}
         aria-controls="loom-detail-panel"

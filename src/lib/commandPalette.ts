@@ -164,8 +164,8 @@ const STATIC_ITEMS: CommandPaletteItem[] = [
   {
     id: "chrome:panel",
     label: "Toggle detail panel",
-    hint: "Encoding · looks · export",
-    keywords: ["panel", "detail", "encoding", "toggle panel"],
+    hint: "Fields · looks · export",
+    keywords: ["panel", "detail", "fields", "encoding", "toggle panel"],
     weight: 4,
   },
   {
@@ -178,7 +178,7 @@ const STATIC_ITEMS: CommandPaletteItem[] = [
   {
     id: "preview:schema",
     label: "Show Schema",
-    hint: "Footer field chips → Encoding",
+    hint: "Footer field chips → Fields",
     chip: "schema",
     keywords: ["schema", "columns", "fields", "show schema", "open schema"],
     weight: 6,

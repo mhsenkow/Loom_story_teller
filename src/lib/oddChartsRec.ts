@@ -99,6 +99,8 @@ export const ODD_NON_CARTESIAN = new Set<string>([
 ]);
 
 export interface OddRenderOpts {
+  /** Reader-facing names parallel to columns (axes, legends, captions). Never used for lookup. */
+  fieldDisplayNames?: string[];
   lineCap?: CanvasLineCap;
   lineJoin?: CanvasLineJoin;
   colors: string[];
@@ -139,6 +141,8 @@ export interface OddRenderOpts {
   /** Largest-word size, 0.6–1.6. */
   wordCloudScale?: number | null;
   wordCloudWeight?: "ranked" | "even" | "heavy" | null;
+  wordCloudGap?: number;
+  wordCloudSizing?: "sqrt" | "linear" | "log";
   /** Pyramid: shared vs independent arm domains (auto picks by magnitude ratio). */
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   /** Show signed Δ or % between Left/Right or Start/End. */
@@ -209,10 +213,12 @@ export function groupSum(
   for (const r of rows) {
     const k = String(r[xi] ?? "");
     if (!m.has(k)) m.set(k, []);
-    m.get(k)!.push(yi >= 0 ? toNum(r[yi]) : 1);
+    const value = yi >= 0 && how !== "count" ? toNum(r[yi]) : 1;
+    if (Number.isFinite(value)) m.get(k)!.push(value);
   }
   return [...m.entries()]
-    .map(([k, vs]) => [k, agg(vs.filter((v) => !isNaN(v)), how)] as [string, number])
+    .filter(([, vs]) => vs.length > 0)
+    .map(([k, vs]) => [k, agg(vs, how)] as [string, number])
     .sort((a, b) => b[1] - a[1]);
 }
 
@@ -229,7 +235,7 @@ export function wordTotalsByGroup(
     const word = String(r[xi] ?? "");
     const group = String(r[ci] ?? "");
     if (!word.trim() || word === "null" || !group.trim() || group === "null") continue;
-    const v = yi >= 0 ? toNum(r[yi]) : 1;
+    const v = yi >= 0 && how !== "count" ? toNum(r[yi]) : 1;
     if (!Number.isFinite(v)) continue;
     let groups = raw.get(word);
     if (!groups) raw.set(word, (groups = new Map()));
@@ -614,83 +620,83 @@ export function buildOddChartRec(
   const titles: Record<OddChartKind, { title: string; subtitle: string }> = {
     bucketField: {
       title: yField ? `${yField} scattered in ${xField} fields` : `Dots in ${xField} fields`,
-      subtitle: "bucket field — regions are categories; size & color still talk",
+      subtitle: "one patch per category, one dot per row",
     },
     beeswarm: {
       title: yField ? `${yField} beeswarm by ${xField}` : `Beeswarm by ${xField}`,
-      subtitle: "each row is a dot — no stacking, just swarm",
+      subtitle: "every row is a dot, so you see the whole spread",
     },
     chernoff: {
       title: `Chernoff faces by ${xField}`,
-      subtitle: "features encode numerics — weird but honest",
+      subtitle: "one face per group — its features follow the numbers",
     },
     glyphStar: {
       title: `Star glyphs by ${xField}`,
-      subtitle: "each star is a multivariate snapshot",
+      subtitle: "one star per group — longer points mean higher values",
     },
     waffle: {
       title: yField ? `${yField} waffle by ${xField}` : `Waffle of ${xField}`,
-      subtitle: "100-cell part-to-whole grid",
+      subtitle: "100 squares, one per percent",
     },
     isotype: {
       title: yField ? `${yField} units by ${xField}` : `Unit chart of ${xField}`,
-      subtitle: "one mark ≈ one chunk of value",
+      subtitle: "count the icons — each is a share of the total",
     },
     pyramid: {
       title: sizeField ? `${yField} ↔ ${sizeField} by ${xField}` : `Pyramid by ${xField}`,
-      subtitle: "mirror bars — two sides of the same story",
+      subtitle: "two sides, back to back",
     },
     slope: {
       title: sizeField ? `${yField} → ${sizeField}` : `Slope by ${xField}`,
-      subtitle: "before / after as a lean diagonal",
+      subtitle: "steeper lines changed more",
     },
     bump: {
       title: yField ? `Rank bumps of ${yField}` : `Bump chart`,
-      subtitle: "who rises and who falls across order",
+      subtitle: "who climbs and who slips in the ranking",
     },
     stream: {
       title: yField ? `Stream of ${yField}` : `Streamgraph`,
-      subtitle: "organic stacked flow over time",
+      subtitle: "how the mix swells and thins over time",
     },
     horizon: {
       title: yField ? `Horizon of ${yField}` : `Horizon chart`,
-      subtitle: "folded bands pack a tall range into a short strip",
+      subtitle: "darker bands mean higher values",
     },
     spiral: {
       title: yField ? `Spiral of ${yField}` : `Time spiral`,
-      subtitle: "time wraps outward — seasons hug seasons",
+      subtitle: "time spirals outward, so cycles line up",
     },
     radialBar: {
       title: yField ? `${yField} on a wheel` : `Radial bars of ${xField}`,
-      subtitle: "polar bars — nightingale vibes",
+      subtitle: "bars on a wheel — longer reaches further out",
     },
     chord: {
       title: colorField ? `${xField} ↔ ${colorField}` : `Chord of ${xField}`,
-      subtitle: "ribbons of flow between categories",
+      subtitle: "thicker ribbons link what goes together most",
     },
     voronoi: {
       title: yField ? `${xField} × ${yField} territories` : `Voronoi`,
-      subtitle: "each point claims the land around it",
+      subtitle: "each point owns the area closest to it",
     },
     isoBars: {
       title: yField ? `Isometric ${yField} by ${xField}` : `Isometric bars`,
-      subtitle: "fake-3D blocks on a diamond grid",
+      subtitle: "taller blocks mean more",
     },
     isoScatter: {
       title: yField ? `Isometric ${xField} · ${yField}` : `Isometric scatter`,
-      subtitle: "depth from a third measure (or size)",
+      subtitle: "a third measure adds depth",
     },
     flower: {
       title: `Flower garden by ${xField}`,
-      subtitle: "each bloom is a multivariate petal set",
+      subtitle: "one flower per group — bigger petals mean higher values",
     },
     mosaic: {
       title: colorField ? `${xField} × ${colorField} mosaic` : `Mosaic of ${xField}`,
-      subtitle: "area encodes share — marimekko cousin",
+      subtitle: "wider and taller blocks hold a bigger share",
     },
     contour: {
       title: yField ? `Density of ${xField} × ${yField}` : `Contour`,
-      subtitle: "smooth hills where points pile up",
+      subtitle: "peaks show where points cluster",
     },
     calendar: {
       title: yField ? `${yField} by day` : `Activity by day`,
@@ -698,19 +704,19 @@ export function buildOddChartRec(
     },
     rose: {
       title: yField ? `${yField} rose by ${xField}` : `Rose of ${xField}`,
-      subtitle: "Nightingale petals — wedge area is the value",
+      subtitle: "bigger wedges mean more",
     },
     ecdf: {
       title: colorField ? `How ${xField} accumulates by ${colorField}` : `How ${xField} accumulates`,
-      subtitle: "cumulative share of rows at or below each value",
+      subtitle: "how quickly values add up from low to high",
     },
     sparkGrid: {
       title: colorField ? `${yField} over ${xField} for each ${colorField}` : `${yField} over ${xField}`,
-      subtitle: "small-multiple sparklines — shape over scale",
+      subtitle: "one small line per group — compare the shapes",
     },
     density: {
       title: colorField ? `Distribution of ${xField} by ${colorField}` : `Distribution of ${xField}`,
-      subtitle: "smoothed density — where values pile up",
+      subtitle: "peaks show the most common values",
     },
     qq: {
       title: `Is ${xField} normally distributed?`,
@@ -726,11 +732,11 @@ export function buildOddChartRec(
     },
     wordCloud: {
       title: yField ? `${xField} sized by ${yField}` : `Most common ${xField}`,
-      subtitle: "word cloud — bigger means more",
+      subtitle: "bigger words appear more",
     },
     errorBars: {
       title: yField ? `Average ${yField} by ${xField}` : `Averages by ${xField}`,
-      subtitle: "mean with 95% confidence interval — overlap means maybe no real difference",
+      subtitle: "averages with their margin of error — overlapping bars may not differ",
     },
   };
 

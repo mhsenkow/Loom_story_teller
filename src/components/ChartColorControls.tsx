@@ -196,7 +196,7 @@ export function ChartColorControls({
         </label>
         {chart?.channelInvert?.color && (
           <p className="text-2xs text-loom-muted">
-            Encoding → Color is also inverted. The preview includes both
+            Fields → Color is also inverted. The preview includes both
             directions.
           </p>
         )}

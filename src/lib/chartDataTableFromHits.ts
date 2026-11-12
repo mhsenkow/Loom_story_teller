@@ -16,8 +16,8 @@ export function dataTableRowsFromHits(targets: HitTarget[] | undefined): ChartDa
   const seen = new Set<string>();
   targets.forEach((t, i) => {
     const summary = t.summary;
-    if (!summary?.columns?.length) return;
-    const key = summary.row.map(String).join("\u0001");
+    if (t.auxiliary || !summary?.columns?.length) return;
+    const key = JSON.stringify([summary.columns, summary.row]);
     if (seen.has(key)) return;
     seen.add(key);
     rows.push({

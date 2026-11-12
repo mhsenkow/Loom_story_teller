@@ -1,6 +1,7 @@
 // LOOM-141 — ChartView orchestration (state, effects, layout)
 // @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 "use client";
+import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
 import type { ReactNode } from "react";
 import { GPU_GLOBE_ENABLED, stageDpr } from "./constants";
 import { useChartPaint } from "./useChartPaint";
@@ -33,6 +34,7 @@ import { type LoomState, useLoomStore } from "@/lib/store";
 import { createChartMonitorDraft, monitorRefLines } from "@/lib/monitoring/chartBridge";
 import { buildChartA11ySummary } from "@/lib/chartA11ySummary";
 import { dataTableRowsFromHits } from "@/lib/chartDataTableFromHits";
+import { buildChartReading } from "@/lib/chartReading";
 import { type CalloutBox, type PressStart } from "@/lib/markFocus";
 import { chartStageLiveMessage, chartStageStatus } from "@/lib/chartStageStatus";
 import { useReducedMotion } from "@/lib/useReducedMotion";
@@ -225,6 +227,9 @@ export function useChartViewCore(): ReactNode | null {
   }, [commitArrangement]);
   useEffect(() => { setArranging(false); setArrangementPreview(null); setArrangementLayout(null); }, [activeChart?.id]);
   const shellMode = useShellMode();
+  const shortPhone = useMediaQuery("(max-width: 767px) and (max-height: 740px)");
+  const narrowWorkspace = useMediaQuery("(min-width: 768px) and (max-width: 1439px)");
+  const compactIdeas = shellMode === "tablet" || narrowWorkspace || shortPhone;
   const liveEdit = useMobileLiveEdit();
   // Auto uses the actual center-panel space; only explicit device previews impose a width cap.
   const [hostSize, setHostSize] = useState({ w: 800, h: 500 });
@@ -710,18 +715,19 @@ export function useChartViewCore(): ReactNode | null {
 
   const showSuggestionsRail = useCallback(() => {
     setSuggestionsRailOpen(true);
-  }, [setSuggestionsRailOpen]);
+    if (compactIdeas) setSuggestionsExpanded(true);
+  }, [setSuggestionsRailOpen, compactIdeas]);
 
   const selectRecommendation = useCallback(
     (rec: ChartRecommendation) => {
       setActiveChart(rec);
-      if (isMobile) {
+      if (isMobile || compactIdeas) {
         setSuggestionsExpanded(false);
       } else {
         setPanelTab("chart");
       }
     },
-    [isMobile, setActiveChart, setPanelTab],
+    [isMobile, compactIdeas, setActiveChart, setPanelTab],
   );
   const [refreshKey, setRefreshKey] = useState(0);
   const [aiSuggesting, setAiSuggesting] = useState(false);
@@ -739,7 +745,7 @@ export function useChartViewCore(): ReactNode | null {
   chartTooltipRef.current = chartTooltip;
   const [scatterView, setScatterView] = useState({ scale: 1, panX: 0, panY: 0 });
   /** Zoomed/panned scatter shows "Reset view" bottom-right; the pinned chip lifts above it. */
-  const scatterViewMoved = activeChart?.kind === "scatter" && (scatterView.scale !== 1 || scatterView.panX !== 0 || scatterView.panY !== 0);
+  const scatterViewMoved = usesScatterNavigation(activeChart) && (scatterView.scale !== 1 || scatterView.panX !== 0 || scatterView.panY !== 0);
   const [brushRect, setBrushRect] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const brushStartRef = useRef<{ x: number; y: number } | null>(null);
   const brushRectRef = useRef<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
@@ -831,9 +837,15 @@ export function useChartViewCore(): ReactNode | null {
   const stageLiveMessage = chartStageLiveMessage(stageStatus);
 
   const dataTableRows = useMemo(
-    () => dataTableRowsFromHits(canvas2DHitRef.current?.targets),
+    () => chartDataTableOpen ? dataTableRowsFromHits(canvas2DHitRef.current?.targets) : [],
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh when chart paints
-    [activeChart?.id, refreshKey, chartDataTableOpen],
+    [activeChart?.id, refreshKey, chartDataTableOpen, hitsVersion],
+  );
+  const chartReading = useMemo(
+    () => !chartDrawError && canvas2DHitRef.current?.readingChart === activeChart
+      ? buildChartReading(activeChart, canvas2DHitRef.current.targets) : null,
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hit geometry is updated by the paint pass
+    [activeChart, hitsVersion, chartDrawError],
   );
   useEffect(() => {
     setWhyReasonOpen(false);
@@ -853,7 +865,11 @@ export function useChartViewCore(): ReactNode | null {
     };
   }, []);
 
-  useEffect(() => { ensureChartFontLoaded(chartFontFamily, appSettings.faces); }, [chartFontFamily, appSettings.faces]);
+  useEffect(() => {
+    void ensureChartFontLoaded(chartFontFamily, appSettings.faces, chartVisualOverrides.titleFontWeight ?? 600);
+    if (activeChart?.kind === "wordCloud")
+      void ensureChartFontLoaded(chartVisualOverrides.wordCloudFont || chartFontFamily, appSettings.faces, 500);
+  }, [chartFontFamily, appSettings.faces, activeChart?.kind, chartVisualOverrides.wordCloudFont, chartVisualOverrides.titleFontWeight]);
 
   useEffect(() => {
     suggestCycleRef.current = 0;
@@ -1057,7 +1073,7 @@ export function useChartViewCore(): ReactNode | null {
     /** Glass / dock stay put on touch — finger leave shouldn't wipe the readout. */
     const stickyTooltip = tooltipPresentation === "glass" || tooltipPresentation === "dock";
     /** Scatter and the other canvases keep separate hover state. Show only the active one. */
-    const hoverTip = activeChart?.kind === "scatter" ? scatterTooltip : chartTooltip;
+    const hoverTip = usesScatterNavigation(activeChart) ? scatterTooltip : chartTooltip;
     /** Height of the carved footer info band (source footnote / colour stops); overlays sit above it. */
     const footerBandPx =
       (chartFootnoteText || chartColorInfo?.stops?.length) && (chartVisualOverrides.chromeInfoBand ?? "footer") === "footer"
@@ -1189,6 +1205,7 @@ export function useChartViewCore(): ReactNode | null {
     });
 
     useAxesOverlay({
+      sceneOrbit,
       axesOverlayRef,
       canvasSized,
       activeChart,
@@ -1324,7 +1341,7 @@ export function useChartViewCore(): ReactNode | null {
   );
 
   const suggestionsRestoreTab =
-    !suggestionsRailOpen && !socialExportReady && !liveEdit && !arranging ? (
+    (!suggestionsRailOpen || (compactIdeas && !suggestionsExpanded)) && !socialExportReady && !liveEdit && !arranging ? (
       <SuggestionsRestoreTab
         isMobile={isMobile}
         chartRecsCount={chartRecs.length}
@@ -1342,7 +1359,7 @@ export function useChartViewCore(): ReactNode | null {
           header={suggestionHeader}
         />
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
-          <p className="text-sm text-loom-muted text-center">Build a chart with Encoding in the Chart panel</p>
+          <p className="text-sm text-loom-muted text-center">Pick what goes on the chart in Fields, in the Chart panel</p>
           <button type="button" onClick={openChartEditor} className="loom-btn-primary text-xs py-2 px-4 min-h-10">
             Open Chart editor
           </button>
@@ -1352,10 +1369,10 @@ export function useChartViewCore(): ReactNode | null {
   }
 
   const mobileRail = isMobile && !suggestionsExpanded;
-  const showSuggestionsPanel = suggestionsRailOpen && !socialExportReady && !liveEdit && !arranging;
+  const showSuggestionsPanel = suggestionsRailOpen && (!compactIdeas || suggestionsExpanded) && !socialExportReady && !liveEdit && !arranging;
 
   return (
-    <div className={`flex h-full animate-enter ${suggestionsExpanded || isMobile ? "flex-col" : ""}`}>
+    <div className={`flex h-full animate-enter ${suggestionsExpanded || isMobile ? "flex-col" : ""} ${mobileRail ? "loom-chart-reading-room" : ""}`}>
       {/* Recommendation panel — desktop left rail, mobile bottom rail, or full browse grid */}
       {showSuggestionsPanel ? (
         <SuggestionRailPanel
@@ -1401,6 +1418,7 @@ export function useChartViewCore(): ReactNode | null {
             chartDrawError,
             chartDataTableOpen,
             dataTableRows,
+            chartReading,
             setChartDataTableOpen,
             chartToolRailProps,
             containerRef,
@@ -1409,6 +1427,7 @@ export function useChartViewCore(): ReactNode | null {
             orbitEnabled,
             sceneOrbit,
             sceneOrbitDragRef,
+            cubeFrameRef,
             setSceneOrbit,
             cubeHover,
             setCubeSlice,

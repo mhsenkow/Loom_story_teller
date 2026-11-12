@@ -25,6 +25,69 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-11-12-community",
+    date: "2026-11-12",
+    title: "Community, and stories that say something",
+    summary: "Vote and comment without an account, and a stories screen that leads with what the data shows.",
+    items: [
+      {
+        title: "3D views you can explore and reset",
+        detail: "Orbit scatter, data cubes and globes now have camera presets, zoom controls and a reset button. Shift + arrows rotates, + and − zoom, and 0 resets. Constant-depth points stay centered, missing depths stay out of the chart, and cube selection follows the visible voxel faces. Accelerated orbit scatter gains matching axes, depth ordering and hover readouts.",
+      },
+      {
+        title: "Vote and talk about charts — no account",
+        detail: "Every story and chart on a live feed has ▲ and ▼ and a comments thread. Votes shape what everyone sees first: loved charts rise, widely disliked ones sink. Sort stories by Community favorites, Most discussed, Divisive, or Least liked, and see the most-loved charts and freshest comments at the top. Remix a chart and it becomes its own entry others can open. Loom remembers this device so your vote counts once; pick a name or keep the friendly one you’re given. Charts from your own files are never shared.",
+      },
+      {
+        title: "Headlines that tell you what was found",
+        detail: "Stories now lead with the finding — “Wind speed and gust rise together”, “United States: 85% of the total” — or with the question a chart answers, instead of a chart recipe. The chart’s description sits underneath in plain words. Mirror-image stories and repeat views of the same rows are folded together, so the page shows more different things.",
+      },
+      {
+        title: "Surprise me",
+        detail: "A new button at the bottom of the stories opens a random pick from the better half of what’s on offer.",
+      },
+      {
+        title: "Charts that speak plainly",
+        detail: "Axes, tooltips and story cards use readable names with units — “temperature anomaly (°C)” instead of anomaly_c — and story numbers read like “−11.4% to 4.9%”. Stories no longer count a feed’s total row as one of its parts, averages are described as averages, and the crypto “Daily moves” story shows all 50 coins. The chart section where you pick what goes on the chart is now called Fields (it was Encoding).",
+      },
+      {
+        title: "Smoother on phones",
+        detail: "Loom no longer opens an empty panel over the start screen on phones, and every button in the stories header fits on narrow screens. On the web, the SQL view says up front that queries run in the desktop app and points you back to the table. Error messages say what to try next instead of showing server codes, and hints point to buttons that really exist.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-27b-android",
+    date: "2026-10-27",
+    title: "Android on the way",
+    items: [
+      {
+        title: "Clearer charts, roomier editing",
+        detail: "Legends, dates, dense labels and 3D axes fit smaller charts more clearly. Tablets leave more room for the plot, and short phones get a taller editor. Count includes rows with missing measures, positive-area charts no longer turn negative totals positive, and empty charts explain what to change.",
+      },
+      {
+        title: "Typefaces that look like themselves",
+        detail: "All 16 fonts are included with Loom, so choosing Lora, Inter, or another named face really changes the lettering. Search font specimens, try Clear, Editorial, or Technical type, and fine-tune readable size and weight controls. Undo or reset just the typography at any time.",
+      },
+      {
+        title: "More thoughtful word clouds",
+        detail: "Give words their own font, spacing, and size contrast. Long words now fit using a shared size adjustment, comparison groups keep the same scale, and the chart tells you how many words are shown. Rows and columns offer a more orderly reading path.",
+      },
+      {
+        title: "A chart that helps you read it",
+        detail: "At a glance explains bars, lines, areas, pies and histograms in plain language. Open it for a reading guide, tap a value to pin it on the chart, or see the numbers in a table that stays up to date. Ties and different line end dates are called out instead of hidden.",
+      },
+      {
+        title: "Follow a line to its answer",
+        detail: "Multi-series line charts now put names and last plotted values at the line ends when there is room. Close finishes get separated labels and leader lines; smaller charts keep a familiar legend. PNG exports carry the same labels.",
+      },
+      {
+        title: "Play Store shell",
+        detail: "Loom on Android uses the same charts and live feeds as loom.ibm.io inside a Capacitor app (com.loom.storyteller). Look for Internal testing first, then the Play listing.",
+      },
+    ],
+  },
+  {
     id: "2026-10-27-chart-engine",
     date: "2026-10-27",
     title: "Chart engine cleanup",

@@ -163,6 +163,8 @@ export function useChartRenderOpts(args: UseChartRenderOptsArgs): ChartRenderOpt
       wordCloudArrange: chartVisualOverrides.wordCloudArrange,
       wordCloudScale: chartVisualOverrides.wordCloudScale,
       wordCloudWeight: chartVisualOverrides.wordCloudWeight,
+      wordCloudGap: chartVisualOverrides.wordCloudGap,
+      wordCloudSizing: chartVisualOverrides.wordCloudSizing,
       pyramidScaleMode: activeChart?.pyramidScaleMode ?? undefined,
       deltaDisplay: activeChart?.deltaDisplay ?? undefined,
       layoutDirection: activeChart?.layoutDirection ?? undefined,

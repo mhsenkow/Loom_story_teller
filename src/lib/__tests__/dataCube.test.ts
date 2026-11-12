@@ -142,6 +142,13 @@ describe("buildDataCube", () => {
 describe("cube camera", () => {
   const cube = buildDataCube(rows, columns, { xField: "region", yField: "product", zField: "year" })!;
 
+  it("keeps the cube visible when large labels share a short canvas", () => {
+    const view = dataCubeChartView(cube, 320, 240, { ramp: ["black", "white"], opacity: 1, camera: { yaw: .6, pitch: .4, zoom: 1 }, axisFontSize: 16 });
+    const { ex, ey, ez } = cubeExtents(cube);
+    const points = [-ex, ex].flatMap(x => [-ey, ey].flatMap(y => [-ez, ez].map(z => projectCube(view, x, y, z))));
+    expect(Math.max(...points.map(p => p.sy)) - Math.min(...points.map(p => p.sy))).toBeGreaterThan(60);
+  });
+
   it("fits around phone controls, readable labels, and a pivot table without breaking voxel picking", () => {
     for (const [w, h, tableHeight] of [[344, 296, 0], [344, 500, 220], [588, 858, 377]]) {
       const opts = { ramp: ["#000000", "#ffffff"], opacity: 1, camera: { yaw: 0.55, pitch: 0.35, zoom: 1 }, axisFontSize: 16, showLegend: false, footerReserve: 48, contentInsets: { top: 56, bottom: tableHeight } };

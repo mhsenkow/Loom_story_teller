@@ -51,7 +51,7 @@ describe("searchChartKinds", () => {
 describe("chartKindLabel", () => {
   it("returns the catalog label instead of the raw id", () => {
     expect(chartKindLabel("forceBubble")).toBe("Force Bubble");
-    expect(chartKindLabel("scatter")).toBe("Dot (scatter)");
+    expect(chartKindLabel("scatter")).toBe("Scatter");
     for (const e of CHART_KIND_CATALOG) expect(chartKindLabel(e.value)).toBe(e.label);
   });
 

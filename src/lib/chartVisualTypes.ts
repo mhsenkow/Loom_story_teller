@@ -88,4 +88,6 @@ export interface ChartVisualOverrides {
   wordCloudScale?: number;
   /** How word weight follows rank. Empty is ranked (largest words heaviest). */
   wordCloudWeight?: "ranked" | "even" | "heavy";
+  wordCloudGap?: number;
+  wordCloudSizing?: "sqrt" | "linear" | "log";
 }

@@ -19,6 +19,7 @@ export function keyboardNavigableHits(targets: HitTarget[] | undefined): HitTarg
   const seen = new Set<string>();
   const out: { t: HitTarget; x: number; y: number }[] = [];
   for (const t of targets) {
+    if (t.auxiliary) continue;
     if (!t.match.length && t.rowIndex == null && !t.summary?.columns?.length) continue;
     const [x, y] = anchor(t);
     const key = `${Math.round(x)}:${Math.round(y)}:${t.shape}`;

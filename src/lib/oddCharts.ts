@@ -57,6 +57,7 @@ import {
 export * from "./oddChartsRec";
 import type { OddChartKind, OddRenderOpts } from "./oddChartsRec";
 import {
+  ODD_NON_CARTESIAN,
   toNum,
   groupSum,
   agg,
@@ -72,6 +73,7 @@ import {
 } from "./oddChartsRec";
 import { resolveLayoutDirection } from "./chartSupport";
 import { resolveIsoFloorOrient } from "./isoOrient";
+import { drawProjectedAxis, type AxisLabelBox } from "./projectedAxis";
 import { resolvePyramidScaleMode } from "./pyramidScale";
 import { formatDeltaLabel } from "./deltaCompare";
 import { chartFont, chartTypeRamp } from "./chartType";
@@ -167,6 +169,10 @@ export function renderOddChart(
       tickRotation: opts.tickRotation,
     },
   };
+  if (!mini && (!ODD_NON_CARTESIAN.has(kind) || kind === "mosaic" || kind === "isoBars")) {
+    const labelRoom = chartTypeRamp(opts.axisFontSize).tick * 4 + 24;
+    env.look.plotBounds = { left: Math.min(w * 0.3, Math.max(pad, labelRoom)), top: pad, right: w - pad, bottom: h - pad };
+  }
   ctx.save();
   let message: string | void;
   try {
@@ -294,12 +300,12 @@ const RENDERERS: Record<OddChartKind, Renderer> = {
 // ---- shared helpers --------------------------------------------------------
 
 function fieldName(env: OddEnv, i: number, fallback = ""): string {
-  return i >= 0 ? (env.columns[i] ?? fallback) : fallback;
+  return i >= 0 ? (env.opts.fieldDisplayNames?.[i] ?? env.columns[i] ?? fallback) : fallback;
 }
 
 /** Plot rect inside the pad (thumbnails use the whole card). */
 function basePlot(env: OddEnv): PlotRect {
-  return { left: env.pad, top: env.pad, right: env.w - env.pad, bottom: env.h - env.pad };
+  return env.look.plotBounds ?? { left: env.pad, top: env.pad, right: env.w - env.pad, bottom: env.h - env.pad };
 }
 
 function gridLook(env: OddEnv): ChartLookOpts {
@@ -419,13 +425,14 @@ function drawPanelLegend(
   // Visual → Legend corner overrides the renderer's preferred corner.
   const lp = env.opts.legendPosition;
   if (lp === "top-right" || lp === "top-left" || lp === "bottom-right" || lp === "bottom-left") corner = lp;
-  const maxRows = entries.length <= 12 ? entries.length : 8;
+  const lineH = chartTypeRamp(env.opts.axisFontSize).legend + 6;
+  const availableRows = Math.max(1, Math.floor((plot.bottom - plot.top - 20) / lineH) - (title ? 1 : 0));
+  const maxRows = Math.min(entries.length <= 12 ? entries.length : 8, entries.length <= availableRows ? availableRows : Math.max(1, availableRows - 1));
   const shown = entries.slice(0, maxRows);
   const extra = entries.length - shown.length;
-  const lineH = chartTypeRamp(env.opts.axisFontSize).legend + 6;
   ctx.save();
   ctx.font = oddFont(env, 10);
-  const maxText = Math.min(150, Math.max(60, (plot.right - plot.left) * 0.32));
+  const maxText = Math.min(150, Math.max(12, plot.right - plot.left - 44), Math.max(60, (plot.right - plot.left) * 0.32));
   let textW = Math.max(...shown.map((e) => ctx.measureText(e.label).width), extra > 0 ? ctx.measureText(`+${extra} more`).width : 0);
   if (title) {
     ctx.font = oddFont(env, 10, 600);
@@ -788,7 +795,12 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
   if (xi < 0 || yi < 0) return "Beeswarm needs a category and a numeric column";
   const model = orderedKeys(rows, xi, 12);
   const cats = model.keys;
-  const vals = rows.map((r) => toNum(r[yi])).filter(Number.isFinite);
+  // Scale to the bands actually drawn; hidden categories shouldn't stretch the axis.
+  const shown = new Set(cats.map(String));
+  const vals = rows
+    .filter((r) => shown.has(String(r[xi])))
+    .map((r) => toNum(r[yi]))
+    .filter(Number.isFinite);
   if (!cats.length || !vals.length) return `No numeric values in ${fieldName(env, yi, "y")}`;
   const { mini, ink } = env;
   const ys = niceTicks(Math.min(...vals), Math.max(...vals), 5, true);
@@ -1226,8 +1238,7 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 
 function drawPyramid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, _ci: number, si: number) {
   if (xi < 0 || yi < 0 || si < 0) return "Pyramid needs a category and two numeric columns";
-  const howRaw = env.opts.yAggregate ?? "sum";
-  const how = howRaw === "count" ? "sum" : howRaw;
+  const how = env.opts.yAggregate ?? "sum";
   const byCat = new Map<string, { left: number[]; right: number[]; rowIndex: number }>();
   for (let ri = 0; ri < rows.length; ri++) {
     const r = rows[ri]!;
@@ -1238,8 +1249,8 @@ function drawPyramid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       cur = { left: [], right: [], rowIndex: ri };
       byCat.set(c, cur);
     }
-    const lv = toNum(r[yi]);
-    const rv = toNum(r[si]);
+    const lv = how === "count" ? 1 : toNum(r[yi]);
+    const rv = how === "count" ? 1 : toNum(r[si]);
     if (Number.isFinite(lv)) cur.left.push(lv);
     if (Number.isFinite(rv)) cur.right.push(rv);
   }
@@ -2464,48 +2475,17 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     hitCircle(env, top.sx, top.sy, r, match, d.p.ri);
   }
   if (mini) return;
-  // Tick labels on the two floor edges from the origin — stay on the diamond after Direction.
-  const o = proj(0, 0, 0);
-  ctx.strokeStyle = inkTint(ink, 0.4);
-  ctx.lineWidth = 1.25;
-  ctx.beginPath();
-  ctx.moveTo(o.sx, o.sy);
-  ctx.lineTo(proj(1, 0, 0).sx, proj(1, 0, 0).sy);
-  ctx.moveTo(o.sx, o.sy);
-  ctx.lineTo(proj(0, 1, 0).sx, proj(0, 1, 0).sy);
-  ctx.stroke();
-
-  ctx.font = oddFont(env, 10);
-  ctx.fillStyle = ink.muted;
-  ctx.textBaseline = "top";
-  for (const v of xs.ticks) {
-    const p = proj(nX(v), 0, 0);
-    ctx.strokeStyle = inkTint(ink, 0.22);
-    ctx.beginPath();
-    ctx.moveTo(p.sx, p.sy);
-    ctx.lineTo(p.sx - 4, p.sy + 7);
-    ctx.stroke();
-    ctx.textAlign = "center";
-    ctx.fillText(formatAxisValue(v, xs.step), p.sx - 2, p.sy + 8);
-  }
-  for (const v of ys.ticks) {
-    const p = proj(0, nY(v), 0);
-    ctx.strokeStyle = inkTint(ink, 0.22);
-    ctx.beginPath();
-    ctx.moveTo(p.sx, p.sy);
-    ctx.lineTo(p.sx + 4, p.sy + 7);
-    ctx.stroke();
-    ctx.textAlign = "left";
-    ctx.fillText(formatAxisValue(v, ys.step), p.sx + 6, p.sy + 6);
-  }
-  ctx.font = oddFont(env, 10, 600);
-  ctx.fillStyle = ink.text;
-  const xm = proj(0.55, 0, 0);
-  const ym = proj(0, 0.55, 0);
-  ctx.textAlign = "center";
-  ctx.fillText(fitTextEllipsis(ctx, `${fieldName(env, xi)} →`, env.w / 2 - 20), xm.sx, xm.sy + 22);
-  ctx.textAlign = "left";
-  ctx.fillText(fitTextEllipsis(ctx, `← ${fieldName(env, yi)}`, env.w / 2 - 20), ym.sx + 10, ym.sy + 18);
+  // Use the front floor edges, outside the marks, in every Direction.
+  const floorPoint = (x: number, y: number) => { const p = proj(x, y, 0); return { x: p.sx, y: p.sy }; };
+  const xEdge = proj(0.5, 1, 0).sy > proj(0.5, 0, 0).sy ? 1 : 0;
+  const yEdge = proj(1, 0.5, 0).sy > proj(0, 0.5, 0).sy ? 1 : 0;
+  const occupied: AxisLabelBox[] = [];
+  const axis = { center: floorPoint(0.5, 0.5), width: env.w, height: env.h,
+    text: ink.text, muted: ink.muted, rule: inkTint(ink, 0.4), fontFamily: env.font, axisFontSize: env.opts.axisFontSize, occupied };
+  drawProjectedAxis(ctx, { ...axis, start: floorPoint(0, xEdge), end: floorPoint(1, xEdge),
+    ticks: xs.ticks, pointOf: v => floorPoint(nX(v), xEdge), format: v => formatAxisValue(v, xs.step), title: fieldName(env, xi) });
+  drawProjectedAxis(ctx, { ...axis, start: floorPoint(yEdge, 0), end: floorPoint(yEdge, 1),
+    ticks: ys.ticks, pointOf: v => floorPoint(yEdge, nY(v)), format: v => formatAxisValue(v, ys.step), title: fieldName(env, yi) });
   if (zs) {
     const p0 = proj(0, 0, 0);
     const p1 = proj(0, 0, 1);
@@ -2606,7 +2586,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   ctx.textBaseline = "middle";
   for (const p of [0, 0.25, 0.5, 0.75, 1]) ctx.fillText(`${Math.round(p * 100)}%`, plot.left - 6, plot.bottom - p * ph);
   ctx.save();
-  ctx.translate(Math.max(10, plot.left - 40), (plot.top + plot.bottom) / 2);
+  ctx.translate(Math.max(chartTypeRamp(env.opts.axisFontSize).tick, plot.left - ctx.measureText("100%").width - chartTypeRamp(env.opts.axisFontSize).tick - 12), (plot.top + plot.bottom) / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = "center";
   ctx.fillText(fitTextEllipsis(ctx, `Share within ${fieldName(env, xi)} · width = ${aggregateAxisTitle(how, fieldName(env, yi) || null).toLowerCase()}`, ph), 0, 0);
@@ -2787,7 +2767,7 @@ function drawCalendar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
       d = { vals: [], ri: i };
       byDay.set(day, d);
     }
-    const v = yi >= 0 ? toNum(rows[i]![yi]) : 1;
+    const v = yi >= 0 && how !== "count" ? toNum(rows[i]![yi]) : 1;
     if (Number.isFinite(v)) d.vals.push(v);
   }
   if (byDay.size < 2) return "Calendar needs dates spread over at least two days";
@@ -2889,7 +2869,7 @@ function drawRose(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
       const k = String(r[xi] ?? "");
       if (!keep.has(k)) continue;
       const c = String(r[ci]);
-      const v = yi >= 0 ? toNum(r[yi]) : 1;
+      const v = yi >= 0 && how !== "count" ? toNum(r[yi]) : 1;
       if (!Number.isFinite(v)) continue;
       let m = segs.get(k);
       if (!m) segs.set(k, (m = new Map()));
@@ -3068,7 +3048,7 @@ function drawSparkGrid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
   const panels = new Map<string, number[][]>();
   const volume = new Map<string, number>();
   for (const r of rows) {
-    const v = toNum(r[yi]);
+    const v = env.opts.yAggregate === "count" ? 1 : toNum(r[yi]);
     if (!Number.isFinite(v)) continue;
     const p = keyPos.get(model.keyOf(r));
     if (p == null) continue;
@@ -3472,7 +3452,7 @@ function drawStripes(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   const model = orderedKeys(rows, xi, env.mini ? 40 : 90, true);
   const sums = new Map<string, number[]>();
   for (const r of rows) {
-    const v = toNum(r[yi]);
+    const v = env.opts.yAggregate === "count" ? 1 : toNum(r[yi]);
     if (!Number.isFinite(v)) continue;
     const k = model.keyOf(r);
     let arr = sums.get(k);
@@ -3561,7 +3541,7 @@ function cloudWeight(rank: number, mode: "ranked" | "even" | "heavy" = "ranked")
 
 function wordFace(env: OddEnv): string {
   const custom = env.opts.wordCloudFont?.trim();
-  return custom || env.font;
+  return custom && custom !== "inherit" ? custom : env.font;
 }
 
 /** Words only. Titles, side labels, and footnotes stay on the chart font. */
@@ -3573,24 +3553,44 @@ function measureCloudWord(
   ctx: CanvasRenderingContext2D,
   env: OddEnv,
   word: CloudWord,
-  plotWidth: number,
   vmax: number,
   minF: number,
   maxF: number,
 ): { f: number; w: number; h: number } {
-  const weight = cloudWeight(word.rank, cloudWeightMode(env));
-  const floor = Math.max(11, chartTypeRamp(env.opts.axisFontSize).mark);
-  let f = Math.round(Math.max(minF, maxF * Math.sqrt(word.v / vmax)));
-  const paintAt = (n: number) => Math.max(floor, n);
-  ctx.font = wordFont(env, paintAt(f), weight);
-  const natural = ctx.measureText(word.word).width;
-  if (natural > plotWidth * 0.92) {
-    f = Math.max(minF, Math.floor((f * plotWidth * 0.92) / Math.max(1, natural)));
-    ctx.font = wordFont(env, paintAt(f), weight);
+  const ratio = Math.max(0, Math.min(1, word.v / vmax));
+  const sizing = env.opts.wordCloudSizing;
+  const prominence = sizing === "linear" ? ratio : sizing === "log" ? Math.log1p(9 * ratio) / Math.log(10) : Math.sqrt(ratio);
+  const f = Math.max(chartTypeRamp(env.opts.axisFontSize).mark, Math.round(Math.max(minF, maxF * prominence)));
+  ctx.font = wordFont(env, f, cloudWeight(word.rank, cloudWeightMode(env)));
+  const metrics = ctx.measureText(word.word);
+  const gap = Math.max(0, Math.min(16, env.opts.wordCloudGap ?? 4));
+  // Measure actual glyph ink, including accents/descenders. Never shrink just one
+  // word: comparisons must keep the same value-to-font-size mapping in each group.
+  const inkWidth = Math.max(metrics.width, (metrics.actualBoundingBoxLeft || 0) + (metrics.actualBoundingBoxRight || 0));
+  const inkHeight = (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0);
+  return { f, w: inkWidth + gap + 2, h: Math.max(f * 1.2, inkHeight) + gap };
+}
+
+/** Fit long labels by reducing the shared ramp, never an individual word or group. */
+function fitCloudMax(
+  ctx: CanvasRenderingContext2D, env: OddEnv,
+  panels: { words: [string, number][]; plot: PlotRect }[],
+  vmax: number, minF: number, maxF: number,
+): number {
+  let fitted = maxF;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let factor = 1;
+    for (const panel of panels) {
+      const width = panel.plot.right - panel.plot.left;
+      panel.words.forEach(([word, v], rank) => {
+        const measured = measureCloudWord(ctx, env, { word, v, rank, color: "", group: "" }, vmax, minF, fitted);
+        if (measured.w > width && measured.f > minF) factor = Math.min(factor, width * .97 / measured.w);
+      });
+    }
+    if (factor === 1) break;
+    fitted = Math.max(minF, fitted * factor);
   }
-  f = paintAt(f);
-  const tw = Math.min(ctx.measureText(word.word).width, plotWidth * 0.92);
-  return { f, w: tw + 4, h: f * 1.15 };
+  return fitted;
 }
 
 /** How many words a region can hold before the spiral is mostly misses. */
@@ -3623,7 +3623,8 @@ function packWordCloud(
   const placed: PlacedCloudWord[] = [];
   const boxes: WordBox[] = [];
   words.forEach((word) => {
-    const sized = measureCloudWord(ctx, env, word, pw, vmax, minF, maxF);
+    const sized = measureCloudWord(ctx, env, word, vmax, minF, maxF);
+    if (sized.w > pw || sized.h > ph) return;
     const { f } = sized;
     const box = { w: sized.w, h: sized.h };
     for (let s = 0; s < 900; s++) {
@@ -3656,7 +3657,7 @@ function packWordFlow(
   const pw = plot.right - plot.left;
   const ph = plot.bottom - plot.top;
   const gap = Math.max(4, Math.round(Math.min(pw, ph) * 0.012));
-  const measured = words.map((word) => ({ word, ...measureCloudWord(ctx, env, word, pw, vmax, minF, maxF) }));
+  const measured = words.map((word) => ({ word, ...measureCloudWord(ctx, env, word, vmax, minF, maxF) }));
   type Line = { items: typeof measured; span: number; cross: number };
   const lines: Line[] = [];
   let line: typeof measured = [];
@@ -3671,6 +3672,7 @@ function packWordFlow(
     cross = 0;
   };
   for (const item of measured) {
+    if (item.w > pw || item.h > ph) continue;
     const main = direction === "rows" ? item.w : item.h;
     const side = direction === "rows" ? item.h : item.w;
     if (line.length && span + gap + main > limit) flush();
@@ -3684,7 +3686,7 @@ function packWordFlow(
   let usedCross = 0;
   for (const entry of lines) {
     const next = usedCross + (used.length ? gap : 0) + entry.cross;
-    if (used.length && next > crossLimit) break;
+    if (next > crossLimit) break;
     used.push(entry);
     usedCross = next;
   }
@@ -3721,7 +3723,6 @@ function paintPackedWords(
   yi: number,
   ci: number,
   how: YAggregateOption,
-  plotWidth: number,
 ): void {
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -3730,7 +3731,7 @@ function paintPackedWords(
     ctx.font = wordFont(env, p.f, cloudWeight(p.rank, cloudWeightMode(env)));
     ctx.fillStyle = p.color;
     ctx.globalAlpha = p.rank < 12 ? 1 : Math.max(0.7, env.alpha);
-    ctx.fillText(fitTextEllipsis(ctx, p.word, Math.min(p.box.w, plotWidth * 0.92)), p.x, p.y);
+    ctx.fillText(p.word, p.x, p.y);
     const match: [number, string][] = [[xi, p.word]];
     // "Higher market_cap" is a side title, not a cell. Only a real group value
     // belongs in the match, or hover cannot find the row.
@@ -3760,16 +3761,25 @@ function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
   const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
   const mode = env.opts.wordCloudMode === "compare" || env.opts.wordCloudMode === "grid" ? env.opts.wordCloudMode : "cloud";
   const { mini, ink } = env;
-  const plot = basePlot(env);
+  const fullPlot = basePlot(env);
+  const plot = { ...fullPlot, bottom: fullPlot.bottom - cloudChrome(env) };
+  const coverage = (shown: number, total: number, note = "") => {
+    if (mini) return;
+    ctx.font = oddFont(env, 10);
+    ctx.fillStyle = ink.muted;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(fitTextEllipsis(ctx, `${shown} of ${total} words shown${note ? ` · ${note}` : ""}`, fullPlot.right - fullPlot.left), fullPlot.left, fullPlot.bottom);
+  };
 
   if (mode === "cloud") {
-    const words = groupSum(rows, xi, yi, how)
-      .filter(([k, v]) => v > 0 && k.trim() !== "" && k !== "null")
-      .slice(0, cloudWordCap(env, plot));
+    const allWords = groupSum(rows, xi, yi, how)
+      .filter(([k, v]) => v > 0 && k.trim() !== "" && k !== "null");
+    const words = allWords.slice(0, cloudWordCap(env, plot));
     if (!words.length) return "No positive values to size words by";
     const limits = cloudFontLimits(env, plot);
     const vmax = words[0]![1];
-    let maxF = limits.maxF;
+
     const cloudWords: CloudWord[] = words.map(([word, v], rank) => ({
       word,
       v,
@@ -3777,21 +3787,10 @@ function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
       group: "",
       rank,
     }));
-    let placed: PlacedCloudWord[] = [];
-    for (let attempt = 0; attempt < 3; attempt++) {
-      placed = packWordCloud(ctx, env, cloudWords, plot, vmax, limits.minF, maxF);
-      if (placed.length >= cloudWords.length * 0.9) break;
-      maxF *= 0.8;
-    }
-    paintPackedWords(ctx, env, rows, placed, xi, yi, -1, how, plot.right - plot.left);
-    const dropped = cloudWords.length - placed.length;
-    if (!mini && dropped > 0) {
-      ctx.font = oddFont(env, 10);
-      ctx.fillStyle = ink.muted;
-      ctx.textAlign = "right";
-      ctx.textBaseline = "bottom";
-      ctx.fillText(`${dropped} smaller word${dropped === 1 ? "" : "s"} didn’t fit`, plot.right, plot.bottom);
-    }
+    const maxF = fitCloudMax(ctx, env, [{ words, plot }], vmax, limits.minF, limits.maxF);
+    const placed = packWordCloud(ctx, env, cloudWords, plot, vmax, limits.minF, maxF);
+    paintPackedWords(ctx, env, rows, placed, xi, yi, -1, how);
+    coverage(placed.length, allWords.length);
     return;
   }
 
@@ -3830,6 +3829,7 @@ function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     if (!leftWords.length && !rightWords.length) return "No positive values to size words by";
     const vmax = Math.max(1, ...leftWords.map(([, v]) => v), ...rightWords.map(([, v]) => v));
     const limits = cloudFontLimits(env, leftPlot);
+    const maxF = fitCloudMax(ctx, env, [{ words: leftWords, plot: leftPlot }, { words: rightWords, plot: rightPlot }], vmax, limits.minF, limits.maxF);
     const packSide = (list: [string, number][], region: PlotRect, color: string, group: string) =>
       packWordCloud(
         ctx,
@@ -3838,14 +3838,14 @@ function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
         region,
         vmax,
         limits.minF,
-        limits.maxF,
+        maxF,
       );
     const placed = [
       ...packSide(leftWords, leftPlot, env.colors[0]!, leftLabel),
       ...packSide(rightWords, rightPlot, env.colors[1 % env.colors.length]!, rightLabel),
     ];
-    if (!placed.length) return "No positive values to size words by";
-    paintPackedWords(ctx, env, rows, placed, xi, yi, ci, how, Math.max(leftPlot.right - leftPlot.left, rightPlot.right - rightPlot.left));
+    if (!placed.length) return "No words fit. Reduce word size or widen the chart.";
+    paintPackedWords(ctx, env, rows, placed, xi, yi, ci, how);
     if (!mini) {
       ctx.font = oddFont(env, 11, 600);
       ctx.textBaseline = "top";
@@ -3868,6 +3868,7 @@ function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
         ctx.fillText(fitTextEllipsis(ctx, note, plot.right - plot.left), plot.left, plot.bottom);
       }
     }
+    coverage(placed.length, (halves ? halves.higher.length + halves.lower.length : leftGroupWords.length + rightGroupWords.length), "shared size scale");
     return;
   }
 
@@ -3888,12 +3889,13 @@ function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
   }));
   const vmax = Math.max(1, ...capped.flatMap((p) => p.words.map(([, v]) => v)));
   const limits = cloudFontLimits(env, cellPlot(0));
+  const maxF = fitCloudMax(ctx, env, capped.map((panel, idx) => ({ words: panel.words, plot: cellPlot(idx) })), vmax, limits.minF, limits.maxF);
   const placed: PlacedCloudWord[] = [];
   capped.forEach((panel, idx) => {
     const region = cellPlot(idx);
     const color = env.colors[idx % env.colors.length]!;
     const cloudWords: CloudWord[] = panel.words.map(([word, v], rank) => ({ word, v, color, group: panel.name, rank }));
-    placed.push(...packWordCloud(ctx, env, cloudWords, region, vmax, limits.minF, limits.maxF));
+    placed.push(...packWordCloud(ctx, env, cloudWords, region, vmax, limits.minF, maxF));
     if (!mini) {
       ctx.font = oddFont(env, 11, 600);
       ctx.fillStyle = color;
@@ -3904,8 +3906,8 @@ function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
       ctx.fillText(fitTextEllipsis(ctx, panel.name, grid.cw - 10), gx + 4, gy + 2);
     }
   });
-  if (!placed.length) return "No positive values to size words by";
-  paintPackedWords(ctx, env, rows, placed, xi, yi, ci, how, grid.cw - 8);
+  if (!placed.length) return "No words fit. Reduce word size or widen the chart.";
+  paintPackedWords(ctx, env, rows, placed, xi, yi, ci, how);
   if (!mini && hidden > 0) {
     ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
@@ -3917,6 +3919,7 @@ function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
       plot.bottom,
     );
   }
+  coverage(placed.length, panels.reduce((sum, panel) => sum + panel.words.length, 0), "shared size scale");
 }
 
 // ---- mean ± CI dot plot ----------------------------------------------------

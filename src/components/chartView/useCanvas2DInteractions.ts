@@ -1,5 +1,6 @@
 // Canvas 2D mark hover, keyboard focus, pins, and tooltip picking (LOOM-141).
 // @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
+import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
 import { useCallback, useEffect, useMemo, type MutableRefObject, type RefObject } from "react";
 import type React from "react";
 import { stageDpr } from "./constants";
@@ -21,13 +22,13 @@ import { scaleY, type YScaleKind } from "@/lib/dsTransforms";
 import { scatterYDomain } from "@/lib/canvasCharts/shared";
 import {
   allowedRowIndices,
+  canvasHitReadout,
   type Canvas2DHitContext,
   type HitTarget,
   mergeChartTooltip,
   pickCanvasTooltipRowIndex,
   pickHitTarget,
   resolveTooltipFieldNames,
-  rowForHitTarget,
 } from "@/lib/chartTooltip";
 import {
   chromeSectionFor,
@@ -197,7 +198,7 @@ export function useCanvas2DInteractions(args: UseCanvas2DInteractionsArgs) {
   const resolveMarkHit = useCallback(
     (ref: MarkRef): HitTarget | null => {
       if (!activeChart) return null;
-      if (activeChart.kind === "scatter") {
+      if (usesScatterNavigation(activeChart)) {
         const data = scatterDataRef.current;
         const st = useLoomStore.getState().sampleRows;
         if (!data || !st) return null;
@@ -207,8 +208,8 @@ export function useCanvas2DInteractions(args: UseCanvas2DInteractionsArgs) {
         }
         return null;
       }
-      const sr = sampleRowsRef.current;
-      const targets = canvas2DHitRef.current?.targets;
+      const sr = canvas2DHitRef.current;
+      const targets = sr?.targets;
       return sr && targets?.length ? findHitForMark(targets, ref, sr.columns, sr.rows, markIdentity) : null;
     },
     [activeChart, markIdentity, pointSize, scatterDataRef, sampleRowsRef, canvas2DHitRef],
@@ -218,30 +219,30 @@ export function useCanvas2DInteractions(args: UseCanvas2DInteractionsArgs) {
     (hit: HitTarget | null, tip: ChartTooltipState) => {
       if (!hit || !tip || !activeChart) return;
       let ref: MarkRef | null = null;
-      if (activeChart.kind === "scatter") {
+      if (usesScatterNavigation(activeChart)) {
         const st = useLoomStore.getState().sampleRows;
         if (st) ref = markRefForRow(tip.rowIndex, st.columns, st.rows, markIdentity);
       } else {
-        const sr = sampleRowsRef.current;
+        const sr = canvas2DHitRef.current;
         if (sr) ref = markRefForHit(hit, sr.columns, sr.rows, markIdentity);
       }
       if (!ref) return;
       togglePinnedTooltip({ chartId: activeChart.id, ref, rowIndex: tip.rowIndex, row: tip.row, columns: tip.columns });
     },
-    [activeChart, markIdentity, togglePinnedTooltip, sampleRowsRef],
+    [activeChart, markIdentity, togglePinnedTooltip, canvas2DHitRef],
   );
 
   const hoverRef = useMemo(() => {
     if (!hoverMark || !activeChart) return null;
-    if (activeChart.kind === "scatter") {
+    if (usesScatterNavigation(activeChart)) {
       const st = useLoomStore.getState().sampleRows;
       return st && hoverMark.rowIndex != null
         ? markRefForRow(hoverMark.rowIndex, st.columns, st.rows, markIdentity)
         : null;
     }
-    const sr = sampleRowsRef.current;
+    const sr = canvas2DHitRef.current;
     return sr ? markRefForHit(hoverMark, sr.columns, sr.rows, markIdentity) : null;
-  }, [hoverMark, activeChart, markIdentity, sampleRowsRef]);
+  }, [hoverMark, activeChart, markIdentity, canvas2DHitRef]);
 
   const resolvedPins = useMemo(
     () =>
@@ -320,7 +321,6 @@ export function useCanvas2DInteractions(args: UseCanvas2DInteractionsArgs) {
         return;
       }
       const link = useLoomStore.getState().tooltipLink;
-      const allowed = allowedRowIndices(sr.rows, sr.columns, link);
       const target = hit.targets?.length ? pickHitTarget(hit.targets, chartX, chartY) : null;
       if (!target) {
         const chrome = pickChartChromeRegion(chartX, chartY, w, h, pad, hit.chromeLayout);
@@ -342,11 +342,15 @@ export function useCanvas2DInteractions(args: UseCanvas2DInteractionsArgs) {
         }
       }
       if (chromeHover) setChromeHover(null);
-      const rowIdx = hit.targets?.length
-        ? target
-          ? rowForHitTarget(target, sr.rows, allowed)
-          : null
-        : pickCanvasTooltipRowIndex(hit, chartX, chartY, allowed);
+      const rawSample = useLoomStore.getState().sampleRows;
+      if (target && rawSample) {
+        const readout = canvasHitReadout(hit, target, rawSample, ac, link);
+        setChartTooltip(readout ? { clientX: e.clientX, clientY: e.clientY, ...readout } : null);
+        setHoverMark(readout ? target : null);
+        setHoveredRowIndex(readout && readout.rowIndex >= 0 ? readout.rowIndex : null);
+        return;
+      }
+      const rowIdx = hit.targets?.length ? null : pickCanvasTooltipRowIndex(hit, chartX, chartY, allowedRowIndices(hit.rows, hit.columns, link));
       if (rowIdx == null) {
         setChartTooltip(null);
         setHoverMark(null);
@@ -406,7 +410,7 @@ export function useCanvas2DInteractions(args: UseCanvas2DInteractionsArgs) {
     setScatterTooltip?.(null);
     setChartTooltip(null);
     setHoveredRowIndex(null);
-  }, [activeChart?.id, setHoveredRowIndex, setHoverMark, setKeyboardMarkIndex, setChartTooltip, setScatterTooltip]);
+  }, [activeChart, setHoveredRowIndex, setHoverMark, setKeyboardMarkIndex, setChartTooltip, setScatterTooltip]);
 
   useEffect(() => {
     const layer = focusLayerRef.current;

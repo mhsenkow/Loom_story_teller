@@ -23,6 +23,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Worker modules import the runtime's DurableObject base; Node tests get a stand-in.
+      "cloudflare:workers": path.resolve(__dirname, "./workers/__tests__/shims/cloudflareWorkers.ts"),
     },
   },
 });

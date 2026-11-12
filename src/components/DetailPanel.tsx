@@ -38,7 +38,7 @@ function GearIcon() {
 function EmptyDatasetState() {
   return (
     <div className="flex flex-col items-center justify-center h-full px-6 py-10 gap-3 text-center">
-      <p className="text-sm text-loom-muted leading-relaxed">Open a dataset to see stats and chart encoding.</p>
+      <p className="text-sm text-loom-muted leading-relaxed">Open a dataset to see its stats and build a chart.</p>
       <button
         type="button"
         className="loom-btn-primary text-xs py-1.5 px-3"
@@ -48,7 +48,7 @@ function EmptyDatasetState() {
           st.setDataRegionOpen(true);
         }}
       >
-        Open Data &amp; sources
+        Open Data library
       </button>
     </div>
   );
@@ -115,17 +115,17 @@ export function DetailPanel() {
         `}
         style={{ paddingBottom: "var(--safe-bottom)", ...(liveEdit ? { height: MOBILE_LIVE_EDIT_SHEET } : {}) }}
       >
-        <div className={`md:hidden relative flex items-center justify-between px-4 shrink-0 ${liveEdit ? "pt-2.5 pb-0" : "pt-3.5 pb-1.5"}`}>
+        <div className={`md:hidden relative flex items-center justify-between px-4 shrink-0 ${liveEdit ? "h-4" : "pt-3.5 pb-1.5"}`}>
           <div className="pointer-events-none absolute left-1/2 top-2 h-1 w-10 -translate-x-1/2 rounded-full bg-loom-border/80" />
-          <span className="text-sm font-semibold text-loom-text tracking-tight">
+          {!liveEdit && <span className="text-sm font-semibold text-loom-text tracking-tight">
             {TABS.find((t) => t.key === panelTab)?.label ?? "Details"}
-          </span>
-          <button type="button" onClick={togglePanel} className="loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted text-lg leading-none rounded-md" aria-label="Close">
+          </span>}
+          <button type="button" onClick={togglePanel} className={`loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted text-lg leading-none rounded-md ${liveEdit ? "absolute right-2 top-4 z-10" : ""}`} aria-label="Close">
             ×
           </button>
         </div>
 
-        <div role="tablist" aria-label="Panel sections" className="loom-tabs overflow-x-auto shrink-0 px-1.5 sm:px-2 min-h-[var(--topbar-height)] border-b border-loom-border">
+        <div role="tablist" aria-label="Panel sections" className={`loom-tabs overflow-x-auto shrink-0 px-1.5 sm:px-2 border-b border-loom-border ${liveEdit ? "min-h-10 pr-12" : "min-h-[var(--topbar-height)]"}`}>
           {TABS.map((tab) => (
             <button
               key={tab.key}

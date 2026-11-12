@@ -1245,7 +1245,7 @@ export function ExplorerView() {
                             key={virtualRow.key}
                             data-explorer-focus-row={ri}
                             className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 ${isAnomaly ? "bg-loom-warning/10 border-l-2 border-l-loom-warning" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
-                            title={isAnomaly ? "Marked as anomaly (Smart tab)" : undefined}
+                            title={isAnomaly ? "Flagged as unusual (Chart → Analyze)" : undefined}
                             aria-rowindex={ri + 1}
                             onMouseEnter={() => setHoveredRowIndex(originalIdx)}
                             onMouseLeave={() => setHoveredRowIndex(null)}
@@ -1277,7 +1277,7 @@ export function ExplorerView() {
                       key={ri}
                       data-explorer-focus-row={ri}
                       className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 transition-colors ${isAnomaly ? "bg-loom-warning/10 border-l-2 border-l-loom-warning" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
-                      title={isAnomaly ? "Marked as anomaly (Smart tab)" : undefined}
+                      title={isAnomaly ? "Flagged as unusual (Chart → Analyze)" : undefined}
                       aria-rowindex={ri + 1}
                       onMouseEnter={() => setHoveredRowIndex(originalIdx)}
                       onMouseLeave={() => setHoveredRowIndex(null)}

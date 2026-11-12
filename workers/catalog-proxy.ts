@@ -22,6 +22,21 @@ import {
   type CloudBundle,
 } from "./monitorCron";
 import { isPublicId, publicFeedXml, publicMomentSvg, publicPageHtml } from "./monitorPublic";
+import { handleSocial, type SocialBackend } from "./socialRoutes";
+import type { SocialHub } from "./socialHub";
+import { SOURCE_BY_KIND, isSourceKind } from "../src/lib/sourceRegistry";
+
+/** Columns of the Wikipedia live stream (not a registry feed; see webStreams.ts). */
+const WIKI_STREAM_COLUMNS = ["id", "wiki", "title", "user", "bot", "minor", "namespace", "edit_type", "old_len", "new_len", "delta", "ts", "server_name", "comment"] as const;
+
+/** Community charts may only name real columns of a feed Loom serves. */
+function socialColumnsFor(kind: string): readonly string[] | null {
+  if (kind === "wiki") return WIKI_STREAM_COLUMNS;
+  return isSourceKind(kind) ? SOURCE_BY_KIND[kind].columns : null;
+}
+
+// Durable Object classes must be exported from the entry module.
+export { SocialHub } from "./socialHub";
 import type { CheckRecord } from "../src/lib/monitoring/types";
 import { parseSourceRows } from "../src/lib/sourceParsers";
 import {
@@ -148,6 +163,10 @@ export interface Env {
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;
   VAPID_SUBJECT?: string;
+  /** Community votes + comments (SocialHub Durable Object). Absent → /api/social answers 503. */
+  SOCIAL?: DurableObjectNamespace<SocialHub>;
+  /** Optional: seeds the hash secret the first time SocialHub runs. It is fixed after that. */
+  SOCIAL_PEPPER?: string;
 }
 
 /** Product host for share links — never mint mhsenkow.workers.dev URLs for recipients. */
@@ -2222,7 +2241,7 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/") || url.pathname.startsWith("/p/") || url.pathname.startsWith("/plot/"))) {
-      if (url.pathname === "/api/fetch-csv" || url.pathname.startsWith("/api/source/") || url.pathname.startsWith("/api/monitors")) {
+      if (url.pathname === "/api/fetch-csv" || url.pathname.startsWith("/api/source/") || url.pathname.startsWith("/api/monitors") || url.pathname.startsWith("/api/social/")) {
         if (
           url.pathname === "/api/fetch-csv" &&
           !fetchCsvAuthorized(request, env) &&
@@ -2265,6 +2284,23 @@ export default {
       }
       if (url.pathname === "/api/feedback" && request.method === "POST") {
         return await handleFeedback(request, env);
+      }
+      if (url.pathname.startsWith("/api/social/")) {
+        return await handleSocial(request, url, {
+          // RPC stubs wrap each result in a Promise; the shapes match SocialBackend.
+          backend: env.SOCIAL ? (env.SOCIAL.getByName("social-v1") as unknown as SocialBackend) : null,
+          reply: (body, status = 200, extra) => {
+            const headers = new Headers({ "Content-Type": "application/json", ...corsHeadersFor(request, env), ...extra });
+            if (!extra?.["Cache-Control"]) headers.set("Cache-Control", "no-store");
+            applyBaselineSecurityHeaders(headers);
+            return new Response(JSON.stringify(body), { status, headers });
+          },
+          originOk: originAllowed(request.headers.get("Origin"), allowedOriginHostsFromEnv(env)),
+          ip: clientIp(request),
+          columnsFor: socialColumnsFor,
+          cache: typeof caches !== "undefined" ? caches.default : undefined,
+          waitUntil: (p) => ctx.waitUntil(p),
+        });
       }
       if (url.pathname === "/oembed" && request.method === "GET") {
         return await handleOEmbed(url, env);

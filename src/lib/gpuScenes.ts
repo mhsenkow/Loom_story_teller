@@ -39,6 +39,7 @@ import {
 import { chartTypeRamp } from "./chartType";
 import { pickDataCubeEncoding, rankCubeDimensions } from "./dataCube";
 import { orientIsoCell, resolveIsoFloorOrient } from "./isoOrient";
+import { drawProjectedAxis, type AxisLabelBox } from "./projectedAxis";
 
 export * from "./gpuScenesRec";
 import type {
@@ -56,7 +57,7 @@ import { extractGpuScenePoints } from "./gpuScenesRec";
 type Vec3 = [number, number, number];
 
 /** Orbit camera frame shared by the scatter3d / firefly fallbacks. */
-type OrbitFrame = { cx: number; cy: number; scale: number; yaw: number; pitch: number };
+export type OrbitFrame = { cx: number; cy: number; scale: number; yaw: number; pitch: number };
 
 function orbitFrame(w: number, h: number, pad: number, yaw: number, pitch: number, zoom: number, mini: boolean): OrbitFrame {
   // Sit the scene under the title band; keep a gutter for axis labels.
@@ -82,8 +83,25 @@ function projectUnit(f: OrbitFrame, nx: number, ny: number, nz: number): { sx: n
   return { sx: f.cx + x1 * f.scale * persp, sy: f.cy - y2 * f.scale * persp, depth: z2 };
 }
 
-function norm(v: number, lo: number, hi: number): number {
-  return ((v - lo) / (hi - lo || 1)) * 2 - 1;
+export function normalizeOrbitValue(v: number, lo: number, hi: number): number {
+  return hi === lo ? 0 : ((v - lo) / (hi - lo)) * 2 - 1;
+}
+
+const norm = normalizeOrbitValue;
+
+/** One camera projection for CPU marks, GPU uniforms, and hover targets. */
+export function orbitSceneLayout(packed: GpuScenePacked, w: number, h: number, pad: number, opts: Partial<GpuSceneRenderOpts>) {
+  const mini = inferMini(opts as GpuSceneRenderOpts, w, h, pad);
+  const frame = orbitFrame(w, h, pad, opts.yaw ?? 0.55, opts.pitch ?? 0.35, opts.zoom ?? 1, mini);
+  const projected = packed.points.map(p => ({
+    ...projectUnit(frame, norm(p.x, packed.xMin, packed.xMax), norm(p.y, packed.yMin, packed.yMax), norm(p.z, packed.zMin, packed.zMax)), p,
+  })).sort((a, b) => b.depth - a.depth);
+  return { frame, projected };
+}
+
+/** Frame and axes over accelerated points, using the same camera as captures. */
+export function drawOrbitSceneChrome(ctx: CanvasRenderingContext2D, packed: GpuScenePacked, w: number, h: number, pad: number, opts: GpuSceneRenderOpts): void {
+  drawOrbitPoints("scatter3d", ctx, packed, w, h, pad, opts.colors, resolveChartInk(opts), opts.fontFamily ?? "Inter", inferMini(opts, w, h, pad), opts, true);
 }
 
 const UNIT_CORNERS: Vec3[] = [];
@@ -154,13 +172,13 @@ export function fireflyPalette(colors: string[], background: string): string[] {
 }
 
 /** Flat x × y plot frame shared by the Canvas fallback and the WebGPU firefly pass. */
-export function fireflyLayout(packed: GpuScenePacked, w: number, h: number, pad: number, mini = false) {
+export function fireflyLayout(packed: GpuScenePacked, w: number, h: number, pad: number, mini = false, axisFontSize?: number) {
   const xs = packed.xCategories
     ? { min: -0.5, max: packed.xCategories.length - 0.5, ticks: packed.xCategories.map((_, i) => i), step: 1 }
     : niceTicks(packed.xMin, packed.xMax, 5, false);
   const ys = niceTicks(packed.yMin, packed.yMax, 5, false);
   const inset = mini ? 6 : pad;
-  const left = inset;
+  const left = mini ? inset : Math.min(w * 0.3, Math.max(inset, chartTypeRamp(axisFontSize).tick * 4 + 24));
   const right = w - inset;
   const top = inset;
   const bottom = h - inset;
@@ -201,7 +219,7 @@ export function drawFireflyChrome(
 ): void {
   const ink = resolveChartInk(opts);
   const font = opts.fontFamily ?? "Inter";
-  const { xs, ys, left, right, top, bottom } = fireflyLayout(packed, w, h, pad);
+  const { xs, ys, left, right, top, bottom } = fireflyLayout(packed, w, h, pad, false, opts.axisFontSize);
   const look: ChartLookOpts = {
     fontFamily: font,
     themeMuted: ink.muted,
@@ -217,7 +235,7 @@ export function drawFireflyChrome(
   drawChartGrid(ctx, w, h, pad, { ...look, themeBorder: inkTint(ink, 0.15), gridOpacity: opts.gridOpacity ?? 1 }, { x: [xs.min, xs.max], y: [ys.min, ys.max] });
   drawAxisFrame(ctx, w, h, pad, { ...look, axisLineColor: opts.axisLineColor ?? inkTint(ink, 0.65) });
   if (packed.xCategories) {
-    const { sx } = fireflyLayout(packed, w, h, pad);
+    const { sx } = fireflyLayout(packed, w, h, pad, false, opts.axisFontSize);
     ctx.font = fontOf(chartTypeRamp(opts.axisFontSize).tick, font);
     ctx.fillStyle = ink.muted;
     ctx.textAlign = "center";
@@ -245,7 +263,7 @@ function drawFireflyField(
   opacity: number,
   opts: GpuSceneRenderOpts,
 ): void {
-  const { sx, sy, left, right, top, bottom } = fireflyLayout(packed, w, h, pad, mini);
+  const { sx, sy, left, right, top, bottom } = fireflyLayout(packed, w, h, pad, mini, opts.axisFontSize);
   const pts = fireflyGlowPoints(packed);
   const crowd = fireflyDensity(pts.length, right - left, bottom - top);
   const base = radiusFromPointSize(opts.pointSize, 3) * (mini ? 0.7 : 1);
@@ -298,6 +316,7 @@ function drawOrbitPoints(
   font: string,
   mini: boolean,
   opts: GpuSceneRenderOpts,
+  chromeOnly = false,
 ): void {
   const { points, xMin, xMax, yMin, yMax, zMin, zMax } = packed;
   const f = orbitFrame(w, h, pad, opts.yaw ?? 0.55, opts.pitch ?? 0.35, opts.zoom ?? 1, mini);
@@ -340,8 +359,7 @@ function drawOrbitPoints(
     ctx.restore();
   }
 
-  const projected = points.map((p) => ({ ...projectUnit(f, norm(p.x, xMin, xMax), norm(p.y, yMin, yMax), norm(p.z, zMin, zMax)), p }));
-  projected.sort((a, b) => b.depth - a.depth);
+  const projected = chromeOnly ? [] : orbitSceneLayout(packed, w, h, pad, opts).projected;
   const n = projected.length;
   const density = n > 4000 ? 0.65 : n > 1500 ? 0.8 : 1;
 
@@ -425,7 +443,7 @@ function drawOrbitPoints(
   const zMid = projectUnit(f, zEdge[0][0], -1, 0);
   const zSide = Math.sign(zMid.sx - center.sx) || 1;
   const yEdge = pickEdge(yCands, (m) => -zSide * (m.sx - center.sx));
-  const look = { ink, font, axisFontSize: opts.axisFontSize };
+  const look = { ink, font, axisFontSize: opts.axisFontSize, w, h, occupied: [] as AxisLabelBox[] };
   drawEdgeAxis(ctx, f, xEdge, xMin, xMax, fields?.x ?? "x", center, look, packed.xCategories);
   drawEdgeAxis(ctx, f, zEdge, zMin, zMax, fields?.z ?? "z", center, look);
   drawEdgeAxis(ctx, f, yEdge, yMin, yMax, fields?.y ?? "y", center, look);
@@ -440,52 +458,28 @@ function drawEdgeAxis(
   max: number,
   title: string,
   center: { sx: number; sy: number },
-  look: { ink: ChartInk; font: string; axisFontSize?: number },
+  look: { ink: ChartInk; font: string; axisFontSize?: number; w: number; h: number; occupied: AxisLabelBox[] },
   categories?: string[],
 ): void {
   const a = projectUnit(f, ...edge[0]);
   const b = projectUnit(f, ...edge[1]);
   const len = Math.hypot(b.sx - a.sx, b.sy - a.sy);
   if (len < 24) return;
-  let ox = -(b.sy - a.sy);
-  let oy = b.sx - a.sx;
-  const mx = (a.sx + b.sx) / 2 - center.sx;
-  const my = (a.sy + b.sy) / 2 - center.sy;
-  if (ox * mx + oy * my < 0) { ox = -ox; oy = -oy; }
-  const ol = Math.hypot(ox, oy) || 1;
-  ox /= ol;
-  oy /= ol;
-  ctx.save();
-  ctx.font = fontOf(chartTypeRamp(look.axisFontSize).tick, look.font);
-  ctx.fillStyle = look.ink.muted;
-  ctx.textAlign = ox > 0.35 ? "left" : ox < -0.35 ? "right" : "center";
-  ctx.textBaseline = oy > 0.35 ? "top" : oy < -0.35 ? "bottom" : "middle";
   const nt = niceTicks(min, max, Math.max(2, Math.min(5, Math.floor(len / 60))), false);
-  const span = max - min || 1;
-  const ticks = categories ? categories.map((_, i) => i) : nt.ticks;
-  const labelOf = (v: number) => (categories ? fitTextEllipsis(ctx, categories[v] ?? "", 90) : formatAxisValue(v, nt.step));
-  let lastX = -Infinity;
-  let lastY = -Infinity;
-  let widest = 0;
-  for (const v of ticks) {
-    const t = (v - min) / span;
-    if (t < -1e-6 || t > 1 + 1e-6) continue;
-    const px = a.sx + (b.sx - a.sx) * t + ox * 6;
-    const py = a.sy + (b.sy - a.sy) * t + oy * 6;
-    const label = labelOf(v);
-    const tw = ctx.measureText(label).width;
-    // Skip labels that would collide with the previous one along this edge.
-    if (Math.abs(px - lastX) < tw + 8 && Math.abs(py - lastY) < chartTypeRamp(look.axisFontSize).tick + 4) continue;
-    ctx.fillText(label, px, py);
-    lastX = px;
-    lastY = py;
-    widest = Math.max(widest, tw);
-  }
-  ctx.font = fontOf(chartTypeRamp(look.axisFontSize).tick, look.font, 600);
-  ctx.fillStyle = look.ink.text;
-  const reach = 6 + (Math.abs(ox) > 0.35 ? widest + 8 : chartTypeRamp(look.axisFontSize).tick + 6);
-  ctx.fillText(fitTextEllipsis(ctx, title, Math.max(60, len)), (a.sx + b.sx) / 2 + ox * reach, (a.sy + b.sy) / 2 + oy * reach);
-  ctx.restore();
+  const ticks = (categories ? categories.map((_, i) => i) : nt.ticks).filter(v => v >= min && v <= max);
+  drawProjectedAxis(ctx, {
+    start: { x: a.sx, y: a.sy }, end: { x: b.sx, y: b.sy }, center: { x: center.sx, y: center.sy },
+    ticks, pointOf: value => {
+      const t = max === min ? 0.5 : (value - min) / (max - min);
+      // Project the actual world coordinate: interpolating screen endpoints
+      // linearly misplaced tick values on edges receding in perspective.
+      const p = projectUnit(f, ...edge[0].map((v, i) => v + (edge[1][i]! - v) * t) as Vec3);
+      return { x: p.sx, y: p.sy };
+    },
+    format: value => categories ? fitTextEllipsis(ctx, categories[value] ?? "", 80) : formatAxisValue(value, nt.step),
+    title, width: look.w, height: look.h, text: look.ink.text, muted: look.ink.muted,
+    rule: look.ink.border, fontFamily: look.font, axisFontSize: look.axisFontSize, occupied: look.occupied,
+  });
 }
 
 function drawTrailRibbons(
@@ -543,7 +537,7 @@ function drawTrailRibbons(
   // Round domains so gridlines / ticks land on whole values and paths never touch the frame.
   const xs = niceTicks(xMin, xMax, 5, true);
   const ys = niceTicks(yMin, yMax, 5, true);
-  const left = pad;
+  const left = mini ? pad : Math.min(w * 0.3, Math.max(pad, chartTypeRamp(axisFontSize).tick * 4 + 24));
   const right = w - pad;
   const top = pad;
   const bottom = h - pad;
@@ -557,6 +551,7 @@ function drawTrailRibbons(
     themeBorder: ink.border,
     themeText: ink.text,
     axisFontSize,
+    plotBounds: { left, right, top, bottom },
   };
   if (!mini) {
     drawChartGrid(ctx, w, h, pad, { ...look, themeBorder: inkTint(ink, 0.14), gridOpacity: 1 }, { x: [xs.min, xs.max], y: [ys.min, ys.max] });
@@ -657,7 +652,8 @@ function drawQuakeTerrain(
   const keyH = mini ? 0 : rampKeyHeight(true, false, opts.axisFontSize) + 8;
   const side = mini ? 4 : Math.max(12, pad * 0.4);
   const top = pad;
-  const bottom = (mini ? pad : Math.max(12, pad * 0.4)) + keyH;
+  const axisRoom = mini ? 0 : chartTypeRamp(opts.axisFontSize).tick * 2;
+  const bottom = (mini ? pad : Math.max(12, pad * 0.4)) + keyH + axisRoom;
   const availW = Math.max(40, w - 2 * side);
   const availH = Math.max(40, h - top - bottom);
   // Diamond floor: half-cell step sx horizontally, sy = sx/2 vertically; peaks take ≤45% of height.
@@ -749,7 +745,7 @@ function drawQuakeTerrain(
   const f = packed.fields;
   drawRampKey(ctx, {
     x: side,
-    y: h - bottom + 6,
+    y: h - bottom + axisRoom + 6,
     width: Math.max(90, Math.min(200, w * 0.36)),
     min: base0,
     max: hi,
@@ -759,55 +755,26 @@ function drawQuakeTerrain(
     fontFamily: font, axisFontSize: opts.axisFontSize,
   });
 
-  // Isometric floor edges + tick labels (aligned with the diamond, not screen axes).
-  const corners = {
-    o: projectFloor(0, 0),
-    x: projectFloor(cols - 1, 0),
-    y: projectFloor(0, rows - 1),
-    far: projectFloor(cols - 1, rows - 1),
-  };
+  // The visible front edges keep floor labels clear of the raised cells.
+  const corners = { o: projectFloor(0, 0) };
+  const xTicks = niceTicks(xMin, xMax, 4, false);
+  const yTicks = niceTicks(yMin, yMax, 4, false);
+  const xEdge = projectFloor((cols - 1) / 2, rows - 1).y > projectFloor((cols - 1) / 2, 0).y ? rows - 1 : 0;
+  const yEdge = projectFloor(cols - 1, (rows - 1) / 2).y > projectFloor(0, (rows - 1) / 2).y ? cols - 1 : 0;
+  const occupied: AxisLabelBox[] = [];
+  const axis = { center: projectFloor((cols - 1) / 2, (rows - 1) / 2), width: w, height: h - keyH,
+    text: ink.text, muted: ink.muted, rule: inkTint(ink, 0.4), fontFamily: font, axisFontSize: opts.axisFontSize, occupied };
+  drawProjectedAxis(ctx, { ...axis, start: projectFloor(0, xEdge), end: projectFloor(cols - 1, xEdge),
+    ticks: xTicks.ticks, pointOf: v => projectFloor((v - xMin) / (xMax - xMin || 1) * (cols - 1), xEdge),
+    format: v => formatAxisValue(v, xTicks.step), title: f?.x ?? "x" });
+  drawProjectedAxis(ctx, { ...axis, start: projectFloor(yEdge, 0), end: projectFloor(yEdge, rows - 1),
+    ticks: yTicks.ticks, pointOf: v => projectFloor(yEdge, (v - yMin) / (yMax - yMin || 1) * (rows - 1)),
+    format: v => formatAxisValue(v, yTicks.step), title: f?.y ?? "y" });
   ctx.save();
-  ctx.strokeStyle = inkTint(ink, 0.4);
-  ctx.lineWidth = 1.25;
-  ctx.beginPath();
-  ctx.moveTo(corners.o.x, corners.o.y);
-  ctx.lineTo(corners.x.x, corners.x.y);
-  ctx.moveTo(corners.o.x, corners.o.y);
-  ctx.lineTo(corners.y.x, corners.y.y);
-  ctx.stroke();
-
-  const xTicks = niceTicks(xMin, xMax, 4, true);
-  const yTicks = niceTicks(yMin, yMax, 4, true);
   ctx.font = fontOf(chartTypeRamp(opts.axisFontSize).tick, font);
   ctx.fillStyle = ink.muted;
-  ctx.textBaseline = "top";
-  for (const v of xTicks.ticks) {
-    const t = (v - xMin) / (xMax - xMin || 1);
-    const c = Math.max(0, Math.min(cols - 1, Math.round(t * (cols - 1))));
-    const p = projectFloor(c, 0);
-    ctx.strokeStyle = inkTint(ink, 0.22);
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    ctx.lineTo(p.x - 4, p.y + 7);
-    ctx.stroke();
-    ctx.textAlign = "center";
-    ctx.fillText(formatAxisValue(v, xTicks.step), p.x - 2, p.y + 8);
-  }
-  for (const v of yTicks.ticks) {
-    const t = (v - yMin) / (yMax - yMin || 1);
-    const r = Math.max(0, Math.min(rows - 1, Math.round(t * (rows - 1))));
-    const p = projectFloor(0, r);
-    ctx.strokeStyle = inkTint(ink, 0.22);
-    ctx.beginPath();
-    ctx.moveTo(p.x, p.y);
-    ctx.lineTo(p.x + 4, p.y + 7);
-    ctx.stroke();
-    ctx.textAlign = "left";
-    ctx.fillText(formatAxisValue(v, yTicks.step), p.x + 6, p.y + 6);
-  }
-
   // Height pole at the origin corner — same perspective as cell extrusion.
-  const zTicks = niceTicks(base0, hi, 3, true);
+  const zTicks = niceTicks(base0, hi, Math.max(1, Math.floor(elevMax / (chartTypeRamp(opts.axisFontSize).tick + 6))), false);
   const poleTop = projectFloor(0, 0, elevMax);
   ctx.strokeStyle = inkTint(ink, 0.45);
   ctx.beginPath();
@@ -825,12 +792,6 @@ function drawQuakeTerrain(
   ctx.font = fontOf(chartTypeRamp(opts.axisFontSize).tick, font, 600);
   ctx.fillStyle = ink.text;
   ctx.textBaseline = "top";
-  const xm = projectFloor((cols - 1) * 0.55, 0);
-  const ym = projectFloor(0, (rows - 1) * 0.55);
-  ctx.textAlign = "center";
-  if (f?.x) ctx.fillText(fitTextEllipsis(ctx, `${f.x} →`, floorW * 0.42), xm.x, xm.y + 22);
-  ctx.textAlign = "left";
-  if (f?.y) ctx.fillText(fitTextEllipsis(ctx, `← ${f.y}`, floorW * 0.42), ym.x + 10, ym.y + 18);
   if (f?.z) {
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";

@@ -10,7 +10,7 @@
 import { useLoomStore } from "@/lib/store";
 import { viewModeName } from "@/lib/viewModes";
 import { applyQueryResult } from "@/lib/datasetPipeline";
-import { queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
+import { isDesktop, queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
 import { STREAM_SQL_SNIPPETS, SOURCE_SQL_SNIPPETS } from "@/lib/recommendations";
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { SqlEditor } from "@/components/SqlEditor";
@@ -39,6 +39,7 @@ export function QueryView() {
   } = useLoomStore();
 
   const isStream = selectedFile?.path === "stream://wiki";
+  const desktop = isDesktop();
   const pathSourceKind = sourceKindFromPath(selectedFile?.path);
   const sourceTable = pathSourceKind ? sourceTableName(pathSourceKind) : undefined;
   const activeTable = isStream ? "wiki_stream" : sourceTable ?? "loom_active";
@@ -173,6 +174,24 @@ export function QueryView() {
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {queryStatusMessage}
       </p>
+      {!desktop && (
+        <div
+          role="note"
+          className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-loom-border bg-loom-elevated/60 px-3 py-2 text-xs text-loom-muted"
+        >
+          <span className="min-w-0 flex-1">
+            SQL runs in the Loom desktop app. Here you can read and copy these queries — the
+            table, charts and Dive already work with this data.
+          </span>
+          <button
+            type="button"
+            className="loom-btn-ghost min-h-9 px-2 text-xs"
+            onClick={() => useLoomStore.getState().setViewMode("explorer")}
+          >
+            Back to the table
+          </button>
+        </div>
+      )}
       {/* Editor */}
       <div className="border-b border-loom-border bg-loom-surface/50 p-2.5 sm:p-3 space-y-2">
         <div className="flex items-center gap-1.5 sm:gap-2 mb-1 sm:mb-2 flex-wrap">

@@ -141,7 +141,7 @@ export default function ExportTab() {
       }
     } catch (e) {
       console.warn("Copy PNG failed:", e);
-      setCopyError("Clipboard access denied. Use HTTPS/localhost and allow clipboard permission.");
+      setCopyError("Your browser blocked copying. Allow clipboard access, or use Download instead.");
     } finally {
       setBusy(null);
     }
@@ -159,7 +159,7 @@ export default function ExportTab() {
       }
     } catch (e) {
       console.warn("Copy SVG failed:", e);
-      setCopyError("Clipboard access denied. Use a secure context (HTTPS or localhost) and allow clipboard permission.");
+      setCopyError("Your browser blocked copying. Allow clipboard access, or use Download instead.");
     }
   }, [svgExportHandler]);
 
@@ -235,7 +235,7 @@ export default function ExportTab() {
   const handleCarouselZip = useCallback(async () => {
     const dashId = activeDashboardId ?? dashboards[0]?.id;
     if (!dashId) {
-      setCopyError("Create a story dashboard first (Dashboards → Tell a story).");
+      setCopyError("Make a story first: tap Tell a story in the chart’s Ideas.");
       return;
     }
     setBusy("carousel");
@@ -557,7 +557,7 @@ export default function ExportTab() {
         <div className="loom-card space-y-2">
           {!hasStory && (
             <p className="text-2xs text-loom-muted py-1">
-              Build a story under Dashboards → Tell a story, then export slides here.
+              Make a story first — tap Tell a story in the chart’s Ideas — then export slides here.
             </p>
           )}
           <button
@@ -583,12 +583,12 @@ export default function ExportTab() {
             onClick={handlePublishStory}
             disabled={!!busy || !hasStory}
             className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent disabled:opacity-50"
-            title="Public multi-slide story page — for a single chart link use Share → Get link"
+            title="Public multi-slide story page — for a single chart, use Share → Copy link"
           >
             {busy === "publish" ? "Publishing…" : "Publish dashboard story link"}
           </button>
           <p className="text-2xs text-loom-muted leading-snug">
-            For one chart + optional data snapshot, use Share → Get link instead.
+            For one chart (with its data if you like), use Share → Copy link instead.
           </p>
         </div>
       </div>
@@ -658,7 +658,7 @@ export default function ExportTab() {
                 aria-label="Copy chart and visual config as JSON"
                 className="w-full px-3 py-2 text-xs font-medium text-loom-text bg-loom-elevated border border-loom-border rounded hover:border-loom-accent"
               >
-                {configFeedback ? "Copied!" : "Copy encoding + look (JSON)"}
+                {configFeedback ? "Copied!" : "Copy fields + look (JSON)"}
               </button>
             </>
           )}

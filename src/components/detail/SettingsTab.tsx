@@ -11,6 +11,7 @@ import { clearPersistedPreferences } from "@/lib/persist";
 import { Button } from "@/components/ui/Button";
 import { WorkspaceBackupControls } from "@/components/WorkspaceBackupControls";
 import { YourSourcesSettings } from "@/components/YourSourcesSettings";
+import { CommunitySettings } from "./CommunitySettings";
 import { useShallow } from "zustand/react/shallow";
 import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
@@ -43,7 +44,8 @@ import {
   type AppFont,
   type FacesSource,
 } from "@/lib/lookSystem";
-import { FONT_CHOICES, FONT_GROUPS, chartFontStack, resolveChartFontFamily } from "@/lib/fontCatalog";
+import { FONT_CHOICES, chartFontStack, resolveChartFontFamily } from "@/lib/fontCatalog";
+import { FontPicker } from "@/components/FontPicker";
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
 import {
@@ -159,6 +161,7 @@ export default function SettingsTab() {
         </button>
       </div>
       <YourSourcesSettings />
+      <CommunitySettings />
       <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">What’s new</h3>
         <p className="text-2xs text-loom-muted mb-2">Recent features and fixes{CHANGELOG[0] ? ` · latest ${CHANGELOG[0].date}` : ""}.</p>
@@ -253,39 +256,16 @@ export default function SettingsTab() {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-loom-text mb-1"><label htmlFor="app-typeface">Typeface</label></h3>
-        <select id="app-typeface" aria-label="App typeface"
-          value={appSettings.font}
-          onChange={(e) => setAppSettings((prev) => ({ ...prev, font: e.target.value as AppFont }))}
-          className="loom-input w-full text-xs py-1.5"
-        >
-          {FONT_GROUPS.map((group) => (
-            <optgroup key={group.label} label={group.label}>
-              {group.fonts.map((id) => <option key={id} value={id}>{FONT_CHOICES[id].family}{appSettings.faces !== "web" ? " · device fallback" : ""}</option>)}
-            </optgroup>
-          ))}
-        </select>
-        <div className="flex gap-1.5 mt-2">
-          {(["local", "web"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setAppSettings((prev) => ({ ...prev, faces: f as FacesSource }))}
-              aria-pressed={(appSettings.faces === "web" ? "web" : "local") === f}
-              className={`px-2 py-1 text-2xs rounded border ${
-                (appSettings.faces === "web" ? "web" : "local") === f ? "border-loom-accent text-loom-text" : "border-loom-border text-loom-muted"
-              }`}
-            >
-              {f === "web" ? "Download fonts" : "Device fonts"}
-            </button>
-          ))}
-        </div>
-        <p className="text-2xs text-loom-muted mt-2">{FONT_CHOICES[appSettings.font].description}</p>
-        <div className="loom-type-preview" style={{ fontFamily: chartFontStack(resolveChartFontFamily(undefined, appSettings.font, appSettings.faces)) }}>
+        <FontPicker label="App typeface" value={FONT_CHOICES[appSettings.font].family}
+          onChange={(family) => {
+            const font = (Object.keys(FONT_CHOICES) as AppFont[]).find((id) => FONT_CHOICES[id].family === family);
+            if (font) setAppSettings((prev) => ({ ...prev, font }));
+          }} />
+        <div className="loom-type-preview" style={{ fontFamily: chartFontStack(FONT_CHOICES[appSettings.font].family) }}>
           <span>Clear stories. Readable details.</span>
           <span className="tabular-nums">Aa Bb 0123456789 · −8.2%</span>
         </div>
-        <p className="text-2xs text-loom-muted mt-1">{appSettings.faces === "web" ? "Downloads the selected face from Google Fonts. Device fonts appear while it loads or when offline." : "No font downloads. Uses system sans, Georgia, or system mono to match your selection."} Charts set to App typeface follow this choice.</p>
+        <p className="text-2xs text-loom-muted mt-2">All 16 typefaces are included with Loom. No third-party font service. Charts set to App typeface follow this choice.</p>
       </div>
 
       <div>

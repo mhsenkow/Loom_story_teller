@@ -35,7 +35,7 @@ export type ChartMonitorResult = { draft: MonitorDraft } | { error: string };
 export function monitorDraftFromChart(rec: ChartRecommendation | null, filePath: string | null | undefined, link: ChartLink | null, title?: string): ChartMonitorResult {
   if (!rec) return { error: "Open a chart first" };
   const kind: SourceKind | null = sourceKindFromPath(filePath);
-  if (!kind) return { error: "Monitors watch live feeds. Open a feed from Data & sources to monitor its charts." };
+  if (!kind) return { error: "Monitors watch live feeds. Open a live feed from the Data library to watch its charts." };
   const def = SOURCE_BY_KIND[kind];
   const typeOf = (c?: string | null) => (c ? def.types[def.columns.indexOf(c)] : undefined);
   const isTime = (c?: string | null) => typeOf(c) === "TIMESTAMP" || typeOf(c) === "DATE";

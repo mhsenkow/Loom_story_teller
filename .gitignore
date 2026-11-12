@@ -33,3 +33,12 @@ dist/
 coverage/
 .nyc_output/
 *.tsbuildinfo
+
+# Local signing / Play upload secrets (never commit)
+.secrets/
+android/keystore.properties
+android/*.jks
+android/*.keystore
+
+# Playwright run artifacts
+test-results/

@@ -11,6 +11,7 @@ import { inferType } from "./recs/columns";
 import { ODD_NON_CARTESIAN, isOddChartKind } from "./oddCharts";
 import { GPU_SCENE_NON_CARTESIAN, isGpuSceneKind } from "./gpuScenes";
 import { GEO_MAP_NON_CARTESIAN, isGeoMapKind } from "./geoMaps";
+import { chartNumber } from "./chartNumbers";
 
 export interface ChartRenderIssue {
   title: string;
@@ -21,7 +22,7 @@ export interface ChartRenderIssue {
 /** Kinds where Canvas renderers bail out without a Y column (no count fallback). */
 const KINDS_REQUIRING_Y_FIELD = new Set<string>([
   "scatter", "bubble", "heatmap", "strip", "box", "violin",
-  "dumbbell", "ridgeline", "hexbin", "parallel",
+  "dumbbell", "ridgeline", "hexbin",
   "beeswarm", "voronoi", "isoScatter", "contour", "pyramid", "slope", "bump", "stream", "horizon",
   "dataCube", "sparkGrid", "connectedScatter", "stripes", "errorBars",
 ]);
@@ -41,7 +42,7 @@ export function getChartRenderIssue(
     if (chart.timeWindow && chart.timeWindow !== "all") {
       return {
         title: "No rows in this window",
-        message: "Nothing in the sample falls inside the Time window. Pick a wider window, or All, in Encoding.",
+        message: "Nothing in the sample falls inside the Time window. Pick a wider window, or All, in Fields.",
         code: "no_rows",
       };
     }
@@ -49,7 +50,8 @@ export function getChartRenderIssue(
   }
 
   const xi = cols.indexOf(chart.xField);
-  if (xi < 0) {
+  const caps = chartCapabilities(chart.kind);
+  if (xi < 0 && caps.xChannel) {
     return {
       title: "Column not found",
       message: `The X field “${chart.xField}” is missing from the current sample. Schema may have changed — pick another column.`,
@@ -57,7 +59,7 @@ export function getChartRenderIssue(
     };
   }
 
-  if (chart.yField) {
+  if (chart.yField && caps.yChannel) {
     const yi = cols.indexOf(chart.yField);
     if (yi < 0) {
       return {
@@ -69,12 +71,12 @@ export function getChartRenderIssue(
   } else if (KINDS_REQUIRING_Y_FIELD.has(chart.kind)) {
     return {
       title: "Y field required",
-      message: `This chart type needs a Y column. Choose one in Encoding, or pick a working suggestion below.`,
+      message: `This chart type needs a Y column. Choose one in Fields, or pick a working suggestion below.`,
       code: "bad_y",
     };
   }
 
-  if (chart.colorField) {
+  if (chart.colorField && caps.colorChannel) {
     const ci = cols.indexOf(chart.colorField);
     if (ci < 0) {
       return {
@@ -85,7 +87,7 @@ export function getChartRenderIssue(
     }
   }
 
-  if (chart.sizeField) {
+  if (chart.sizeField && caps.sizeChannel) {
     const si = cols.indexOf(chart.sizeField);
     if (si < 0) {
       return {
@@ -140,19 +142,20 @@ export function getChartRenderIssue(
     }
   }
 
-  if (chart.kind === "radar" || chart.kind === "parallel") {
-    const skipIdx = chart.colorField ? cols.indexOf(chart.colorField) : -1;
+  if (chart.kind === "radar" || chart.kind === "parallel" || chart.kind === "corrMatrix") {
+    const skipIdx = caps.colorChannel && chart.colorField ? cols.indexOf(chart.colorField) : -1;
     let numericCols = 0;
     for (let c = 0; c < cols.length; c++) {
       if (c === skipIdx) continue;
-      const sampleN = rows.slice(0, 24).filter(r => r[c] !== null && r[c] !== "" && typeof r[c] !== "boolean" && !isNaN(Number(r[c]))).length;
-      if (sampleN >= Math.min(12, rows.length * 0.4)) numericCols++;
+      const values = rows.slice(0, 24).map(r => chartNumber(r[c])).filter(Number.isFinite);
+      if (values.length >= Math.min(12, rows.length * 0.4) && (chart.kind !== "corrMatrix" || new Set(values).size > 1)) numericCols++;
     }
-    const need = chart.kind === "parallel" ? 3 : 3;
+    const need = chart.kind === "corrMatrix" ? 2 : 3;
     if (numericCols < need) {
       return {
         title: "Not enough numeric columns",
-        message: chart.kind === "parallel"
+        message: chart.kind === "corrMatrix" ? "Correlation needs at least two numeric measures that vary. Choose another chart for a single measure."
+          : chart.kind === "parallel"
           ? "Parallel coordinates need at least three numeric measures in the sample (excluding the color field)."
           : "Radar needs at least three numeric measures in the sample (excluding the color field).",
         code: "insufficient_numeric",

@@ -14,6 +14,7 @@ import { type BarFacetHitPayload, formatTooltipNumber } from "../chartTooltip";
 import { type YAggregateOption } from "../recommendations";
 import { axisFont, barPath, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
 import { contrastingInk } from "../chartLayout";
+import { chartTypeRamp } from "../chartType";
 import { DEFAULT_COLORS } from "./shared";
 
 export type BarModel = { entries: [string, number][]; rowCounts: Map<string, number>; ordered: boolean };
@@ -33,7 +34,7 @@ export function computeBarModel(rows: unknown[][], xi: number, yi: number, agg: 
       if (!isNaN(v)) groups.get(k)!.push(v);
     }
   }
-  const all = [...groups.entries()].map(([label, vals]) => [label, aggregateValues(vals, agg)] as [string, number]);
+  const all = [...groups.entries()].filter(([, vals]) => vals.length > 0).map(([label, vals]) => [label, aggregateValues(vals, agg)] as [string, number]);
   const cls = classifyKeys(all.map((e) => e[0]));
   if (cls.kind !== "band" && cls.sorted.length >= 3 && cls.sorted.length <= Math.max(40, limit)) {
     const byKey = new Map(all);
@@ -89,7 +90,7 @@ export function renderFullBar(
     const bounds = { ...rect, left: rect.left + gutter };
     const band = (horizontal ? bounds.bottom - bounds.top : bounds.right - bounds.left) / nx;
     const cName = fieldLabel(opts, ci, "group");
-    const colorOf = (i: number) => cols[i % cols.length]!;
+    const colorOf = (i: number) => cols[(opts?.seriesIndices?.get(subLabels[i]!) ?? i) % cols.length]!;
     setLegend(opts, subLabels.map((label, si) => ({ label, color: colorOf(si) })));
     const plotted = stackMode === "percent" ? grid.map(row => {
       const total = row.reduce((sum, v) => sum + Math.abs(v), 0) || 1;
@@ -197,7 +198,7 @@ export function renderFullBar(
     vMin = opts.sharedValueDomain.min;
     vMax = opts.sharedValueDomain.max;
   }
-  const colorOf = (i: number) => (colorByCategory ? cols[i % cols.length]! : cols[0]!);
+  const colorOf = (i: number) => (colorByCategory ? cols[(opts?.seriesIndices?.get(entries[i]![0]) ?? i) % cols.length]! : cols[0]!);
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
   const summaryFor = (label: string, val: number) => {
     const rowsIn = bm.rowCounts.get(label) ?? 0;
@@ -230,6 +231,7 @@ export function renderFullBar(
       : linear(vMin, hiV, x0, x0 + plotW);
     if (opts) opts.scales = { x: X, valueAxis: "x", rect: { left: x0, top: rect.top, right: x0 + plotW, bottom: rect.bottom } };
     const barT = Math.max(2, Math.min(band * 0.72, 30));
+    const labelEvery = Math.max(1, Math.ceil((chartTypeRamp(opts?.axisFontSize).tick + 4) / Math.max(1, band)));
     const centers: number[] = [];
     for (const g of ghostCompare) {
       const yMid = rect.top + band * (g.at + 0.5);
@@ -263,12 +265,13 @@ export function renderFullBar(
       ctx.textBaseline = "middle";
       const tipRight = (val >= 0) !== reverse;
       ctx.textAlign = tipRight ? "left" : "right";
-      ctx.fillText(formatDataValue(val), tipRight ? left + len + 5 : left - 5, yMid);
+      if (i % labelEvery === 0) ctx.fillText(formatDataValue(val), tipRight ? left + len + 5 : left - 5, yMid);
       pushHit(opts, {
         shape: "rect", x: rect.left, y: rect.top + band * i, w: rect.right - rect.left, h: band,
         mark: { x: Math.min(left, left + len), y: yMid - barT / 2, w: Math.abs(len), h: barT },
         match: [[xi, label]],
         summary: summaryFor(label, val),
+        reading: { label, value: val, measure: vTitle },
       });
     });
     ctx.textBaseline = "alphabetic";
@@ -329,6 +332,7 @@ export function renderFullBar(
       mark: { x: rect.left + band * (i + 0.5) - barW / 2, y: Math.min(Y(0), Y(val)), w: barW, h: Math.max(val === 0 ? 0 : 1, Math.abs(Y(val) - Y(0))) },
       match: [[xi, label]],
       summary: summaryFor(label, val),
+      reading: { label, value: val, measure: vTitle },
     });
   });
   ctx.globalAlpha = 1;
@@ -374,6 +378,7 @@ export function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown
         shape: "rect", x: x0, y: rect.top, w: x1 - x0, h: rect.bottom - rect.top,
         match: [],
         rowIndex: firstRow[i]!,
+        reading: { label: `${formatAxisValue(a, bins.step)} – ${formatAxisValue(b, bins.step)}`, value: c, measure: "Count" },
         summary: {
           columns: [name, "Count"],
           row: [`${formatAxisValue(a, bins.step)} – ${formatAxisValue(b, bins.step)}`, formatTooltipNumber(c)],

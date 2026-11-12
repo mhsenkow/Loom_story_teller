@@ -260,6 +260,7 @@ const TIME_INTERVALS: TimeInterval[] = [
   { ms: DAY, unit: "ms", n: DAY },
   { ms: 2 * DAY, unit: "ms", n: 2 * DAY },
   { ms: 7 * DAY, unit: "ms", n: 7 * DAY },
+  { ms: 14 * DAY, unit: "ms", n: 14 * DAY },
   { ms: 30 * DAY, unit: "month", n: 1 },
   { ms: 91 * DAY, unit: "month", n: 3 },
   { ms: 182 * DAY, unit: "month", n: 6 },
@@ -274,6 +275,8 @@ const TIME_INTERVALS: TimeInterval[] = [
 
 /** Calendar-aligned ticks inside [min, max] (ms) with a matching label format. */
 export function timeTicks(min: number, max: number, count = 6): { ticks: number[]; format: (t: number) => string } {
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return { ticks: [], format: () => "" };
+  if (min > max) [min, max] = [max, min];
   const span = Math.max(1, max - min);
   const target = span / Math.max(1, count);
   const iv = TIME_INTERVALS.find((i) => i.ms >= target) ?? TIME_INTERVALS[TIME_INTERVALS.length - 1]!;
@@ -301,10 +304,15 @@ export function timeTicks(min: number, max: number, count = 6): { ticks: number[
       }
     }
   }
+  // Calendar boundaries can leave a short domain with one (or no) ticks.
+  // Endpoints still communicate its actual span, especially on phone widths.
+  const endpoints = ticks.length < 2;
+  if (endpoints) ticks.splice(0, ticks.length, ...(min === max ? [min] : [min, max]));
   const sameYear = new Date(min).getUTCFullYear() === new Date(max).getUTCFullYear();
   const pad2 = (n: number) => String(n).padStart(2, "0");
   const format = (t: number) => {
     const d = new Date(t);
+    if (endpoints && span >= DAY) return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${sameYear ? "" : ` ${d.getUTCFullYear()}`}`;
     if (iv.unit === "year") return String(d.getUTCFullYear());
     if (iv.unit === "month") {
       const mon = MONTHS[d.getUTCMonth()]!;

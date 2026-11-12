@@ -5,9 +5,26 @@
 import type { QueryResult } from "./store";
 import { applyChartTimeWindow } from "./chartTime";
 import type { ChartRecommendation } from "./recommendations";
+import { groupChartChannels, type GroupedChannels } from "./channelGroups";
 
 const rowCache = new WeakMap<QueryResult, Map<string, unknown[][]>>();
 const bitmapCache = new Map<string, ImageBitmap | null>();
+const groupedCache = new WeakMap<QueryResult, WeakMap<ChartRecommendation, Map<number, GroupedChannels>>>();
+
+/** Group the visible window before thinning, so preview symbols use the full cohort. */
+export function groupedChannelsForThumb(data: QueryResult, rec: ChartRecommendation, maxPoints = 1500): GroupedChannels {
+  let recipes = groupedCache.get(data);
+  if (!recipes) groupedCache.set(data, recipes = new WeakMap());
+  let sizes = recipes.get(rec);
+  if (!sizes) recipes.set(rec, sizes = new Map());
+  const cached = sizes.get(maxPoints);
+  if (cached) return cached;
+  const grouped = groupChartChannels(downsampledRowsForThumb(data, rec, Infinity), data.columns, rec);
+  const stride = Math.max(1, Math.ceil(grouped.rows.length / Math.max(1, maxPoints)));
+  const result = stride === 1 ? grouped : { ...grouped, rows: grouped.rows.filter((_, i) => i % stride === 0) };
+  sizes.set(maxPoints, result);
+  return result;
+}
 
 function datasetKey(rec: ChartRecommendation): string {
   return `${rec.timeWindow ?? ""}|${rec.timeWindowField ?? ""}`;

@@ -11,6 +11,14 @@ const rows = [
 const identity = ["city", "temp", null];
 
 describe("markFocus", () => {
+  it("keeps bucketed line-series pins distinct at the same X value", () => {
+    const a: HitTarget = { shape: "circle", cx: 1, cy: 2, r: 3, match: [], summary: { columns: ["month", "region", "value"], row: ["Jan", "East", 4] }, reading: { label: "Jan", series: "East", value: 4, measure: "value" } };
+    const b: HitTarget = { ...a, reading: { ...a.reading!, series: "West" } };
+    const ref = markRefForHit(a, columns, rows, identity)!;
+    expect(sameMark(ref, markRefForHit(b, columns, rows, identity))).toBe(false);
+    expect(findHitForMark([a, b], ref, columns, rows, identity)).toBe(a);
+    expect(keyboardNavigableHits([a, { ...a, cx: 100, auxiliary: true }])).toEqual([a]);
+  });
   it("identifies marks by values, not position or order", () => {
     const bar: HitTarget = { shape: "rect", x: 10, y: 20, w: 30, h: 40, match: [[0, "Rome"]] };
     const moved: HitTarget = { shape: "rect", x: 300, y: 5, w: 12, h: 90, match: [[0, "Rome"]] };

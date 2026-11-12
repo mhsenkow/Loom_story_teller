@@ -314,6 +314,9 @@ function* buildDiscoverStorySteps(
   });
   const assess = createDiscoverAssessor(stats, sample, kind);
   const used = new Set<string>();
+  const unwindowed = new Set(
+    charts.filter((c) => !c.timeWindow || c.timeWindow === "all").map((c) => discoverRecipeKey({ ...c, timeWindow: undefined, timeWindowField: undefined })),
+  );
   const all: DiscoverStory[] = [];
   let considered = 0;
   for (const chart of [primaryChart, ...charts.filter((c) => c !== primaryChart)]) {
@@ -321,6 +324,15 @@ function* buildDiscoverStorySteps(
     const key = discoverRecipeKey(chart);
     if (used.has(key)) continue;
     used.add(key);
+    // "Last 24 hours" of a feed that only holds a day of rows is the same chart again.
+    if (
+      chart !== primaryChart &&
+      chart.timeWindow &&
+      chart.timeWindow !== "all" &&
+      unwindowed.has(discoverRecipeKey({ ...chart, timeWindow: undefined, timeWindowField: undefined })) &&
+      applyChartTimeWindow(sample.rows, sample.columns, chart).rows.length === sample.rows.length
+    )
+      continue;
     const evidence = assess(chart);
     if (!evidence) continue;
     const story = makeStory(chart, chart === primaryChart ? 0 : 1);
@@ -337,6 +349,21 @@ function* buildDiscoverStorySteps(
     all.push(story);
   }
   const ranked = [...all].sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  // Lead with the finding, not the chart recipe: the best story for each finding takes it
+  // as its headline ("Wildfires: 98% of all events"); the feed's own hook stays as written,
+  // and other charts of the same finding keep their chart title so cards don't repeat.
+  const told = new Set<string>();
+  for (const story of ranked) if (story.headline && story.insight?.headline) told.add(story.insight.headline);
+  for (const story of ranked) {
+    if (story.headline) continue;
+    // A finding nobody has told yet, else the question the chart answers, else its own title.
+    const lead = [story.insight?.headline, story.insight?.question].find((text) => text && !told.has(text));
+    if (!lead) continue;
+    told.add(lead);
+    const plotted = story.hook;
+    story.hook = lead;
+    story.blurb = story.chart.subtitle ? `${plotted} · ${story.blurb}` : plotted;
+  }
   const bestByKind = new Map<string, DiscoverStory>();
   for (const story of ranked) if (!bestByKind.has(story.chartKind)) bestByKind.set(story.chartKind, story);
   // Preserve every viable kind when it fits, before spending slots on settings.

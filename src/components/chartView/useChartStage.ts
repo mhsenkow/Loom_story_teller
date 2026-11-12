@@ -6,6 +6,7 @@ import { fitChartFrame, type ChartAspectId, type DetectedDevice } from "@/lib/ch
 import { chartStageGutter } from "@/lib/chartSpace";
 import { resolveStageBoxSize } from "@/lib/chartStagePixels";
 import { useLoomStore } from "@/lib/store";
+import { useMobileLiveEdit } from "@/lib/useMediaQuery";
 import type { ChartVisualOverrides } from "@/lib/chartVisualTypes";
 import { stageDpr } from "./constants";
 
@@ -62,6 +63,7 @@ export function useChartStage(args: UseChartStageArgs): UseChartStageResult {
   } = args;
 
   const stageMounted = !!selectedFile;
+  const liveEdit = useMobileLiveEdit();
 
   const chartFrameMax = useMemo((): ChartFrameSize => {
     if (socialExportTarget) {
@@ -74,12 +76,12 @@ export function useChartStage(args: UseChartStageArgs): UseChartStageResult {
     const railReserve = !isMobile ? 48 : 0;
     return fitChartFrame({
       hostW: Math.max(40, hostSize.w - railReserve),
-      hostH: hostSize.h,
+      hostH: Math.max(40, hostSize.h - (isMobile && !liveEdit ? 38 : 0)),
       aspectId: chartAspect,
       device: chartDevice,
       gutter: chartStageGutter(chartVisualOverrides.spaceUse),
     });
-  }, [hostSize.w, hostSize.h, chartAspect, chartDevice, socialExportTarget, isMobile, chartVisualOverrides.spaceUse]);
+  }, [hostSize.w, hostSize.h, chartAspect, chartDevice, socialExportTarget, isMobile, liveEdit, chartVisualOverrides.spaceUse]);
 
   const chartFrameSize = useMemo((): ChartFrameSize => {
     if (socialExportTarget) return chartFrameMax;

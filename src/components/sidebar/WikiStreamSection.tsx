@@ -76,7 +76,8 @@ export function WikiStreamSection() {
       startPolling();
       setToast("Connected to Wikipedia live stream");
     } catch (e) {
-      setToast(`Stream failed: ${e instanceof Error ? e.message : e}`);
+      console.warn("Wikipedia stream failed:", e);
+      setToast("Couldn’t connect to Wikipedia Live — try again in a moment");
     } finally {
       setConnecting(false);
     }
@@ -106,7 +107,7 @@ export function WikiStreamSection() {
       const snap = await streamSnapshot(500);
       if (!snap.sample.rows.length) {
         setToast(
-          "No Wikipedia events yet — wait a second and try Explore again",
+          "No Wikipedia events yet — wait a second and try Chart it again",
         );
         return;
       }
@@ -129,7 +130,7 @@ export function WikiStreamSection() {
       setToast(`Loaded ${snap.sample.rows.length} stream events`);
     } catch (e) {
       setToast(
-        `Failed to load snapshot: ${e instanceof Error ? e.message : e}`,
+        "Couldn’t load Wikipedia Live yet — try again in a moment",
       );
     }
   };
@@ -239,7 +240,7 @@ export function WikiStreamSection() {
               disabled={streamBufferRows === 0}
               className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium disabled:opacity-50"
             >
-              Explore
+              Chart it
             </button>
           </div>
         </div>
@@ -255,7 +256,7 @@ export function WikiStreamSection() {
             onClick={handleLoadSnapshot}
             className="text-2xs py-0.5 px-2 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent hover:bg-loom-accent/20 font-medium"
           >
-            Explore
+            Chart it
           </button>
         </div>
       )}

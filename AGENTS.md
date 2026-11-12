@@ -66,6 +66,8 @@ make tablet-xcode  # Open Xcode to Archive / Distribute
 
 **iOS:** Bundle `com.loom.storyteller`, team `WC44W2QVE4`. Mobile Rust is `src-tauri/src/mobile.rs` (no DuckDB). Frontend: `isDesktop()` for DuckDB IPC; iPad/iPhone Tauri uses the web data path. Re-auth Apple ID in Xcode → Settings → Accounts before the first IPA build. Shell strategy: [docs/MOBILE_IOS.md](docs/MOBILE_IOS.md). Release checklist: [docs/MOBILE_ACCEPTANCE.md](docs/MOBILE_ACCEPTANCE.md).
 
+**Android:** Same application id via Capacitor (`android/`). Web-parity only (no DuckDB). Dev: `make phone`. Play AAB: `make phone-weave`. Listing: [android/PLAY_STORE.md](android/PLAY_STORE.md). Strategy: [docs/MOBILE_ANDROID.md](docs/MOBILE_ANDROID.md).
+
 **Clean checkout (LOOM-089):** Tag releases and `make ci` assume a fresh `git clone` + `npm ci` — no reliance on untracked local files. Before tagging, run `make ci` from a clean tree (or CI on the PR) so missing assets or config surface before App Store / Worker deploy.
 
 `eslint.config.mjs` uses flat config; some React Compiler ESLint rules are relaxed so the existing large components stay lint-clean without a full rewrite.

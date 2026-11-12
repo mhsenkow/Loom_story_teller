@@ -3,6 +3,8 @@
  * recording fake 2D context (module wiring + no throw + hit targets / paint).
  */
 import { describe, expect, it } from "vitest";
+import { buildChartReading } from "../chartReading";
+import type { ChartRecommendation } from "../recommendations";
 import type { ChartRenderOpts } from "../chartRenderTypes";
 import { buildBarFacetGrid, pickHitTarget, rowForHitTarget, type HitTarget } from "../chartTooltip";
 import { renderFullBar, renderFullHistogram } from "../canvasCharts/bar";
@@ -349,5 +351,54 @@ describe("stat chart geometry", () => {
     expect(picked.rowIndex).toBe(target.rowIndex);
     // The tooltip resolves to that line's row, not the category's first row.
     expect(rowForHitTarget(picked, rows as (string | number | boolean | null)[][])).toBe(target.rowIndex);
+  });
+});
+
+
+describe("line endpoint keys", () => {
+  const seriesRows = [[1, 10, "East"], [2, 20, "East"], [1, 12, "West"], [2, 21, "West"]];
+  it("replaces automatic legends with names, actual endpoint values, and readouts", () => {
+    const { ctx, calls } = fakeCtx();
+    const config = opts();
+    renderFullLine(ctx, seriesRows, 0, 1, 2, 800, 450, 48, config);
+    expect(config.legend).toEqual([]);
+    expect(calls.labels.map(l => l.text)).toEqual(expect.arrayContaining(["East", "West", "20", "21"]));
+    expect(config.scales!.rect.right).toBeLessThan(752);
+    expect(config.hits!.filter(h => h.shape === "rect").map(h => h.summary?.row)).toEqual([
+      ["East", "2", "20"], ["West", "2", "21"],
+    ]);
+  });
+  it.each([
+    { legendPosition: "right" }, { legendPosition: "none" }, { mini: true }, { lineEndLabels: false },
+  ])("preserves explicit layout and thumbnail behavior: %j", (overrides) => {
+    const { ctx } = fakeCtx();
+    const config = { ...opts(), ...overrides };
+    renderFullLine(ctx, seriesRows, 0, 1, 2, 800, 450, 48, config);
+    expect(config.scales!.rect.right).toBe(752);
+    expect(config.legend).toHaveLength(2);
+  });
+  it("uses the legend on narrow charts and when full names cannot fit", () => {
+    for (const [width, source] of [[320, seriesRows], [800, seriesRows.map(r => [r[0], r[1], `${r[2]} ${"long name ".repeat(30)}`])]] as const) {
+      const { ctx } = fakeCtx();
+      const config = opts();
+      renderFullLine(ctx, source, 0, 1, 2, width, 450, 48, config);
+      expect(config.legend).toHaveLength(2);
+      expect(config.scales!.rect.right).toBe(width - 48);
+    }
+  });
+  it("labels the transformed endpoint and skips missing or log-invalid observations", () => {
+    const { ctx } = fakeCtx();
+    const config = { ...opts(), seriesNormalize: "index100" as const };
+    renderFullLine(ctx, [...seriesRows, [3, null, "East"]], 0, 1, 2, 800, 450, 48, config);
+    expect(config.hits!.filter(h => h.shape === "rect")[0].summary?.row).toEqual(["East", "2", "200"]);
+    const recipe = { kind: "line", xField: "day", yField: "value" } as ChartRecommendation;
+    const reading = buildChartReading(recipe, config.hits)!;
+    expect(reading.headline).toContain("East finishes highest at 200");
+    expect(reading.context).toContain("4 plotted values");
+    expect(reading.context).toContain("Index");
+    const log = { ...opts(), yScale: "log" as const };
+    renderFullLine(ctx, [...seriesRows, [3, -2, "East"]], 0, 1, 2, 800, 450, 48, log);
+    expect(log.hits!.filter(h => h.shape === "rect")[0].summary?.row).toEqual(["East", "2", "20"]);
+    expect(buildChartReading(recipe, log.hits)!.headline).toContain("West finishes highest at 21");
   });
 });

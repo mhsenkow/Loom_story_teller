@@ -13,6 +13,7 @@ import {
   IconWhy,
 } from "@/components/ChartCellChrome";
 import type { ChartRecommendation } from "@/lib/recommendations";
+import { ChartSocialRail } from "./ChartSocialRail";
 
 export type ScatterModeBarProps = {
   isMobile: boolean;
@@ -173,7 +174,10 @@ export function ChartToolRail(props: ChartToolRailProps): ReactNode {
     return (
       <div className={wrapperClassName ?? "loom-chart-tools flex flex-col items-stretch gap-1.5"}>
         {whyPanel}
-        <div className="flex justify-end">{rail}</div>
+        <div className="flex justify-end items-start gap-1.5">
+          <ChartSocialRail orientation="horizontal" />
+          {rail}
+        </div>
       </div>
     );
   }
@@ -182,6 +186,7 @@ export function ChartToolRail(props: ChartToolRailProps): ReactNode {
     <div className={wrapperClassName ?? "loom-chart-tools flex flex-col gap-1.5 self-start items-start shrink-0"}>
       {whyPanel}
       {rail}
+      <ChartSocialRail orientation="vertical" />
     </div>
   );
 }

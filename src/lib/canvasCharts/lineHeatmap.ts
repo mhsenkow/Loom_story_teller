@@ -12,7 +12,8 @@ import { contrastingInk } from "../chartLayout";
 import { type PlotRect, drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks, drawColorRamp } from "../chartLooks";
 import { sampleContinuous } from "../chartPalettes";
 import { type ChartRenderOpts } from "../chartRenderTypes";
-import { chartTypeRamp } from "../chartType";
+import { CHART_TEXT_FALLBACK, chartFont, chartTypeRamp } from "../chartType";
+import { layoutLineEndLabels } from "../lineEndLabels";
 import { formatTooltipNumber } from "../chartTooltip";
 import { type SeriesNormalize, type YScaleKind, anomalyRowIndices, normalizeSeriesValues, rollingMean, rollingStd, scaleDomain, scaleY } from "../dsTransforms";
 import { type YAggregateOption } from "../recommendations";
@@ -40,7 +41,7 @@ export function renderFullLine(
   const lineW = opts?.lineWidth ?? 2;
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "mean");
   const rect = plotOf(w, h, pad, opts);
-  const span = rect.right - rect.left;
+  let span = rect.right - rect.left;
   const comparePrev = !!opts?.comparePrevious;
 
   // Series in first-appearance order; cap at the 10 largest so the legend stays readable
@@ -80,7 +81,8 @@ export function renderFullLine(
       // Single series + Compare Y: name both lines by their fields, not "series".
       const field = opts?.fieldNames?.[measureIdx];
       const label = nameSuffix ? (name ? `${name}${nameSuffix}` : field ?? "Compare Y") : name || (y2Idx >= 0 && field ? field : name);
-      return { name: label, pts, compare: !!nameSuffix, colorIndex: seriesIndex + (nameSuffix ? series.length : 0), measureIdx };
+      const colorIndex = (opts?.seriesIndices?.get(name) ?? seriesIndex) + (nameSuffix ? opts?.seriesIndices?.size ?? series.length : 0);
+      return { name: label, pts, compare: !!nameSuffix, colorIndex, measureIdx };
     }).filter((s) => s.pts.length > 0);
 
   let data = seriesFrom(yi);
@@ -151,6 +153,27 @@ export function renderFullLine(
   if (opts?.yScale === "log") {
     data = data.map(s => ({ ...s, pts: s.pts.filter(p => p.v > 0) })).filter(s => s.pts.length);
     if (!data.length) return;
+  }
+  const labelSize = chartTypeRamp(opts?.axisFontSize).legend;
+  const labelHeight = labelSize * 2 + 5;
+  const labelRight = rect.right;
+  const endLabels = data.map(s => ({ name: s.name || "series", value: formatTooltipNumber(s.pts.at(-1)!.v) }));
+  let endLabelWidth = 0;
+  if (!opts?.mini && opts?.lineEndLabels !== false && (opts?.legendPosition ?? "auto") === "auto"
+    && data.length >= 2 && data.length <= 10 && !opts?.shapeField && !opts?.emojiField
+    && layoutLineEndLabels(data.map(() => rect.top), rect.top, rect.bottom, labelHeight)) {
+    ctx.save();
+    ctx.font = chartFont(labelSize, opts?.fontFamily, 600);
+    const nameWidth = Math.max(...endLabels.map(label => ctx.measureText(label.name).width));
+    ctx.font = chartFont(labelSize, opts?.fontFamily);
+    const valueWidth = Math.max(...endLabels.map(label => ctx.measureText(label.value).width));
+    ctx.restore();
+    const needed = Math.ceil(Math.max(nameWidth, valueWidth)) + 28;
+    if (needed <= span * 0.35 && span - needed >= 240) {
+      endLabelWidth = needed;
+      rect.right -= needed;
+      span = rect.right - rect.left;
+    }
   }
   let yMin = Infinity;
   let yMax = -Infinity;
@@ -295,6 +318,7 @@ export function renderFullLine(
         // Bucketed keys aren't raw values — identify the bucket by its first row
         match: tb.unit ? [] : ci >= 0 ? [[xi, p.key], [ci, s.name]] : [[xi, p.key]],
         rowIndex: tb.unit ? tb.firstRow.get(p.key) : undefined,
+        ...(!s.compare ? { reading: { label: p.key, value: p.v, measure: measureTitle, series: s.name, order: p.t } } : {}),
         summary: ci >= 0
           ? { columns: [xName, cName, measureTitle], row: [p.key, s.name, formatTooltipNumber(p.v)] }
           : { columns: [xName, measureTitle], row: [p.key, formatTooltipNumber(p.v)] },
@@ -325,6 +349,43 @@ export function renderFullLine(
   if (ys.min < 0 && ys.max > 0) drawZeroLine(ctx, rect.left, Y(0), rect.right, Y(0), opts);
   drawChartTicks(ctx, 0, 1, ys.min, ys.max, w, h, rect, opts, { x: false });
   drawXModelAxis(ctx, model, w, h, rect, opts);
+  if (endLabelWidth) {
+    const centers = layoutLineEndLabels(data.map(s => Y(s.pts.at(-1)!.v)), rect.top, rect.bottom, labelHeight)!;
+    const textX = rect.right + 24;
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    data.forEach((s, i) => {
+      const last = s.pts.at(-1)!;
+      const color = cols[s.colorIndex % cols.length]!;
+      const y = centers[i];
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash(s.compare ? [3, 3] : []);
+      ctx.beginPath();
+      ctx.moveTo(X(last.t), Y(last.v));
+      ctx.lineTo(rect.right + 6, Y(last.v));
+      ctx.lineTo(textX - 6, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = opts?.themeText ?? CHART_TEXT_FALLBACK;
+      ctx.font = chartFont(labelSize, opts?.fontFamily, 600);
+      ctx.fillText(endLabels[i].name, textX, y - (labelSize + 5) / 2);
+      ctx.fillStyle = opts?.themeMuted ?? opts?.themeText ?? CHART_TEXT_FALLBACK;
+      ctx.font = chartFont(labelSize, opts?.fontFamily);
+      ctx.fillText(endLabels[i].value, textX, y + (labelSize + 5) / 2);
+      pushHit(opts, {
+        shape: "rect", x: textX - 3, y: y - labelHeight / 2,
+        w: labelRight - textX + 3, h: labelHeight,
+        match: [],
+        auxiliary: true,
+        summary: { columns: [cName, xName, valueTitle(opts, s.measureIdx, "mean")], row: [endLabels[i].name, last.key, endLabels[i].value] },
+      });
+    });
+    ctx.restore();
+    setLegend(opts, []);
+  }
 }
 
 export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {

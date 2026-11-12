@@ -12,11 +12,12 @@ import { drawAxisTicks, drawGridLines } from "@/lib/canvasCharts/primitives";
 import { DEFAULT_PAD } from "@/lib/canvasCharts/shared";
 import { plotOf } from "@/lib/canvasCharts/plumbing";
 import { scaleDomain, scaleY, type YScaleKind } from "@/lib/dsTransforms";
-import { drawFireflyChrome, extractGpuScenePoints, isWebGpuDrawableScene } from "@/lib/gpuScenes";
+import { drawFireflyChrome, drawOrbitSceneChrome, extractGpuScenePoints, isWebGpuDrawableScene } from "@/lib/gpuScenes";
 import { isWebGpuGlobeKind } from "@/lib/geoMaps";
 import type { ScatterDataBounds } from "./extractScatterData";
 import { getEffectiveScatterBounds } from "./extractScatterData";
 import { stageDpr } from "./constants";
+import { drawEmptyMessage, resolveChartInk } from "@/lib/chartInk";
 
 export type UseAxesOverlayArgs = {
   axesOverlayRef: RefObject<HTMLCanvasElement | null>;
@@ -39,6 +40,7 @@ export type UseAxesOverlayArgs = {
   useWebGpuGlobe: boolean;
   extractScatterData: () => ScatterDataBounds | null;
   scatterView: { scale: number; panX: number; panY: number };
+  sceneOrbit: { yaw: number; pitch: number; zoom: number };
   chartRenderOpts: ChartRenderOpts;
   refreshKey: number;
   effectiveTheme: string;
@@ -72,6 +74,7 @@ export function useAxesOverlay(args: UseAxesOverlayArgs) {
     useWebGpuGlobe,
     extractScatterData,
     scatterView,
+    sceneOrbit,
     chartRenderOpts,
     refreshKey,
     effectiveTheme,
@@ -133,19 +136,21 @@ export function useAxesOverlay(args: UseAxesOverlayArgs) {
       });
       const ui = getThemeUiColors(effectiveTheme);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      if (activeChart.kind === "firefly" && sampleRows) {
+      if ((activeChart.kind === "firefly" || activeChart.kind === "scatter3d") && sampleRows) {
         const flyRows = chartSampleRows?.rows ?? sampleRows.rows;
         const flyCols = chartSampleRows?.columns ?? sampleRows.columns;
         const groupedFly = groupChartChannels(flyRows, flyCols, activeChart);
         const packed = extractGpuScenePoints(groupedFly.rows, groupedFly.columns, {
           xField: activeChart.xField,
           yField: activeChart.yField,
+          zField: activeChart.zField,
           colorField: groupedFly.colorField,
           sizeField: activeChart.sizeField,
           timeField: activeChart.timeField,
+          invertZ: !!activeChart.channelInvert?.z,
         });
         if (packed) {
-          drawFireflyChrome(
+          (activeChart.kind === "scatter3d" ? drawOrbitSceneChrome : drawFireflyChrome)(
             ctx,
             packed,
             w,
@@ -157,6 +162,7 @@ export function useAxesOverlay(args: UseAxesOverlayArgs) {
             scenePad,
             {
               ...chartRenderOpts,
+              ...sceneOrbit,
               fontFamily: chartRenderOpts.fontFamily,
               axisFontSize: chartRenderOpts.axisFontSize,
               themeText: ui.text,
@@ -165,6 +171,8 @@ export function useAxesOverlay(args: UseAxesOverlayArgs) {
               themeBg: ui.bg,
             },
           );
+        } else {
+          drawEmptyMessage(ctx, w, h, "No numeric rows to place in the scene", resolveChartInk({ themeBg: ui.bg, themeText: ui.text, themeMuted: ui.label, themeBorder: ui.border }), chartRenderOpts.fontFamily ?? "Inter", false, chartRenderOpts.axisFontSize);
         }
       }
       const titleText = chartTitleOverrides[activeChart.id] ?? activeChart.title;
@@ -301,6 +309,7 @@ export function useAxesOverlay(args: UseAxesOverlayArgs) {
     useWebGpuGlobe,
     extractScatterData,
     scatterView,
+    sceneOrbit,
     chartRenderOpts,
     refreshKey,
     effectiveTheme,

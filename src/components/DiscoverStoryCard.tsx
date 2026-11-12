@@ -18,6 +18,10 @@ import { DISCOVER_FAMILIES, discoverFamily } from "@/lib/discoverChartCatalog";
 import { feedRef } from "@/lib/sourceRef";
 import { SourcePrefMenu, useSourcePref } from "./SourcePrefControls";
 import type { DiscoverFlowTier } from "@/lib/discoverFlowLayout";
+import { VoteControl } from "./VoteControl";
+import { useLoomStore } from "@/lib/store";
+import { socialKey, socialLinkFor } from "@/lib/socialKey";
+import { formatSocialAgo } from "@/lib/socialRank";
 
 const SETTINGS_VISIBLE = 2;
 
@@ -78,6 +82,13 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
     .filter(Boolean)
     .join("\n");
   const hasVariants = !!(variants && variants.length > 1 && groupId);
+  const key = useMemo(() => socialKey(story.kind, story.chart), [story.kind, story.chart]);
+  const socialMeta = useMemo(
+    () => ({ title: story.hook, link: socialLinkFor(story.streamPath, story.fileName, story.chart) }),
+    [story.hook, story.streamPath, story.fileName, story.chart],
+  );
+  const latest = useLoomStore((s) => (s.socialEnabled ? s.socialSummary?.latest[key] : undefined));
+  const openThread = useLoomStore((s) => s.openSocialThread);
   return (
     <article
       className={`discover-story relative discover-tier-${tier} ${featured ? "discover-story-featured" : ""} ${pref.reaction === "hide" ? "opacity-60" : ""}`}
@@ -146,6 +157,22 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
           )}
         </div>
       </button>
+      <div className="discover-story-social">
+        <VoteControl socialKey={key} meta={socialMeta} />
+        {latest && (
+          <button
+            type="button"
+            className="discover-story-chatter"
+            onClick={() => openThread({ key, title: story.hook, link: socialMeta.link })}
+            title={`${latest.name}: ${latest.body}`}
+          >
+            <span className="sr-only">Latest comment from </span>
+            <strong>{latest.name}</strong>
+            <span aria-hidden> · {formatSocialAgo(latest.at, clock)} · </span>
+            <span className="discover-story-chatter-body">“{latest.body}”</span>
+          </button>
+        )}
+      </div>
       <div className="discover-story-proof">
         <p className="discover-story-meta" title={metaTitle}>
           <span className={freshness.due ? "discover-freshness-due" : ""}>

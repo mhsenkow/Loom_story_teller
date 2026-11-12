@@ -763,10 +763,10 @@ export async function publishStoryToWorker(input: {
       error?: string;
     };
     if (!res.ok) {
-      return { url: "", id: "", error: data.error || `Publish failed (${res.status})` };
+      return { url: "", id: "", error: data.error || "Couldn’t make a share link — try again, or use Save image instead." };
     }
     if (!data.url || !data.id) {
-      return { url: "", id: "", error: data.error || "Publish returned no URL" };
+      return { url: "", id: "", error: data.error || "Couldn’t make a share link — try again, or use Save image instead." };
     }
     const { toPublicLoomUrl } = await import("./publicOrigin");
     // Never hand recipients a workers.dev / localhost URL (Cap API host).

@@ -6,6 +6,7 @@
 // =================================================================
 
 import type { Metadata, Viewport } from "next";
+import "@/styles/fonts.css";
 import "@/styles/globals.css";
 import { SHELL_BOOTSTRAP_SCRIPT } from "@/lib/shellBootstrap";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/themeBootstrap";

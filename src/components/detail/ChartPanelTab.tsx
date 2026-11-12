@@ -51,8 +51,9 @@ import {
   type AppFont,
   type FacesSource,
 } from "@/lib/lookSystem";
-import { FONT_CHOICES, FONT_GROUPS, chartFontLabel, chartFontStack, resolveChartFontFamily } from "@/lib/fontCatalog";
-import { chartTypeRamp, resolveChartAxisFontSize } from "@/lib/chartType";
+import { resolveChartFontFamily } from "@/lib/fontCatalog";
+import { ChartTypographyControls } from "@/components/ChartTypographyControls";
+import { WordCloudControls } from "@/components/WordCloudControls";
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
 import {
@@ -251,8 +252,6 @@ function EncodingSlot({
       data-chrome-target={chromeTarget}
       onMouseEnter={chromeTarget && onChromeEnter ? () => onChromeEnter(chromeTarget) : undefined}
       onMouseLeave={onChromeLeave}
-    >
-      <div
         onDragEnter={
           droppable
             ? (e) => {
@@ -290,6 +289,8 @@ function EncodingSlot({
               }
             : undefined
         }
+    >
+      <div
         className={`
           loom-encoding-slot flex items-stretch gap-0 rounded-md border transition-colors
           ${chromeActive ? "border-loom-accent bg-loom-accent/15 ring-2 ring-loom-accent/50" : ""}
@@ -444,7 +445,7 @@ function IconToggleGroup<T extends string | number>({
         {label}
       </p>
       <div
-        className="loom-seg"
+        className="loom-inspector-choices"
         role="radiogroup"
         aria-labelledby={`icon-toggle-${label.replace(/\s+/g, "-").toLowerCase()}`}
         onKeyDown={(e) => {
@@ -478,10 +479,10 @@ function IconToggleGroup<T extends string | number>({
               tabIndex={active ? 0 : -1}
               onClick={() => onChange(opt.value)}
               data-active={active}
-              className="loom-seg-item loom-seg-btn"
+              className="loom-inspector-choice"
             >
-              {opt.icon}
-              {opt.icon && options.length > 4 ? null : <span className="leading-none">{opt.label}</span>}
+              <span aria-hidden className="loom-choice-icon">{opt.icon}</span>
+              <span>{opt.label}</span>
             </button>
           );
         })}
@@ -969,7 +970,7 @@ function SaveChartViewButton() {
 const AnalyzeSection = lazy(() => import("./SmartTab"));
 const OverlaysSection = lazy(() => import("./OverlaysTab"));
 const CHART_SECTIONS = [
-  { id: "encoding", label: "Encoding", path: "M4 5h16M4 12h16M4 19h16M8 3v4M16 10v4M10 17v4" },
+  { id: "encoding", label: "Fields", path: "M4 5h16M4 12h16M4 19h16M8 3v4M16 10v4M10 17v4" },
   { id: "visual", label: "Visual", path: "M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-3.7 1.5 1.5 0 0 1 1-2.8H17a4 4 0 0 0 4-4C21 6.4 17 3 12 3ZM7 10h.01M10 7h.01M15 7h.01M18 10h.01" },
   { id: "analyze", label: "Analyze", path: "M3 3v18h18M6 15l4-5 4 3 6-8M16 5h4v4" },
   { id: "overlays", label: "Overlays", path: "m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" },
@@ -1054,8 +1055,6 @@ export default function ChartPanelTab() {
   const effectiveTheme = useChartTheme();
   const inheritedStyle = resolveThemeChartStyle(effectiveTheme);
   const previewFont = resolveChartFontFamily(chartVisualOverrides.fontFamily, appSettings.font, appSettings.faces);
-  const previewType = chartTypeRamp(chartVisualOverrides.axisFontSize);
-  const customFont = chartVisualOverrides.fontFamily && chartVisualOverrides.fontFamily !== "inherit" && !Object.values(FONT_CHOICES).some((font) => font.family === chartVisualOverrides.fontFamily);
   const [specExpanded, setSpecExpanded] = useState(true);
   const [specCopyOk, setSpecCopyOk] = useState(false);
   const [dragOverSlot, setDragOverSlot] = useState<"x" | "y" | "color" | "size" | "z" | null>(null);
@@ -1214,8 +1213,8 @@ export default function ChartPanelTab() {
   }, [vegaSpec]);
 
   const applyEncoding = useCallback(
-    (slot: "x" | "y" | "color", colName: string) => {
-      if (!activeChart || columnStats.length === 0) return;
+    (slot: "x" | "y" | "color", colName: string): boolean => {
+      if (!activeChart || columnStats.length === 0) return false;
       const resolved =
         colName === "" || colName === "__none__"
           ? null
@@ -1225,17 +1224,19 @@ export default function ChartPanelTab() {
         const gate = encodingDropAllowed(activeChart.kind, slot, col);
         if (!gate.ok) {
           setToast(gate.reason);
-          return;
+          return false;
         }
       }
       const newX = slot === "x" ? (resolved ?? activeChart.xField) : activeChart.xField;
       const newY = slot === "y" ? resolved : activeChart.yField;
       const newColor = slot === "color" ? resolved : activeChart.colorField;
-      if (slot === "x" && !resolved) return;
+      if (slot === "x" && !resolved) return false;
       const extra = extraFromChart();
       if (slot === "color" && (activeChart.kind === "heatmap" || activeChart.kind === "hexbin") && !activeChart.colorField && newColor) extra.yAggregate = "mean";
       const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extra);
-      if (rec) commitRec(rec);
+      if (!rec) return false;
+      commitRec(rec);
+      return true;
     },
     [activeChart, columnStats, tableName, extraFromChart, setToast, commitRec],
   );
@@ -1330,17 +1331,13 @@ export default function ChartPanelTab() {
         setToast(`Mapped ${colName} → ${slotLabel}`, { undo: true });
         return;
       }
-      const newX = slot === "x" ? colName : activeChart.xField;
-      const newY = slot === "y" ? colName : activeChart.yField;
-      const newColor = slot === "color" ? colName : activeChart.colorField;
-      const rec = createChartRec(activeChart.kind, columnStats, newX, newY, newColor, tableName, extraFromChart());
-      if (rec) {
+      if (applyEncoding(slot, colName)) {
         const labels = encodingChannelLabels(activeChart.kind);
         const slotLabel = slot === "x" ? labels.x : slot === "y" ? labels.y : labels.color;
-        commitRec(rec, `Mapped ${colName} → ${slotLabel}`);
+        setToast(`Mapped ${colName} → ${slotLabel}`, { undo: true });
       }
     },
-    [activeChart, columnStats, tableName, extraFromChart, setToast, commitRec, applyEncodingExtra],
+    [activeChart, columnStats, setToast, applyEncoding, applyEncodingExtra],
   );
 
   const applySplitMode = useCallback(
@@ -1906,7 +1903,7 @@ export default function ChartPanelTab() {
       <div
         role="tablist"
         aria-label="Chart panel sections"
-        className="flex items-center gap-0.5 px-2 py-1.5 border-b border-loom-border bg-loom-surface shrink-0"
+        className="loom-chart-section-tabs flex items-center gap-0.5 px-2 py-1.5 border-b border-loom-border bg-loom-surface shrink-0"
       >
         <div className="flex items-center gap-0.5 bg-loom-elevated rounded-md p-0.5 w-full">
           {CHART_SECTIONS.map((sec) => (
@@ -2238,7 +2235,7 @@ export default function ChartPanelTab() {
                           type="button"
                           aria-pressed={splitMode === mode}
                           onClick={() => applySplitMode(mode)}
- className="loom-seg-item loom-seg-btn"
+ className="loom-inspector-choice"
                           title={
                             mode === "color"
                               ? "Overlay series by color in one plot"
@@ -2307,7 +2304,7 @@ export default function ChartPanelTab() {
                             key={d.value}
                             type="button"
                             onClick={() => applyLayoutDirection(d.value)}
-                            className="loom-seg-item loom-seg-btn"
+                            className="loom-inspector-choice"
                             title={encodingDirectionTitle(activeChart.kind, d.value)}
                             aria-pressed={on}
                           >
@@ -2344,7 +2341,7 @@ export default function ChartPanelTab() {
                           key={s.value}
                           type="button"
                           onClick={() => applyYScale(s.value)}
-                          className="loom-seg-item loom-seg-btn"
+                          className="loom-inspector-choice"
                           title={s.title}
                           aria-pressed={on}
                         >
@@ -2404,7 +2401,7 @@ export default function ChartPanelTab() {
                           type="button"
                           aria-pressed={on}
                           onClick={() => patchChartExtra({ deltaDisplay: mode })}
-                          className="loom-seg-item loom-seg-btn"
+                          className="loom-inspector-choice"
                         >
                           {label}
                         </button>
@@ -2445,7 +2442,7 @@ export default function ChartPanelTab() {
                             aria-pressed={on}
                             disabled={!timeFieldActive && r !== "all"}
                             onClick={() => applyTimeWindow({ field: timeFieldActive, range: r })}
-                            className="loom-seg-item loom-seg-btn"
+                            className="loom-inspector-choice"
                             title={spec?.label ?? r}
                           >
                             {spec?.short ?? r}
@@ -2723,7 +2720,7 @@ export default function ChartPanelTab() {
                             type="button"
                             aria-pressed={on}
                             onClick={() => patchChartExtra({ rollingWindow: w })}
-                            className="loom-seg-item loom-seg-btn"
+                            className="loom-inspector-choice"
                             title={w ? `${w}-point rolling mean along X` : "No rolling mean"}
                           >
                             {label}
@@ -2751,7 +2748,7 @@ export default function ChartPanelTab() {
                             type="button"
                             aria-pressed={on}
                             onClick={() => patchChartExtra({ seriesNormalize: mode })}
-                            className="loom-seg-item loom-seg-btn"
+                            className="loom-inspector-choice"
                             title={
                               mode === "index100"
                                 ? "Rebase each series so the first point is 100"
@@ -2820,7 +2817,7 @@ export default function ChartPanelTab() {
                             type="button"
                             aria-pressed={on}
                             onClick={() => patchChartExtra({ wordCloudMode: mode === "cloud" ? null : mode })}
-                            className="loom-seg-item loom-seg-btn"
+                            className="loom-inspector-choice"
                           >
                             {label}
                           </button>
@@ -2847,7 +2844,7 @@ export default function ChartPanelTab() {
                             type="button"
                             aria-pressed={on}
                             onClick={() => patchChartExtra({ bumpMode: mode })}
-                            className="loom-seg-item loom-seg-btn"
+                            className="loom-inspector-choice"
                           >
                             {label}
                           </button>
@@ -2880,7 +2877,7 @@ export default function ChartPanelTab() {
                               type="button"
                               aria-pressed={on}
                               onClick={() => patchChartExtra({ pyramidScaleMode: mode })}
-                              className="loom-seg-item loom-seg-btn"
+                              className="loom-inspector-choice"
                             >
                               {label}
                             </button>
@@ -3000,7 +2997,7 @@ export default function ChartPanelTab() {
                       />
                     </p>
                   )}
-                  <p className="text-2xs text-loom-muted pl-0.5">Fields</p>
+                  <p className="text-2xs text-loom-muted pl-0.5">Show in tooltip</p>
                   <div className="flex flex-wrap gap-1.5">
                     {columnStats.map((c) => {
                       const on = activeChart.tooltipFields?.includes(c.name) ?? false;
@@ -3033,7 +3030,7 @@ export default function ChartPanelTab() {
                       onClick={() => applyTooltipFields([])}
                       className="text-2xs text-loom-muted hover:text-loom-text"
                     >
-                      Use encoding defaults
+                      Use the chart’s own fields
                     </button>
                   </div>
                   <EncodingSlot
@@ -3212,7 +3209,7 @@ export default function ChartPanelTab() {
                 </p>
                 <EncodingInfoTip
                   label="About design system"
-                  text="Tufte / Bauhaus / Newspaper / Military (and friends) replace ink, axes, and atmosphere. Keep chips below only affect Shuffle look — same idea as Encoding Keep for ✦/⟳."
+                  text="Tufte / Bauhaus / Newspaper / Military (and friends) replace ink, axes, and atmosphere. Keep chips below only affect Shuffle look — same idea as Fields Keep for ✦/⟳."
                 />
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -3269,7 +3266,7 @@ export default function ChartPanelTab() {
                 </button>
               </div>
               <ShuffleKeepRow
-                tip="Only affects Shuffle look. Kept sections stay; the rest reshuffle. Same pattern as Encoding Keep for field shuffle / random chart."
+                tip="Only affects Shuffle look. Kept sections stay; the rest reshuffle. Same pattern as Fields Keep for field shuffle / random chart."
                 chips={VISUAL_SHUFFLE_SECTIONS.map((s) => ({
                   id: s.id,
                   label: s.label,
@@ -3474,135 +3471,22 @@ export default function ChartPanelTab() {
                 open={visualSections.cloud !== false}
                 onToggle={() => setVisualSections((prev) => ({ ...prev, cloud: prev.cloud === false }))}
               >
-                <div>
-                  <label className="block text-2xs text-loom-muted mb-1">Word font</label>
-                  <select
-                    aria-label="Word font"
-                    value={chartVisualOverrides.wordCloudFont ?? "inherit"}
-                    onChange={(e) => updateOverride("wordCloudFont", e.target.value === "inherit" ? undefined : e.target.value)}
-                    className="loom-input loom-panel-select w-full"
-                  >
-                    <option value="inherit">Same as chart</option>
-                    {chartVisualOverrides.wordCloudFont && chartVisualOverrides.wordCloudFont !== "inherit" && !Object.values(FONT_CHOICES).some((font) => font.family === chartVisualOverrides.wordCloudFont) && (
-                      <option value={chartVisualOverrides.wordCloudFont}>{chartVisualOverrides.wordCloudFont}</option>
-                    )}
-                    {FONT_GROUPS.map((group) => (
-                      <optgroup key={group.label} label={group.label}>
-                        {group.fonts.map((id) => <option key={id} value={FONT_CHOICES[id].family}>{FONT_CHOICES[id].family}</option>)}
-                      </optgroup>
-                    ))}
-                  </select>
-                  <p className="text-2xs text-loom-muted mt-1">The words use this face. Titles and axes keep the chart font.</p>
-                </div>
-                <IconToggleGroup
-                  label="Arrangement"
-                  value={chartVisualOverrides.wordCloudArrange ?? "spiral"}
-                  options={[
-                    { value: "spiral", label: "Spiral", icon: "◎" },
-                    { value: "rows", label: "Rows", icon: "≡" },
-                    { value: "columns", label: "Columns", icon: "❙" },
-                  ]}
-                  onChange={(value) => updateOverride("wordCloudArrange", value === "spiral" ? undefined : value)}
-                />
-                <div className="loom-slider-row">
-                  <span className="truncate text-2xs text-loom-muted">Word size</span>
-                  <input
-                    aria-label="Word size"
-                    type="range"
-                    min={60}
-                    max={160}
-                    step={5}
-                    value={Math.round((chartVisualOverrides.wordCloudScale ?? 1) * 100)}
-                    onChange={(e) => updateOverride("wordCloudScale", Number(e.target.value) / 100)}
-                  />
-                  <span className="loom-slider-value">{Math.round((chartVisualOverrides.wordCloudScale ?? 1) * 100)}%</span>
-                </div>
-                <IconToggleGroup
-                  label="Weight"
-                  value={chartVisualOverrides.wordCloudWeight ?? "ranked"}
-                  options={[
-                    { value: "ranked", label: "Ranked", icon: "A" },
-                    { value: "even", label: "Even", icon: "A" },
-                    { value: "heavy", label: "Heavy", icon: "A" },
-                  ]}
-                  onChange={(value) => updateOverride("wordCloudWeight", value === "ranked" ? undefined : value)}
-                />
-                <p
-                  className="text-sm text-loom-text leading-snug"
-                  style={{
-                    fontFamily: chartFontStack(chartVisualOverrides.wordCloudFont || previewFont),
-                    fontWeight: chartVisualOverrides.wordCloudWeight === "heavy" ? 700 : chartVisualOverrides.wordCloudWeight === "even" ? 500 : 650,
-                  }}
-                >
-                  {activeChart.xField || "Words"} sized across the cloud
-                </p>
+                <WordCloudControls value={chartVisualOverrides} chartFamily={previewFont}
+                  wordField={activeChart.xField || "Words"}
+                  sizeLabel={!activeChart.yField || activeChart.yAggregate === "count" ? "row count" : `${(Y_AGGREGATE_OPTIONS.find((option) => option.value === (activeChart.yAggregate ?? "sum"))?.label ?? "sum").toLowerCase()} of ${activeChart.yField}`}
+                  mode={activeChart.wordCloudMode ?? "cloud"} limit={activeChart.topN ?? 80}
+                  onLimit={(topN) => patchChartExtra({ topN })}
+                  onEdit={editChartVisualOverrides} />
               </ChartInspectorSection>
             )}
 
             {/* Typography */}
             <ChartInspectorSection title="Typography" open={!!visualSections.type} onToggle={() => toggleVisualSection("type")}>
 
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Font family</label>
-                <select aria-label="Font family"
-                  value={chartVisualOverrides.fontFamily ?? "inherit"}
-                  onChange={(e) => updateOverride("fontFamily", e.target.value === "inherit" ? undefined : e.target.value)}
-                  className="loom-input loom-panel-select w-full"
-                >
-                  <option value="inherit">App typeface</option>
-                  {customFont && <option value={chartVisualOverrides.fontFamily}>{chartVisualOverrides.fontFamily}</option>}
-                  {FONT_GROUPS.map((group) => (
-                    <optgroup key={group.label} label={group.label}>
-                      {group.fonts.map((id) => <option key={id} value={FONT_CHOICES[id].family}>{FONT_CHOICES[id].family}</option>)}
-                    </optgroup>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label htmlFor="chart-text-size" className="block text-2xs text-loom-muted mb-1">Chart text size</label>
-                <select id="chart-text-size" aria-label="Chart text size"
-                  value={resolveChartAxisFontSize(chartVisualOverrides.axisFontSize)}
-                  onChange={(e) => updateOverride("axisFontSize", Number(e.target.value))}
-                  className="loom-input loom-panel-select w-full"
-                >
-                  <option value={11}>11 px · Compact</option>
-                  <option value={12}>12 px · Balanced</option>
-                  <option value={13}>13 px · Comfortable</option>
-                  <option value={14}>14 px · Large</option>
-                  <option value={15}>15 px · Larger</option>
-                  <option value={16}>16 px · Presentation</option>
-                </select>
-                <p className="text-2xs text-loom-muted mt-1">Scales titles, axes, legends, values, and source notes. Crowded labels are spaced or skipped.</p>
-              </div>
-              <div className="loom-type-preview" role="group" aria-label="Chart typography sample" style={{ fontFamily: chartFontStack(previewFont), fontSize: previewType.tick }}>
-                <span className="line-clamp-2" title={previewTitle} style={{ fontSize: previewType.title, fontWeight: chartVisualOverrides.titleFontWeight ?? inheritedStyle.titleFontWeight ?? 600, fontStyle: chartVisualOverrides.titleItalic ? "italic" : "normal", lineHeight: 1.3 }}>{previewTitle}</span>
-                <span>{activeChart?.xField ?? "Category Aa"}{activeChart?.yField ? ` · ${activeChart.yField}` : ""}</span>
-                <span className="tabular-nums">12,345.67 · −8.2%</span>
-              </div>
-              <p className="text-2xs text-loom-muted">
-                {appSettings.faces === "web" ? "Selected typeface" : "Device typeface"}: {chartFontLabel(previewFont)}. {" "}
-                <button type="button" onClick={() => setPanelTab("settings")} className="text-loom-accent underline underline-offset-2">Font settings</button>
-              </p>
-              <IconToggleGroup
-                label="Title weight"
-                value={chartVisualOverrides.titleFontWeight ?? inheritedStyle.titleFontWeight ?? 600}
-                onChange={(v) => updateOverride("titleFontWeight", v)}
-                options={[
-                  { value: 300, label: "Light", icon: Ico.weightLight },
-                  { value: 400, label: "Regular", icon: Ico.weightRegular },
-                  { value: 600, label: "Semibold", icon: Ico.weightSemi },
-                  { value: 700, label: "Bold", icon: Ico.weightBold },
-                ]}
-              />
-              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
-                <input
-                  type="checkbox"
-                  checked={chartVisualOverrides.titleItalic ?? false}
-                  onChange={(e) => updateOverride("titleItalic", e.target.checked)}
-                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                />
-                Title italic
-              </label>
+              <ChartTypographyControls value={chartVisualOverrides} family={previewFont}
+                appFamily={resolveChartFontFamily(undefined, appSettings.font, appSettings.faces)}
+                title={previewTitle} subtitle={`${activeChart?.xField ?? "Category Aa"}${activeChart?.yField ? ` · ${activeChart.yField}` : ""}`}
+                inheritedWeight={inheritedStyle.titleFontWeight ?? 600} onEdit={editChartVisualOverrides} />
               {caps.tickLabelRotation ? (
                 <div className="space-y-1">
                   <IconToggleGroup
@@ -3759,7 +3643,7 @@ export default function ChartPanelTab() {
                     </div>
                     {showSymbolEnc && (
                       <p className="text-2xs text-loom-muted mt-1.5 leading-snug">
-                        One marker for every point. For a symbol per category, use Encoding → Emoji or Shape from column.
+                        One marker for every point. For a symbol per category, use Fields → Emoji or Shape from column.
                       </p>
                     )}
                   </div>
@@ -3822,7 +3706,7 @@ export default function ChartPanelTab() {
                       {activeChart.sizeField && (() => {
                         const s = chartVisualOverrides.sizeScale ?? 1;
                         return (
-                          <span className="ml-1 text-loom-muted/80" title="Size encoding min–max multiplier">
+                          <span className="ml-1 text-loom-muted/80" title="Size range multiplier (smallest to largest)">
                             {" "}(range {(0.4 * s).toFixed(1)}× – {(1.2 * s).toFixed(1)}×)
                           </span>
                         );
@@ -4027,7 +3911,7 @@ export default function ChartPanelTab() {
                   disabled={!caps.legend}
                 >
                   {(isHeat ? [["auto", "Show color scale"], ["none", "Hide color scale"]] : [
-                    ["auto", "Auto (emptiest corner)"],
+                    ["auto", activeChart?.kind === "line" ? "Auto (line ends when they fit)" : "Auto (emptiest corner)"],
                     ["custom", "Custom (drag on chart)"],
                     ["top-right", "Top right"],
                     ["top-left", "Top left"],

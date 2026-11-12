@@ -36,7 +36,7 @@ import { partitionRowsByFacet, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacet
 import { cancelScheduledIdleCallback, scheduleIdleCallback } from "@/lib/idleCallback";
 import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
 import { buildCorrMatrix, buildPareto, rollingMean, normalizeSeriesValues, scaleY, scaleDomain, type YScaleKind } from "@/lib/dsTransforms";
-import { downsampledRowsForThumb } from "@/lib/chartThumbnailCache";
+import { groupedChannelsForThumb } from "@/lib/chartThumbnailCache";
 import { screenDevicePixelRatio } from "@/lib/chartStagePixels";
 import { aggregateValues } from "@/lib/canvasCharts/plumbing";
 import { chartFont, resolveChartAxisFontSize } from "@/lib/chartType";
@@ -174,7 +174,6 @@ export function ChartCard({
 
     const xIdx = data.columns.indexOf(rec.xField);
     const yIdx = rec.yField ? data.columns.indexOf(rec.yField) : -1;
-    const cIdx = rec.colorField ? data.columns.indexOf(rec.colorField) : -1;
     const rowIdx = rec.rowField ? data.columns.indexOf(rec.rowField) : -1;
     const y2Idx = rec.y2Field ? data.columns.indexOf(rec.y2Field) : -1;
     const topN = rec.topN != null ? clampTopN(rec.topN) : null;
@@ -186,7 +185,10 @@ export function ChartCard({
 
     const pointPreview = ["scatter", "bubble", "strip"].includes(rec.kind)
       || isGeoFamilyKind(rec.kind) || isGpuSceneKind(rec.kind);
-    const rows = downsampledRowsForThumb(data, rec, pointPreview ? 1500 : Infinity);
+    const grouped = groupedChannelsForThumb(data, rec, pointPreview ? 1500 : Infinity);
+    const rows = grouped.rows;
+    const seriesField = grouped.colorField ?? (["line", "radar", "bump"].includes(rec.kind) ? rec.emojiField ?? grouped.shapeField : null);
+    const cIdx = seriesField ? grouped.columns.indexOf(seriesField) : -1;
     if (!rows.length) return;
 
     const paintPanel = (
@@ -210,7 +212,7 @@ export function ChartCard({
         cIdx,
         y2Idx,
         sizeIdx: rec.sizeField ? data.columns.indexOf(rec.sizeField) : -1,
-        columns: data.columns,
+        columns: grouped.columns,
         w: pw,
         h: ph,
         pad: panelPad,
@@ -239,9 +241,9 @@ export function ChartCard({
         sizeField: rec.sizeField,
         xField: rec.xField,
         yField: rec.yField,
-        colorField: rec.colorField,
+        colorField: grouped.colorField,
         layoutDirection: rec.layoutDirection,
-        pointEncoding: rec,
+        pointEncoding: { ...rec, colorField: grouped.colorField, shapeField: grouped.shapeField },
         hero,
       });
       ctx.restore();

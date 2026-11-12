@@ -174,3 +174,55 @@ describe("word cloud comparison", () => {
     expect(back?.chart.colorField).toBe("side");
   });
 });
+
+describe("word cloud typography and coverage", () => {
+  function draw(options: Record<string, unknown>, rows: unknown[][], width = 640, height = 420) {
+    const state: Record<string, unknown> = { font: "12px sans-serif" };
+    const painted: { text: string; font: string }[] = [];
+    const ctx = new Proxy({}, {
+      get: (_, key: string) => key === "measureText" ? (text: string) => {
+        const size = Number(String(state.font).match(/([\d.]+)px/)?.[1] ?? 12);
+        return { width: text.length * size * .48, actualBoundingBoxAscent: size * .8, actualBoundingBoxDescent: size * .25 };
+      } : key === "fillText" ? (text: string) => painted.push({ text, font: String(state.font) }) : key in state ? state[key] : () => {},
+      set: (_, key: string, value) => { state[key] = value; return true; },
+    }) as CanvasRenderingContext2D;
+    const hits: HitTarget[] = [];
+    renderOddChart("wordCloud", ctx, rows, columns, 0, 2, 1, -1, width, height, 48, { colors: ["#3366cc", "#dc3912"], fontFamily: "Inter", ...options, hits }, false);
+    return { hits, painted };
+  }
+
+  it("keeps equal values the same font size across unequal word lengths and comparison groups", () => {
+    const result = draw({ wordCloudMode: "compare", wordCloudWeight: "even", wordCloudScale: .6 }, [["A", "East", 100], ["Longer", "West", 100]], 900);
+    const words = result.painted.filter((p) => ["A", "Longer"].includes(p.text));
+    expect(words).toHaveLength(2);
+    expect(words[0].font).toBe(words[1].font);
+    expect(result.painted.some((p) => p.text.includes("2 of 2 words shown"))).toBe(true);
+  });
+
+  it("reports all eligible words, including those outside the limit, without truncating labels", () => {
+    const rows = Array.from({ length: 30 }, (_, i) => [`word${i}`, "East", 30 - i]);
+    const result = draw({ topN: 5 }, rows);
+    const words = result.hits.filter((h) => h.summary?.columns.includes("rank"));
+    expect(words.length).toBeLessThanOrEqual(5);
+    expect(result.painted.some((p) => p.text === `${words.length} of 30 words shown`)).toBe(true);
+    expect(result.painted.filter((p) => p.text.startsWith("word")).every((p) => !p.text.includes("…"))).toBe(true);
+  });
+
+  it("keeps placed words inside the canvas with no collisions even with accented ink and generous spacing", () => {
+    for (const arrange of ["spiral", "rows", "columns"]) {
+      const { hits } = draw({ wordCloudArrange: arrange, wordCloudGap: 16 }, Array.from({ length: 25 }, (_, i) => [`Été${i}`, "East", 25 - i]), 420, 300);
+      const boxes = hits.filter((h) => h.shape === "rect" && h.summary?.columns.includes("rank")) as (HitTarget & { x: number; y: number; w: number; h: number })[];
+      expect(boxes.length).toBeGreaterThan(0);
+      for (const [i, box] of boxes.entries()) {
+        expect(box.x).toBeGreaterThanOrEqual(0); expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.w).toBeLessThanOrEqual(420); expect(box.y + box.h).toBeLessThanOrEqual(300);
+        for (const other of boxes.slice(i + 1)) expect(box.x < other.x + other.w && box.x + box.w > other.x && box.y < other.y + other.h && box.y + box.h > other.y).toBe(false);
+      }
+    }
+  });
+
+  it("persists size contrast and spacing in portable chart links", () => {
+    const link = { src: "mock://sales.csv", chart: { kind: "wordCloud" as const, xField: "word" }, visual: { wordCloudGap: 12, wordCloudSizing: "log", wordCloudFont: "Fraunces" } };
+    expect(decodeChartLink(encodeChartLink(link))?.visual).toEqual(link.visual);
+  });
+});

@@ -17,7 +17,7 @@ export function chartStageStatus(args: {
   if (args.renderError) return { kind: "error", message: args.renderError };
   if (args.loadingSample) return { kind: "loading", message: "Loading chart data…" };
   if (args.hasChart && !args.hasRows) {
-    return { kind: "empty", message: "No rows to plot for this encoding." };
+    return { kind: "empty", message: "No rows to plot with these fields." };
   }
   return { kind: "idle" };
 }

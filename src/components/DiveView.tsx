@@ -436,7 +436,7 @@ export function DiveView() {
         <div className="flex-1 min-h-0">
           <StartHere
             title="Dive into a dataset"
-            detail="Dive slices event data Scuba-style — time window, filters, group-by, p90 vs last week. Live feeds with timestamps work best."
+            detail="Slice your data by time, filter it, and compare groups. Live feeds with dates work best."
           />
         </div>
       </div>
@@ -902,7 +902,7 @@ export function DiveView() {
                   Open in Query
                 </button>
               )}
-              {!isDesktop() && <span className="text-2xs text-loom-muted">DuckDB SQL — runs in the desktop app</span>}
+              {!isDesktop() && <span className="text-2xs text-loom-muted">The query behind these results — runs in the desktop app</span>}
             </div>
           </div>
         )}

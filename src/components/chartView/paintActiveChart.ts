@@ -1,7 +1,8 @@
 // Active chart paint pass (extracted from ChartView useEffect — LOOM-141)
 // @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
-import { categoryIndex, radiusFromPointSize } from "@/lib/chartInk";
+import { categoryIndex, radiusFromPointSize, drawEmptyMessage, resolveChartInk } from "@/lib/chartInk";
 import { groupChartChannels } from "@/lib/channelGroups";
+import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
 import { chartEntranceKey, markChartEntrancePlayed, shouldPlayChartEntrance } from "@/lib/chartEntranceOnce";
 import { notifyChartPainted } from "@/lib/chartPaintSignal";
 import { chartFont, chartTypeRamp } from "@/lib/chartType";
@@ -48,13 +49,15 @@ import { clampTopN, countFacetGroupsDropped, DEFAULT_TOP_N, layoutFacetCells, pa
 import { computeFacetSharedScatterBounds, computeFacetSharedValueDomain } from "@/lib/chartFacetScales";
 import { resolveLayoutDirection } from "@/lib/chartSupport";
 import type { YAggregateOption } from "@/lib/recommendations";
-import { drawFireflyChrome, extractGpuScenePoints, fireflyDensity, fireflyGlowPoints, fireflyPalette, fireflyLayout, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
+import { drawFireflyChrome, extractGpuScenePoints, fireflyDensity, fireflyGlowPoints, fireflyPalette, fireflyLayout, orbitSceneLayout, normalizeOrbitValue, type OrbitFrame, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
 import { isGeoMapKind, isWebGpuGlobeKind, renderGeoMapCanvas } from "@/lib/geoMaps";
 import { cubeCellCenter, cubeCellKey, dataCubeChartView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
 import { isOddChartKind, renderOddChart } from "@/lib/oddCharts";
 import { buildBarFacetGrid, type Canvas2DHitContext, type HitTarget } from "@/lib/chartTooltip";
 import type { ChartRecommendation } from "@/lib/recommendations";
-import type { SmartResults } from "@/lib/store";
+import { useLoomStore, type SmartResults } from "@/lib/store";
+import { fieldDisplayNames } from "@/lib/fieldDisplayName";
+import { sourceKindFromPath } from "@/lib/sourceRegistry";
 import { FRAMED_KINDS, OWN_FRAME_KINDS, SYMBOL_SERIES_KINDS, stageDpr } from "./constants";
 import type { ChartStageRefs } from "./chartStageRefs";
 import type { AtlasBundle } from "@/lib/geoAtlas";
@@ -194,7 +197,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       : () => undefined;
 
   if (!canvasSized || !activeChart || !sampleRows) return;
-  if (activeChart.kind !== "scatter") scatterDataRef.current = null;
+  if (!usesScatterNavigation(activeChart)) scatterDataRef.current = null;
   if (activeChart.kind !== "dataCube") cubeFrameRef.current = null;
   
   // Data cube: back walls on 2D canvas → voxels on WebGPU (or 2D) → labels on the overlay
@@ -346,7 +349,32 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       let points = packed.points;
       let bounds: { xMin: number; xMax: number; yMin: number; yMax: number; zMin: number; zMax: number } = packed;
       let plotRect: { left: number; top: number; right: number; bottom: number } | undefined;
+      let orbitFrame: OrbitFrame | undefined;
       let crowd = { alpha: 1, size: 1 };
+      if (activeChart.kind === "scatter3d") {
+        const orbitPad = resolveChartPad({ kind: activeChart.kind, width: w, height: h, basePad: chartRenderOpts.chartPadding ?? DEFAULT_PAD,
+          titleLayout: chartRenderOpts.titleLayout, tickRotation: chartRenderOpts.tickRotation, chartFrame: chartRenderOpts.chartFrame,
+          isCompact, legendPosition: chartRenderOpts.legendPosition, axisFontSize: chartRenderOpts.axisFontSize,
+          sourceFootnote: chartRenderOpts.sourceFootnote, chromeInfoBand: chartRenderOpts.chromeInfoBand });
+        const orbitHeight = h - ((chartFootnoteText || chartColorInfo?.stops?.length) && (chartVisualOverrides.chromeInfoBand ?? "footer") === "footer" ? FOOTNOTE_BAND_PX : 0);
+        const layout = orbitSceneLayout(packed, w, orbitHeight, orbitPad, sceneOrbit);
+        orbitFrame = layout.frame;
+        // Painter order is required for translucent sprites; source row order
+        // made distant points cover near points. Normalize before float32 upload
+        // so timestamps and close, large-valued coordinates retain their detail.
+        points = layout.projected.map(({ p }) => ({ ...p,
+          x: normalizeOrbitValue(p.x, packed.xMin, packed.xMax),
+          y: normalizeOrbitValue(p.y, packed.yMin, packed.yMax),
+          z: normalizeOrbitValue(p.z, packed.zMin, packed.zMax),
+        }));
+        bounds = { xMin: -1, xMax: 1, yMin: -1, yMax: 1, zMin: -1, zMax: 1 };
+        crowd = { alpha: packed.sizeRange ? 1 : 0, size: points.length > 4000 ? 0.65 : points.length > 1500 ? 0.8 : 1 };
+        const targets: HitTarget[] = layout.projected.map(p => ({ shape: "circle", cx: p.sx, cy: p.sy, r: Math.max(6, radiusFromPointSize(pointSize, 3) * 2), match: [], rowIndex: p.p.row ?? p.p.trail }));
+        canvas2DHitRef.current = { kind: activeChart.kind, frameH: h, rows: sceneRows, columns: sceneCols,
+          rowSourceIndices: chartSampleRows?.rowSourceIndices, pad: orbitPad, w, h: orbitHeight,
+          xIdx: sceneCols.indexOf(activeChart.xField), yIdx: sceneCols.indexOf(activeChart.yField ?? ""),
+          cIdx: sceneCols.indexOf(activeChart.colorField ?? ""), sizeIdx: sceneCols.indexOf(activeChart.sizeField ?? ""), targets };
+      }
       if (activeChart.kind === "firefly") {
         const ffPad = resolveChartPad({
           kind: activeChart.kind,
@@ -363,7 +391,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
           chromeInfoBand: chartRenderOpts.chromeInfoBand,
         });
         const ffHeight = h - ((chartFootnoteText || chartColorInfo?.stops?.length) && (chartVisualOverrides.chromeInfoBand ?? "footer") === "footer" ? FOOTNOTE_BAND_PX : 0);
-        const lay = fireflyLayout(packed, w, ffHeight, ffPad);
+        const lay = fireflyLayout(packed, w, ffHeight, ffPad, false, chartRenderOpts.axisFontSize);
         points = fireflyGlowPoints(packed);
         bounds = { xMin: lay.xs.min, xMax: lay.xs.max, yMin: lay.ys.min, yMax: lay.ys.max, zMin: 0, zMax: 1 };
         plotRect = { left: lay.left, top: lay.top, right: lay.right, bottom: lay.bottom };
@@ -377,6 +405,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
           frameH: h,
           rows: sceneRows,
           columns: sceneCols,
+          rowSourceIndices: chartSampleRows?.rowSourceIndices,
           pad: ffPad,
           w,
           h: ffHeight,
@@ -389,10 +418,11 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       }
       sceneRendererRef.current.uploadData(points, bounds, {
         plotRect,
-        pointSize: activeChart.kind === "firefly" ? radiusFromPointSize(pointSize, 3) * 5.2 * crowd.size : pointSize * (activeChart.kind === "globe" ? 1.6 : 1),
+        orbitFrame,
+        pointSize: activeChart.kind === "scatter3d" ? radiusFromPointSize(pointSize, 3) * 2 : activeChart.kind === "firefly" ? radiusFromPointSize(pointSize, 3) * 5.2 * crowd.size : pointSize * (activeChart.kind === "globe" ? 1.6 : 1),
         opacity,
         glowDensity: crowd.alpha,
-        sizeScale: chartVisualOverrides.sizeScale ?? 1,
+        sizeScale: activeChart.kind === "scatter3d" ? crowd.size : chartVisualOverrides.sizeScale ?? 1,
         palette: activeChart.kind === "firefly" ? fireflyPalette(colors, themeUi.bg) : colors,
         clearColor: hexToRgb01(themeUi.bg),
         yaw: sceneOrbit.yaw,
@@ -402,6 +432,9 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       });
       sceneRendererRef.current.setCamera(sceneOrbit.yaw, sceneOrbit.pitch, sceneOrbit.zoom);
       sceneRendererRef.current.render(w, h);
+    } else {
+      sceneRendererRef.current.uploadData([], { xMin: 0, xMax: 1, yMin: 0, yMax: 1, zMin: 0, zMax: 1 }, { clearColor: hexToRgb01(themeUi.bg) });
+      sceneRendererRef.current.render((canvasRef.current?.width ?? 1) / stageDpr(), (canvasRef.current?.height ?? 1) / stageDpr());
     }
     setHitsVersion((v) => v + 1);
     notifyChartPainted();
@@ -436,7 +469,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
   const sourceCols = chartSampleRows?.columns;
   if (!Array.isArray(rowsAll) || !Array.isArray(sourceCols)) return;
   
-  const zoomScale = activeChart.kind === "scatter" ? scatterView.scale : 1;
+  const zoomScale = usesScatterNavigation(activeChart) ? scatterView.scale : 1;
   const densityKinds =
     activeChart.kind === "scatter" || activeChart.kind === "bubble" || activeChart.kind === "parallel";
   const sourceIndices = chartSampleRows?.rowSourceIndices;
@@ -486,7 +519,9 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
   );
   const pad = titleWrapPx ? resolveChartPad({ ...padArgs, titleWrapPx }) : basePadPx;
   if (ARRANGE_PLOT_KINDS.has(activeChart.kind) && !activeChart.rowField) {
-    opts.plotBounds = arrangementPlot(w, h, chartVisualOverrides) ?? automaticPlotBounds({ ...padArgs, titleWrapPx }, chartVisualOverrides.spaceUse);
+    const arranged = arrangementPlot(w, h, chartVisualOverrides);
+    opts.plotBounds = arranged ?? automaticPlotBounds({ ...padArgs, titleWrapPx }, chartVisualOverrides.spaceUse);
+    opts.lineEndLabels = !arranged;
   }
   const xIdx = cols.indexOf(activeChart.xField);
   const yIdx = activeChart.yField ? cols.indexOf(activeChart.yField) : -1;
@@ -505,7 +540,13 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
   if (xIdx === -1) return;
   
   const fontFamily = opts.fontFamily ?? "Inter";
-  
+  const displayNames = fieldDisplayNames(cols, sourceKindFromPath(useLoomStore.getState().selectedFile?.path));
+  const disp = (field: string | null | undefined) => {
+    if (!field) return field;
+    const i = cols.indexOf(field);
+    return i >= 0 ? displayNames[i]! : field;
+  };
+
   const drawOneFrame = (clipProgress: number) => {
     try {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -524,7 +565,9 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
         ...opts,
         hits,
         analysis: !analysisUnavailable(activeChart) && smartResults?.analysis?.scope === analysisScope(activeChart) ? smartResults.analysis : undefined,
-        fieldNames: cols.filter((name) => !name.includes("\u0000")),
+        fieldNames: cols,
+        fieldDisplayNames: displayNames,
+        shapeField: grouped.shapeField,
         colorField: activeChart.kind === "heatmap" || activeChart.kind === "hexbin" ? activeChart.colorField : grouped.colorField,
         legend: null,
         scales: null,
@@ -538,6 +581,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       const topN = clampTopN(opts.topN, DEFAULT_TOP_N);
       const y2Idx = opts.y2Field ? cols.indexOf(opts.y2Field) : -1;
       const kind = activeChart.kind;
+      const refLines = [...(customRefLines[activeChart.id] ?? []), ...monitorLines];
       const rowIdx = activeChart.rowField ? cols.indexOf(activeChart.rowField) : -1;
       const facetPanels =
         rowIdx >= 0 && (kind === "bar" || kind === "line" || kind === "area" || kind === "scatter" || kind === "bubble")
@@ -572,16 +616,17 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
               ? "Count"
             : kind === "corrMatrix"
               ? "Pearson r"
-              : activeChart.yField;
+              : disp(activeChart.yField);
         const lolliHoriz = kind === "lollipop" && lolliLayout.horizontal;
+        const xTitle = disp(activeChart.xField)!;
         if (barHorizontal || lolliHoriz) {
-          drawAxisFieldLabels(ctx, w, h, pad, measure, activeChart.xField, opts);
+          drawAxisFieldLabels(ctx, w, h, pad, measure, xTitle, opts);
         } else if (kind === "ridgeline") {
-          drawAxisFieldLabels(ctx, w, h, pad, activeChart.xField, activeChart.yField, opts);
+          drawAxisFieldLabels(ctx, w, h, pad, xTitle, disp(activeChart.yField), opts);
         } else if (kind === "dumbbell") {
-          drawAxisFieldLabels(ctx, w, h, pad, `${activeChart.yField ?? "start"} → ${activeChart.sizeField ?? "end"}`, activeChart.xField, opts);
+          drawAxisFieldLabels(ctx, w, h, pad, `${disp(activeChart.yField) ?? "start"} → ${disp(activeChart.sizeField) ?? "end"}`, xTitle, opts);
         } else {
-          drawAxisFieldLabels(ctx, w, h, pad, activeChart.xField, yTitle, opts);
+          drawAxisFieldLabels(ctx, w, h, pad, xTitle, yTitle, opts);
         }
       }
   
@@ -605,7 +650,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       if (!paintsOwnBackground) drawTitle();
   
       let scatterViewBounds: { xMin: number; xMax: number; yMin: number; yMax: number } | undefined;
-      if (!useFacets && activeChart.kind === "scatter") {
+      if (usesScatterNavigation(activeChart)) {
         const sd = extractScatterData();
         if (sd) {
           scatterViewBounds = getEffectiveScatterBounds(sd, scatterView);
@@ -624,7 +669,11 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       }
   
       if (useFacets) {
-        const sourceIndexOf = new Map<unknown[], number>(rows.map((row, index) => [row, sub.sourceIndices?.[index] ?? index]));
+        const sourceIndexOf = new Map<unknown[], number>(rows.map((row, index) => [row, index]));
+        const seriesIndices = cIdx >= 0 ? categoryIndex(rows, cIdx) : undefined;
+        const symbolIdx = cols.indexOf(activeChart.emojiField ?? grouped.shapeField ?? "");
+        const symbolIndices = symbolIdx >= 0 ? categoryIndex(rows, symbolIdx) : undefined;
+        const facetLegend = new Map<string, NonNullable<ChartRenderOpts["legend"]>[number]>();
         const titleBand = Math.min(56, h * 0.12);
         const facetAgg: YAggregateOption = yIdx < 0 ? "count" : (ropts.yAggregate ?? (kind === "line" ? "mean" : "sum"));
         const sharedValueDomain = computeFacetSharedValueDomain(kind, rows, xIdx, yIdx, facetAgg, rowIdx, cIdx, ropts) ?? undefined;
@@ -650,7 +699,10 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
           const cellOpts: ChartRenderOpts = {
             ...ropts,
             plotBounds: undefined,
+            lineEndLabels: false,
             rowSourceIndices: undefined,
+            seriesIndices,
+            symbolIndices,
             hits: cellHits,
             legend: null,
             scales: null,
@@ -692,6 +744,16 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
               opacityIdx,
             }, undefined, sharedScatterBounds);
           }
+          if (refLines.length && cellOpts.scales) drawReferenceLines(ctx, refLines, cellOpts.scales, cellOpts);
+          if (smartResults) {
+            drawSmartOverlays(ctx, cw, ch, miniPad, panel.rows, cols, xIdx, yIdx, activeChart, smartResults, {
+              ...cellOpts,
+              rowSourceIndices: panel.rows.map(row => {
+                const local = sourceIndexOf.get(row)!;
+                return sub.sourceIndices?.[local] ?? local;
+              }),
+            }, smartOverlayPalette(themeUi, colorblindCharts));
+          }
           ctx.restore();
           for (const hit of cellHits) {
             if (hit.rowIndex != null) hit.rowIndex = sourceIndexOf.get(panel.rows[hit.rowIndex]!) ?? hit.rowIndex;
@@ -699,10 +761,11 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
           }
           offsetHitTargets(cellHits, cell.x, cell.y + labelH);
           hits.push(...cellHits);
-          if (fi === 0 && cellOpts.legend) ropts.legend = cellOpts.legend;
+          for (const entry of cellOpts.legend ?? []) facetLegend.set(entry.label, entry);
           if (fi === 0 && cellOpts.scales) ropts.scales = cellOpts.scales;
         }
-        drawAxisFieldLabels(ctx, w, h, pad, activeChart.xField, activeChart.yField, ropts);
+        ropts.legend = [...facetLegend.values()];
+        drawAxisFieldLabels(ctx, w, h, pad, disp(activeChart.xField)!, disp(activeChart.yField), ropts);
       }
   
       if (!useFacets) switch (activeChart.kind) {
@@ -712,6 +775,10 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
             outlineIdx,
             opacityIdx,
           }, smartResults?.clusters?.rowToCluster ?? undefined, scatterViewBounds);
+          if (!usesScatterNavigation(activeChart) && sub.sourceIndices) {
+            const localIndex = new Map(sub.sourceIndices.map((source, i) => [source, i]));
+            for (const hit of hits) if (hit.rowIndex != null) hit.rowIndex = localIndex.get(hit.rowIndex) ?? hit.rowIndex;
+          }
           break;
         case "bar": renderFullBar(ctx, rows, xIdx, yIdx, barColorIdx, w, h, pad, ropts, barFacetPayload, barHorizontal, barModel, cIdx >= 0 && cIdx === xIdx, barReverse); break;
         case "histogram": renderFullHistogram(ctx, rows, xIdx, w, h, pad, ropts); break;
@@ -912,9 +979,12 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
                 wordCloudArrange: opts.wordCloudArrange,
                 wordCloudScale: opts.wordCloudScale,
                 wordCloudWeight: opts.wordCloudWeight,
+                wordCloudGap: opts.wordCloudGap,
+                wordCloudSizing: opts.wordCloudSizing,
                 pyramidScaleMode: opts.pyramidScaleMode ?? activeChart.pyramidScaleMode ?? undefined,
                 deltaDisplay: opts.deltaDisplay ?? activeChart.deltaDisplay ?? undefined,
                 layoutDirection: activeChart.layoutDirection,
+                fieldDisplayNames: displayNames,
                 hits,
               },
               false,
@@ -923,12 +993,22 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
           break;
       }
       if (paintsOwnBackground) drawTitle();
+      if (!useFacets && !hits.length && !paintsOwnBackground && !isOddChartKind(kind)) {
+        const message = kind === "corrMatrix"
+          ? "Choose at least two numeric columns with varying values"
+          : ["pie", "treemap", "sunburst", "forceBubble", "funnel", "pareto"].includes(kind)
+            ? "No positive totals to plot — try Count or another measure"
+            : "No valid values to plot — check the fields and filters";
+        drawEmptyMessage(ctx, w, h, message, resolveChartInk(opts), fontFamily, false, opts.axisFontSize);
+      }
   
       const baseHit: Canvas2DHitContext = {
+        readingChart: activeChart,
         kind: activeChart.kind,
         frameH: hFull,
         rows,
         columns: cols,
+        rowSourceIndices: sub.sourceIndices,
         pad,
         w,
         h,
@@ -975,7 +1055,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
         // Renderers with a label gutter report their real plot rect — keep the key inside it
         const plotRect = !useFacets && ropts.scales?.rect ? ropts.scales.rect : pad;
         // Point / bubble maps draw their size key bottom-left
-        const avoid = categoricalMap && activeChart.sizeField ? ["bottom-left"] : [];
+        const avoid = activeChart.sizeField ? (categoricalMap ? ["bottom-left"] : kind === "bubble" ? ["bottom-right"] : []) : [];
         legendRect = drawLegend(ctx, legendEntries, legendPos, w, h, plotRect, fontFamily, opts.themeBg, opts.themeBorder, opts.themeText, legendTitle, avoid, { x: chartVisualOverrides.legendOffsetX, y: chartVisualOverrides.legendOffsetY, width: chartVisualOverrides.legendWidth, height: chartVisualOverrides.legendHeight }, opts.axisFontSize);
       }
       const actualPlot = !useFacets && ropts.scales?.rect ? ropts.scales.rect : (opts.plotBounds ?? { left: pad, top: pad, right: w - pad, bottom: h - pad });
@@ -992,8 +1072,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       setHitsVersion((v) => v + 1);
       // Custom reference lines ("+ Add reference line") on the renderer's own value scale
       // …plus limits from monitors watching this feed's plotted column ("🔔 ▲ name").
-      const refLines = [...(customRefLines[activeChart.id] ?? []), ...monitorLines];
-      if (refLines.length && ropts.scales) {
+      if (!useFacets && refLines.length && ropts.scales) {
         drawReferenceLines(ctx, refLines, ropts.scales, opts);
       }
       if (opts.ghostEnabled) {
@@ -1017,7 +1096,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
         ctx.fillText("rows", tx, gy + 44);
         ctx.restore();
       }
-      if (smartResults) {
+      if (!useFacets && smartResults) {
         drawSmartOverlays(
           ctx,
           w,

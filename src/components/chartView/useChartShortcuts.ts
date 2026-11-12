@@ -1,5 +1,6 @@
 // LOOM-141
 // @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
+import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
 import { useEffect } from "react";
 
 export function useChartShortcuts(ctx: {
@@ -76,7 +77,7 @@ export function useChartShortcuts(ctx: {
           return;
         }
 
-        if (!activeChart || activeChart.kind !== "scatter") return;
+        if (!usesScatterNavigation(activeChart)) return;
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         const stageEl = stageHostRef.current;
         const focused = document.activeElement;

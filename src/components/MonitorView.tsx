@@ -164,7 +164,7 @@ function ForYourData() {
   if (!kind) {
     return (
       <p className="text-xs text-loom-muted border border-dashed border-loom-border rounded-md p-3">
-        You&apos;re looking at <strong className="text-loom-text">{fileName}</strong>, which is a file. Monitors watch live feeds that update on their own. Open one from Data &amp; sources to get suggestions here.
+        You&apos;re looking at <strong className="text-loom-text">{fileName}</strong>, which is a file. Monitors watch live feeds that update on their own. Open one from the Data library to get suggestions here.
       </p>
     );
   }

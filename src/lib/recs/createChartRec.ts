@@ -473,7 +473,7 @@ export function createChartRec(
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
       if (kind === "pareto") {
         title = yField ? `Pareto — ${yField} by ${xField}` : `Pareto — count by ${xField}`;
-        subtitle = "bars + cumulative % (80/20)";
+        subtitle = "bars rank the groups; the line adds them up";
       } else if (subOk && colorField) {
         title += ` × ${colorField}`;
         if (barStackMode === "grouped") subtitle = rowField ? `dodged by ${colorField}; facets by ${rowField}` : `grouped by ${colorField}`;
@@ -489,7 +489,7 @@ export function createChartRec(
       enc.y = { aggregate: "count", type: "quantitative" };
       enc.color = { value: COLORS[1] };
       title = `Distribution of ${xField}`;
-      subtitle = "binned count";
+      subtitle = "how many rows fall in each range";
       break;
     case "line": {
       const agg = aggForMeasure("mean");
@@ -516,7 +516,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "nominal" };
       enc.color = { ...(colorField && agg !== "count" ? { field: colorField } : {}), aggregate: agg, type: "quantitative", scale: { scheme: "viridis" } };
       title = `${xField} × ${yField}`;
-      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per cell` : "row count per cell";
+      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per cell` : "darker cells hold more rows";
       break;
     }
     case "strip":
@@ -529,7 +529,7 @@ export function createChartRec(
         ? { field: colorField, type: "nominal", scale: { range: COLORS } }
         : { field: yField, type: "nominal", scale: { range: COLORS }, legend: null };
       title = `${xField} by ${yField}`;
-      subtitle = colorField ? `colored by ${colorField}` : "strip plot";
+      subtitle = colorField ? `colored by ${colorField}` : "every row is a tick";
       break;
     case "box":
       if (!yField) return null;
@@ -537,7 +537,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "quantitative" };
       enc.color = { value: COLORS[2] };
       title = `${yField} by ${xField}`;
-      subtitle = "box plot";
+      subtitle = "each box holds the middle half of the values";
       break;
     case "area": {
       const agg = aggForMeasure("sum");
@@ -563,7 +563,7 @@ export function createChartRec(
         : { aggregate: "count", type: "quantitative" };
       enc.color = { field: xField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = "donut";
+      subtitle = "each slice is a share of the whole";
       break;
     }
     case "bubble": {
@@ -580,7 +580,7 @@ export function createChartRec(
       if (sizeField) enc.size = { field: sizeField, type: "quantitative", scale: { range: [16, 120] } };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = sizeField ? `${xField} vs ${yField} sized by ${sizeField}` : `${xField} vs ${yField}`;
-      subtitle = colorField ? `colored by ${colorField}` : (sizeField ? "three-variable relationship" : "bubble chart");
+      subtitle = colorField ? `colored by ${colorField}` : (sizeField ? "position and size show three measures" : "bigger bubbles mean more");
       break;
     }
     case "violin": {
@@ -589,7 +589,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = `${yField} distribution by ${xField}`;
-      subtitle = "violin — density per group";
+      subtitle = "wider means more values there";
       break;
     }
     case "radar": {
@@ -599,7 +599,7 @@ export function createChartRec(
         : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = "radar / spider chart";
+      subtitle = "further from the center means higher";
       break;
     }
     case "waterfall": {
@@ -622,7 +622,7 @@ export function createChartRec(
         ? { field: colorField, type: "nominal", scale: { range: COLORS } }
         : { value: COLORS[0] };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = colorField ? `colored by ${colorField}` : "lollipop — stem + dot";
+      subtitle = colorField ? `colored by ${colorField}` : "one dot per group, ranked";
       break;
     }
     case "dumbbell": {
@@ -636,7 +636,7 @@ export function createChartRec(
       enc.size = { field: sizeField, type: "quantitative", aggregate: yAggregate ?? "mean" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = `${yField} → ${sizeField} by ${xField}`;
-      subtitle = colorField ? `dumbbell · split by ${colorField}` : "dumbbell — start to end";
+      subtitle = colorField ? `dumbbell · split by ${colorField}` : "the gap between two values, per group";
       break;
     }
     case "ridgeline": {
@@ -645,7 +645,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "nominal" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = `${xField} ridges by ${yField}`;
-      subtitle = "ridgeline — overlapping densities";
+      subtitle = "one ridge per group — peaks show common values";
       break;
     }
     case "hexbin": {
@@ -656,7 +656,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "quantitative", bin: { maxbins: 20 } };
       enc.color = { ...(colorField && agg !== "count" ? { field: colorField } : {}), aggregate: agg, type: "quantitative", scale: { scheme: "viridis" } };
       title = `${xField} × ${yField}`;
-      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per hex` : "row count per hex";
+      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per hex` : "darker hexes hold more points";
       break;
     }
     case "funnel": {
@@ -668,7 +668,7 @@ export function createChartRec(
         ? { field: yField, type: "quantitative", aggregate: agg }
         : { aggregate: "count", type: "quantitative" };
       title = yField ? `${aggLabel(agg)} of ${yField} funnel` : `Count funnel by ${xField}`;
-      subtitle = "funnel — stage conversion";
+      subtitle = "widest at the top, narrowing by size";
       break;
     }
     case "parallel": {
@@ -679,7 +679,7 @@ export function createChartRec(
         : { field: numCols.find(c => c.name !== xField)?.name ?? xField, type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = `Parallel: ${numCols.slice(0, 6).map(c => c.name).join(", ")}`;
-      subtitle = colorField ? `profiles by ${colorField}` : "parallel coordinates";
+      subtitle = colorField ? `profiles by ${colorField}` : "one line per row across every measure";
       break;
     }
     case "treemap": {
@@ -690,7 +690,7 @@ export function createChartRec(
         : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = colorField ? `nested by ${colorField}` : "treemap";
+      subtitle = colorField ? `nested by ${colorField}` : "bigger boxes mean more";
       break;
     }
     case "sunburst": {
@@ -708,7 +708,7 @@ export function createChartRec(
         enc.detail = { field: xField, type: "nominal" };
       }
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = colorField && colorField !== xField ? `inner ring: ${colorField}` : "sunburst";
+      subtitle = colorField && colorField !== xField ? `inner ring: ${colorField}` : "the inner ring splits into the outer ring";
       break;
     }
     case "choropleth": {
@@ -728,7 +728,7 @@ export function createChartRec(
         : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = "packed circles — size = value";
+      subtitle = "bigger circles mean more";
       break;
     }
     case "sankey":

@@ -233,7 +233,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         store.setViewMode("chart");
         store.setPanelTab("chart");
         store.setPanelOpen(true);
-        store.setToast("Encoding");
+        store.setToast("Fields");
         onClose();
         return;
       }

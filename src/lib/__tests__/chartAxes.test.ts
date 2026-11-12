@@ -99,6 +99,21 @@ describe("x models", () => {
 });
 
 describe("timeTicks", () => {
+  it("keeps multiple distinct labels in a month-long phone chart", () => {
+    const t = timeTicks(Date.UTC(2026, 0, 1), Date.UTC(2026, 0, 30), 2);
+    expect(t.ticks.length).toBeGreaterThanOrEqual(2);
+    expect(new Set(t.ticks.map(t.format)).size).toBe(t.ticks.length);
+  });
+
+  it("falls back to endpoints when calendar boundaries miss a short range", () => {
+    const min = Date.UTC(2026, 0, 2), max = Date.UTC(2026, 0, 12);
+    const t = timeTicks(min, max, 1);
+    expect(t.ticks).toEqual([min, max]);
+    expect(t.ticks.map(t.format)).toEqual(["Jan 2", "Jan 12"]);
+    expect(timeTicks(max, min, 1).ticks).toEqual(t.ticks);
+    expect(timeTicks(NaN, max).ticks).toEqual([]);
+  });
+
   it("uses month ticks for a one-year span", () => {
     const t = timeTicks(Date.UTC(2023, 0, 1), Date.UTC(2023, 11, 31), 6);
     expect(t.ticks.length).toBeGreaterThanOrEqual(4);

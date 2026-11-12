@@ -1,97 +1,176 @@
-// =================================================================
-// fontCatalog — optional web font loading
-// =================================================================
-
+// One font catalog for app controls, canvas, exports, and bundled font loading.
+// Legacy faces settings remain readable; every named choice now uses its real face.
 import type { AppFont, FacesSource } from "./lookSystem";
 
-/** One catalog for Settings, Visual, canvas fallbacks, and optional downloads. */
-export const FONT_CHOICES: Record<
-  AppFont,
-  {
-    family: string;
-    local: string;
-    fallback: string;
-    description: string;
-    query: string;
-  }
-> = {
-  "source-sans": {
-    family: "Source Sans 3", local: "system-ui",
-    fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-    description: "Open, humanist sans for small chart labels and dense tables.",
-    query: "family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700",
-  },
-  "source-serif": {
-    family: "Source Serif 4", local: "Georgia",
-    fallback: 'Georgia, "Times New Roman", serif',
-    description: "Editorial serif for narrative charts, annotations, and reading.",
-    query: "family=Source+Serif+4:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700",
-  },
-  "ibm-plex-mono": {
-    family: "IBM Plex Mono", local: "ui-monospace",
-    fallback: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-    description: "Technical mono for aligned values, timestamps, and precise readouts.",
-    query: "family=IBM+Plex+Mono:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700",
-  },
+export type FontChoice = {
+  family: string;
+  local: string;
+  fallback: string;
+  description: string;
+  weights: readonly number[];
+  italic: boolean;
+};
+
+export const FONT_CHOICES: Record<AppFont, FontChoice> = {
   inter: {
     family: "Inter",
     local: "system-ui",
     fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-    description: "Clear, balanced interface and chart text.",
-    query:
-      "family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600;1,700",
+    description: "Balanced and neutral. A clear starting point for any chart.",
+    weights: [100, 200, 300, 400, 500, 600, 700, 800, 900],
+    italic: true,
+  },
+  "source-sans": {
+    family: "Source Sans 3",
+    local: "system-ui",
+    fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    description: "Open, humanist letters for small labels and dense tables.",
+    weights: [200, 300, 400, 500, 600, 700, 800, 900],
+    italic: true,
+  },
+  "source-serif": {
+    family: "Source Serif 4",
+    local: "Georgia",
+    fallback: 'Georgia, "Times New Roman", serif',
+    description: "Editorial character for narrative charts and reading.",
+    weights: [200, 300, 400, 500, 600, 700, 800, 900],
+    italic: true,
+  },
+  "ibm-plex-mono": {
+    family: "IBM Plex Mono",
+    local: "ui-monospace",
+    fallback: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    description: "Technical, fixed-width letters for values and timestamps.",
+    weights: [300, 400, 500, 600, 700],
+    italic: true,
   },
   "ibm-plex": {
     family: "IBM Plex Sans",
     local: "system-ui",
     fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
     description: "Distinct letterforms for technical labels and data.",
-    query:
-      "family=IBM+Plex+Sans:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600;1,700&family=IBM+Plex+Mono:wght@400;500;600",
+    weights: [100, 200, 300, 400, 500, 600, 700],
+    italic: true,
   },
   geist: {
     family: "Geist",
     local: "system-ui",
     fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
-    description: "Compact, neutral sans serif for dense workspaces.",
-    query: "family=Geist:wght@300;400;500;600;700",
+    description: "Compact, crisp letters for dense workspaces.",
+    weights: [100, 200, 300, 400, 500, 600, 700, 800, 900],
+    italic: true,
   },
   lora: {
     family: "Lora",
     local: "Georgia",
     fallback: 'Georgia, "Times New Roman", serif',
-    description: "A reading serif for editorial charts and longer titles.",
-    query: "family=Lora:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700",
+    description: "A warm reading serif for stories and longer titles.",
+    weights: [400, 500, 600, 700],
+    italic: true,
   },
   "libre-baskerville": {
     family: "Libre Baskerville",
     local: "Georgia",
     fallback: 'Georgia, "Times New Roman", serif',
-    description: "A broad, traditional serif; give long labels extra room.",
-    query: "family=Libre+Baskerville:ital,wght@0,400;0,700;1,400",
+    description: "Broad, traditional letters. Give long labels extra room.",
+    weights: [400, 500, 600, 700],
+    italic: true,
   },
   "jetbrains-mono": {
     family: "JetBrains Mono",
     local: "ui-monospace",
     fallback: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
     description:
-      "Fixed-width text for numbers, codes, and aligned comparisons.",
-    query:
-      "family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600;1,700",
+      "Clear fixed-width letters for numbers, codes, and comparisons.",
+    weights: [100, 200, 300, 400, 500, 600, 700, 800],
+    italic: true,
   },
   "fira-code": {
     family: "Fira Code",
     local: "ui-monospace",
     fallback: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
-    description: "A coding mono; useful for field names and identifiers.",
-    query: "family=Fira+Code:wght@300;400;500;600;700",
+    description: "A coding mono for field names and identifiers.",
+    weights: [300, 400, 500, 600, 700],
+    italic: false,
+  },
+  "atkinson-hyperlegible-next": {
+    family: "Atkinson Hyperlegible Next",
+    local: "system-ui",
+    fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    description: "Distinctive letter shapes for easier reading at small sizes.",
+    weights: [200, 300, 400, 500, 600, 700, 800],
+    italic: true,
+  },
+  "dm-sans": {
+    family: "DM Sans",
+    local: "system-ui",
+    fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    description: "Friendly, open curves for approachable data stories.",
+    weights: [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000],
+    italic: true,
+  },
+  "space-grotesk": {
+    family: "Space Grotesk",
+    local: "system-ui",
+    fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    description: "Geometric character for bold headlines and word clouds.",
+    weights: [300, 400, 500, 600, 700],
+    italic: false,
+  },
+  manrope: {
+    family: "Manrope",
+    local: "system-ui",
+    fallback: 'system-ui, -apple-system, "Segoe UI", sans-serif',
+    description: "Rounded, modern geometry with compact proportions.",
+    weights: [200, 300, 400, 500, 600, 700, 800],
+    italic: false,
+  },
+  fraunces: {
+    family: "Fraunces",
+    local: "Georgia",
+    fallback: 'Georgia, "Times New Roman", serif',
+    description: "Expressive, soft serifs for standout titles and word clouds.",
+    weights: [100, 200, 300, 400, 500, 600, 700, 800, 900],
+    italic: true,
+  },
+  "ibm-plex-serif": {
+    family: "IBM Plex Serif",
+    local: "Georgia",
+    fallback: 'Georgia, "Times New Roman", serif',
+    description: "Structured serifs for editorial and scientific stories.",
+    weights: [300, 400, 500, 600, 700],
+    italic: true,
   },
 };
 
 export const FONT_GROUPS: { label: string; fonts: AppFont[] }[] = [
-  { label: "Sans serif", fonts: ["inter", "ibm-plex", "geist", "source-sans"] },
-  { label: "Serif", fonts: ["lora", "libre-baskerville", "source-serif"] },
-  { label: "Monospace", fonts: ["jetbrains-mono", "fira-code", "ibm-plex-mono"] },
+  {
+    label: "Sans serif",
+    fonts: [
+      "inter",
+      "ibm-plex",
+      "geist",
+      "source-sans",
+      "atkinson-hyperlegible-next",
+      "dm-sans",
+      "space-grotesk",
+      "manrope",
+    ],
+  },
+  {
+    label: "Serif",
+    fonts: [
+      "lora",
+      "libre-baskerville",
+      "source-serif",
+      "fraunces",
+      "ibm-plex-serif",
+    ],
+  },
+  {
+    label: "Monospace",
+    fonts: ["jetbrains-mono", "fira-code", "ibm-plex-mono"],
+  },
 ];
 
 const genericFamilies = new Set([
@@ -104,8 +183,15 @@ const genericFamilies = new Set([
   "ui-sans-serif",
 ]);
 
-const choiceByFamily = new Map(Object.entries(FONT_CHOICES).map(([id, choice]) => [choice.family, { ...choice, id: id as AppFont }]));
-const deviceStacks = new Map(Object.values(FONT_CHOICES).map((choice) => [choice.local, choice.fallback]));
+const choiceByFamily = new Map(
+  Object.entries(FONT_CHOICES).map(([id, choice]) => [
+    choice.family,
+    { ...choice, id: id as AppFont },
+  ]),
+);
+const deviceStacks = new Map(
+  Object.values(FONT_CHOICES).map((choice) => [choice.local, choice.fallback]),
+);
 
 /** Preserve the intended category offline. Never quote a generic CSS family. */
 export function chartFontStack(family = "Inter"): string {
@@ -133,53 +219,69 @@ export function chartFontStack(family = "Inter"): string {
 export function resolveChartFontFamily(
   override: string | undefined,
   appFont: AppFont,
-  faces: FacesSource,
+  _faces?: FacesSource,
 ): string {
+  void _faces; // Persisted source modes no longer change the selected family.
   const explicit = override?.trim();
-  if (explicit && explicit !== "inherit") {
-    const chosen = choiceByFamily.get(explicit);
-    return chosen && faces !== "web" ? chosen.local : explicit;
-  }
-  const choice = FONT_CHOICES[appFont] ?? FONT_CHOICES.inter;
-  return faces === "web" ? choice.family : choice.local;
+  if (explicit && explicit !== "inherit") return explicit;
+  return (FONT_CHOICES[appFont] ?? FONT_CHOICES.inter).family;
+}
+
+export function fontChoiceForFamily(family: string): FontChoice | undefined {
+  return choiceByFamily.get(family);
 }
 
 export function chartFontLabel(family: string): string {
-  return family === "system-ui" ? "System sans" : family === "ui-monospace" ? "System mono" : family;
+  return family === "system-ui"
+    ? "System sans"
+    : family === "ui-monospace"
+      ? "System mono"
+      : family;
 }
 
-const loaded = new Set<AppFont>();
-
-export function ensureLookFontLoaded(font: AppFont, faces: FacesSource): void {
-  if (typeof document === "undefined" || faces !== "web" || loaded.has(font))
-    return;
-  const choice = FONT_CHOICES[font];
-  if (!choice) return;
-  loaded.add(font);
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = `https://fonts.googleapis.com/css2?${choice.query}&display=swap`;
-  link.onload = () => {
-    // Canvas does not reflow like DOM text. Request its common weights so the
-    // FontFaceSet loadingdone event can repaint with the final measurements.
-    if (document.fonts)
-      void Promise.all(
-        [400, 600, 700].map((weight) =>
-          document.fonts.load(`${weight} 12px "${choice.family}"`),
-        ),
-      ).catch(() => {});
-  };
-  link.onerror = () => {
-    loaded.delete(font);
-    link.remove();
-  };
-  document.head.appendChild(link);
-}
+// Cache per document, and evict failures so the picker can offer a real retry.
+const pending = new WeakMap<Document, Map<string, Promise<boolean>>>();
 
 export function ensureChartFontLoaded(
   family: string,
-  faces: FacesSource,
-): void {
-  const id = choiceByFamily.get(family)?.id;
-  if (id) ensureLookFontLoaded(id, faces);
+  _faces?: FacesSource,
+  weight = 600,
+): Promise<boolean> {
+  if (typeof document === "undefined" || !document.fonts?.load)
+    return Promise.resolve(false);
+  const choice = choiceByFamily.get(family);
+  if (!choice) return Promise.resolve(true);
+  let cache = pending.get(document);
+  if (!cache) {
+    cache = new Map();
+    pending.set(document, cache);
+  }
+  const key = `${family}/${weight}`;
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const weights = [...new Set([400, 600, 700, weight])];
+  const requests = weights.map((weight) => `${weight} 12px "${family}"`);
+  if (choice.italic)
+    requests.push(
+      ...weights.map((weight) => `italic ${weight} 12px "${family}"`),
+    );
+  const task = Promise.all(requests.map((font) => document.fonts.load(font)))
+    .then(
+      // The MCP build has no DOM lib, so FontFace[] is typed as unknown there.
+      (faces) => faces.every((loaded) => (loaded as unknown[]).length > 0),
+      () => false,
+    )
+    .then((ok) => {
+      if (!ok) cache!.delete(key);
+      return ok;
+    });
+  cache.set(key, task);
+  return task;
+}
+
+export function ensureLookFontLoaded(
+  font: AppFont,
+  faces?: FacesSource,
+): Promise<boolean> {
+  return ensureChartFontLoaded(FONT_CHOICES[font]?.family ?? "Inter", faces);
 }

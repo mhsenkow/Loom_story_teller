@@ -10,6 +10,7 @@
 
 import { useEffect, useRef } from "react";
 import { useLoomStore } from "@/lib/store";
+import { hydrateSocialState } from "@/lib/store/socialSlice";
 import {
   getPersistedAppSettings,
   setPersistedAppSettings,
@@ -66,7 +67,7 @@ export function HydrateStore() {
   const notifyStorageFailure = () => {
     if (storageToastShown.current) return;
     storageToastShown.current = true;
-    useLoomStore.getState().setToast("Couldn't save — browser storage is full");
+    useLoomStore.getState().setToast("Couldn’t save — this browser is out of space. Export a backup in Settings, then remove old files from Recent.");
   };
 
   useEffect(() => {
@@ -110,6 +111,11 @@ export function HydrateStore() {
       unsubscribe();
       window.removeEventListener("storage", onStorage);
     };
+  }, []);
+
+  useEffect(() => {
+    // Community: this device's own votes, display name and show/hide preference.
+    useLoomStore.setState(hydrateSocialState());
   }, []);
 
   useEffect(() => {

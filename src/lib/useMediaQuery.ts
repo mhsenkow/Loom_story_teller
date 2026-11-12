@@ -114,8 +114,10 @@ export const MOBILE_LIVE_EDIT_SHEET = "clamp(14rem, calc(100dvh - 25rem), 48dvh)
  */
 export function useMobileLiveEdit(): boolean {
   const isMobile = useIsMobile();
+  // The sheet needs room for its navigation and usable controls below it.
+  const hasPreviewRoom = useMediaQuery("(min-height: 740px)");
   const live = useLoomStore(
     (s) => s.panelOpen && s.viewMode === "chart" && s.panelTab === "chart",
   );
-  return isMobile && live;
+  return isMobile && hasPreviewRoom && live;
 }

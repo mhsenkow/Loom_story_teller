@@ -293,8 +293,10 @@ export function renderFullWaterfall(ctx: CanvasRenderingContext2D, rows: unknown
   const groups = new Map<string, number[]>();
   for (const r of rows) {
     const k = String(r[xi]);
+    const value = agg === "count" ? 1 : chartNumber(r[yi]);
+    if (!Number.isFinite(value)) continue;
     if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? chartNumber(r[yi]) : 1);
+    groups.get(k)!.push(value);
   }
   // Steps run in natural order for numbers / dates, otherwise first appearance
   const cls = classifyKeys([...groups.keys()]);
@@ -402,8 +404,10 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
   const groups = new Map<string, { vals: number[]; cat: string; row: unknown[] }>();
   for (const r of rows) {
     const k = String(r[xi]);
+    const value = agg === "count" ? 1 : chartNumber(r[yi]);
+    if (!Number.isFinite(value)) continue;
     if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "", row: r });
-    groups.get(k)!.vals.push(yi >= 0 ? chartNumber(r[yi]) : 1);
+    groups.get(k)!.vals.push(value);
   }
   const symbols = markSymbols(opts, opts?.fieldNames, rows);
   const drawHead = (row: unknown[], x: number, y: number, r: number, color: string) => {

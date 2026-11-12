@@ -608,7 +608,7 @@ export function recommendSourceStory(
         mk("scatter", "Cap vs change · log Y", "Magnitude on a log scale", 86, "market_cap", "change_24h_pct", null, null, null, { yScale: "log" }),
         mk("corrMatrix", "Market correlations", "Price · cap · volume · change", 84, "price_usd", "market_cap", null),
         mk("treemap", "Market share", "Each coin's slice of the top 50", 82, "symbol", "market_cap", null, "max", null, { topN: 20 }),
-        mk("beeswarm", "Daily moves", "Every coin's 24h % change as a dot", 80, "symbol", "change_24h_pct", null),
+        mk("histogram", "Daily moves", "How far the top 50 coins moved in 24 hours", 80, "change_24h_pct", null, null),
         mk("isoScatter", "Price · change · volume", "Pseudo-3D market space", 78, "price_usd", "change_24h_pct", "symbol", null, "volume_24h"),
       ]);
   }

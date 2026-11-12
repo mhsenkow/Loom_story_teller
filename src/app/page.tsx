@@ -37,6 +37,7 @@ import {
   dashboardGridClass,
   dashboardGridStyle,
   readDesktopPrefsFromSession,
+  shellModeFromWidth,
   writeDesktopPrefsToSession,
   type ShellMode,
 } from "@/lib/shellLayout";
@@ -82,11 +83,13 @@ const ShareSheet = dynamic(() => import("@/components/ShareSheet").then((m) => m
 const VizSwipeDeck = dynamic(() => import("@/components/VizSwipeDeck").then((m) => m.VizSwipeDeck), { ssr: false });
 const PromptDialog = dynamic(() => import("@/components/PromptDialog").then((m) => m.PromptDialog), { ssr: false });
 const FeedbackNotes = dynamic(() => import("@/components/FeedbackNotes").then((m) => m.FeedbackNotes), { ssr: false });
+const CommunityThread = dynamic(() => import("@/components/CommunityThread").then((m) => m.CommunityThread), { ssr: false });
 
 function OccasionalOverlays() {
   const shareSheetOpen = useLoomStore((s) => s.shareSheetOpen);
   const vizSwipeOpen = useLoomStore((s) => s.vizSwipeOpen);
   const promptDialog = useLoomStore((s) => s.promptDialog);
+  const socialOpen = useLoomStore((s) => s.socialOpen);
   return (
     <>
       <Onboarding />
@@ -94,6 +97,7 @@ function OccasionalOverlays() {
       {shareSheetOpen && <ShareSheet />}
       {vizSwipeOpen && <VizSwipeDeck />}
       {promptDialog && <PromptDialog />}
+      {socialOpen && <CommunityThread />}
       <FeedbackNotes />
     </>
   );
@@ -581,20 +585,24 @@ function HomeContent({
   const panelOpen = useLoomStore((s) => s.panelOpen);
 
   useLayoutEffect(() => {
+    // Hydration reports the 1280px server width for one render; on a touch phone that
+    // reads as "tablet" (panel open), and tablet → phone then kept the panel open.
+    // Decide from the live viewport so cold loads start in the real mode.
+    const mode = shellModeFromWidth(window.innerWidth);
     const prev = shellModeRef.current;
-    if (prev === shellMode) return;
+    if (prev === mode) return;
     const next = applyShellModeTransition({
       prevMode: prev,
-      nextMode: shellMode,
+      nextMode: mode,
       desktopPrefs: readDesktopPrefsFromSession(),
       current: { sidebarOpen, panelOpen },
     });
     useLoomStore.setState(next);
-    shellModeRef.current = shellMode;
+    shellModeRef.current = mode;
   }, [shellMode, sidebarOpen, panelOpen]);
 
   useEffect(() => {
-    if (shellMode !== "desktop") return;
+    if (shellMode !== "desktop" || shellModeFromWidth(window.innerWidth) !== "desktop") return;
     writeDesktopPrefsToSession({ sidebarOpen, panelOpen });
   }, [shellMode, sidebarOpen, panelOpen]);
 
@@ -831,9 +839,9 @@ function HomeContent({
                 <li><kbd className="loom-kbd">1</kbd> Explorer · <kbd className="loom-kbd">2</kbd> Chart · <kbd className="loom-kbd">3</kbd> Query · <kbd className="loom-kbd">4</kbd> Dive · <kbd className="loom-kbd">5</kbd> Monitor</li>
                 <li><kbd className="loom-kbd">⌥1</kbd>–<kbd className="loom-kbd">⌥5</kbd> Panel tabs (Stats → Settings)</li>
                 <li><kbd className="loom-kbd">[</kbd> Sidebar · <kbd className="loom-kbd">]</kbd> Right panel · <kbd className="loom-kbd">F</kbd> Full screen chart · <kbd className="loom-kbd">Esc</kbd> Leave it</li>
-                <li className="pt-1 text-loom-muted font-medium text-2xs uppercase tracking-wider">Scatter</li>
+                <li className="pt-1 text-loom-muted font-medium text-2xs uppercase tracking-wider">Dot charts</li>
                 <li>Two-finger scroll pans · pinch / mouse wheel zooms toward cursor · double-click resets</li>
-                <li className="md:hidden">On phone: chart fills the screen · Scan for viz cards · swipe Keep / Skip · Edit opens Encoding</li>
+                <li className="md:hidden">On phone: the chart fills the screen · swipe ideas to keep or skip · Edit changes what’s on the chart</li>
                 <li><kbd className="loom-kbd">+</kbd>/<kbd className="loom-kbd">−</kbd> Zoom · <kbd className="loom-kbd">0</kbd> Reset · arrows pan (Shift = faster)</li>
                 <li><kbd className="loom-kbd">V</kbd> Pan · <kbd className="loom-kbd">C</kbd> Crosshair · <kbd className="loom-kbd">G</kbd> Lasso</li>
                 <li><kbd className="loom-kbd">Shift</kbd>+drag brush select · <kbd className="loom-kbd">L</kbd> Link tooltip · <kbd className="loom-kbd">Esc</kbd> Clear</li>
