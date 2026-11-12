@@ -12,7 +12,7 @@
     "build": "next build && node scripts/write-build-id.mjs",
     "start": "npm run preview",
     "preview": "npx serve out -s -l 3000",
-    "lint": "eslint src e2e --max-warnings=850",
+    "lint": "eslint src e2e --max-warnings=110",
     "tauri": "tauri",
     "spin": "npm run tauri dev",
     "weave": "npm run tauri build",

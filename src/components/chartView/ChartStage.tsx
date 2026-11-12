@@ -13,7 +13,7 @@ import { ChartHoverTooltip, CrosshairTooltip } from "./ChartTooltip";
 import { CanvasArrangeOverlay } from "@/components/CanvasArrangeOverlay";
 import { DataCubePivotBar, DataCubePivotTable } from "@/components/DataCubePivot";
 import { FOOTNOTE_BAND_PX } from "@/lib/chartLayout";
-import { ARRANGE_PLOT_KINDS, hasCanvasArrangement } from "@/lib/canvasArrangement";
+import { ARRANGE_PLOT_KINDS } from "@/lib/canvasArrangement";
 import { chromeHighlightRect } from "@/lib/chartChromeLink";
 import { formatAxisValue } from "@/lib/chartAxes";
 import { aspectLabel } from "@/lib/chartViewport";
@@ -451,6 +451,7 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
           >
           <canvas
             ref={canvasRef}
+            aria-label="WebGPU chart layer"
             className="absolute inset-0 w-full h-full"
             style={{
               zIndex: useWebGPUScatter || useWebGpuScene || useWebGpuGlobe || useWebGpuCube ? 1 : 0,
@@ -462,18 +463,21 @@ export function ChartStage({ d }: { d: ChartViewRuntime }) {
           />
           <canvas
             ref={canvas2DRef}
+            aria-label="Chart"
             data-loom-chart-canvas2d
             className="absolute inset-0 w-full h-full"
             style={{ zIndex: useWebGPUScatter || useWebGpuScene || useWebGpuCube ? 0 : 1 }}
           />
           <canvas
             ref={axesOverlayRef}
+            aria-hidden
             className="absolute inset-0 w-full h-full pointer-events-none"
             style={{ zIndex: useWebGPUScatter || useWebGpuCube || useWebGpuScene || useWebGpuGlobe ? 2 : 0 }}
           />
           {/* Mark focus + pinned readouts (markFocus.ts) — above every chart layer, in exports too. */}
           <canvas
             ref={focusLayerRef}
+            aria-hidden
             data-loom-focus-layer
             className="absolute inset-0 w-full h-full pointer-events-none"
             style={{ zIndex: 3 }}

@@ -25,7 +25,6 @@ export type UseScatterInteractionsArgs = {
   lassoPoints: { x: number; y: number }[];
   crosshairPos: { dataX: number; dataY: number; screenX: number; screenY: number } | null;
   rulerPins: { x: number; y: number }[];
-  scatterView: { scale: number; panX: number; panY: number };
   pointSize: number;
   setScatterTooltip: React.Dispatch<React.SetStateAction<ScatterTooltipState>>;
   setHoveredRowIndex: (idx: number | null) => void;
@@ -57,7 +56,6 @@ export type UseScatterInteractionsArgs = {
   brushStartRef: MutableRefObject<{ x: number; y: number } | null>;
   brushRectRef: MutableRefObject<{ x1: number; y1: number; x2: number; y2: number } | null>;
   pointerDownAtRef: MutableRefObject<PressStart | null>;
-  lastPointerTypeRef: MutableRefObject<string>;
   getEffectiveScatterBounds: (
     sd: { xMin: number; xMax: number; yMin: number; yMax: number },
     view: { scale: number; panX: number; panY: number },
@@ -91,7 +89,6 @@ export function useScatterInteractions(args: UseScatterInteractionsArgs): UseSca
     lassoPoints,
     crosshairPos,
     rulerPins,
-    scatterView,
     setScatterTooltip,
     setHoveredRowIndex,
     setHoverMark,
@@ -108,7 +105,6 @@ export function useScatterInteractions(args: UseScatterInteractionsArgs): UseSca
     brushStartRef,
     brushRectRef,
     pointerDownAtRef,
-    lastPointerTypeRef,
     getEffectiveScatterBounds,
     scatterHitForRow,
   } = args;

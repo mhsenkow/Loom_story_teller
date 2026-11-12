@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useSidebarOverlays } from "@/lib/useMediaQuery";
 import { useLoomStore, type FileEntry } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { pickFolder, scanFolder, inspectFile, isDesktop, fetchCsvTextWeb, streamStart, streamSnapshot, sourceStart, sourceSnapshot, type SourceKind } from "@/lib/tauri";
 import { getRecentFiles as getPersistedRecentFiles } from "@/lib/persist";
 import { activateDataset } from "@/lib/datasetPipeline";
@@ -16,26 +17,75 @@ import { webFileDisplayName, webFileStablePathFromFile, WEB_FILE_STABLE_PREFIX }
 import { bumpWebHydrationUserAction } from "@/lib/webHydration";
 import { getWebFileInspect, putWebFileInspect } from "@/lib/webFileStore";
 import { canPickDirectory, pickWebDirectoryFiles } from "@/lib/webFolderPick";
-import { WEB_VAULT_LABEL, WEB_VAULT_PATH, canLinkDeviceFolder, clearLinkedDirectory, ensureLinkedFolderPermission, getLinkedFolderMeta, isWebVaultPath, linkedFolderPermissionState, linkDeviceDataFolder, loadLinkedDirectoryHandle, resyncLinkedDataFolder, webVaultDisplayName, type LinkedFolderMeta, type LinkedFolderScanProgress } from "@/lib/webDataFolder";
+import { WEB_VAULT_LABEL, WEB_VAULT_PATH, canLinkDeviceFolder, clearLinkedDirectory, ensureLinkedFolderPermission, getLinkedFolderMeta, linkedFolderPermissionState, linkDeviceDataFolder, loadLinkedDirectoryHandle, resyncLinkedDataFolder, webVaultDisplayName, type LinkedFolderMeta, type LinkedFolderScanProgress } from "@/lib/webDataFolder";
 import { reconcileLinkedFolder, formatLinkedFolderReconcileToast, type LinkedFileFingerprint } from "@/lib/linkedFolderReconcile";
 import { formatWebBatchImportToast } from "@/lib/webBatchImport";
 import { ipcErrorMessage, leaveSourcesShowChart } from "./shared";
-import {
-  LOOM_LOAD_CSV_EVENT,
-  LOOM_OPEN_RECENT_EVENT,
-  type LoomLoadCsvDetail,
-  type LoomOpenRecentDetail,
-} from "@/lib/loomDatasetEvents";
-
+import { LOOM_LOAD_CSV_EVENT, LOOM_OPEN_RECENT_EVENT, type LoomLoadCsvDetail, type LoomOpenRecentDetail } from "@/lib/loomDatasetEvents";
 export function useSidebarController() {
   const {
-    mountedFolder, files, isScanning, selectedFile, inspectingFilePath, sidebarOpen, dataRegionOpen, dataSourcesExpanded,
-    setMountedFolder, setFiles, setIsScanning, setInspectingFilePath,
+    mountedFolder,
+    files,
+    isScanning,
+    selectedFile,
+    inspectingFilePath,
+    sidebarOpen,
+    dataRegionOpen,
+    dataSourcesExpanded,
+    setMountedFolder,
+    setFiles,
+    setIsScanning,
+    setInspectingFilePath,
     openDataset,
-    setDataRegionOpen, setDataSourcesExpanded, webFileCache, setWebFileCache,
-    addRecentFile, setLastSession, viewMode, recentFiles, lastSession, setViewMode,
-    setToast, toggleSidebar, beginWebImport, isActiveWebImport, removeRecentFile, clearRecentFiles,
-  } = useLoomStore();
+    setDataRegionOpen,
+    setDataSourcesExpanded,
+    webFileCache,
+    setWebFileCache,
+    addRecentFile,
+    setLastSession,
+    viewMode,
+    recentFiles,
+    lastSession,
+    setViewMode,
+    setToast,
+    toggleSidebar,
+    beginWebImport,
+    isActiveWebImport,
+    removeRecentFile,
+    clearRecentFiles
+  } = useLoomStore(
+    useShallow((s) => ({
+      mountedFolder: s.mountedFolder,
+      files: s.files,
+      isScanning: s.isScanning,
+      selectedFile: s.selectedFile,
+      inspectingFilePath: s.inspectingFilePath,
+      sidebarOpen: s.sidebarOpen,
+      dataRegionOpen: s.dataRegionOpen,
+      dataSourcesExpanded: s.dataSourcesExpanded,
+      setMountedFolder: s.setMountedFolder,
+      setFiles: s.setFiles,
+      setIsScanning: s.setIsScanning,
+      setInspectingFilePath: s.setInspectingFilePath,
+      openDataset: s.openDataset,
+      setDataRegionOpen: s.setDataRegionOpen,
+      setDataSourcesExpanded: s.setDataSourcesExpanded,
+      webFileCache: s.webFileCache,
+      setWebFileCache: s.setWebFileCache,
+      addRecentFile: s.addRecentFile,
+      setLastSession: s.setLastSession,
+      viewMode: s.viewMode,
+      recentFiles: s.recentFiles,
+      lastSession: s.lastSession,
+      setViewMode: s.setViewMode,
+      setToast: s.setToast,
+      toggleSidebar: s.toggleSidebar,
+      beginWebImport: s.beginWebImport,
+      isActiveWebImport: s.isActiveWebImport,
+      removeRecentFile: s.removeRecentFile,
+      clearRecentFiles: s.clearRecentFiles,
+    })),
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const webImportAbortRef = useRef<AbortController | null>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState("");

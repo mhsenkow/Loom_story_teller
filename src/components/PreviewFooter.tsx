@@ -21,20 +21,6 @@ type FooterTab = "preview" | "schema";
 type SortDir = "asc" | "desc";
 type EncodeSlot = "x" | "y" | "color";
 
-function compareCells(
-  a: string | number | boolean | null | undefined,
-  b: string | number | boolean | null | undefined,
-  dir: SortDir,
-): number {
-  const mul = dir === "asc" ? 1 : -1;
-  if (a == null && b == null) return 0;
-  if (a == null) return 1;
-  if (b == null) return -1;
-  if (typeof a === "number" && typeof b === "number") return (a - b) * mul;
-  if (typeof a === "boolean" && typeof b === "boolean") return (Number(a) - Number(b)) * mul;
-  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * mul;
-}
-
 export function PreviewFooter() {
   const sampleRows = useLoomStore((s) => s.sampleRows);
   const selectedFile = useLoomStore((s) => s.selectedFile);

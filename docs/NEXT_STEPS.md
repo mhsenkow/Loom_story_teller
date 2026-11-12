@@ -9,7 +9,7 @@ Left behind after the 2026-10-12 backlog close (699/700 Done-when met). Update t
 0. **Live crash (fixed 2026-10-12)** — `useVisualViewport` returned a new object every `getSnapshot` → React #185 via always-mounted `Dialog`; store `readInitialShellDrawers()` mismatched SSR → #418. CSP Report-Only removed from `<meta>` (invalid) and kept on `_headers` with Cloudflare Insights hosts. SW caches are now build-id scoped so a bad shell cannot stick across deploys (hard-reload / “Reload Loom” if an old tab still shows the crash).
 
 1. **ESLint warning budget**  
-   Temporarily raised to `--max-warnings=850` so web deploy can ship (~828 unused-import / dead-binding warnings, mostly from the store/recs/sidebar splits). **Restore ≤110** by clearing `@typescript-eslint/no-unused-vars` in the split modules; do not keep raising the ceiling.
+   Restored to `--max-warnings=110` (was 850). Unused-import debt cleared (~106 warnings remain: mostly react-hooks + a11y click/keyboard patterns). Keep lowering; do not raise the ceiling.
 
 2. **CI on clean tree**  
    Run `make ci` from a clean checkout before the next tag (LOOM-089). Confirm no reliance on untracked local-only assets.

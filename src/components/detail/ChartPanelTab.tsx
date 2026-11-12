@@ -1,20 +1,14 @@
 "use client";
 
-import { isNumericType } from "@/lib/canvasCharts/shared";
 import { useChartTheme } from "@/components/useChartTheme";
 import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
-import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
+import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useId, type ReactNode, type DragEvent } from "react";
 import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
-import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
-import { clampSmartFloat, clampSmartInt, SMART_TOP_N, SMART_Z } from "@/lib/smartInputClamp";
-import { useIsMobile, useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
-import { useFocusTrap } from "@/lib/useFocusTrap";
-import { clearPersistedPreferences } from "@/lib/persist";
-import { Button } from "@/components/ui/Button";
-import { WorkspaceBackupControls } from "@/components/WorkspaceBackupControls";
+import { emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
+
 import { useShallow } from "zustand/react/shallow";
-import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
-import { formatNumber } from "@/lib/format";
+import { useLoomStore, type ChartVisualOverrides } from "@/lib/store";
+
 import { ChartKindPicker } from "@/components/ChartKindPicker";
 import { ColumnFieldPicker } from "@/components/ColumnFieldPicker";
 import { EncodingInfoTip } from "@/components/EncodingInfoTip";
@@ -26,132 +20,31 @@ import { ChartLookLibrary } from "@/components/ChartLookLibrary";
 import { ChartInspectorSection } from "@/components/ChartInspectorSection";
 import { chartSpacePadding } from "@/lib/chartSpace";
 import { goToDashboardsAfterSave, saveChartView } from "@/lib/saveChartView";
-import {
-  AXIS_LABEL_COLOR_SWATCHES,
-  AXIS_LINE_COLOR_SWATCHES,
-} from "@/lib/chartPalettes";
-import {
-  THEMES,
-  THEME_LABEL,
-  UI_CHROMES,
-  UI_CHROME_LABEL,
-  APP_FONTS,
-  APP_FONT_LABEL,
-  FACES_SOURCES,
-  VISUAL_PRESETS,
-  VISUAL_PRESET_BLURB,
-  shuffleVisualOverrides,
-  VISUAL_SHUFFLE_SECTIONS,
-  type VisualPresetId,
-  type VisualShuffleLocks,
-  type VisualShuffleSection,
-  normalizeTheme,
-  type LookTheme,
-  type UiChrome,
-  type AppFont,
-  type FacesSource,
-} from "@/lib/lookSystem";
+import { AXIS_LABEL_COLOR_SWATCHES, AXIS_LINE_COLOR_SWATCHES } from "@/lib/chartPalettes";
+import { VISUAL_PRESETS, VISUAL_PRESET_BLURB, shuffleVisualOverrides, VISUAL_SHUFFLE_SECTIONS, type VisualPresetId, type VisualShuffleLocks, type VisualShuffleSection } from "@/lib/lookSystem";
 import { resolveChartFontFamily } from "@/lib/fontCatalog";
 import { ChartTypographyControls } from "@/components/ChartTypographyControls";
 import { WordCloudControls } from "@/components/WordCloudControls";
-import { requestDiscoverScan } from "@/lib/discoverStories";
-import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
-import {
-  createChartRec,
-  fitEncodingToKind,
-  PART_TO_WHOLE_KINDS,
-  Y_AGGREGATE_OPTIONS,
-  getRecommendationReason,
-  getRandomEncoding,
-  applyEncodingLocks,
-  chartKindDataSupport,
-  tryBuildRandomChartRec,
-  randomEncodingToExtra,
-  recommendStorySequence,
-  recommendStreamStory,
-  type ChartKind,
-  type ChartRecommendation,
-  type YAggregateOption,
-  type EncodingShuffleLocks,
-} from "@/lib/recommendations";
-import {
-  computeDataQualityHints,
-  formatChartAggregationSummary,
-  chartCapabilities,
-  defaultYAggregate,
-  encodingChannelLabels,
-  encodingDirectionTip,
-  encodingDirectionTitle,
-  encodingKindBlurb,
-  encodingPanelHints,
-  encodingDropAllowed,
-  CHART_LAYOUT_DIRECTIONS,
-  CHART_Y_SCALE_OPTIONS,
-  type ChartLayoutDirection,
-  type ChartYScaleOption,
-} from "@/lib/chartSupport";
-import {
-  chromeDomId,
-  chromeSectionFor,
-  type ChartChromeTarget,
-} from "@/lib/chartChromeLink";
+
+import { createChartRec, fitEncodingToKind, PART_TO_WHOLE_KINDS, Y_AGGREGATE_OPTIONS, getRecommendationReason, getRandomEncoding, applyEncodingLocks, chartKindDataSupport, tryBuildRandomChartRec, randomEncodingToExtra, type ChartKind, type ChartRecommendation, type YAggregateOption, type EncodingShuffleLocks } from "@/lib/recommendations";
+import { formatChartAggregationSummary, chartCapabilities, defaultYAggregate, encodingChannelLabels, encodingDirectionTip, encodingDirectionTitle, encodingKindBlurb, encodingPanelHints, encodingDropAllowed, CHART_LAYOUT_DIRECTIONS, CHART_Y_SCALE_OPTIONS, type ChartLayoutDirection, type ChartYScaleOption } from "@/lib/chartSupport";
+import { chromeDomId, chromeSectionFor, type ChartChromeTarget } from "@/lib/chartChromeLink";
 import { CHART_TOOLTIP_MODES, type ChartTooltipMode } from "@/lib/chartTooltipMode";
 import { ATLAS_OPTIONS } from "@/lib/geoAtlas";
 import { isGeoFamilyKind } from "@/lib/geoMaps";
-import {
-  resolveDataProvenance,
-  provenanceKindLabel,
-  type DataProvenance,
-} from "@/lib/dataProvenance";
+
 import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 import { GROUP_INTO_CHOICES, clampGroupInto } from "@/lib/channelGroups";
-import {
-  CHART_TIME_RANGES,
-  applyChartTimeWindow,
-  chartTimeRangeOptions,
-  pickDefaultTimeField,
-  temporalColumnNames,
-  timeColumnSpanMs,
-  type ChartTimeRange,
-} from "@/lib/chartTime";
-import {
-  runAnomaly,
-  runForecast,
-  runTrend,
-  runReferenceLines,
-  runClustering,
-  runCorrelationMatrix,
-  type AnomalyMethod,
-} from "@/lib/smartAnalytics";
-import { corrCellInk, corrFillT, sampleCorrDiverging, DEFAULT_CORR_DIVERGING } from "@/lib/corrMatrixStyle";
-import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
-import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
-import { exportDashboardMicrosite, streamSnapshot, isDesktop, isTauri, openExternalUrl } from "@/lib/tauri";
+import { CHART_TIME_RANGES, applyChartTimeWindow, chartTimeRangeOptions, pickDefaultTimeField, temporalColumnNames, timeColumnSpanMs, type ChartTimeRange } from "@/lib/chartTime";
+
 import { isNumericColumnType } from "@/lib/dataCubeSchema";
 import { inferColumnType } from "@/lib/columnClassify";
-import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
-import {
-  SOCIAL_PRESETS,
-  getSocialPreset,
-  buildSocialCaption,
-  shareOrDownloadFile,
-  copyTextToClipboard,
-  slugifyFilename,
-  publishStoryToWorker,
-  recordCanvasVideo,
-} from "@/lib/socialExport";
-import { downloadBlob } from "@/lib/zipStore";
+
 import { CURATED_MARK_EMOJIS, MARK_SHAPE_OPTIONS } from "@/lib/chartMarks";
-import {
-  assignChartEmoji,
-  chartEmojiLabel,
-  emojiFieldKeys,
-  seedEmojiMap,
-} from "@/lib/chartEmoji";
+import { assignChartEmoji, chartEmojiLabel, emojiFieldKeys, seedEmojiMap } from "@/lib/chartEmoji";
 import { semanticEmojiMap } from "@/lib/discoverMarkers";
 import { chartKindLabel } from "@/lib/chartKindSearch";
 import { onRadioGroupKeyDown, radioTabIndex } from "@/lib/radioGroupKeys";
-
 const DRAG_TYPE_COLUMN = "application/x-loom-column";
 
 /** Plain names for shuffle-lock keys in the Random toast. */
@@ -817,7 +710,6 @@ const Ico = {
   ),
 } as const;
 
-
 function EmojiAssignments({
   field,
   rows,
@@ -1011,7 +903,6 @@ export default function ChartPanelTab() {
     pushChartEditUndo,
     lockedColorField,
     setLockedColorField,
-    unlockColorAndResetLocks,
   } = useLoomStore(
     useShallow((s) => ({
       activeChart: s.activeChart,
@@ -1047,11 +938,9 @@ export default function ChartPanelTab() {
       pushChartEditUndo: s.pushChartEditUndo,
       lockedColorField: s.lockedColorField,
       setLockedColorField: s.setLockedColorField,
-      unlockColorAndResetLocks: s.unlockColorAndResetLocks,
     })),
   );
   const previewTitle = useLoomStore((s) => s.activeChart ? s.chartTitleOverrides[s.activeChart.id] ?? s.activeChart.title : "Your chart title");
-  const setPanelTab = useLoomStore((s) => s.setPanelTab);
   const effectiveTheme = useChartTheme();
   const inheritedStyle = resolveThemeChartStyle(effectiveTheme);
   const previewFont = resolveChartFontFamily(chartVisualOverrides.fontFamily, appSettings.font, appSettings.faces);
@@ -1071,18 +960,6 @@ export default function ChartPanelTab() {
     if (cur?.source === "panel") setChartChromeFocus(null);
   }, [setChartChromeFocus]);
 
-  // Chart click on an axis / title → switch tab and scroll the matching control into view.
-  // Hover only outlines the chart; it does not open or scroll the panel.
-  useEffect(() => {
-    if (!chartChromeFocus || chartChromeFocus.source !== "chart") return;
-    const sections: Partial<Record<ChartChromeTarget, string>> = { color: "color", marks: "look", axes: "look", grid: "axes", title: "look", legend: "layout" };
-    const section = sections[chartChromeFocus.target];
-    if (section) setVisualSections((prev) => ({ ...prev, [section]: true }));
-    const t = window.setTimeout(() => {
-      document.getElementById(chromeDomId(chartChromeFocus.target))?.scrollIntoView({ block: "nearest", behavior: appSettings.reducedMotion ? "auto" : "smooth" });
-    }, 80);
-    return () => window.clearTimeout(t);
-  }, [chartChromeFocus, appSettings.reducedMotion]);
   const [vegaOpen, setVegaOpen] = useState(false);
   const [chartWhyOpen, setChartWhyOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(true);
@@ -1098,6 +975,19 @@ export default function ChartPanelTab() {
   );
   const [visualSections, setVisualSections] = useState<Record<string, boolean>>({ design: true });
   const toggleVisualSection = (key: string) => setVisualSections((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  // Chart click on an axis / title → switch tab and scroll the matching control into view.
+  // Hover only outlines the chart; it does not open or scroll the panel.
+  useEffect(() => {
+    if (!chartChromeFocus || chartChromeFocus.source !== "chart") return;
+    const sections: Partial<Record<ChartChromeTarget, string>> = { color: "color", marks: "look", axes: "look", grid: "axes", title: "look", legend: "layout" };
+    const section = sections[chartChromeFocus.target];
+    if (section) setVisualSections((prev) => ({ ...prev, [section]: true }));
+    const t = window.setTimeout(() => {
+      document.getElementById(chromeDomId(chartChromeFocus.target))?.scrollIntoView({ block: "nearest", behavior: appSettings.reducedMotion ? "auto" : "smooth" });
+    }, 80);
+    return () => window.clearTimeout(t);
+  }, [chartChromeFocus, appSettings.reducedMotion]);
   const [encodingLocks, setEncodingLocks] = useState<EncodingShuffleLocks>({});
   const [visualLocks, setVisualLocks] = useState<VisualShuffleLocks>({});
 
@@ -3091,11 +2981,11 @@ export default function ChartPanelTab() {
             {caps.scatterExtras && (
               <div className="mt-2 space-y-1">
                 <label className="flex items-center gap-1.5 text-2xs text-loom-muted cursor-pointer">
-                  <input type="checkbox" checked={connectScatterTrail} onChange={(e) => setConnectScatterTrail(e.target.checked)} className="rounded border-loom-border accent-loom-accent" />
+                  <input type="checkbox" checked={connectScatterTrail} onChange={(e) => setConnectScatterTrail(e.target.checked)} className="rounded border-loom-border accent-loom-accent" aria-label="Connect points (trail)" />
                   Connect points (trail)
                 </label>
                 <label className="flex items-center gap-1.5 text-2xs text-loom-muted cursor-pointer">
-                  <input type="checkbox" checked={showMarginals} onChange={(e) => setShowMarginals(e.target.checked)} className="rounded border-loom-border accent-loom-accent" />
+                  <input type="checkbox" checked={showMarginals} onChange={(e) => setShowMarginals(e.target.checked)} className="rounded border-loom-border accent-loom-accent" aria-label="Marginal distributions" />
                   Marginal distributions
                 </label>
               </div>
@@ -3289,7 +3179,6 @@ export default function ChartPanelTab() {
                   <option value="flat">Flat</option><option value="glaze">Glaze</option><option value="satin">Satin</option><option value="ink">Printed edge</option><option value="etched">Etched edge</option>
                 </select>
               </label>}
-
 
               <IconToggleGroup
                 label="Detail"
@@ -4071,7 +3960,6 @@ export default function ChartPanelTab() {
                 ))}
               </ChartInspectorSection>
             )}
-
 
           </div>
       </div>

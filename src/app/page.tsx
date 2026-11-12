@@ -133,8 +133,26 @@ function DashboardCanvas({ onCollapse }: { onCollapse: () => void }) {
     setPanelTab,
     setDashboardRefresh,
     previewCapture,
-    setToast,
-  } = useLoomStore();
+    setToast
+  } = useLoomStore(
+    useShallow((s) => ({
+      dashboards: s.dashboards,
+      activeDashboardId: s.activeDashboardId,
+      tableViews: s.tableViews,
+      chartViews: s.chartViews,
+      queryViews: s.queryViews,
+      querySnapshots: s.querySnapshots,
+      applyTableView: s.applyTableView,
+      applyChartView: s.applyChartView,
+      applyQueryView: s.applyQueryView,
+      applyQuerySnapshot: s.applyQuerySnapshot,
+      setViewMode: s.setViewMode,
+      setPanelTab: s.setPanelTab,
+      setDashboardRefresh: s.setDashboardRefresh,
+      previewCapture: s.previewCapture,
+      setToast: s.setToast,
+    })),
+  );
   const active = dashboards.find((d) => d.id === activeDashboardId);
   const [focusedSlot, setFocusedSlot] = useState<DashboardSlot | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
@@ -867,7 +885,7 @@ function HomeContent({
                 <label htmlFor="loom-feedback-title" className="sr-only">
                   Issue title
                 </label>
-                <input
+                <input aria-label="Title (optional)"
                   id="loom-feedback-title"
                   type="text"
                   placeholder="Title (optional)"
@@ -878,7 +896,7 @@ function HomeContent({
                 <label htmlFor="loom-feedback-body" className="sr-only">
                   Feedback description
                 </label>
-                <textarea
+                <textarea aria-label="Describe your feedback or paste a screenshot after opening the issue…"
                   id="loom-feedback-body"
                   placeholder="Describe your feedback or paste a screenshot after opening the issue…"
                   value={feedbackBody}
@@ -887,7 +905,7 @@ function HomeContent({
                   className="loom-input w-full text-xs px-2 py-1.5 resize-y min-h-[72px]"
                 />
                 <div className="flex items-center gap-2 flex-wrap">
-                  <input
+                  <input aria-label="loom feedback screenshot"
                     ref={feedbackFileRef}
                     id="loom-feedback-screenshot"
                     type="file"

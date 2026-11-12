@@ -1,7 +1,7 @@
 // Canvas 2D axes/title/legend overlay above WebGPU scatter and scenes (LOOM-141).
 // @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 import { useEffect } from "react";
-import type { MutableRefObject, RefObject } from "react";
+import type { RefObject } from "react";
 import { groupChartChannels } from "@/lib/channelGroups";
 import { drawAxisFieldLabels, drawAxisFrame, drawChartSourceFootnote, drawChartTitleBlock } from "@/lib/chartLooks";
 import { FOOTNOTE_BAND_PX, resolveChartPad } from "@/lib/chartLayout";
@@ -18,7 +18,6 @@ import type { ScatterDataBounds } from "./extractScatterData";
 import { getEffectiveScatterBounds } from "./extractScatterData";
 import { stageDpr } from "./constants";
 import { drawEmptyMessage, resolveChartInk } from "@/lib/chartInk";
-
 export type UseAxesOverlayArgs = {
   axesOverlayRef: RefObject<HTMLCanvasElement | null>;
   canvasSized: boolean;

@@ -160,7 +160,8 @@ export function drawMarkerPath(
         const rad = i % 2 === 0 ? r * 1.2 : r * 0.5;
         const px = cx + Math.cos(angle) * rad;
         const py = cy + Math.sin(angle) * rad;
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       }
       ctx.closePath();
       break;
@@ -172,7 +173,8 @@ export function drawMarkerPath(
         const angle = (Math.PI * 2 * i) / sides - Math.PI / 2;
         const px = cx + Math.cos(angle) * r;
         const py = cy + Math.sin(angle) * r;
-        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
       }
       ctx.closePath();
       break;

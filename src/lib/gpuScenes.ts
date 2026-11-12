@@ -7,49 +7,19 @@
 // with Canvas 2D fallbacks for capture / unsupported GPUs.
 // =================================================================
 
-import type { ColumnInfo } from "./store";
-import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
 import { ensureContrast } from "./wcagColor";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
 import { formatAxisValue, formatDataValue, niceTicks } from "./chartAxes";
-import {
-  drawAxisFieldLabels,
-  drawAxisFrame,
-  drawChartGrid,
-  drawChartTicks,
-  type ChartLookOpts,
-} from "./chartLooks";
-import {
-  resolveChartInk,
-  inkHighlight,
-  inkShadow,
-  inkTint,
-  mixColor,
-  withAlpha,
-  rampColor,
-  rampKeyHeight,
-  sequentialStops,
-  drawRampKey,
-  drawEmptyMessage,
-  fontOf,
-  radiusFromPointSize,
-  type ChartInk,
-} from "./chartInk";
+import { drawAxisFieldLabels, drawAxisFrame, drawChartGrid, drawChartTicks, type ChartLookOpts } from "./chartLooks";
+import { resolveChartInk, inkHighlight, inkShadow, inkTint, mixColor, withAlpha, rampColor, rampKeyHeight, sequentialStops, drawRampKey, drawEmptyMessage, fontOf, radiusFromPointSize, type ChartInk } from "./chartInk";
 import { chartTypeRamp } from "./chartType";
-import { pickDataCubeEncoding, rankCubeDimensions } from "./dataCube";
+
 import { orientIsoCell, resolveIsoFloorOrient } from "./isoOrient";
 import { drawProjectedAxis, type AxisLabelBox } from "./projectedAxis";
-
 export * from "./gpuScenesRec";
-import type {
-  GpuSceneKind,
-  GpuSceneRenderOpts,
-  GpuScenePacked,
-  GpuScenePoint,
-} from "./gpuScenesRec";
+import type { GpuSceneKind, GpuSceneRenderOpts, GpuScenePacked, GpuScenePoint } from "./gpuScenesRec";
 import { extractGpuScenePoints } from "./gpuScenesRec";
-
 // ---------------------------------------------------------------------------
 // Canvas 2D fallbacks (capture-safe)
 // ---------------------------------------------------------------------------
@@ -318,7 +288,7 @@ function drawOrbitPoints(
   opts: GpuSceneRenderOpts,
   chromeOnly = false,
 ): void {
-  const { points, xMin, xMax, yMin, yMax, zMin, zMax } = packed;
+  const { xMin, xMax, yMin, yMax, zMin, zMax } = packed;
   const f = orbitFrame(w, h, pad, opts.yaw ?? 0.55, opts.pitch ?? 0.35, opts.zoom ?? 1, mini);
   const firefly = kind === "firefly";
   const opacity = opts.opacity ?? 0.85;

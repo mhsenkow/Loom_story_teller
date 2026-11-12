@@ -4,6 +4,12 @@ For contributors and AI: where things live and how they connect. For a shorter a
 
 ---
 
+## 3D quality follow-up (2026-11-12)
+
+`SceneCameraControls` shares camera limits and keyboard actions from `orbitCamera.ts`. Wheel handling uses a local non-passive listener; pivot controls retain their own scrolling. Cube taps ray-test the current frame at release, including transformed centers and the active slice. `pickDataCubeCell` intersects the ray with voxel boxes and chooses the nearest surface, not the nearest center.
+
+`extractGpuScenePoints` rejects missing encoded depth and expands constant axes symmetrically around their real value. `orbitSceneLayout` provides one camera frame and depth order for Canvas, GPU uniforms and hit targets. Accelerated scatter normalizes coordinates before float32 upload, sorts translucent marks back to front, and receives matching projected axes through `useAxesOverlay`. Tick positions are projected in world space, with cross-axis collision checks. Empty accelerated scenes clear old points and show a recovery message. Camera bars are outside the canvas; captures remain Canvas and retain the camera.
+
 ## Entry points
 
 | Entry | Role |
@@ -128,7 +134,7 @@ Development does not register the offline service worker; an existing Loom regis
 - **Spec generation** — live specs are built in `createChartRec` (`src/lib/recs/createChartRec.ts`). `src/lib/vega.ts` (`generateScatterSpec`, `generateBarSpec`, …) has no importers today and is kept only as reference builders. `src/lib/chartSpecParity.ts` declares per kind whether the spec is `native`, a `stand-in`, or `none` (LOOM-543; enforced by `chartSpecParity.test.ts`).
 - **Recommendations** — `src/lib/recommendations.ts`: `ChartKind` covers classic canvas kinds (scatter → sankey / network / arc diagram, plus dumbbell / ridgeline / hexbin / funnel / parallel), 20 odd Canvas kinds (`oddCharts.ts`), and 6 GPU/3D scene kinds (`gpuScenes.ts`: `scatter3d`, `trailRibbon`, `quakeTerrain`, `firefly`, `loomWeave`, `dataCube`) with optional `zField` / `timeField` / `trailId`. Flow graphs share `src/lib/flowGraphs.ts`. `recommend()` for arbitrary files; `recommendStorySequence()` for multi-chart dashboards; `recommendStreamStory()` / `recommendSourceStory()` for `wiki_stream` and poll-source schemas (often `spec: {}` with `xField`/`yField` — WebGPU scatter reads those when `spec.encoding` is missing). `STREAM_SQL_SNIPPETS` and `SOURCE_SQL_SNIPPETS` feed the Query view. Returns `ChartRecommendation[]` with encoding fields used by `ChartView`. Capabilities / honesty labels live in `chartSupport.ts`. Before diversify, `recommend()` applies local **viz preference boosts** from swipe feedback (`src/lib/vizPreferences.ts` + cached model hydrated from `loom-viz-preferences`).
 - **Deep scan + swipe deck** — `src/lib/deepScan.ts` builds a `DatasetProfile` (pairwise Pearson, nominal contingency, skew/entropy) then `deepRecommend()` expands/re-ranks candidates into a ~12–20 chart deck. Mobile **✦ Swipe ideas** (suggestions header) / desktop **Deep scan** (ChartView) opens `VizSwipeDeck`: swipe right = Keep (apply chart + like), left = Skip (dislike). Preferences stay on-device; they re-rank future `recommend()` and deep scans. No cloud learning in v1.
-- **Rendering** — `ChartView.tsx`:
+- **Rendering** — thin `ChartView.tsx` composer + `src/components/chartView/` (LOOM-141): `useChartViewCore` owns state/effects, `paintActiveChart` is the Canvas/WebGPU draw pass, `ChartStage` is the stage layout, hooks cover export / scatter / GPU / cube / shortcuts. Eligibility and paint rules below live in those modules, not the 12-line composer:
   - Chooses WebGPU for scatter only when mark is circle and no stroke/jitter/glow and no glow/outline/opacity encoding; otherwise Canvas 2D scatter so mark shape, outline, jitter, glow, and size scale all apply.
   - Bar/line/area/arc/strip are drawn with Canvas 2D. Visual overrides (fonts, grid, axes, padding, legend, data labels, background, blend, entrance animation) come from `chartVisualOverrides`.
   - **Smart overlays** — If `smartResults` is set: anomaly rings, trend line, forecast line/points, reference lines, clustering. **Custom ref lines** and **annotations** from store. **Responsive**: `chartRenderOpts` (padding, font size, grid, legend) adapt to container width (compact &lt;400px, medium &lt;600px).
@@ -142,14 +148,14 @@ Development does not register the offline service worker; an existing Loom regis
   - **Bars** — `computeBarModel` keeps numeric/date keys in order (≤40) and ranks categories by value (top 20). `barsShouldBeHorizontal` flips to labeled horizontal bands when the stage is portrait or the names can't sit flat under their bars. One color unless Color encodes something.
   - **Hover targets** — renderers push `HitTarget`s (rect / circle / arc + `match` column values or `rowIndex`, plus an aggregated `summary`) into `ChartRenderOpts.hits` while painting; `Canvas2DHitContext.targets` makes the tooltip pick exactly what was drawn and show the mark's value (bar total, slice share, bin range). Kinds without targets fall back to `pickCanvasTooltipRowIndex` geometry.
   - **Legend** — renderers report the series they colored via `setLegend` (`ChartRenderOpts.legend`); the dispatch draws it. `legendPosition` defaults to `"auto"`: shown only when a color field is encoded, in the plot corner with the least ink (sampled from the canvas). **Arrange** mode (Chart toolbar) drags/resizes the key into `legendPosition: "custom"` plus normalized `legendOffsetX/Y` / `legendWidth/Height` (share-stable in `#chart=` `vo`). Density ramps go through `densityStops` so the high end contrasts with the theme background.
-  - **Titles over maps** — geo and GPU-scene renderers fill the whole canvas, so ChartView draws the title block after them. Flat-map projections fit with the full pad on top only (`fitProjection` in `geoMaps.ts`).
-- **Smart analytics** — `src/lib/smartAnalytics.ts`: `runAnomaly`, `runForecast`, `runTrend`, `runReferenceLines`, `runClustering`. **Correlation matrix** (Pearson) computed in DetailPanel. Smart tab runs cards and sets `smartResults`; ChartView draws overlays.
+  - **Titles over maps** — geo and GPU-scene renderers fill the whole canvas, so `paintActiveChart` draws the title block after them. Flat-map projections fit with the full pad on top only (`fitProjection` in `geoMaps.ts`).
+- **Smart analytics** — `src/lib/smartAnalytics.ts`: `runAnomaly`, `runForecast`, `runTrend`, `runReferenceLines`, `runClustering`. **Correlation matrix** (Pearson) computed in DetailPanel. Smart tab runs cards and sets `smartResults`; `paintActiveChart` draws overlays.
 
 ---
 
 ## Visual layer
 
-Chart look and feel is controlled by `chartVisualOverrides` in the store and applied in `ChartView.tsx` via `chartRenderOpts`. Grouped as:
+Chart look and feel is controlled by `chartVisualOverrides` in the store and applied in `chartView/` (`useChartRenderOpts` → `paintActiveChart`) via `chartRenderOpts`. Grouped as:
 
 - **Color** — `src/lib/chartPalettes.ts` is the system of record (system + research palettes). Kinds: categorical, sequential, diverging, spectrum, semantic, reference. `colorPalette: "auto"` (default) picks scale from chart kind / color field (heatmap → sequential blue, waterfall → semantic, else categorical). `resolveChartColors` + `sampleContinuous` drive canvas/WebGPU; heatmaps interpolate sequential stops. Settings → colorblind charts forces Okabe–Ito / Cividis unless a palette is locked. Chart → Visual → Color shows swatch grid + reverse. Shuffle look respects per-section locks (Color / Design / Marks / …).
 - **Typography** — `fontFamily`, `titleFontWeight`, `titleItalic`, `tickRotation`; applied to title and axis labels. **Word cloud** (Visual section, only when that kind is active) — `wordCloudFont` (words only), `wordCloudArrange` (`spiral` | `rows` | `columns`), `wordCloudScale` (0.6–1.6), `wordCloudWeight` (`ranked` | `even` | `heavy`), `wordCloudGap` (0–16 px), and `wordCloudSizing` (`sqrt` | `linear` | `log`). Word limits reuse `activeChart.topN`, and resets preserve data encodings. Bars, lines, points, and maps keep their own Marks / Basemap sections.
@@ -283,7 +289,7 @@ View mode `monitor` (TopBar **Monitor**, key **5**). Full design and file map: [
 
 | File | Purpose |
 |------|---------|
-| `src-tauri/src/db.rs` | DuckDB connection, `scan_folder`, `query_file`, `get_column_stats`, `inspect_file`. Table name for the active file is `loom_active`. |
+| `src-tauri/src/db.rs` | DuckDB connection, `scan_folder`, `query_file`, `get_column_stats` (IPC kept; UI uses `inspect_file` for stats + sample), `inspect_file`. Table name for the active file is `loom_active`. |
 | `src/lib/vega.ts` | Reference Vega-Lite builders (no importers; live specs come from `recs/createChartRec.ts`). |
 | `src/lib/recommendations.ts` | Stable barrel re-exporting `src/lib/recs/*` (`types`, `columns`, `createChartRec`, `recommend`, `recommendSeeded`, `random`, `expand`, `sourceStory`, `sqlSnippets`). |
 | `src/lib/chartSpecParity.ts` | Per-`ChartKind` portability tier (native / stand-in / none) for the Vega-Lite spec. |
@@ -293,7 +299,8 @@ View mode `monitor` (TopBar **Monitor**, key **5**). Full design and file map: [
 | `workers/__tests__/*` | Worker handler tests (`catalogProxyHandlers.test.ts`: fetch-csv, source cache, stories, feedback) with fake `caches` / KV / `fetch`; run by `npm run test:node` and type-checked by `check:worker`. |
 | `src/lib/ollama.ts` | Ollama API for “Suggest with AI”. |
 | `src/lib/webgpu.ts` | WebGPU device, pipeline, buffer upload, draw for scatter. |
-| `src/components/ChartView.tsx` | Main chart area, suggestion grid, Smart overlays (anomaly/trend/forecast/ref lines/clusters), title edit, export handler registration. |
+| `src/components/ChartView.tsx` | Thin composer: `useChartViewCore` → `ChartStage` (LOOM-141). |
+| `src/components/chartView/` | Paint (`paintActiveChart`), stage layout, export/GPU/scatter/cube/shortcut hooks, suggestion rail, social rail. |
 | `src/components/ChartKindPicker.tsx` | Searchable chart type picker in Fields (grouped Classic / Creative / 3D & GPU / Maps; ↑/↓ Enter Esc; type-to-search from the closed trigger; “Fits this table” filter). Ranking + synonyms in `src/lib/chartKindSearch.ts`. |
 | `src/components/ColumnFieldPicker.tsx` | Searchable encoding fields with type filters; arrows skip disabled fields, Home/End jump, Enter selects, Escape dismisses. Popup is portaled to the nearest dialog (body on desktop) and placed by `columnPickerPlacement.ts` within the visual viewport (including the mobile keyboard); focus leaving the popup dismisses it. Selected field and active search result have separate ARIA states. Mobile Escape dismisses the picker before the editing sheet. |
 | `src/components/DetailPanel.tsx` | Right panel: Stats, Chart (Encoding \| Visual secondary header; encoding channels, Facet / Split / Top N / Group into / Compare Y, Visual, bar stack, ref lines, trail, marginals), Export, Smart (anomaly, forecast, trend, ref lines, clustering, correlation matrix). |

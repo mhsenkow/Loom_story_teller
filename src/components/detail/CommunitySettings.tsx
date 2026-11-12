@@ -40,7 +40,7 @@ export function CommunitySettings() {
             Name on your comments
           </label>
           <div className="flex items-center gap-2 mb-2">
-            <input
+            <input aria-label="community display name"
               id="community-display-name"
               className="loom-input text-xs py-1.5 px-2 flex-1 min-w-0"
               value={draft}

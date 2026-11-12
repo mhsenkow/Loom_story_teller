@@ -50,6 +50,7 @@ The desktop app (Tauri + DuckDB) adds folder mounting, millions of rows, SQL ove
 - **Interactivity** — **Pan** (drag) and **zoom** (wheel) on scatter. **Brush** (Shift+drag) or **Lasso** (freeform polygon) to select points and sync to table selection. **Crosshair** mode shows live (x, y) and ruler pins for Δx/Δy. **Tooltip pinning** — click a point to pin its tooltip. **Mini-map** when zoomed. **Custom reference lines** from the Chart panel.
 - **Chart → Analyze + Overlays (first draft)** — On a single-series line chart, add a baseline forecast with an approximate 95% prediction band, or flag unusual values against a trailing median/MAD baseline. Cards offer simple parameters, visibility/removal controls, and an info panel with the full calculation code. Analysis uses the filtered, aggregated values actually plotted. Overlays adds labeled events and shaded ranges on date or numeric X axes. These layers are session-only and appear in PNG captures; shared links, saved views, and Vega SVG do not carry them. Forecasting needs eight plotted points; detection needs more history than its lookback. Seasonal models and multi-series analysis are not included yet.
 - **More analysis tools** — **Anomaly** (Z-score, IQR, MAD), **Forecast**, **Trend line**, **Reference lines**, **Clustering**, and **Correlation matrix** (pairwise Pearson heatmap). Overlays draw on the chart; filter table to anomalies.
+- **3D camera controls** — Orbit scatter, cubes, globes and globe trails have Perspective / Front / Side / Above views, zoom buttons and Reset. Drag to rotate, pinch or scroll to zoom; focus the chart and use Shift + arrows to rotate, + / − to zoom, and 0 to reset. Plain arrows still inspect marks. Controls stay outside the plotted data and PNG exports.
 - **Data cube 3D** — Pick **Rows**, **Columns**, and **Depth** (any column type: categories, numbers, dates are binned to ≤12 slots) plus an optional **Value** with Sum / Average / Min / Max (default: row count). Each non-empty cell is a voxel sized and colored by its value. Drag to orbit, scroll to zoom, hover a voxel for its row · column · depth and value. Renders with WebGPU when available (Canvas 2D fallback for exports and thumbnails).
   - **Pivot it** — drag the **Rows / Columns / Depth** chips onto each other (or click two, or **↻ Pivot** to rotate all three) and the voxels fly to their new positions; drop a Schema column on a chip to replace that axis. **Slice** a depth layer with ◀ ▶, `[` / `]`, or by clicking a voxel (other layers ghost; Esc for all). **▦ Table** docks a linked pivot table (rows × columns for the slice, or rolled up across depth, with row / column / grand totals) — hover a cell to light its voxels.
 - **Export** — Copy or download PNG/SVG; copy chart config as JSON. Annotations and custom ref lines are per chart.
@@ -302,7 +303,8 @@ Loom_story_teller/
 │   │   ├── Sidebar.tsx          # Files, Data & sources, live stream + poll source cards
 │   │   ├── TopBar.tsx           # View tabs (Explorer / Chart / Query)
 │   │   ├── DetailPanel.tsx      # Right panel: Stats, Chart (encoding + Visual), Export, Smart
-│   │   ├── ChartView.tsx       # Chart canvas, suggestions, Smart overlays, title edit, export
+│   │   ├── ChartView.tsx        # Thin composer → chartView/ (LOOM-141)
+│   │   ├── chartView/           # paintActiveChart, ChartStage, useChartViewCore, export/GPU hooks
 │   │   ├── ChartCard.tsx        # Thumbnail + “Try” for suggestions
 │   │   ├── ExplorerView.tsx    # Full-width data table
 │   │   ├── QueryView.tsx       # SQL editor + results

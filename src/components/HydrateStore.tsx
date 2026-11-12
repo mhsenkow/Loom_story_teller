@@ -10,6 +10,7 @@
 
 import { useEffect, useRef } from "react";
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { hydrateSocialState } from "@/lib/store/socialSlice";
 import {
   getPersistedAppSettings,
@@ -176,8 +177,34 @@ export function HydrateStore() {
     queryViews,
     dashboards,
     vizPreferences,
-    selectedFile,
-  } = useLoomStore();
+    selectedFile
+  } = useLoomStore(
+    useShallow((s) => ({
+      setAppSettings: s.setAppSettings,
+      setRecentFiles: s.setRecentFiles,
+      setLastSession: s.setLastSession,
+      setQueryHistory: s.setQueryHistory,
+      setQuerySnippets: s.setQuerySnippets,
+      setTablePrefs: s.setTablePrefs,
+      setTableViews: s.setTableViews,
+      setChartViews: s.setChartViews,
+      setQueryViews: s.setQueryViews,
+      setDashboards: s.setDashboards,
+      setVizPreferences: s.setVizPreferences,
+      appSettings: s.appSettings,
+      recentFiles: s.recentFiles,
+      lastSession: s.lastSession,
+      queryHistory: s.queryHistory,
+      querySnippets: s.querySnippets,
+      tablePrefs: s.tablePrefs,
+      tableViews: s.tableViews,
+      chartViews: s.chartViews,
+      queryViews: s.queryViews,
+      dashboards: s.dashboards,
+      vizPreferences: s.vizPreferences,
+      selectedFile: s.selectedFile,
+    })),
+  );
   const selectedPath = selectedFile?.path ?? null;
   const skipTablePrefsPathLoad = useRef(false);
 

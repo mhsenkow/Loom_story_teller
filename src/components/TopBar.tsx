@@ -9,6 +9,7 @@
 
 import { ThemeCycleButton } from "./ThemeCycleButton";
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import {
   CHART_ASPECTS,
   type ChartAspectId,
@@ -80,8 +81,29 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
     activeChart,
     setShareSheetOpen,
     setToast,
-    discoverReturnPath,
-  } = useLoomStore();
+    discoverReturnPath
+  } = useLoomStore(
+    useShallow((s) => ({
+      dataSourcesExpanded: s.dataSourcesExpanded,
+      viewMode: s.viewMode,
+      setViewMode: s.setViewMode,
+      sidebarOpen: s.sidebarOpen,
+      panelOpen: s.panelOpen,
+      togglePanel: s.togglePanel,
+      toggleSidebar: s.toggleSidebar,
+      setPanelTab: s.setPanelTab,
+      selectedFile: s.selectedFile,
+      appSettings: s.appSettings,
+      setAppSettings: s.setAppSettings,
+      columnStats: s.columnStats,
+      sampleRows: s.sampleRows,
+      queryResult: s.queryResult,
+      activeChart: s.activeChart,
+      setShareSheetOpen: s.setShareSheetOpen,
+      setToast: s.setToast,
+      discoverReturnPath: s.discoverReturnPath,
+    })),
+  );
   const viewportW = useViewportWidth();
   const aspect = appSettings.chartAspect ?? "free";
   const devicePreset = appSettings.chartDevice ?? "auto";

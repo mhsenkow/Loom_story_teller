@@ -209,7 +209,7 @@ export function ChartKindGallery({
             autoComplete="off"
           />
           <label className="flex cursor-pointer select-none items-center gap-1.5 text-2xs text-loom-muted">
-            <input type="checkbox" checked={fitsOnly} onChange={(e) => setFitsOnly(e.target.checked)} className="accent-[var(--loom-accent)]" />
+            <input type="checkbox" checked={fitsOnly} onChange={(e) => setFitsOnly(e.target.checked)} className="accent-[var(--loom-accent)]" aria-label="Fits this table" />
             Fits this table ({fitCount})
           </label>
           <button type="button" onClick={onClose} className="loom-btn-ghost ml-auto h-8 w-8 p-0" aria-label="Close chart types">

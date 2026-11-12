@@ -1,122 +1,15 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
-import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
-import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
-import { clampSmartFloat, clampSmartInt, SMART_TOP_N, SMART_Z } from "@/lib/smartInputClamp";
-import { useIsMobile, useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
-import { useFocusTrap } from "@/lib/useFocusTrap";
-import { clearPersistedPreferences } from "@/lib/persist";
-import { Button } from "@/components/ui/Button";
-import { WorkspaceBackupControls } from "@/components/WorkspaceBackupControls";
-import { useShallow } from "zustand/react/shallow";
-import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
+import { useMemo, useEffect } from "react";
+
+import { useLoomStore } from "@/lib/store";
 import { formatNumber } from "@/lib/format";
-import { ChartKindPicker } from "@/components/ChartKindPicker";
-import {
-  AXIS_LABEL_COLOR_SWATCHES,
-  AXIS_LINE_COLOR_SWATCHES,
-  COLOR_PALETTES,
-  palettesGrouped,
-  resolveChartColors,
-  type PaletteKind,
-} from "@/lib/chartPalettes";
-import {
-  THEMES,
-  THEME_LABEL,
-  UI_CHROMES,
-  UI_CHROME_LABEL,
-  APP_FONTS,
-  APP_FONT_LABEL,
-  FACES_SOURCES,
-  VISUAL_PRESETS,
-  VISUAL_PRESET_BLURB,
-  shuffleVisualOverrides,
-  VISUAL_SHUFFLE_SECTIONS,
-  type VisualPresetId,
-  type VisualShuffleLocks,
-  type VisualShuffleSection,
-  normalizeTheme,
-  type LookTheme,
-  type UiChrome,
-  type AppFont,
-  type FacesSource,
-} from "@/lib/lookSystem";
-import { requestDiscoverScan } from "@/lib/discoverStories";
-import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
-import {
-  createChartRec,
-  fitEncodingToKind,
-  Y_AGGREGATE_OPTIONS,
-  getRecommendationReason,
-  getRandomEncoding,
-  applyEncodingLocks,
-  chartKindDataSupport,
-  tryBuildRandomChartRec,
-  randomEncodingToExtra,
-  recommendStorySequence,
-  recommendStreamStory,
-  type ChartKind,
-  type YAggregateOption,
-  type EncodingShuffleLocks,
-} from "@/lib/recommendations";
-import {
-  computeDataQualityHints,
-  formatChartAggregationSummary,
-  chartCapabilities,
-  encodingChannelLabels,
-  CHART_LAYOUT_DIRECTIONS,
-  CHART_Y_SCALE_OPTIONS,
-  type ChartLayoutDirection,
-  type ChartYScaleOption,
-} from "@/lib/chartSupport";
-import {
-  chromeDomId,
-  chromeSectionFor,
-  type ChartChromeTarget,
-} from "@/lib/chartChromeLink";
-import { CHART_TOOLTIP_MODES, type ChartTooltipMode } from "@/lib/chartTooltipMode";
-import {
-  resolveDataProvenance,
-  provenanceKindLabel,
-  type DataProvenance,
-} from "@/lib/dataProvenance";
-import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
-import {
-  CHART_TIME_RANGES,
-  applyChartTimeWindow,
-  chartTimeRangeOptions,
-  pickDefaultTimeField,
-  temporalColumnNames,
-  timeColumnSpanMs,
-  type ChartTimeRange,
-} from "@/lib/chartTime";
-import {
-  runAnomaly,
-  runForecast,
-  runTrend,
-  runReferenceLines,
-  runClustering,
-  runCorrelationMatrix,
-  type AnomalyMethod,
-} from "@/lib/smartAnalytics";
-import { corrCellInk, corrFillT, sampleCorrDiverging, DEFAULT_CORR_DIVERGING } from "@/lib/corrMatrixStyle";
-import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
-import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
-import { exportDashboardMicrosite, streamSnapshot, isDesktop, isTauri, openExternalUrl } from "@/lib/tauri";
-import { isNumericColumnType } from "@/lib/dataCubeSchema";
-import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
-import {
-  SOCIAL_PRESETS,
-  getSocialPreset,
-  buildSocialCaption,
-  shareOrDownloadFile,
-  copyTextToClipboard,
-  slugifyFilename,
-  publishStoryToWorker,
-  recordCanvasVideo,
-} from "@/lib/socialExport";
-import { downloadBlob } from "@/lib/zipStore";
+
+import { computeDataQualityHints } from "@/lib/chartSupport";
+
+import { resolveDataProvenance, provenanceKindLabel, type DataProvenance } from "@/lib/dataProvenance";
+
+import { isTauri, openExternalUrl } from "@/lib/tauri";
 
 export default function StatsTab() {
   const columnStats = useLoomStore((s) => s.columnStats);

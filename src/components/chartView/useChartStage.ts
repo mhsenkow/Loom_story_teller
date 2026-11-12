@@ -86,7 +86,7 @@ export function useChartStage(args: UseChartStageArgs): UseChartStageResult {
   const chartFrameSize = useMemo((): ChartFrameSize => {
     if (socialExportTarget) return chartFrameMax;
     return arrangedFrameSize(chartFrameMax, chartVisualOverrides);
-  }, [chartFrameMax, chartVisualOverrides.canvasWidth, chartVisualOverrides.canvasHeight, socialExportTarget]);
+  }, [chartFrameMax, chartVisualOverrides, socialExportTarget]);
 
   useEffect(() => {
     if (suggestionsExpanded) return;
@@ -156,6 +156,8 @@ export function useChartStage(args: UseChartStageArgs): UseChartStageResult {
     canvas2DRef,
     axesOverlayRef,
     focusLayerRef,
+    setCanvasSized,
+    setContainerSize,
   ]);
 
   return { chartFrameMax, chartFrameSize, stageMounted };

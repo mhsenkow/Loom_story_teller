@@ -334,7 +334,7 @@ export function useGpuRenderers(args: UseGpuRenderersArgs): UseGpuRenderersResul
     });
     const pad = plotInsets.padCss;
     const eff = getEffectiveScatterBounds(gpuScatterPack.sd, scatterView);
-    const { yScaleKind, yMin, yMax } = gpuScatterPack;
+    const { yScaleKind } = gpuScatterPack;
     let renderYMin = eff.yMin;
     let renderYMax = eff.yMax;
     if (yScaleKind !== "linear") {

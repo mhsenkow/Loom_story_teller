@@ -6,8 +6,7 @@ import type { ChartRecommendation } from "../recommendations";
 import type { ChartChromeSection, ChartChromeFocus } from "../chartChromeLink";
 import type { DiveLink, DiveQuery } from "../dive";
 import type { ChartLink } from "../chartLink";
-import type { LoomState, ViewMode, PanelTab, FileEntry, ColumnInfo, QueryResult, ChartVisualOverrides } from "./types";
-
+import type { LoomState, ViewMode, PanelTab, FileEntry, ColumnInfo, QueryResult } from "./types";
 export function chartActivationPatch(rec: ChartRecommendation): Partial<LoomState> {
   return {
     activeChart: rec,

@@ -6,7 +6,7 @@ import { fillMaterialPath } from "./material";
 // =================================================================
 
 import { aggregateValues, fieldLabel, plotOf, pushHit, setLegend, valueTitle } from "./plumbing";
-import { classifyKeys, formatAxisValue, formatDataValue, histogramBins, linear, niceTicks, niceZeroScale } from "../chartAxes";
+import { classifyKeys, formatAxisValue, formatDataValue, histogramBins, linear, niceZeroScale } from "../chartAxes";
 import { DEFAULT_TOP_N, clampTopN } from "../chartFacets";
 import { drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks } from "../chartLooks";
 import { type ChartRenderOpts } from "../chartRenderTypes";
@@ -16,7 +16,6 @@ import { axisFont, barPath, drawZeroLine, labelGutter, widestText } from "./axis
 import { contrastingInk } from "../chartLayout";
 import { chartTypeRamp } from "../chartType";
 import { DEFAULT_COLORS } from "./shared";
-
 export type BarModel = { entries: [string, number][]; rowCounts: Map<string, number>; ordered: boolean };
 
 /** Aggregate simple bars. Ordered keys (numbers, dates) keep their order; categories rank by value (Top N). */

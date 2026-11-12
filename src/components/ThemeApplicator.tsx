@@ -9,6 +9,7 @@
 
 import { useLayoutEffect } from "react";
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import {
   normalizeFaces,
   normalizeFont,
@@ -22,7 +23,15 @@ import { ensureLookFontLoaded } from "@/lib/fontCatalog";
 import { applyThemeChromeColor, themeChromeColor } from "@/lib/themeChromeColor";
 
 export function ThemeApplicator() {
-  const { appSettings, setAppSettings } = useLoomStore();
+  const {
+    appSettings,
+    setAppSettings
+  } = useLoomStore(
+    useShallow((s) => ({
+      appSettings: s.appSettings,
+      setAppSettings: s.setAppSettings,
+    })),
+  );
   const { theme, uiChrome, font, faces, fontScale, reducedMotion, colorblindCharts } = appSettings;
   const prefersDark = useMediaQuery("(prefers-color-scheme: dark)");
 

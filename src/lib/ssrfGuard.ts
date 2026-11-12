@@ -111,8 +111,7 @@ export async function fetchWithSsrfGuard(
   assertHttpUrlAllowed(current);
 
   let redirectCount = 0;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
+  for (;;) {
     const response = await fetch(current.toString(), { ...init, redirect: "manual" });
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get("Location");

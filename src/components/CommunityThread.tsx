@@ -85,7 +85,7 @@ export function CommunityThread() {
         <label htmlFor="community-draft" className="sr-only">
           Add a comment
         </label>
-        <textarea
+        <textarea aria-label="What do you notice in this chart?"
           id="community-draft"
           ref={inputRef}
           className="loom-input community-textarea"
@@ -107,7 +107,7 @@ export function CommunityThread() {
               <label htmlFor="community-name" className="sr-only">
                 Your display name
               </label>
-              <input
+              <input aria-label="community name"
                 id="community-name"
                 className="loom-input text-xs py-1 px-2 w-36"
                 value={nameDraft}

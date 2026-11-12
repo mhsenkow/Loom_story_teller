@@ -1129,32 +1129,6 @@ function drawLine(
   ctx.globalAlpha = 1;
 }
 
-function drawHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
-  const stops = colors.length ? colors : FALLBACK_COLORS;
-  const xLabels = [...new Set(rows.map(r => String(r[xi])))].slice(0, 12);
-  const yLabels = [...new Set(rows.map(r => String(r[yi])))].slice(0, 12);
-  const counts = new Map<string, number>();
-  for (const row of rows) {
-    const k = `${row[xi]}|${row[yi]}`;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
-  }
-  const maxC = Math.max(...counts.values(), 1);
-  const cellW = (w - 2 * pad) / xLabels.length;
-  const cellH = (h - 2 * pad) / yLabels.length;
-
-  xLabels.forEach((xL, xi2) => {
-    yLabels.forEach((yL, yi2) => {
-      const c = counts.get(`${xL}|${yL}`) ?? 0;
-      if (c <= 0) return;
-      const intensity = c / maxC;
-      ctx.globalAlpha = 0.3 + intensity * 0.7;
-      ctx.fillStyle = sampleContinuous(stops, 0.2 + intensity * 0.8);
-      ctx.fillRect(pad + xi2 * cellW, pad + yi2 * cellH, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
-    });
-  });
-  ctx.globalAlpha = 1;
-}
-
 function drawStrip(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, ci: number, w: number, h: number, pad: number, colors: string[]) {
   const COL = colors.length ? colors : FALLBACK_COLORS;
   const [xMin, xMax] = numericRange(rows, xi);
@@ -1426,7 +1400,8 @@ function drawViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
     for (let b = 0; b < bins; b++) {
       const y = h - pad - (b / bins) * (h - 2 * pad);
       const dx = (counts[b] / maxC) * halfW;
-      b === 0 ? ctx.moveTo(cx - dx, y) : ctx.lineTo(cx - dx, y);
+      if (b === 0) ctx.moveTo(cx - dx, y);
+      else ctx.lineTo(cx - dx, y);
     }
     for (let b = bins - 1; b >= 0; b--) {
       const y = h - pad - (b / bins) * (h - 2 * pad);
@@ -1465,7 +1440,8 @@ function drawRadar(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames
     ctx.beginPath();
     for (let i = 0; i <= n; i++) {
       const angle = (Math.PI * 2 * (i % n)) / n - Math.PI / 2;
-      i === 0 ? ctx.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r) : ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      if (i === 0) ctx.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      else ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
     }
     ctx.closePath();
     ctx.stroke();
@@ -1505,7 +1481,8 @@ function drawRadar(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames
     means.forEach((v, i) => {
       const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
       const r = Math.max(0.04, v) * radius;
-      i === 0 ? ctx.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r) : ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      if (i === 0) ctx.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      else ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
     });
     ctx.closePath();
     ctx.fill();
@@ -1831,42 +1808,6 @@ function drawRidgeline(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
     ctx.fillStyle = COL[0]; ctx.globalAlpha = 0.5; ctx.fill();
     ctx.strokeStyle = COL[0]; ctx.globalAlpha = 0.9; ctx.lineWidth = 1; ctx.stroke();
   });
-  ctx.globalAlpha = 1;
-}
-
-function drawHexbin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, stops: string[]) {
-  const [xMin, xMax] = numericRange(rows, xi);
-  const [yMin, yMax] = numericRange(rows, yi);
-  const hexR = Math.min(w, h) / 18;
-  const hexW = hexR * Math.sqrt(3), hexH = hexR * 1.5;
-  const counts = new Map<string, number>();
-  let maxC = 0;
-  for (const r of rows) {
-    const xv = Number(r[xi]), yv = Number(r[yi]);
-    if (isNaN(xv) || isNaN(yv)) continue;
-    const px = pad + ((xv - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
-    const py = h - pad - ((yv - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
-    const col = Math.round((px - pad) / hexW), row = Math.round((py - pad) / hexH);
-    const key = `${col},${row}`;
-    const n = (counts.get(key) ?? 0) + 1;
-    counts.set(key, n); if (n > maxC) maxC = n;
-  }
-  for (const [key, count] of counts) {
-    const [cs, rs] = key.split(",");
-    const col = Number(cs), row = Number(rs);
-    const cx = pad + col * hexW + (row % 2 ? hexW / 2 : 0);
-    const cy = pad + row * hexH;
-    const t = count / maxC;
-    ctx.fillStyle = sampleContinuous(stops, 0.2 + t * 0.8);
-    ctx.globalAlpha = 0.45 + t * 0.5;
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const ang = (Math.PI / 180) * (60 * i - 30);
-      const hx = cx + hexR * Math.cos(ang), hy = cy + hexR * Math.sin(ang);
-      if (i === 0) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
-    }
-    ctx.closePath(); ctx.fill();
-  }
   ctx.globalAlpha = 1;
 }
 

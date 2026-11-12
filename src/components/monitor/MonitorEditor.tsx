@@ -209,16 +209,16 @@ export function MonitorEditor() {
         <section className="space-y-3">
           <div>
             <label className={label} htmlFor="mon-name">Name</label>
-            <input id="mon-name" className="loom-input w-full" value={d.name} placeholder="e.g. Warehouse heat" onChange={(e) => set({ name: e.target.value })} />
+            <input aria-label="Name" id="mon-name" className="loom-input w-full" value={d.name} placeholder="e.g. Warehouse heat" onChange={(e) => set({ name: e.target.value })} />
           </div>
           <div>
             <label className={label} htmlFor="mon-decision">If this fires, I will…</label>
-            <textarea id="mon-decision" className="loom-input w-full min-h-16" value={d.decision} placeholder="The decision or action this monitor exists for" onChange={(e) => set({ decision: e.target.value })} />
+            <textarea aria-label="If this fires, I will…" id="mon-decision" className="loom-input w-full min-h-16" value={d.decision} placeholder="The decision or action this monitor exists for" onChange={(e) => set({ decision: e.target.value })} />
             <p className="text-2xs text-loom-muted mt-1">Tie it to something you&apos;d actually do. You&apos;ll be asked afterward whether each alert led to that.</p>
           </div>
           <div>
             <label className={label} htmlFor="mon-why">Why it matters (optional)</label>
-            <input id="mon-why" className="loom-input w-full" value={d.rationale ?? ""} placeholder="Who is affected, what it costs" onChange={(e) => set({ rationale: e.target.value || undefined })} />
+            <input aria-label="Why it matters (optional)" id="mon-why" className="loom-input w-full" value={d.rationale ?? ""} placeholder="Who is affected, what it costs" onChange={(e) => set({ rationale: e.target.value || undefined })} />
           </div>
         </section>
 
@@ -227,19 +227,19 @@ export function MonitorEditor() {
           <div className="grid grid-cols-2 gap-2">
             <div className="col-span-2">
               <label className={label} htmlFor="mon-src">Feed</label>
-              <select id="mon-src" className="loom-input w-full" value={d.metric.source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
+              <select aria-label="Feed" id="mon-src" className="loom-input w-full" value={d.metric.source} onChange={(e) => changeSource(e.target.value as SourceKind)}>
                 {SOURCE_DEFS.map((s) => <option key={s.kind} value={s.kind}>{s.label}</option>)}
               </select>
             </div>
             <div>
               <label className={label} htmlFor="mon-agg">Calculation</label>
-              <select id="mon-agg" className="loom-input w-full" value={d.metric.agg} onChange={(e) => setMetric({ agg: e.target.value as MonitorAgg })}>
+              <select aria-label="Calculation" id="mon-agg" className="loom-input w-full" value={d.metric.agg} onChange={(e) => setMetric({ agg: e.target.value as MonitorAgg })}>
                 {AGGS.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
               </select>
             </div>
             <div>
               <label className={label} htmlFor="mon-col">Column</label>
-              <select
+              <select aria-label="Column"
                 id="mon-col"
                 className="loom-input w-full"
                 disabled={d.metric.agg === "count"}
@@ -251,18 +251,18 @@ export function MonitorEditor() {
             </div>
             <div>
               <label className={label} htmlFor="mon-time">Time column</label>
-              <select id="mon-time" className="loom-input w-full" value={d.metric.timeColumn ?? ""} onChange={(e) => setMetric({ timeColumn: e.target.value || undefined })}>
+              <select aria-label="Time column" id="mon-time" className="loom-input w-full" value={d.metric.timeColumn ?? ""} onChange={(e) => setMetric({ timeColumn: e.target.value || undefined })}>
                 <option value="">None</option>
                 {timeCols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
               </select>
             </div>
             <div>
               <label className={label} htmlFor="mon-look">Only the last … minutes</label>
-              <input id="mon-look" className="loom-input w-full" inputMode="numeric" disabled={!d.metric.timeColumn} value={d.metric.lookbackMinutes ?? ""} placeholder="All rows" onChange={(e) => setMetric({ lookbackMinutes: numOr(e.target.value) })} />
+              <input aria-label="Only the last … minutes" id="mon-look" className="loom-input w-full" inputMode="numeric" disabled={!d.metric.timeColumn} value={d.metric.lookbackMinutes ?? ""} placeholder="All rows" onChange={(e) => setMetric({ lookbackMinutes: numOr(e.target.value) })} />
             </div>
             <div>
               <label className={label} htmlFor="mon-unit">Unit</label>
-              <input id="mon-unit" className="loom-input w-full" value={d.metric.unit ?? ""} onChange={(e) => setMetric({ unit: e.target.value || undefined })} />
+              <input aria-label="Unit" id="mon-unit" className="loom-input w-full" value={d.metric.unit ?? ""} onChange={(e) => setMetric({ unit: e.target.value || undefined })} />
             </div>
           </div>
 
@@ -334,25 +334,25 @@ export function MonitorEditor() {
 
           {r.kind === "threshold" && (
             <div className="grid grid-cols-2 gap-2">
-              <div><label className={label} htmlFor="r-above">Above</label><NumberField id="r-above" className="loom-input w-full" allowEmpty value={r.above} onChange={(v) => setRule({ ...r, above: v })} /></div>
-              <div><label className={label} htmlFor="r-below">Below</label><NumberField id="r-below" className="loom-input w-full" allowEmpty value={r.below} onChange={(v) => setRule({ ...r, below: v })} /></div>
+              <div><label className={label} htmlFor="r-above">Above</label><NumberField id="r-above" aria-label="Above" className="loom-input w-full" allowEmpty value={r.above} onChange={(v) => setRule({ ...r, above: v })} /></div>
+              <div><label className={label} htmlFor="r-below">Below</label><NumberField id="r-below" aria-label="Below" className="loom-input w-full" allowEmpty value={r.below} onChange={(v) => setRule({ ...r, below: v })} /></div>
             </div>
           )}
           {r.kind === "range" && (
             <div className="grid grid-cols-2 gap-2">
-              <div><label className={label} htmlFor="r-low">Low</label><NumberField id="r-low" className="loom-input w-full" value={r.low} onChange={(v) => v != null && setRule({ ...r, low: v })} /></div>
-              <div><label className={label} htmlFor="r-high">High</label><NumberField id="r-high" className="loom-input w-full" value={r.high} onChange={(v) => v != null && setRule({ ...r, high: v })} /></div>
+              <div><label className={label} htmlFor="r-low">Low</label><NumberField id="r-low" aria-label="Low" className="loom-input w-full" value={r.low} onChange={(v) => v != null && setRule({ ...r, low: v })} /></div>
+              <div><label className={label} htmlFor="r-high">High</label><NumberField id="r-high" aria-label="High" className="loom-input w-full" value={r.high} onChange={(v) => v != null && setRule({ ...r, high: v })} /></div>
             </div>
           )}
           {r.kind === "change" && (
             <div className="grid grid-cols-3 gap-2">
-              <div><label className={label} htmlFor="r-pct">By %</label><NumberField id="r-pct" className="loom-input w-full" value={r.pct} onChange={(v) => v != null && setRule({ ...r, pct: Math.abs(v) })} /></div>
+              <div><label className={label} htmlFor="r-pct">By %</label><NumberField id="r-pct" aria-label="By %" className="loom-input w-full" value={r.pct} onChange={(v) => v != null && setRule({ ...r, pct: Math.abs(v) })} /></div>
               <div><label className={label} htmlFor="r-dir">Direction</label>
-                <select id="r-dir" className="loom-input w-full" value={r.direction} onChange={(e) => setRule({ ...r, direction: e.target.value as "up" | "down" | "either" })}>
+                <select aria-label="Direction" id="r-dir" className="loom-input w-full" value={r.direction} onChange={(e) => setRule({ ...r, direction: e.target.value as "up" | "down" | "either" })}>
                   <option value="either">Either</option><option value="up">Rise</option><option value="down">Drop</option>
                 </select></div>
               <div><label className={label} htmlFor="r-vs">Compared with</label>
-                <select id="r-vs" className="loom-input w-full" value={r.versus} onChange={(e) => setRule({ ...r, versus: e.target.value as "previous" | "baseline" })}>
+                <select aria-label="Compared with" id="r-vs" className="loom-input w-full" value={r.versus} onChange={(e) => setRule({ ...r, versus: e.target.value as "previous" | "baseline" })}>
                   <option value="previous">Last check</option><option value="baseline">Recent median</option>
                 </select></div>
             </div>
@@ -361,12 +361,12 @@ export function MonitorEditor() {
             <div className="space-y-2">
               <div className="grid grid-cols-3 gap-2">
                 <div><label className={label} htmlFor="r-sens">Sensitivity</label>
-                  <select id="r-sens" className="loom-input w-full" value={r.sensitivity} onChange={(e) => setRule({ ...r, sensitivity: Number(e.target.value) })}>
+                  <select aria-label="Sensitivity" id="r-sens" className="loom-input w-full" value={r.sensitivity} onChange={(e) => setRule({ ...r, sensitivity: Number(e.target.value) })}>
                     <option value={2.5}>Sensitive</option><option value={3.5}>Balanced</option><option value={5}>Conservative</option>
                   </select></div>
-                <div><label className={label} htmlFor="r-win">Baseline checks</label><input id="r-win" className="loom-input w-full" inputMode="numeric" value={r.window} onChange={(e) => setRule({ ...r, window: Math.max(5, Math.min(200, numOr(e.target.value, 30)!)) })} /></div>
+                <div><label className={label} htmlFor="r-win">Baseline checks</label><input aria-label="Baseline checks" id="r-win" className="loom-input w-full" inputMode="numeric" value={r.window} onChange={(e) => setRule({ ...r, window: Math.max(5, Math.min(200, numOr(e.target.value, 30)!)) })} /></div>
                 <div><label className={label} htmlFor="r-seas">Normal for</label>
-                  <select id="r-seas" className="loom-input w-full" value={r.seasonal} onChange={(e) => setRule({ ...r, seasonal: e.target.value as "none" | "hour" | "weekday-hour" })}>
+                  <select aria-label="Normal for" id="r-seas" className="loom-input w-full" value={r.seasonal} onChange={(e) => setRule({ ...r, seasonal: e.target.value as "none" | "hour" | "weekday-hour" })}>
                     <option value="none">Any time</option><option value="hour">This hour of day</option><option value="weekday-hour">This weekday + hour</option>
                   </select></div>
               </div>
@@ -378,14 +378,14 @@ export function MonitorEditor() {
             </div>
           )}
           {r.kind === "stale" && (
-            <div><label className={label} htmlFor="r-age">No new rows for (minutes)</label><input id="r-age" className="loom-input w-full" inputMode="numeric" value={r.maxAgeMinutes} onChange={(e) => setRule({ ...r, maxAgeMinutes: numOr(e.target.value, 60)! })} /></div>
+            <div><label className={label} htmlFor="r-age">No new rows for (minutes)</label><input aria-label="No new rows for (minutes)" id="r-age" className="loom-input w-full" inputMode="numeric" value={r.maxAgeMinutes} onChange={(e) => setRule({ ...r, maxAgeMinutes: numOr(e.target.value, 60)! })} /></div>
           )}
 
           <div className="grid grid-cols-2 gap-2">
             <div><label className={label} htmlFor="r-confirm">Confirm over … checks</label>
-              <input id="r-confirm" className="loom-input w-full" inputMode="numeric" value={d.confirmChecks} onChange={(e) => set({ confirmChecks: Math.max(1, Math.min(20, numOr(e.target.value, 1)!)) })} /></div>
+              <input aria-label="Confirm over … checks" id="r-confirm" className="loom-input w-full" inputMode="numeric" value={d.confirmChecks} onChange={(e) => set({ confirmChecks: Math.max(1, Math.min(20, numOr(e.target.value, 1)!)) })} /></div>
             <div><label className={label} htmlFor="r-sev">Severity</label>
-              <select id="r-sev" className="loom-input w-full" value={d.severity} onChange={(e) => set({ severity: e.target.value as MonitorDraft["severity"] })}>
+              <select aria-label="Severity" id="r-sev" className="loom-input w-full" value={d.severity} onChange={(e) => set({ severity: e.target.value as MonitorDraft["severity"] })}>
                 <option value="info">Info</option><option value="warning">Warning</option><option value="critical">Critical</option>
               </select></div>
           </div>
@@ -471,24 +471,24 @@ export function MonitorEditor() {
 
         <section className="space-y-3">
           <h3 className="text-sm font-medium text-loom-text">How to tell you</h3>
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={d.notify.inApp} onChange={(e) => setNotify({ inApp: e.target.checked })} /> In-app banner</label>
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={d.notify.system} onChange={(e) => setNotify({ system: e.target.checked })} /> System notification</label>
-          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!d.onFire?.chime} onChange={(e) => set({ onFire: { ...d.onFire, chime: e.target.checked } })} /> Chime</label>
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={d.notify.inApp} onChange={(e) => setNotify({ inApp: e.target.checked })} aria-label="In-app banner" /> In-app banner</label>
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={d.notify.system} onChange={(e) => setNotify({ system: e.target.checked })} aria-label="System notification" /> System notification</label>
+          <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={!!d.onFire?.chime} onChange={(e) => set({ onFire: { ...d.onFire, chime: e.target.checked } })} aria-label="Chime" /> Chime</label>
           <label className="flex items-start gap-2 text-xs">
-            <input type="checkbox" className="mt-0.5" checked={!!d.onFire?.shareMoment} onChange={(e) => set({ onFire: { ...d.onFire, shareMoment: e.target.checked } })} />
+            <input type="checkbox" className="mt-0.5" checked={!!d.onFire?.shareMoment} onChange={(e) => set({ onFire: { ...d.onFire, shareMoment: e.target.checked } })} aria-label="Auto-share the moment" />
             <span>Auto-share the moment<span className="block text-2xs text-loom-muted">Publishes a public story page with the chart of what happened, ready to send or post to NeoSpace.</span></span>
           </label>
           <div className="grid grid-cols-3 gap-2">
             <div><label className={label} htmlFor="n-cool">Remind every (min)</label>
-              <input id="n-cool" className="loom-input w-full" inputMode="numeric" value={d.notify.cooldownMinutes} onChange={(e) => setNotify({ cooldownMinutes: Math.max(0, numOr(e.target.value, 0)!) })} /></div>
+              <input aria-label="Remind every (min)" id="n-cool" className="loom-input w-full" inputMode="numeric" value={d.notify.cooldownMinutes} onChange={(e) => setNotify({ cooldownMinutes: Math.max(0, numOr(e.target.value, 0)!) })} /></div>
             <div><label className={label} htmlFor="n-qf">Quiet from (h)</label>
-              <input id="n-qf" className="loom-input w-full" inputMode="numeric" value={d.notify.quietFromHour ?? ""} placeholder="—" onChange={(e) => setNotify({ quietFromHour: numOr(e.target.value) })} /></div>
+              <input aria-label="Quiet from (h)" id="n-qf" className="loom-input w-full" inputMode="numeric" value={d.notify.quietFromHour ?? ""} placeholder="—" onChange={(e) => setNotify({ quietFromHour: numOr(e.target.value) })} /></div>
             <div><label className={label} htmlFor="n-qt">Quiet to (h)</label>
-              <input id="n-qt" className="loom-input w-full" inputMode="numeric" value={d.notify.quietToHour ?? ""} placeholder="—" onChange={(e) => setNotify({ quietToHour: numOr(e.target.value) })} /></div>
+              <input aria-label="Quiet to (h)" id="n-qt" className="loom-input w-full" inputMode="numeric" value={d.notify.quietToHour ?? ""} placeholder="—" onChange={(e) => setNotify({ quietToHour: numOr(e.target.value) })} /></div>
           </div>
           <p className="text-2xs text-loom-muted">0 = tell me once per alert. Quiet hours still record checks; they just skip the system notification.</p>
           <label className="flex items-start gap-2 text-xs">
-            <input type="checkbox" className="mt-0.5" checked={!!d.cloud} onChange={(e) => set({ cloud: e.target.checked || undefined })} />
+            <input type="checkbox" className="mt-0.5" checked={!!d.cloud} onChange={(e) => set({ cloud: e.target.checked || undefined })} aria-label="Always on cloud checks" />
             <span>
               Always on: Loom&apos;s server runs this check on its schedule (at most every {CLOUD_MIN_INTERVAL_MINUTES} min), even when the app is closed, and sends alerts to your channel.
               <span className="block text-2xs text-loom-muted">
@@ -498,8 +498,8 @@ export function MonitorEditor() {
           </label>
           <div>
             <label className={label} htmlFor="mon-card">Scorecard</label>
-            <input id="mon-card" className="loom-input w-full" list="mon-cards" value={d.scorecard ?? ""} placeholder="Group related metrics, e.g. City heat health" onChange={(e) => set({ scorecard: e.target.value || undefined })} />
-            <datalist id="mon-cards">{scorecards.map((s) => <option key={s} value={s} />)}</datalist>
+            <input aria-label="Scorecard" id="mon-card" className="loom-input w-full" list="mon-cards" value={d.scorecard ?? ""} placeholder="Group related metrics, e.g. City heat health" onChange={(e) => set({ scorecard: e.target.value || undefined })} />
+            <datalist id="mon-cards">{scorecards.map((s) => <option aria-label="mon cards" key={s} value={s} />)}</datalist>
           </div>
         </section>
 

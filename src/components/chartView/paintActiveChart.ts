@@ -6,8 +6,7 @@ import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
 import { chartEntranceKey, markChartEntrancePlayed, shouldPlayChartEntrance } from "@/lib/chartEntranceOnce";
 import { notifyChartPainted } from "@/lib/chartPaintSignal";
 import { chartFont, chartTypeRamp } from "@/lib/chartType";
-import { chartFontStack, resolveChartFontFamily } from "@/lib/fontCatalog";
-import { FOOTNOTE_BAND_PX, densityAwarePointMarks, fitTextEllipsis, resolveChartPad, subsampleRowsForDensity, titleBandBottom } from "@/lib/chartLayout";
+import { FOOTNOTE_BAND_PX, fitTextEllipsis, resolveChartPad, subsampleRowsForDensity } from "@/lib/chartLayout";
 import {
   chartFootnoteReservePx,
   drawAxisFieldLabels,
@@ -19,22 +18,21 @@ import {
   drawChartTitleBlock,
 } from "@/lib/chartLooks";
 import { densityPointBudget } from "@/lib/chartStagePixels";
-import { drawCanvasAnnotations } from "@/lib/canvasAnnotationDraw";
-import { ARRANGE_PLOT_KINDS, arrangementPlot, hasCanvasArrangement, titleArrangementRect } from "@/lib/canvasArrangement";
+import { ARRANGE_PLOT_KINDS, arrangementPlot, titleArrangementRect } from "@/lib/canvasArrangement";
 import type { ChartChromeLayout } from "@/lib/chartChromeLink";
 import { automaticPlotBounds } from "@/lib/chartSpace";
-import { buildCategoricalLegendEntries, drawLegend } from "@/lib/chartLegend";
+import { drawLegend } from "@/lib/chartLegend";
 import type { ChartRenderOpts } from "@/lib/chartRenderTypes";
-import { plotOf, valueTitle } from "@/lib/canvasCharts/plumbing";
+import { valueTitle } from "@/lib/canvasCharts/plumbing";
 import { renderFullSunburst } from "@/lib/canvasCharts/sunburst";
-import { invScaleY, scaleDomain, scaleY, type YScaleKind } from "@/lib/dsTransforms";
+import { type YScaleKind } from "@/lib/dsTransforms";
 import { analysisScope, analysisUnavailable } from "@/lib/timeSeriesAnalysis";
 import { smartOverlayPalette } from "@/lib/chartSmartOverlayStyle";
 import { chartEntranceReveal, easeOutCubic, traceEntranceClip } from "@/lib/motion";
 import { getThemeUiColors, hexToRgb01 } from "@/lib/chartPalettes";
 import { monitorRefLines } from "@/lib/monitoring/chartBridge";
 import { drawReferenceLines } from "@/lib/canvasCharts/axisHelpers";
-import { drawAxisTicks, drawGridLines, drawSmartOverlays } from "@/lib/canvasCharts/primitives";
+import { drawSmartOverlays } from "@/lib/canvasCharts/primitives";
 import { renderFullScatter } from "@/lib/canvasCharts/scatter";
 import { type BarModel, barsShouldBeHorizontal, computeBarModel, renderFullBar, renderFullHistogram } from "@/lib/canvasCharts/bar";
 import { renderFullHeatmap, renderFullLine } from "@/lib/canvasCharts/lineHeatmap";
@@ -44,14 +42,14 @@ import { renderFullLollipop, renderFullRadar, renderFullViolin, renderFullWaterf
 import { renderFullArcDiagram, renderFullForceBubble, renderFullNetwork, renderFullSankey, renderFullTreemap } from "@/lib/canvasCharts/flowCharts";
 import { renderFullCorrMatrix, renderFullDumbbell, renderFullFunnel, renderFullHexbin, renderFullParallel, renderFullPareto, renderFullRidgeline } from "@/lib/canvasCharts/statCharts";
 import { markSymbols } from "@/lib/markSymbols";
-import { DEFAULT_PAD, offsetHitTargets, scatterYDomain } from "@/lib/canvasCharts/shared";
+import { DEFAULT_PAD, offsetHitTargets } from "@/lib/canvasCharts/shared";
 import { clampTopN, countFacetGroupsDropped, DEFAULT_TOP_N, layoutFacetCells, partitionRowsByFacet } from "@/lib/chartFacets";
 import { computeFacetSharedScatterBounds, computeFacetSharedValueDomain } from "@/lib/chartFacetScales";
 import { resolveLayoutDirection } from "@/lib/chartSupport";
 import type { YAggregateOption } from "@/lib/recommendations";
-import { drawFireflyChrome, extractGpuScenePoints, fireflyDensity, fireflyGlowPoints, fireflyPalette, fireflyLayout, orbitSceneLayout, normalizeOrbitValue, type OrbitFrame, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
+import { extractGpuScenePoints, fireflyDensity, fireflyGlowPoints, fireflyPalette, fireflyLayout, orbitSceneLayout, normalizeOrbitValue, type OrbitFrame, type GpuSceneKind, isGpuSceneKind, isWebGpuDrawableScene, renderGpuSceneCanvas } from "@/lib/gpuScenes";
 import { isGeoMapKind, isWebGpuGlobeKind, renderGeoMapCanvas } from "@/lib/geoMaps";
-import { cubeCellCenter, cubeCellKey, dataCubeChartView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, pickDataCubeCell, renderDataCubeCanvas } from "@/lib/dataCube";
+import { cubeCellCenter, cubeCellKey, dataCubeChartView, type DataCube, type DataCubeRenderOpts, drawDataCubeBackLayer, drawDataCubeFrontLayer, renderDataCubeCanvas } from "@/lib/dataCube";
 import { isOddChartKind, renderOddChart } from "@/lib/oddCharts";
 import { buildBarFacetGrid, type Canvas2DHitContext, type HitTarget } from "@/lib/chartTooltip";
 import type { ChartRecommendation } from "@/lib/recommendations";
@@ -147,7 +145,6 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
     chartFootnoteText,
     chartColorInfo,
     footnoteOpts,
-    gpuReady,
     useWebGPUScatter,
     useWebGpuScene,
     useWebGpuGlobe,
@@ -168,7 +165,6 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
     pointSize,
     isCompact,
     isMobile,
-    containerSize,
     sceneOrbit,
     dataCube,
     cubeHover,
@@ -181,14 +177,11 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
     monitorLines,
     geoAtlasBundle,
     reducedMotion,
-    fontEpoch,
     chartFontFamily,
-    effectiveTheme,
     colorblindCharts,
     reportArrangementLayout: reportArrangementLayoutArg,
     setHitsVersion,
     setChartDrawError,
-    setCubeAnim,
   } = p;
   // Alias so nested drawOneFrame never hits a TDZ / stale-bundle name miss after LOOM-141.
   const reportArrangementLayout =
@@ -1053,7 +1046,8 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
             ? undefined
             : activeChart.emojiField ?? activeChart.shapeField ?? activeChart.colorField ?? undefined;
         // Renderers with a label gutter report their real plot rect — keep the key inside it
-        const plotRect = !useFacets && ropts.scales?.rect ? ropts.scales.rect : pad;
+        const plotRect = !useFacets && ropts.scales?.rect ? ropts.scales.rect
+          : categoricalMap && legendPos === "auto" ? { left: 12, top: pad, right: w - 12, bottom: h - 12 } : pad;
         // Point / bubble maps draw their size key bottom-left
         const avoid = activeChart.sizeField ? (categoricalMap ? ["bottom-left"] : kind === "bubble" ? ["bottom-right"] : []) : [];
         legendRect = drawLegend(ctx, legendEntries, legendPos, w, h, plotRect, fontFamily, opts.themeBg, opts.themeBorder, opts.themeText, legendTitle, avoid, { x: chartVisualOverrides.legendOffsetX, y: chartVisualOverrides.legendOffsetY, width: chartVisualOverrides.legendWidth, height: chartVisualOverrides.legendHeight }, opts.axisFontSize);

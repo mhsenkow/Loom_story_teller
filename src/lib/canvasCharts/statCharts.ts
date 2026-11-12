@@ -21,10 +21,9 @@ import { buildCorrMatrix, buildPareto } from "../dsTransforms";
 import { type YAggregateOption } from "../recommendations";
 import { axisFont, barPath, densityStops, labelGutter } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
-import { drawAxisTicks, drawGridLines, numRange } from "./primitives";
+import { numRange } from "./primitives";
 import { formatDeltaLabel } from "../deltaCompare";
 import { DEFAULT_COLORS } from "./shared";
-
 export function renderFullPareto(
   ctx: CanvasRenderingContext2D,
   rows: unknown[][],

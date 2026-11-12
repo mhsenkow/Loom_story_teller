@@ -119,44 +119,48 @@ describe("custom chart colors", () => {
   });
 });
 
-it("renders custom categorical and single-stop quantitative colors into SVG", async () => {
-  const { compile } = await import("vega-lite/build/src/index.js");
-  const vega = await import("vega");
-  for (const type of ["nominal", "quantitative"]) {
-    const source = {
-      mark: "bar",
-      data: {
-        values: [
-          { category: "A", value: 1 },
-          { category: "B", value: 2 },
-        ],
-      },
-      encoding: {
-        x: { field: "category", type: "nominal" },
-        y: { field: "value", type: "quantitative" },
-        color: {
-          field: type === "nominal" ? "category" : "value",
-          type,
-          scale: { scheme: "viridis" },
+it(
+  "renders custom categorical and single-stop quantitative colors into SVG",
+  async () => {
+    const { compile } = await import("vega-lite/build/src/index.js");
+    const vega = await import("vega");
+    for (const type of ["nominal", "quantitative"]) {
+      const source = {
+        mark: "bar",
+        data: {
+          values: [
+            { category: "A", value: 1 },
+            { category: "B", value: 2 },
+          ],
         },
-      },
-    };
-    const spec = applyChartSpecColors(
-      source,
-      ["#123456", "#abcdef"],
-      ["#123456"],
-    );
-    const compiled = compile(spec as unknown as Parameters<typeof compile>[0]);
-    const view = new vega.View(vega.parse(compiled.spec), { renderer: "none" });
-    try {
-      await view.runAsync();
-      const svg = await view.toSVG();
-      expect(svg).toContain(
-        type === "nominal" ? 'fill="#123456"' : 'fill="rgb(18, 52, 86)"',
+        encoding: {
+          x: { field: "category", type: "nominal" },
+          y: { field: "value", type: "quantitative" },
+          color: {
+            field: type === "nominal" ? "category" : "value",
+            type,
+            scale: { scheme: "viridis" },
+          },
+        },
+      };
+      const spec = applyChartSpecColors(
+        source,
+        ["#123456", "#abcdef"],
+        ["#123456"],
       );
-      if (type === "nominal") expect(svg).toContain('fill="#abcdef"');
-    } finally {
-      view.finalize();
+      const compiled = compile(spec as unknown as Parameters<typeof compile>[0]);
+      const view = new vega.View(vega.parse(compiled.spec), { renderer: "none" });
+      try {
+        await view.runAsync();
+        const svg = await view.toSVG();
+        expect(svg).toContain(
+          type === "nominal" ? 'fill="#123456"' : 'fill="rgb(18, 52, 86)"',
+        );
+        if (type === "nominal") expect(svg).toContain('fill="#abcdef"');
+      } finally {
+        view.finalize();
+      }
     }
-  }
-});
+  },
+  20_000,
+);

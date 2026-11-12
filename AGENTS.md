@@ -21,7 +21,7 @@ Use this file plus [DOCS.md](DOCS.md) (architecture) and [README.md](README.md) 
 | Path | Role |
 |------|------|
 | `src/app/` | Next.js App Router: `layout.tsx`, `page.tsx` (shell + three-panel layout; views: explorer / chart / query / dive) |
-| `src/components/` | One main React component per file (PascalCase) |
+| `src/components/` | One main React component per file (PascalCase); chart stage lives in `chartView/` (thin `ChartView.tsx` composer) |
 | `src/lib/` | TypeScript **without** React: store, IPC, Vega, WebGPU, recommendations, analytics |
 | `src/shaders/` | WGSL for WebGPU scatter |
 | `src/styles/globals.css` | Design tokens (`--loom-*`, `--chart-*`); reskin here only |
@@ -34,7 +34,7 @@ Use this file plus [DOCS.md](DOCS.md) (architecture) and [README.md](README.md) 
 
 - **IPC:** Add Rust `#[tauri::command]` → register in `lib.rs` → add typed wrapper in `tauri.ts`. UI components must not call `invoke()` directly.
 - **State:** Zustand only (`store.ts`). No parallel global state for the same concern.
-- **Charts:** Vega-Lite specs are the portable “brain”; WebGPU is for high-density **scatter** only when rules in `ChartView` allow (see README WebGPU section). Stream/source story recs often use `spec: {}` with `xField`/`yField`; `extractScatterData` falls back to those fields when `spec.encoding` is absent.
+- **Charts:** Vega-Lite specs are the portable “brain”; WebGPU is for high-density **scatter** only when rules in `chartView/` allow (see README WebGPU section). Paint/stage live under `src/components/chartView/` (`paintActiveChart`, `useChartViewCore`, `ChartStage`); `ChartView.tsx` is a thin composer. Stream/source story recs often use `spec: {}` with `xField`/`yField`; `extractScatterData` falls back to those fields when `spec.encoding` is absent.
 - **Theming:** Use CSS variables / Tailwind tokens from `globals.css`; avoid hard-coded hex in new UI.
 - **Static export:** `next.config.mjs` uses `output: "export"` — no runtime Next.js API routes.
 

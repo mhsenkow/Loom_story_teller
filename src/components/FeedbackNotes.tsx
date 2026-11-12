@@ -216,7 +216,7 @@ export function FeedbackNotes() {
             <label htmlFor="loom-note-title-input" className="sr-only">
               Short title
             </label>
-            <input
+            <input aria-label="Short title"
               ref={titleRef}
               id="loom-note-title-input"
               type="text"
@@ -228,7 +228,7 @@ export function FeedbackNotes() {
             <label htmlFor="loom-note-body" className="sr-only">
               Description
             </label>
-            <textarea
+            <textarea aria-label="What happened / what would help…"
               id="loom-note-body"
               className="loom-input w-full text-xs min-h-[88px] resize-y"
               placeholder="What happened / what would help…"
@@ -237,7 +237,7 @@ export function FeedbackNotes() {
               rows={4}
             />
             <div className="flex items-center gap-2 flex-wrap">
-              <input
+              <input aria-label="loom note shot"
                 ref={fileRef}
                 type="file"
                 accept="image/*"

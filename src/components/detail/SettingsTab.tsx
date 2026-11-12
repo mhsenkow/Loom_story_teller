@@ -1,126 +1,23 @@
 "use client";
 
 import { THEME_PAIRINGS } from "@/lib/themePairing";
-import { useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
-import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
-import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
-import { clampSmartFloat, clampSmartInt, SMART_TOP_N, SMART_Z } from "@/lib/smartInputClamp";
-import { useIsMobile, useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
-import { useFocusTrap } from "@/lib/useFocusTrap";
+
+import { defaultAppLookSettings } from "@/lib/lookSettingsDefaults";
+
 import { clearPersistedPreferences } from "@/lib/persist";
 import { Button } from "@/components/ui/Button";
 import { WorkspaceBackupControls } from "@/components/WorkspaceBackupControls";
 import { YourSourcesSettings } from "@/components/YourSourcesSettings";
 import { CommunitySettings } from "./CommunitySettings";
-import { useShallow } from "zustand/react/shallow";
-import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
-import { formatNumber } from "@/lib/format";
-import { ChartKindPicker } from "@/components/ChartKindPicker";
-import {
-  THEME_CHART,
-  THEME_UI,
-  AXIS_LABEL_COLOR_SWATCHES,
-  AXIS_LINE_COLOR_SWATCHES,
-  COLOR_PALETTES,
-  palettesGrouped,
-  resolveChartColors,
-  type PaletteKind,
-} from "@/lib/chartPalettes";
-import {
-  THEMES,
-  THEME_LABEL,
-  UI_CHROMES,
-  UI_CHROME_LABEL,
-  VISUAL_PRESETS,
-  VISUAL_PRESET_BLURB,
-  shuffleVisualOverrides,
-  VISUAL_SHUFFLE_SECTIONS,
-  type VisualPresetId,
-  type VisualShuffleLocks,
-  type VisualShuffleSection,
-  normalizeTheme,
-  type LookTheme,
-  type UiChrome,
-  type AppFont,
-  type FacesSource,
-} from "@/lib/lookSystem";
+
+import { useLoomStore, type AppTheme, type FontScale } from "@/lib/store";
+
+import { THEME_CHART, THEME_UI } from "@/lib/chartPalettes";
+import { THEMES, THEME_LABEL, UI_CHROMES, UI_CHROME_LABEL, normalizeTheme, type UiChrome, type AppFont } from "@/lib/lookSystem";
 import { FONT_CHOICES, chartFontStack, resolveChartFontFamily } from "@/lib/fontCatalog";
 import { FontPicker } from "@/components/FontPicker";
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
-import {
-  createChartRec,
-  fitEncodingToKind,
-  Y_AGGREGATE_OPTIONS,
-  getRecommendationReason,
-  getRandomEncoding,
-  applyEncodingLocks,
-  chartKindDataSupport,
-  tryBuildRandomChartRec,
-  randomEncodingToExtra,
-  recommendStorySequence,
-  recommendStreamStory,
-  type ChartKind,
-  type YAggregateOption,
-  type EncodingShuffleLocks,
-} from "@/lib/recommendations";
-import {
-  computeDataQualityHints,
-  formatChartAggregationSummary,
-  chartCapabilities,
-  encodingChannelLabels,
-  CHART_LAYOUT_DIRECTIONS,
-  CHART_Y_SCALE_OPTIONS,
-  type ChartLayoutDirection,
-  type ChartYScaleOption,
-} from "@/lib/chartSupport";
-import {
-  chromeDomId,
-  chromeSectionFor,
-  type ChartChromeTarget,
-} from "@/lib/chartChromeLink";
-import { CHART_TOOLTIP_MODES, type ChartTooltipMode } from "@/lib/chartTooltipMode";
-import {
-  resolveDataProvenance,
-  provenanceKindLabel,
-  type DataProvenance,
-} from "@/lib/dataProvenance";
-import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
-import {
-  CHART_TIME_RANGES,
-  applyChartTimeWindow,
-  chartTimeRangeOptions,
-  pickDefaultTimeField,
-  temporalColumnNames,
-  timeColumnSpanMs,
-  type ChartTimeRange,
-} from "@/lib/chartTime";
-import {
-  runAnomaly,
-  runForecast,
-  runTrend,
-  runReferenceLines,
-  runClustering,
-  runCorrelationMatrix,
-  type AnomalyMethod,
-} from "@/lib/smartAnalytics";
-import { corrCellInk, corrFillT, sampleCorrDiverging, DEFAULT_CORR_DIVERGING } from "@/lib/corrMatrixStyle";
-import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
-import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
-import { exportDashboardMicrosite, streamSnapshot, isDesktop, isTauri, openExternalUrl } from "@/lib/tauri";
-import { isNumericColumnType } from "@/lib/dataCubeSchema";
-import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
-import {
-  SOCIAL_PRESETS,
-  getSocialPreset,
-  buildSocialCaption,
-  shareOrDownloadFile,
-  copyTextToClipboard,
-  slugifyFilename,
-  publishStoryToWorker,
-  recordCanvasVideo,
-} from "@/lib/socialExport";
-import { downloadBlob } from "@/lib/zipStore";
 
 export default function SettingsTab() {
   const appSettings = useLoomStore((s) => s.appSettings);
@@ -137,11 +34,6 @@ export default function SettingsTab() {
     { value: 1.15, label: "115%" },
   ];
   const themePref = appSettings.theme;
-  const currentTheme =
-    themePref === "system"
-      ? "system"
-      : ((themePref === "high-contrast" ? "contrast" : themePref === "colorblind" ? "dark" : themePref) as LookTheme);
-
   return (
     <div className="p-4 space-y-6">
       <div>
@@ -193,7 +85,7 @@ export default function SettingsTab() {
             System
           </button>
           {THEMES.map((t) => (
-            <button
+            <button aria-label="setAppSettings((prev) => ({ ...prev, theme: t as AppTheme }))}"
               key={t}
               type="button"
               aria-pressed={themePref === t}
@@ -226,7 +118,7 @@ export default function SettingsTab() {
       <div className="loom-pairing-card">
         <label className="flex items-center justify-between gap-3 cursor-pointer">
           <span className="text-sm font-semibold">Follow theme</span>
-          <input type="checkbox" checked={!!appSettings.themePairing}
+          <input aria-label="setAppSettings((prev) => (" type="checkbox" checked={!!appSettings.themePairing}
             onChange={(event) => setAppSettings((prev) => ({ ...prev, themePairing: event.target.checked }))} />
         </label>
         <p className="text-2xs text-loom-label mt-2">{themePref === "system" ? "System follows your device’s light/dark appearance with neutral type and chrome." : THEME_PAIRINGS[normalizeTheme(themePref)].description}</p>

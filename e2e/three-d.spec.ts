@@ -40,6 +40,21 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 320, height: 568 
           await view.selectOption(preset);
           await expect(view).toHaveValue(preset);
         }
+        await stage.dispatchEvent("wheel", { deltaY: 0, deltaX: 20, cancelable: true });
+        await expect(zoom).toHaveText("100%");
+        await stage.dispatchEvent("wheel", { deltaY: -120, deltaMode: 0, cancelable: true });
+        await expect(zoom).toHaveText("127%");
+        await camera.getByRole("button", { name: "Reset 3D camera", exact: true }).click();
+        if (viewport.width >= 768) {
+          const box = (await stage.boundingBox())!;
+          const x = box.x + box.width / 2, y = box.y + box.height / 2;
+          await page.mouse.move(x, y);
+          await page.mouse.down();
+          await page.mouse.move(x + 45, y + 20, { steps: 5 });
+          await page.mouse.up();
+          await expect(view).toHaveValue("custom");
+          await camera.getByRole("button", { name: "Reset 3D camera", exact: true }).click();
+        }
         for (const button of await camera.getByRole("button").all()) await expect(button).toBeInViewport();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
         const frame = await stage.boundingBox();

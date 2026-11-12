@@ -11,20 +11,14 @@
 // columns (left → right), Z field = depth (front → back).
 // =================================================================
 
-import type { ColumnInfo } from "./queryTypes";
 import type { YAggregateOption } from "./recommendations";
 import { formatChartNumber } from "./formatChartNumber";
 import { toTime } from "./dive";
-import {
-  CUBE_MAX_BINS,
-  pickDataCubeEncoding,
-  rankCubeDimensions,
-} from "./dataCubeSchema";
+import { CUBE_MAX_BINS } from "./dataCubeSchema";
 import { sampleContinuous } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
 import { drawEmptyMessage, drawRampKey, mixColor, resolveChartInk, withAlpha, type ChartInk } from "./chartInk";
 import { chartFont, chartTypeRamp } from "./chartType";
-
 export type CubeAxisKind = "category" | "numeric" | "time";
 
 export interface CubeAxis {
@@ -97,8 +91,6 @@ function asNumber(v: unknown): number {
   }
   return NaN;
 }
-
-const DATE_LIKE = /^\d{4}-\d{1,2}(-\d{1,2})?([T ]\d{1,2}:\d{2})?|^\d{1,2}\/\d{1,2}\/\d{2,4}/;
 
 function asTime(v: unknown): number {
   const t = toTime(v);
@@ -437,7 +429,6 @@ export function cubeCellKey(cube: Pick<DataCube, "x" | "y" | "z">, cell: Pick<Cu
     .join("\u0001");
 }
 
-
 // ---------------------------------------------------------------------------
 // Camera (column-major 4×4, WebGPU clip space z ∈ [0, 1])
 // ---------------------------------------------------------------------------
@@ -668,10 +659,10 @@ export function dataCubeChartView(cube: DataCube, w: number, h: number, opts: Da
   const optional = opts.spaceUse === "roomy" ? 20 : 0;
   const side = Math.min(w * 0.32, (opts.spaceUse === "fill" ? 80 : 104) + type.tick + optional);
   const legendReserve = opts.showLegend !== false ? Math.min(type.tick * 5, h < 360 ? h * 0.15 : Infinity) : 0;
-  const top = Math.max(opts.contentInsets?.top ?? 0, legendReserve) + type.tick * 2 + 12 + optional;
+  const top = Math.max(opts.contentInsets?.top ?? 0, legendReserve) + (h < 360 ? type.tick + 8 : type.tick * 2 + 12) + optional;
   // Slanted floor labels and their field titles need more depth than a single tick row.
-  const axisReserve = Math.min(Math.max(64, type.tick * (opts.spaceUse === "fill" ? 4 : 5.5)), h < 360 ? h * 0.22 : Infinity);
-  const bottom = Math.max(opts.contentInsets?.bottom ?? 0, opts.footerReserve ?? 0) + axisReserve + (h >= 400 && !opts.contentInsets?.bottom ? type.footnote * 2 + 12 : 12) + optional;
+  const axisReserve = h < 360 ? Math.min(Math.max(40, type.tick * 3), h * 0.16) : Math.max(64, type.tick * (opts.spaceUse === "fill" ? 4 : 5.5));
+  const bottom = Math.max(opts.contentInsets?.bottom ?? 0, opts.footerReserve ?? 0) + axisReserve + (h >= 400 && !opts.contentInsets?.bottom ? type.footnote * 2 + 12 : h < 360 ? 8 : 12) + optional;
   const availableHeight = Math.max(24, h - top - bottom);
   const base = cubeView({ ...opts.camera, zoom: 1, offsetY: 0 }, w, h);
   const { ex, ey, ez } = cubeExtents(cube);
@@ -1120,3 +1111,4 @@ export function renderDataCubeCanvas(
   drawDataCubeFrontLayer(ctx, cube, v, far, opts);
   ctx.restore();
 }
+

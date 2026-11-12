@@ -191,7 +191,8 @@ export function renderFullRadar(
       const angle = (Math.PI * 2 * (i % n)) / n - Math.PI / 2;
       const px = cx + Math.cos(angle) * r;
       const py = cy + Math.sin(angle) * r;
-      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
     }
     ctx.closePath();
     ctx.stroke();
@@ -240,7 +241,8 @@ export function renderFullRadar(
     ctx.beginPath();
     normals.forEach((_, i) => {
       const p = vertex(i);
-      i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
     });
     ctx.closePath();
     ctx.fill();

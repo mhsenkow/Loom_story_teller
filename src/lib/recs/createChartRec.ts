@@ -319,7 +319,6 @@ export function createChartRec(
 ): ChartRecommendation | null {
   const numCols = measureColumns(columns);
   const nomCols = columns.filter((c) => inferType(c.data_type, c.name, c.min_value, c.max_value) === "nominal");
-  const timeCols = columns.filter((c) => inferType(c.data_type, c.name, c.min_value, c.max_value) === "temporal");
   // undefined = unset (may auto-fill for bubble/dumbbell); null = explicitly cleared
   const sizeFieldProvided = extra != null && "sizeField" in extra;
   let sizeField = sizeFieldProvided ? (extra!.sizeField ?? null) : undefined;

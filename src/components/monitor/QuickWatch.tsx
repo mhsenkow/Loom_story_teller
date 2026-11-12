@@ -190,12 +190,12 @@ export function QuickWatch() {
         <div className="space-y-1">
           <p className="text-2xs uppercase tracking-wide text-loom-label">Tell me</p>
           <div className="flex flex-wrap gap-1.5 text-xs">
-            <label className="flex items-center gap-1"><input type="checkbox" checked={d.notify.system} onChange={(e) => setD({ ...d, notify: { ...d.notify, system: e.target.checked } })} /> On this screen</label>
+            <label className="flex items-center gap-1"><input aria-label="setD(" type="checkbox" checked={d.notify.system} onChange={(e) => setD({ ...d, notify: { ...d.notify, system: e.target.checked } })} /> On this screen</label>
             <label className="flex items-center gap-1" title={remote ? undefined : `Set up your phone or browser push in ${viewModeName("monitor")} → Where alerts go`}>
-              <input type="checkbox" checked={alwaysOn} onChange={(e) => setAlwaysOn(e.target.checked)} /> Even when Loom is closed{remote ? ` (${[hasPhone ? "phone" : null, hasPush ? "browser push" : null].filter(Boolean).join(" + ")})` : ""}
+              <input aria-label="setAlwaysOn(e.target.checked)} /> Even when Loom is closed" type="checkbox" checked={alwaysOn} onChange={(e) => setAlwaysOn(e.target.checked)} /> Even when Loom is closed{remote ? ` (${[hasPhone ? "phone" : null, hasPush ? "browser push" : null].filter(Boolean).join(" + ")})` : ""}
             </label>
-            <label className="flex items-center gap-1"><input type="checkbox" checked={d.onFire?.chime ?? true} onChange={(e) => setD({ ...d, onFire: { ...d.onFire, chime: e.target.checked } })} /> Chime</label>
-            <label className="flex items-center gap-1" title="Publishes a public story page with the moment card when it fires"><input type="checkbox" checked={!!d.onFire?.shareMoment} onChange={(e) => setD({ ...d, onFire: { ...d.onFire, shareMoment: e.target.checked } })} /> Auto-share the moment</label>
+            <label className="flex items-center gap-1"><input aria-label="setD(" type="checkbox" checked={d.onFire?.chime ?? true} onChange={(e) => setD({ ...d, onFire: { ...d.onFire, chime: e.target.checked } })} /> Chime</label>
+            <label className="flex items-center gap-1" title="Publishes a public story page with the moment card when it fires"><input aria-label="Publishes a public story page with the moment card when it fires" type="checkbox" checked={!!d.onFire?.shareMoment} onChange={(e) => setD({ ...d, onFire: { ...d.onFire, shareMoment: e.target.checked } })} /> Auto-share the moment</label>
           </div>
           {alwaysOn && !remote && (
             <p className="text-2xs text-loom-warning-text">

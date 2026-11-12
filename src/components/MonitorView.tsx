@@ -104,7 +104,7 @@ function AlertReview({ alert, monitor }: { alert: MonitorAlert; monitor?: Monito
         <div className="flex flex-wrap items-center gap-2">
           <input className="loom-input flex-1 min-w-40 text-xs" placeholder="Note (optional): what you did or why it's normal" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Review note" />
           <label className="flex items-center gap-1 text-2xs text-loom-muted" title="Expected / on purpose → don't alert again at this weekday and hour">
-            <input type="checkbox" checked={learn} onChange={(e) => setLearn(e.target.checked)} /> Remember expected times
+            <input type="checkbox" checked={learn} onChange={(e) => setLearn(e.target.checked)} aria-label="Remember expected times" /> Remember expected times
           </label>
         </div>
       </div>
@@ -321,7 +321,7 @@ export function MonitorView() {
             )}
             {monitors.length > 0 && <button type="button" className="loom-btn-ghost text-xs px-2 py-1.5 rounded-md" onClick={exportAll}>Export</button>}
             <button type="button" className="loom-btn-ghost text-xs px-2 py-1.5 rounded-md" onClick={() => fileRef.current?.click()}>Import</button>
-            <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ""; }} />
+            <input aria-label="Choose file" ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ""; }} />
             <button type="button" className="loom-btn-primary text-sm px-3 py-1.5 rounded-md" onClick={() => {
               const kind = sourceKindFromPath(useLoomStore.getState().selectedFile?.path) ?? "usgs";
               openMonitorEditor("new", draftForFeed(kind), "quick");

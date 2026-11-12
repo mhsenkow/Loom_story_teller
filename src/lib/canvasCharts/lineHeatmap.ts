@@ -271,7 +271,7 @@ export function renderFullLine(
     ctx.globalAlpha = 1;
   }
   applyLineDash(ctx, opts?.lineStrokeStyle);
-  data.forEach((s, si) => {
+  data.forEach((s) => {
     const color = cols[s.colorIndex % cols.length]!;
     const pts = s.pts.map((p) => ({ x: X(p.t), y: Y(p.v) }));
     ctx.strokeStyle = color;
@@ -329,7 +329,7 @@ export function renderFullLine(
   ctx.globalAlpha = 1;
   const legendSrc = data.filter((s) => !s.compare || y2Idx >= 0 || comparePrev);
   if (ci >= 0 || y2Idx >= 0 || comparePrev) {
-    setLegend(opts, legendSrc.map((s, si) => {
+    setLegend(opts, legendSrc.map((s) => {
       const symbol = symbols.categorical && !s.compare ? symbolOf(s) : null;
       const label = s.name || "series";
       return {

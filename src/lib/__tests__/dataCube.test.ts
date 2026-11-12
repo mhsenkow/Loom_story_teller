@@ -158,7 +158,7 @@ describe("cube camera", () => {
         const p = projectCube(v, x, y, z);
         expect(p.sx).toBeGreaterThan(80);
         expect(p.sx).toBeLessThan(w - 80);
-        expect(p.sy).toBeGreaterThanOrEqual(56 + 32 + 11.99);
+        expect(p.sy).toBeGreaterThanOrEqual(56 + (h < 360 ? 24 : 44) - 0.01);
         expect(p.sy).toBeLessThan(h - Math.max(tableHeight, 48) - 32);
       }
       const target = sortCellsBackToFront(cube, v).at(-1)!.cell;

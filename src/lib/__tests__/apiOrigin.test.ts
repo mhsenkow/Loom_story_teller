@@ -25,6 +25,13 @@ describe("apiUrl", () => {
     expect(DEFAULT_CATALOG_ORIGIN).toBe("https://loom.ibm.io");
   });
 
+  it("prefixes the product origin on tauri.localhost even before internals inject", () => {
+    vi.stubGlobal("window", {
+      location: { hostname: "tauri.localhost" },
+    });
+    expect(apiUrl("/api/health")).toBe(`${DEFAULT_CATALOG_ORIGIN}/api/health`);
+  });
+
   it("prefixes the product origin inside Capacitor", () => {
     vi.stubGlobal("window", {
       location: { hostname: "localhost" },

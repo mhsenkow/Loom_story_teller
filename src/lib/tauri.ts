@@ -129,6 +129,7 @@ export async function queryFile(
   throw new Error(WEB_FILE_SQL_ERROR);
 }
 
+/** Desktop IPC for column stats alone. UI paths use `inspectFile` (stats + sample); keep for ad-hoc tools. */
 export async function getColumnStats(filePath: string): Promise<ColumnInfo[]> {
   if (isDesktop()) {
     return invoke<ColumnInfo[]>("get_column_stats", { filePath });

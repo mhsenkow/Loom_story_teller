@@ -8,6 +8,7 @@
 "use client";
 
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { viewModeName } from "@/lib/viewModes";
 import { applyQueryResult } from "@/lib/datasetPipeline";
 import { isDesktop, queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
@@ -25,18 +26,58 @@ import { sourceKindFromPath, sourceTable as sourceTableName } from "@/lib/source
 
 export function QueryView() {
   const {
-    selectedFile, querySql, setQuerySql,
-    queryResult, setQueryResult, queryError, setQueryError,
-    isQuerying, setIsQuerying,
-    queryHistory, appendQueryHistory,
-    querySnippets, addQuerySnippet, setPromptDialog,
+    selectedFile,
+    querySql,
+    setQuerySql,
+    queryResult,
+    setQueryResult,
+    queryError,
+    setQueryError,
+    isQuerying,
+    setIsQuerying,
+    queryHistory,
+    appendQueryHistory,
+    querySnippets,
+    addQuerySnippet,
+    setPromptDialog,
     columnStats,
     setToast,
-    queryResultPage, queryResultPageSize, setQueryResultPage, setQueryResultPageSize,
-    querySnapshots, addQuerySnapshot, removeQuerySnapshot,
-    nlQueryInput, setNlQueryInput,
-    addQueryView,
-  } = useLoomStore();
+    queryResultPage,
+    queryResultPageSize,
+    setQueryResultPage,
+    querySnapshots,
+    addQuerySnapshot,
+    nlQueryInput,
+    setNlQueryInput,
+    addQueryView
+  } = useLoomStore(
+    useShallow((s) => ({
+      selectedFile: s.selectedFile,
+      querySql: s.querySql,
+      setQuerySql: s.setQuerySql,
+      queryResult: s.queryResult,
+      setQueryResult: s.setQueryResult,
+      queryError: s.queryError,
+      setQueryError: s.setQueryError,
+      isQuerying: s.isQuerying,
+      setIsQuerying: s.setIsQuerying,
+      queryHistory: s.queryHistory,
+      appendQueryHistory: s.appendQueryHistory,
+      querySnippets: s.querySnippets,
+      addQuerySnippet: s.addQuerySnippet,
+      setPromptDialog: s.setPromptDialog,
+      columnStats: s.columnStats,
+      setToast: s.setToast,
+      queryResultPage: s.queryResultPage,
+      queryResultPageSize: s.queryResultPageSize,
+      setQueryResultPage: s.setQueryResultPage,
+      querySnapshots: s.querySnapshots,
+      addQuerySnapshot: s.addQuerySnapshot,
+      nlQueryInput: s.nlQueryInput,
+      setNlQueryInput: s.setNlQueryInput,
+      addQueryView: s.addQueryView,
+    })),
+  );
 
   const isStream = selectedFile?.path === "stream://wiki";
   const desktop = isDesktop();

@@ -5,52 +5,17 @@
 // pixels use d3-geo + TopoJSON atlases. Capture always uses these drawers.
 // =================================================================
 
-import {
-  geoAlbersUsa,
-  geoEqualEarth,
-  geoMercator,
-  geoOrthographic,
-  geoPath,
-  geoGraticule10,
-  type GeoProjection,
-} from "d3-geo";
-import type { ColumnInfo } from "./store";
-import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
-import { VIZ_CATEGORICAL } from "./chartPalettes";
-import {
-  getAtlas,
-  pickAtlasKind,
-  findFeatureIndex,
-  isGeoRegionField,
-  isLatField,
-  isLonField,
-  isUsAtlasKind,
-  peekWorldAtlas,
-  peekUsAtlas,
-  type AtlasBundle,
-  type AtlasKind,
-} from "./geoAtlas";
-import {
-  resolveChartInk,
-  inkTint,
-  withAlpha,
-  rampColor,
-  sequentialStops,
-  drawEmptyMessage,
-  drawRampKey,
-  rampKeyHeight,
-  drawSizeKey,
-  categoryIndex,
-  radiusFromPointSize,
-  type ChartInk,
-} from "./chartInk";
+import { geoAlbersUsa, geoEqualEarth, geoMercator, geoOrthographic, geoPath, geoGraticule10, type GeoProjection } from "d3-geo";
 
+import type { YAggregateOption } from "./recommendations";
+import { VIZ_CATEGORICAL } from "./chartPalettes";
+import { getAtlas, pickAtlasKind, findFeatureIndex, isLatField, isLonField, isUsAtlasKind, peekWorldAtlas, peekUsAtlas, type AtlasBundle } from "./geoAtlas";
+import { resolveChartInk, inkTint, withAlpha, rampColor, sequentialStops, drawEmptyMessage, drawRampKey, rampKeyHeight, drawSizeKey, categoryIndex, radiusFromPointSize, type ChartInk } from "./chartInk";
 export * from "./geoMapsRec";
 import type { GeoMapKind } from "./geoMapsRec";
 import { formatTooltipNumber, type HitTarget } from "./chartTooltip";
 import { drawMarkerPath } from "./chartMarks";
 import { type MarkSymbol, markSymbols } from "./markSymbols";
-
 export interface GeoRenderOpts {
   lineCap?: CanvasLineCap;
   lineJoin?: CanvasLineJoin;
@@ -1026,3 +991,4 @@ export {
   pickAtlasKind,
   type AtlasKind,
 } from "./geoAtlas";
+

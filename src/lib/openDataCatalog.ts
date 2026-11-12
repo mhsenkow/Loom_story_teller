@@ -50,7 +50,10 @@ export const DEFAULT_CATALOG_ORIGIN =
 
 function isNativeShellWindow(w: Record<string, unknown> | undefined): boolean {
   if (!w) return false;
-  if ("__TAURI_INTERNALS__" in w) return true;
+  if ("__TAURI_INTERNALS__" in w || "__TAURI__" in w) return true;
+  // Tauri 2 webview host when internals are briefly missing during early boot.
+  const host = (w.location as { hostname?: string } | undefined)?.hostname ?? "";
+  if (host === "tauri.localhost" || host.endsWith(".tauri.localhost")) return true;
   const cap = w.Capacitor as { isNativePlatform?: () => boolean } | undefined;
   try {
     return !!cap?.isNativePlatform?.();
@@ -66,9 +69,11 @@ function isNativeShellWindow(w: Record<string, unknown> | undefined): boolean {
  */
 export function apiUrl(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
-  const g = typeof globalThis !== "undefined" ? globalThis : undefined;
-  const w = g && "window" in g ? (g as unknown as { window?: Record<string, unknown> }).window : undefined;
-  if (isNativeShellWindow(w)) {
+  const g = typeof globalThis !== "undefined" ? (globalThis as Record<string, unknown>) : undefined;
+  const fromWindow =
+    g && "window" in g ? (g.window as Record<string, unknown> | undefined) : undefined;
+  // Check window first (Vitest stubs / real webview), then globalThis (Tauri injects there too).
+  if (isNativeShellWindow(fromWindow) || isNativeShellWindow(g)) {
     return `${DEFAULT_CATALOG_ORIGIN}${p}`;
   }
   return p;

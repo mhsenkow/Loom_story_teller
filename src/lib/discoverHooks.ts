@@ -68,7 +68,7 @@ type DiscoverHookFn = (n: number, sample: QueryResult, chart: ChartRecommendatio
 function hook_usgs(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   let maxMag = 0;
   let place = "";
@@ -125,7 +125,7 @@ function hook_usgs(
 function hook_hn(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   let best = 0;
   let title = "";
@@ -255,7 +255,7 @@ function hook_starlink(
 function hook_crypto(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   let bestAbs = 0;
   let sym = "";
@@ -338,7 +338,7 @@ function hook_iss(
 function hook_nws(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   let severe = 0;
   let extremeCount = 0;
@@ -392,7 +392,7 @@ function hook_nws(
 function hook_meteo(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   // Latest observation per city (buffer holds ~2 days of hourly rows)
   const latest = new Map<string, { ts: string; temp: number; precip: number }>();
@@ -513,7 +513,7 @@ function hook_world_bank(
 function hook_aq(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   let worst = -Infinity;
   let city = "";
@@ -685,7 +685,7 @@ function hook_countries(
 function hook_spacex(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   let ok = 0;
   let fail = 0;
@@ -963,7 +963,7 @@ function hook_pageviews(
 function hook_climate(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   // Average anomaly for the latest complete year
   const byYear = new Map<number, number[]>();
@@ -1026,7 +1026,7 @@ function hook_climate(
 function hook_gdacs(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   let red = 0;
   let orange = 0;
@@ -1167,7 +1167,7 @@ function hook_aurora(
 function hook_asteroids(
   n: number,
   sample: QueryResult,
-  chart: ChartRecommendation,
+  _chart: ChartRecommendation,
 ): DiscoverHookResult {
   let closest = Infinity;
   let name = "";

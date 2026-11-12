@@ -32,29 +32,10 @@ export function useChartExport(ctx: {
   axesOverlayRef?: unknown;
   focusLayerRef?: unknown;
   cubeFrameRef?: unknown;
-  tooltipLink?: unknown;
-  setTooltipLink?: unknown;
-  activeChart?: unknown;
-  chartSampleRows?: unknown;
-  scatterTooltipRef?: unknown;
-  chartTooltipRef?: unknown;
-  getEffectiveScatterBounds?: unknown;
-  setChartInteractionMode?: unknown;
-  setToast?: unknown;
-  applyBrushSelection?: unknown;
-  setLassoPoints?: unknown;
-  setRulerPins?: unknown;
-  setCrosshairPos?: unknown;
-  setScatterView?: unknown;
-  scatterDataRef?: unknown;
-  stageHostRef?: unknown;
 }): void {
   const {
     setPngExportHandler, setSvgExportHandler, setSvgExportLabel, vegaSpec, savedChartVisualOverrides,
     exportStateRef, canvasRef, canvas2DRef, axesOverlayRef, focusLayerRef, cubeFrameRef,
-    tooltipLink, setTooltipLink, activeChart, chartSampleRows, scatterTooltipRef, chartTooltipRef,
-    getEffectiveScatterBounds, setChartInteractionMode, setToast, applyBrushSelection, setLassoPoints,
-    setRulerPins, setCrosshairPos, setScatterView, scatterDataRef, stageHostRef,
   } = ctx as Record<string, never>;
     // Register PNG/SVG export handlers for the Export tab
     useEffect(() => {

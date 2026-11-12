@@ -547,7 +547,7 @@ export function expandRecommendationsWithExtras(
 
 /** Short, human-readable reason why this chart type fits the data. No LLM required. */
 export function getRecommendationReason(rec: ChartRecommendation): string {
-  const { kind, xField, yField, colorField } = rec;
+  const { kind, yField, colorField } = rec;
   switch (kind) {
     case "scatter":
       return yField ? "Two numeric columns → good for correlation or distribution" : "Numeric pairs for relationship";

@@ -30,10 +30,10 @@ export function FilesView({
   linkedMeta,
   onLinkDeviceFolder,
   onResyncLinkedFolder,
-  onReconnectLinkedFolder,
-  onCancelFolderScan,
-  folderScan,
-  linkedAccessBlocked,
+  onReconnectLinkedFolder: _onReconnectLinkedFolder,
+  onCancelFolderScan: _onCancelFolderScan,
+  folderScan: _folderScan,
+  linkedAccessBlocked: _linkedAccessBlocked,
   onUnlinkDeviceFolder,
   webVaultFileCount,
   recentFiles,
@@ -133,7 +133,7 @@ export function FilesView({
                   <p className="text-[10px] text-loom-muted mt-0.5 pl-3.5">On this device</p>
                 )}
               </div>
-              <input
+              <input aria-label="loom web csv files"
                 ref={fileInputRef}
                 id="loom-web-csv-files"
                 type="file"

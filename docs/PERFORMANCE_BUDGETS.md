@@ -1,5 +1,7 @@
 # Performance budgets (LOOM-698)
 
+**3D quality (2026-11-12):** Orbit scatter shares an O(n log n) projected-depth sort (at most 8,000 scene points) with its accelerated upload and hover list. Axis chrome is constant-size work per orbit frame. Cube picking remains O(occupied cells), using ray/box intersections rather than distance circles. No dependency or continuous animation loop is added. The isolated combined build reports 501 kB First Load JS, within the 600 kB budget. Hardware GPU and physical-device frame times remain unmeasured.
+
 **Chart reading (2026-10-27):** Renderers attach exact numeric metadata to existing hit targets. Reading generation scans displayed targets, sorts line observations within series (O(n log n)), and emits at most three fact cards. It runs after paint, not on hover; it does not scan source rows or call a model/network service. Table projection now refreshes after paint only while the table is open. No new library or animation loop is introduced. Desktop/phone browser checks use the static production app and demo data; physical-device timings remain unmeasured.
 
 **Line endpoint keys (2026-10-27):** Text measurement and collision placement operate on at most ten displayed series, with O(s log s) placement and no additional row scan. Labels reuse the transformed line endpoints and existing Canvas paint/export lifecycle; no animation, dependency, or background work is added. Physical-device timings remain unmeasured.

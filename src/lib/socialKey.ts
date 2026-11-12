@@ -15,25 +15,24 @@ import type { LoomState } from "./store/types";
 import { recipeKeyFromChart } from "./socialRecipe";
 
 /** Fields that make a recipe (the normalization lives in socialRecipe). */
-const RECIPE_FIELDS = [
-  "kind",
-  "xField",
-  "yField",
-  "colorField",
-  "sizeField",
-  "zField",
-  "rowField",
-  "y2Field",
-  "yAggregate",
-  "timeWindow",
-  "topN",
-  "barStackMode",
-  "seriesNormalize",
-  "rollingWindow",
-  "wordCloudMode",
-  "anomalyHighlight",
-  "bumpMode",
-] as const;
+type RecipeField =
+  | "kind"
+  | "xField"
+  | "yField"
+  | "colorField"
+  | "sizeField"
+  | "zField"
+  | "rowField"
+  | "y2Field"
+  | "yAggregate"
+  | "timeWindow"
+  | "topN"
+  | "barStackMode"
+  | "seriesNormalize"
+  | "rollingWindow"
+  | "wordCloudMode"
+  | "anomalyHighlight"
+  | "bumpMode";
 
 /** Source kind for a public live feed path (`stream://usgs` → `usgs`), else null. */
 export function socialKindFromPath(path: string | null | undefined): string | null {
@@ -42,7 +41,7 @@ export function socialKindFromPath(path: string | null | undefined): string | nu
 }
 
 /** `usgs:k3j9x0` — stable across devices for the same feed + recipe (see socialRecipe). */
-export function socialKey(kind: string, chart: Partial<Pick<ChartRecommendation, (typeof RECIPE_FIELDS)[number]>>): string {
+export function socialKey(kind: string, chart: Partial<Pick<ChartRecommendation, RecipeField>>): string {
   return recipeKeyFromChart(kind, chart as Record<string, unknown>);
 }
 

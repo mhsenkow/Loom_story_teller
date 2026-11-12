@@ -12,6 +12,7 @@
 import { handOffToNeoSpace } from "@/lib/neospaceShare";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { getRecommendationReason } from "@/lib/recommendations";
 import {
   blueskyShareHref,
@@ -92,8 +93,24 @@ function ShareSheetBody() {
     setPanelTab,
     panelOpen,
     togglePanel,
-    setToast,
-  } = useLoomStore();
+    setToast
+  } = useLoomStore(
+    useShallow((s) => ({
+      activeChart: s.activeChart,
+      chartTitleOverrides: s.chartTitleOverrides,
+      setChartTitleOverride: s.setChartTitleOverride,
+      selectedFile: s.selectedFile,
+      sampleRows: s.sampleRows,
+      aiSuggestionReason: s.aiSuggestionReason,
+      exportBurnIn: s.exportBurnIn,
+      setExportBurnIn: s.setExportBurnIn,
+      setShareSheetOpen: s.setShareSheetOpen,
+      setPanelTab: s.setPanelTab,
+      panelOpen: s.panelOpen,
+      togglePanel: s.togglePanel,
+      setToast: s.setToast,
+    })),
+  );
 
   const shellMode = useShellMode();
   const keyboardInset = useKeyboardBottomInset();
@@ -873,7 +890,7 @@ function ShareSheetBody() {
             }}
           >
             <label className="sr-only" htmlFor="share-mastodon-server">Your Mastodon server</label>
-            <input
+            <input aria-label="Your server, e.g. mastodon.social"
               id="share-mastodon-server"
               className="loom-input flex-1 min-w-0 text-sm"
               placeholder="Your server, e.g. mastodon.social"

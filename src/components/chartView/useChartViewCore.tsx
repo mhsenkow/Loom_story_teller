@@ -19,12 +19,7 @@ import { useDataCubeStage } from "./useDataCubeStage";
 import { useChartSwapAnimation, useChartSwapRefs } from "./useChartSwapAnimation";
 import { useChartRenderOpts } from "./useChartRenderOpts";
 import { useChartScatterGlobeEffects } from "./useChartScatterGlobeEffects";
-import {
-  SuggestionRailHeader,
-  SuggestionRailPanel,
-  SuggestionsEmptyRail,
-  SuggestionsRestoreTab,
-} from "./SuggestionRail";
+import { SuggestionRailHeader, SuggestionRailPanel, SuggestionsEmptyRail, SuggestionsRestoreTab } from "./SuggestionRail";
 import { chartWhyReasonText } from "./ChartToolbar";
 import { useChartTheme } from "@/components/useChartTheme";
 import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
@@ -40,9 +35,9 @@ import { chartStageLiveMessage, chartStageStatus } from "@/lib/chartStageStatus"
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { describeChartColorStatus, discreteSeriesColors, getThemeUiColors, resolveChartColors } from "@/lib/chartPalettes";
 import { useIsMobile, useMediaQuery, useMobileLiveEdit, useShellMode } from "@/lib/useMediaQuery";
-import { chartSpacePadding } from "@/lib/chartSpace";
-import { type ChartRecommendation, createChartRec, getBestSuggestion, getRecommendationReason, getTopSuggestions, recommend, recommendStorySequence, tryBuildRandomChartRec, type YAggregateOption } from "@/lib/recommendations";
-import { chartCapabilities, defaultYAggregate, encodingChannelLabels, formatChartAggregationSummary, getChartRenderIssue } from "@/lib/chartSupport";
+
+import { type ChartRecommendation, createChartRec, getBestSuggestion, getRecommendationReason, getTopSuggestions, recommend, recommendStorySequence, tryBuildRandomChartRec } from "@/lib/recommendations";
+import { chartCapabilities, encodingChannelLabels, formatChartAggregationSummary, getChartRenderIssue } from "@/lib/chartSupport";
 import { canUseWebGpuScatter } from "@/lib/webGpuScatterEligibility";
 import { type ArrangeChange } from "@/components/CanvasArrangeOverlay";
 import { ARRANGEMENT_KEYS, hasCanvasArrangement } from "@/lib/canvasArrangement";
@@ -53,26 +48,22 @@ import { resolveTooltipPresentation } from "@/lib/chartTooltipMode";
 import { isWebGpuDrawableScene } from "@/lib/gpuScenes";
 import { isWebGpuGlobeKind } from "@/lib/geoMaps";
 import { type CubeHoverCell } from "@/components/DataCubePivot";
-import { cubeCellKey, type DataCube, type DataCubeRenderOpts } from "@/lib/dataCube";
+import { type DataCube, type DataCubeRenderOpts } from "@/lib/dataCube";
 import { FOOTNOTE_BAND_PX, titleBandBottom } from "@/lib/chartLayout";
 import { resolveChartAxisFontSize } from "@/lib/chartType";
 import { ensureChartFontLoaded, resolveChartFontFamily } from "@/lib/fontCatalog";
-import { ensureContrast } from "@/lib/wcagColor";
+
 import { formatSourceFootnote, resolveDataProvenance } from "@/lib/dataProvenance";
 import { VISUAL_PRESETS } from "@/lib/lookSystem";
 import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
-import {
-  readSuggestionsRailFromSession,
-  writeSuggestionsRailToSession,
-} from "@/lib/shellLayout";
+import { readSuggestionsRailFromSession, writeSuggestionsRailToSession } from "@/lib/shellLayout";
 import { type Canvas2DHitContext, type HitTarget } from "@/lib/chartTooltip";
-import type { ChartRenderOpts } from "@/lib/chartRenderTypes";
+
 import { type YScaleKind } from "@/lib/dsTransforms";
 import { applyChartTimeWindow, composeChartFootnote, formatChartTimeFootnote, resolveEffectiveTimeRec } from "@/lib/chartTime";
 import { applyExplorerViewToRows, explorerFiltersActive } from "@/lib/explorerViewRows";
 import { goToDashboardsAfterSave, saveChartView } from "@/lib/saveChartView";
 import { isNumericType } from "@/lib/canvasCharts/shared";
-
 export function useChartViewCore(): ReactNode | null {
   // A string key (stable between checks) so a monitor's nextRunAt ticking doesn't redraw the chart.
   const monitorLinesKey = useLoomStore((s) => JSON.stringify(monitorRefLines(s.monitors, s.selectedFile?.path, s.activeChart?.yField)));
@@ -85,7 +76,7 @@ export function useChartViewCore(): ReactNode | null {
     selectedFile, sampleRows, chartRecs, activeChart, setActiveChart, setPanelTab, columnStats,
     chartVisualOverrides: savedChartVisualOverrides, aiSuggestionReason, chartTitleOverrides, setChartTitleOverride,
     setPngExportHandler, setSvgExportHandler, setSvgExportLabel, vegaSpec, smartResults, appSettings,
-    setSelectedRowIndices, setToast, chartAnnotations,
+    setToast, chartAnnotations,
     setHoveredRowIndex,
     tooltipLink, setTooltipLink,
     pinnedTooltips, togglePinnedTooltip, setPinnedTooltips,
@@ -93,13 +84,11 @@ export function useChartViewCore(): ReactNode | null {
     crosshairPos, setCrosshairPos,
     lassoPoints, setLassoPoints,
     barStackMode, connectScatterTrail, showMarginals,
-    selectedRowIndices,
     rulerPins, setRulerPins,
     setPromptDialog, querySql,
-    createStoryDashboard, setDashboardsExpanded,
+    createStoryDashboard,
     startDeepScan,
     chartChromeFocus, setChartChromeFocus, setChartPanelSection, setPanelOpen,
-    setChartVisualOverrides,
     inspectingFilePath,
       suggestionsRailOpen, setSuggestionsRailOpen,
       tableColumnFilters, tableFilterRowIndices, tableSortColumn, tableSortDir,
@@ -123,7 +112,6 @@ export function useChartViewCore(): ReactNode | null {
       vegaSpec: s.vegaSpec,
       smartResults: s.smartResults,
       appSettings: s.appSettings,
-      setSelectedRowIndices: s.setSelectedRowIndices,
       setToast: s.setToast,
       chartAnnotations: s.chartAnnotations,
       setHoveredRowIndex: s.setHoveredRowIndex,
@@ -142,19 +130,16 @@ export function useChartViewCore(): ReactNode | null {
       barStackMode: s.barStackMode,
       connectScatterTrail: s.connectScatterTrail,
       showMarginals: s.showMarginals,
-      selectedRowIndices: s.selectedRowIndices,
       rulerPins: s.rulerPins,
       setRulerPins: s.setRulerPins,
       setPromptDialog: s.setPromptDialog,
       querySql: s.querySql,
       createStoryDashboard: s.createStoryDashboard,
-      setDashboardsExpanded: s.setDashboardsExpanded,
       startDeepScan: s.startDeepScan,
       chartChromeFocus: s.chartChromeFocus,
       setChartChromeFocus: s.setChartChromeFocus,
       setChartPanelSection: s.setChartPanelSection,
       setPanelOpen: s.setPanelOpen,
-      setChartVisualOverrides: s.setChartVisualOverrides,
       inspectingFilePath: s.inspectingFilePath,
       suggestionsRailOpen: s.suggestionsRailOpen,
       setSuggestionsRailOpen: s.setSuggestionsRailOpen,
@@ -523,7 +508,6 @@ export function useChartViewCore(): ReactNode | null {
     chartFootnoteText,
     chartColorInfo,
   });
-
 
   const renderIssue = useMemo(
     () => getChartRenderIssue(activeChart, chartSampleRows ?? sampleRows),
@@ -1022,7 +1006,6 @@ export function useChartViewCore(): ReactNode | null {
     setRefreshKey((k) => k + 1);
   }, []);
 
-
   const extractScatterData = useExtractScatterData(chartSampleRows, activeChart);
 
     useGpuRenderers({
@@ -1055,11 +1038,10 @@ export function useChartViewCore(): ReactNode | null {
       sampleColumns: sampleRows?.columns,
     });
 
-
     useChartShortcuts({
       tooltipLink, setTooltipLink, activeChart, chartSampleRows, scatterTooltipRef, chartTooltipRef,
       getEffectiveScatterBounds, setChartInteractionMode, setToast, applyBrushSelection, setLassoPoints,
-      setRulerPins, setCrosshairPos, setScatterView, scatterDataRef, stageHostRef,
+      setBrushRect, setRulerPins, setCrosshairPos, setScatterView, scatterDataRef, stageHostRef,
     });
     useChartExport({
       setPngExportHandler, setSvgExportHandler, setSvgExportLabel, vegaSpec, savedChartVisualOverrides,
@@ -1103,7 +1085,6 @@ export function useChartViewCore(): ReactNode | null {
       lassoPoints,
       crosshairPos,
       rulerPins,
-      scatterView,
       pointSize,
       setScatterTooltip,
       setHoveredRowIndex,
@@ -1121,7 +1102,6 @@ export function useChartViewCore(): ReactNode | null {
       brushStartRef,
       brushRectRef,
       pointerDownAtRef,
-      lastPointerTypeRef,
       getEffectiveScatterBounds,
       scatterHitForRow,
     });
@@ -1230,7 +1210,6 @@ export function useChartViewCore(): ReactNode | null {
       fontEpoch,
       chartVisualOverrides,
     });
-
 
     useChartScatterGlobeEffects({ activeChart, sampleRows, setScatterView, setSceneOrbit });
 

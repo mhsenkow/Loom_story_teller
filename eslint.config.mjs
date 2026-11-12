@@ -23,6 +23,16 @@ export default defineConfig([
       "react-hooks/preserve-manual-memoization": "warn",
       "react-hooks/immutability": "warn",
       "react-hooks/incompatible-library": "warn",
+      // Intentional unused bindings use a leading underscore (params kept for API shape).
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+        },
+      ],
       // jsx-a11y via eslint-config-next/core-web-vitals (LOOM-483) — ratchet on new UI:
       "jsx-a11y/control-has-associated-label": "warn",
       "jsx-a11y/click-events-have-key-events": "warn",

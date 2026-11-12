@@ -536,7 +536,7 @@ export default function ExportTab() {
               </label>
             ))}
             {exportBurnIn.includeHandle && (
-              <input
+              <input aria-label="@handle"
                 type="text"
                 className="loom-input w-full text-xs"
                 placeholder="@handle"

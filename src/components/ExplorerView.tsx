@@ -10,6 +10,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { formatNumber } from "@/lib/format";
 import {
   applyVisibleColumnOrder,
@@ -170,7 +171,89 @@ const DEFAULT_TABLE_ENHANCE = {
 };
 
 export function ExplorerView() {
-  const { selectedFile, sampleRows, columnStats, tablePrefs, setTablePrefs, setViewMode, setPanelTab, panelOpen, togglePanel, smartResults, tableFilterRowIndices, setTableFilterRowIndices, tableColumnFilters, setTableColumnFilter, setTableColumnFilters, tableSortColumn, tableSortDir, setTableSort, selectedRowIndices, setSelectedRowIndices, tableViews, addTableView, removeTableView, applyTableView, tableUndoStack, tableRedoStack, pushTableUndo, undoTable, redoTable, hoveredRowIndex, setHoveredRowIndex, setToast, setPromptDialog, querySql, activeChart, viewTimeField, viewTimeWindow, setStatsFocusColumn, setPanelOpen } = useLoomStore();
+  const {
+    selectedFile,
+    sampleRows,
+    columnStats,
+    tablePrefs,
+    setTablePrefs,
+    setViewMode,
+    setPanelTab,
+    panelOpen,
+    togglePanel,
+    smartResults,
+    tableFilterRowIndices,
+    setTableFilterRowIndices,
+    tableColumnFilters,
+    setTableColumnFilter,
+    setTableColumnFilters,
+    tableSortColumn,
+    tableSortDir,
+    setTableSort,
+    selectedRowIndices,
+    setSelectedRowIndices,
+    tableViews,
+    addTableView,
+    removeTableView,
+    applyTableView,
+    tableUndoStack,
+    tableRedoStack,
+    pushTableUndo,
+    undoTable,
+    redoTable,
+    hoveredRowIndex,
+    setHoveredRowIndex,
+    setToast,
+    setPromptDialog,
+    querySql,
+    activeChart,
+    viewTimeField,
+    viewTimeWindow,
+    setStatsFocusColumn,
+    setPanelOpen
+  } = useLoomStore(
+    useShallow((s) => ({
+      selectedFile: s.selectedFile,
+      sampleRows: s.sampleRows,
+      columnStats: s.columnStats,
+      tablePrefs: s.tablePrefs,
+      setTablePrefs: s.setTablePrefs,
+      setViewMode: s.setViewMode,
+      setPanelTab: s.setPanelTab,
+      panelOpen: s.panelOpen,
+      togglePanel: s.togglePanel,
+      smartResults: s.smartResults,
+      tableFilterRowIndices: s.tableFilterRowIndices,
+      setTableFilterRowIndices: s.setTableFilterRowIndices,
+      tableColumnFilters: s.tableColumnFilters,
+      setTableColumnFilter: s.setTableColumnFilter,
+      setTableColumnFilters: s.setTableColumnFilters,
+      tableSortColumn: s.tableSortColumn,
+      tableSortDir: s.tableSortDir,
+      setTableSort: s.setTableSort,
+      selectedRowIndices: s.selectedRowIndices,
+      setSelectedRowIndices: s.setSelectedRowIndices,
+      tableViews: s.tableViews,
+      addTableView: s.addTableView,
+      removeTableView: s.removeTableView,
+      applyTableView: s.applyTableView,
+      tableUndoStack: s.tableUndoStack,
+      tableRedoStack: s.tableRedoStack,
+      pushTableUndo: s.pushTableUndo,
+      undoTable: s.undoTable,
+      redoTable: s.redoTable,
+      hoveredRowIndex: s.hoveredRowIndex,
+      setHoveredRowIndex: s.setHoveredRowIndex,
+      setToast: s.setToast,
+      setPromptDialog: s.setPromptDialog,
+      querySql: s.querySql,
+      activeChart: s.activeChart,
+      viewTimeField: s.viewTimeField,
+      viewTimeWindow: s.viewTimeWindow,
+      setStatsFocusColumn: s.setStatsFocusColumn,
+      setPanelOpen: s.setPanelOpen,
+    })),
+  );
   const isMobile = useIsMobile();
 
   /** Same accent-as-signal as PreviewFooter: which columns are on the active chart. */
@@ -1189,8 +1272,8 @@ export function ExplorerView() {
               </tr>
               {(!isMobile || showColumnFilters) && (
               <tr className="bg-loom-surface/50 sticky top-7 z-10">
-                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-10 bg-loom-surface w-8 min-w-8 max-w-8" />
-                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-10 bg-loom-surface w-10 min-w-10" />
+                <th aria-hidden className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-10 bg-loom-surface w-8 min-w-8 max-w-8" />
+                <th aria-hidden className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-10 bg-loom-surface w-10 min-w-10" />
                 {columns.map((col) => (
                   <th key={col} className="px-1 py-0.5 border-b border-loom-border">
                     <input
@@ -1234,7 +1317,7 @@ export function ExplorerView() {
                   const paddingBottom = items.length > 0 ? rowVirtualizer.getTotalSize() - items[items.length - 1].end : 0;
                   return (
                     <>
-                      {paddingTop > 0 && <tr><td style={{ height: paddingTop, padding: 0 }} colSpan={columns.length + 2} /></tr>}
+                      {paddingTop > 0 && <tr aria-hidden><td style={{ height: paddingTop, padding: 0 }} colSpan={columns.length + 2} /></tr>}
                       {items.map((virtualRow) => {
                         const ri = virtualRow.index;
                         const row = displayRows[ri];
@@ -1265,7 +1348,7 @@ export function ExplorerView() {
                           </tr>
                         );
                       })}
-                      {paddingBottom > 0 && <tr><td style={{ height: paddingBottom, padding: 0 }} colSpan={columns.length + 2} /></tr>}
+                      {paddingBottom > 0 && <tr aria-hidden><td style={{ height: paddingBottom, padding: 0 }} colSpan={columns.length + 2} /></tr>}
                     </>
                   );
                 })()

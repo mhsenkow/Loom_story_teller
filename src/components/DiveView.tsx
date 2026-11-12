@@ -765,7 +765,7 @@ export function DiveView() {
               })}
               {!query.metrics.some((m) => m.agg === "count") && (
                 <label className="flex items-center gap-1.5 text-2xs text-loom-muted">
-                  <input type="checkbox" checked={query.hits !== false} onChange={(e) => update({ hits: e.target.checked })} className="accent-[var(--loom-accent)]" />
+                  <input aria-label="update(" type="checkbox" checked={query.hits !== false} onChange={(e) => update({ hits: e.target.checked })} className="accent-[var(--loom-accent)]" />
                   Show hits (rows per group) in the table
                 </label>
               )}
@@ -1318,7 +1318,7 @@ function DiveSamples({
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
                   {cols.map((c) => (
                     <label key={c} className="flex items-center gap-1 text-2xs text-loom-text font-mono">
-                      <input type="checkbox" checked={!visible || visible.includes(c)} onChange={() => toggle(c)} className="accent-[var(--loom-accent)]" />
+                      <input aria-label="toggle(c)} className=&quot;accent-[var(--loom-accent)]&quot; />" type="checkbox" checked={!visible || visible.includes(c)} onChange={() => toggle(c)} className="accent-[var(--loom-accent)]" />
                       {c}
                     </label>
                   ))}

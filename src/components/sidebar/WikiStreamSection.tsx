@@ -128,7 +128,7 @@ export function WikiStreamSection() {
       });
       leaveSourcesShowChart();
       setToast(`Loaded ${snap.sample.rows.length} stream events`);
-    } catch (e) {
+    } catch {
       setToast(
         "Couldn’t load Wikipedia Live yet — try again in a moment",
       );

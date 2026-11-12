@@ -239,7 +239,7 @@ export function ChartKindPicker({
           style={pos ? { left: pos.left, top: pos.top, width: pos.width } : { visibility: "hidden" }}
         >
           <div className="p-2 border-b border-loom-border space-y-1.5">
-            <input
+            <input aria-label="Value"
               ref={inputRef}
               type="text"
               role="combobox"

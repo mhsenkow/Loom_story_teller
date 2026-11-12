@@ -6,71 +6,16 @@
 // pixels are always Canvas 2D (same contract as ChartView).
 // =================================================================
 
-import type { ColumnInfo } from "./store";
-import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
+import type { YAggregateOption } from "./recommendations";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
 import { formatDateCell } from "./dateFormat";
-import {
-  aggregateAxisTitle,
-  classifyKeys,
-  formatAxisValue,
-  formatDataValue,
-  linear,
-  niceTicks,
-  timeTicks,
-} from "./chartAxes";
-import {
-  drawAxisFieldLabels,
-  drawAxisFrame,
-  drawBandAxisX,
-  drawBandAxisY,
-  drawChartGrid,
-  drawChartTicks,
-  drawPositionedLabelsX,
-  type ChartLookOpts,
-  type PlotRect,
-} from "./chartLooks";
-import {
-  categoryIndex,
-  dodgeLabels,
-  drawEmptyMessage,
-  drawKeyPanel,
-  drawRampKey,
-  drawSizeKey,
-  drawSwatchRow,
-  inkHighlight,
-  inkOn,
-  inkShadow,
-  inkTint,
-  mixColor,
-  radiusFromPointSize,
-  rampColor,
-  rampKeyHeight,
-  resolveChartInk,
-  sequentialStops,
-  withAlpha,
-  type ChartInk,
-  type SwatchEntry,
-} from "./chartInk";
-
+import { aggregateAxisTitle, classifyKeys, formatAxisValue, formatDataValue, linear, niceTicks, timeTicks } from "./chartAxes";
+import { drawAxisFieldLabels, drawAxisFrame, drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks, drawPositionedLabelsX, type ChartLookOpts, type PlotRect } from "./chartLooks";
+import { categoryIndex, dodgeLabels, drawEmptyMessage, drawKeyPanel, drawRampKey, drawSizeKey, drawSwatchRow, inkHighlight, inkOn, inkShadow, inkTint, mixColor, radiusFromPointSize, rampColor, rampKeyHeight, resolveChartInk, sequentialStops, withAlpha, type ChartInk, type SwatchEntry } from "./chartInk";
 export * from "./oddChartsRec";
 import type { OddChartKind, OddRenderOpts } from "./oddChartsRec";
-import {
-  ODD_NON_CARTESIAN,
-  toNum,
-  groupSum,
-  agg,
-  numColsOf,
-  nomColsOf,
-  timeColsOf,
-  inferType,
-  jitter,
-  topGroupsByWeight,
-  splitWordCloudHalves,
-  wordTotalsByGroup,
-  wordsForCloudGroup,
-} from "./oddChartsRec";
+import { ODD_NON_CARTESIAN, toNum, groupSum, agg, jitter, topGroupsByWeight, splitWordCloudHalves, wordTotalsByGroup, wordsForCloudGroup } from "./oddChartsRec";
 import { resolveLayoutDirection } from "./chartSupport";
 import { resolveIsoFloorOrient } from "./isoOrient";
 import { drawProjectedAxis, type AxisLabelBox } from "./projectedAxis";
@@ -79,8 +24,6 @@ import { formatDeltaLabel } from "./deltaCompare";
 import { chartFont, chartTypeRamp } from "./chartType";
 import { type MarkSymbols, drawMarkSymbol, markSymbols } from "./markSymbols";
 import type { HitTarget } from "./chartTooltip";
-
-
 // ---------------------------------------------------------------------------
 // Renderers
 // ---------------------------------------------------------------------------
@@ -3176,7 +3119,7 @@ function drawDensity(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   const series = [...seriesBy(rows, xi, ci).entries()].filter(([, v]) => v.length >= 3);
   if (!series.length) return "Density needs at least three numeric values";
   const all = series.flatMap(([, v]) => v);
-  const { mini, ink } = env;
+  const { mini } = env;
   const xs = niceTicks(Math.min(...all), Math.max(...all), 5, true);
   const N = mini ? 60 : 160;
   const curves = series.map(([k, v]) => ({ k, n: v.length, vals: v, d: kde(v, xs.min, xs.max, N) }));
@@ -4019,3 +3962,4 @@ function drawErrorBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
   drawAxisFieldLabels(ctx, env.w, env.h, env.pad, `${fieldName(env, yi)} · mean with 95% interval`, null, env.look);
   if (ci >= 0 && stats.some((st) => st.vals.length <= 300)) drawPanelLegend(ctx, env, legendEntriesFor(rows, ci, env.colors), fieldName(env, ci), plot, "bottom-right");
 }
+

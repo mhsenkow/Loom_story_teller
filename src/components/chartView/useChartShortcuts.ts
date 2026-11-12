@@ -4,17 +4,6 @@ import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
 import { useEffect } from "react";
 
 export function useChartShortcuts(ctx: {
-  setPngExportHandler?: unknown;
-  setSvgExportHandler?: unknown;
-  setSvgExportLabel?: unknown;
-  vegaSpec?: unknown;
-  savedChartVisualOverrides?: unknown;
-  exportStateRef?: unknown;
-  canvasRef?: unknown;
-  canvas2DRef?: unknown;
-  axesOverlayRef?: unknown;
-  focusLayerRef?: unknown;
-  cubeFrameRef?: unknown;
   tooltipLink?: unknown;
   setTooltipLink?: unknown;
   activeChart?: unknown;
@@ -26,6 +15,7 @@ export function useChartShortcuts(ctx: {
   setToast?: unknown;
   applyBrushSelection?: unknown;
   setLassoPoints?: unknown;
+  setBrushRect?: unknown;
   setRulerPins?: unknown;
   setCrosshairPos?: unknown;
   setScatterView?: unknown;
@@ -33,11 +23,9 @@ export function useChartShortcuts(ctx: {
   stageHostRef?: unknown;
 }): void {
   const {
-    setPngExportHandler, setSvgExportHandler, setSvgExportLabel, vegaSpec, savedChartVisualOverrides,
-    exportStateRef, canvasRef, canvas2DRef, axesOverlayRef, focusLayerRef, cubeFrameRef,
     tooltipLink, setTooltipLink, activeChart, chartSampleRows, scatterTooltipRef, chartTooltipRef,
     getEffectiveScatterBounds, setChartInteractionMode, setToast, applyBrushSelection, setLassoPoints,
-    setRulerPins, setCrosshairPos, setScatterView, scatterDataRef, stageHostRef,
+    setBrushRect, setRulerPins, setCrosshairPos, setScatterView, scatterDataRef, stageHostRef,
   } = ctx as Record<string, never>;
     useEffect(() => {
       const onKey = (e: KeyboardEvent) => {
@@ -168,8 +156,14 @@ export function useChartShortcuts(ctx: {
       setToast,
       applyBrushSelection,
       setLassoPoints,
+      setBrushRect,
       setRulerPins,
       setCrosshairPos,
+      setScatterView,
+      scatterDataRef,
+      stageHostRef,
+      scatterTooltipRef,
+      chartTooltipRef,
     ]);
 
 }
