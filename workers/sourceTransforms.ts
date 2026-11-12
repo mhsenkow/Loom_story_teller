@@ -112,6 +112,23 @@ export function paprikaToGecko(body: unknown): Json[] {
   });
 }
 
+/** CoinLore `/api/tickers` (keyless, serves Cloudflare egress) → CoinGecko markets shape. */
+export function coinloreToGecko(body: unknown): Json[] {
+  return asArr(asObj(body).data).map((t) => {
+    const c = asObj(t);
+    return {
+      id: String(c.nameid ?? c.id ?? ""),
+      symbol: String(c.symbol ?? "").toLowerCase(),
+      name: String(c.name ?? ""),
+      current_price: numOrNull(c.price_usd),
+      market_cap: numOrNull(c.market_cap_usd),
+      total_volume: numOrNull(c.volume24),
+      price_change_percentage_24h: numOrNull(c.percent_change_24h),
+      market_cap_rank: numOrNull(c.rank),
+    };
+  });
+}
+
 // ---- Aircraft (ADSB.lol fallback → OpenSky `states`) ----
 
 /** Query points spread over the contiguous US (250 nm radius each). */

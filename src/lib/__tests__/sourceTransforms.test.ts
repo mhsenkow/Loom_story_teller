@@ -20,6 +20,7 @@ import {
   nwisIvWide,
   openMeteoCities,
   paprikaToGecko,
+  coinloreToGecko,
   starlinkGp,
   steamTop,
   treasuryDebt,
@@ -56,6 +57,18 @@ describe("Worker source transforms (shapes the browser parsers read)", () => {
     expect(out.features[0]!.properties).not.toHaveProperty("description");
     const rows = parseSourceRows("nws", out);
     expect(rows[0]!.slice(0, 7)).toEqual(["b", "New", "", "Severe", "", "", "Here"]);
+  });
+
+  it("coinloreToGecko feeds parseCrypto", () => {
+    const body = {
+      data: [
+        { id: "90", symbol: "BTC", name: "Bitcoin", nameid: "bitcoin", rank: 1, price_usd: "84644.12",
+          percent_change_24h: "2.19", market_cap_usd: "1686000000000.5", volume24: 31000000000.1 },
+      ],
+    };
+    const rows = parseSourceRows("crypto", coinloreToGecko(body));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(["bitcoin", "BTC", "Bitcoin", 84644.12, 1686000000000.5, 31000000000.1, 2.19, 1]);
   });
 
   it("paprikaToGecko feeds parseCrypto", () => {
