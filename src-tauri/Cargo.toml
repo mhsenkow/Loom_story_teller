@@ -16,16 +16,18 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
-tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-notification = "2"
+# Mobile open_external_url (and desktop reveal/open) — avoid tauri-plugin-shell on iOS
+# (Swift `_init_plugin_shell` fails to link in the App Store IPA build).
+opener = "0.7"
 
 # Desktop-only: DuckDB, folder FS, native dialogs, Rust poll/SSE sources
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+tauri-plugin-shell = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
-opener = "0.7"
 # Bundled only: static parquet/json fail to compile against current Xcode libc++
 # (thrift TEnumIterator). Never INSTALL extensions at runtime — that drops
 # ad-hoc–signed binaries into ~/.duckdb and Gatekeeper blocks them on MAS builds.
