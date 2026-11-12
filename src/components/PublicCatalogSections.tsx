@@ -47,9 +47,9 @@ export interface CatalogSectionProps {
 }
 
 const BTN_EXPLORE =
-  "text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50";
+  "library-pack-action text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50";
 const BTN_SAVE =
-  "text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text disabled:opacity-50";
+  "library-pack-action text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text disabled:opacity-50";
 const EXTERNAL_ICON = (
   <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
     <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6M15 3h6v6M10 14L21 3" />
@@ -130,8 +130,8 @@ export function SocrataCatalogSection({
           title="City & state open data"
           lede={
             canLoadInBrowser
-              ? "Search every Socrata portal — NYC, Chicago, SF, Seattle, Austin, states, CDC. Explore loads the rows straight into Chart."
-              : "Search every Socrata portal — NYC, Chicago, SF, Seattle, states. Save CSVs into your folder."
+              ? "Search Socrata, or pick a city, state, or agency. Explore loads the rows straight into Chart."
+              : "Search Socrata, or pick a city, state, or agency. Save CSVs into your folder."
           }
           meta={!loading && datasets.length > 0 ? `${datasets.length}` : undefined}
         />
@@ -174,11 +174,27 @@ export function SocrataCatalogSection({
                 onChange={(e) => setRequest((r) => ({ ...r, domain: e.target.value }))}
               >
                 <option value="">All portals</option>
-                {SOCRATA_PORTALS.map((p) => (
-                  <option key={p.domain} value={p.domain}>
-                    {p.label}
-                  </option>
-                ))}
+                <optgroup label="Cities">
+                  {SOCRATA_PORTALS.filter((p) => p.group === "city").map((p) => (
+                    <option key={p.domain} value={p.domain}>
+                      {p.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="States & provinces">
+                  {SOCRATA_PORTALS.filter((p) => p.group === "state").map((p) => (
+                    <option key={p.domain} value={p.domain}>
+                      {p.label}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="Agencies">
+                  {SOCRATA_PORTALS.filter((p) => p.group === "agency").map((p) => (
+                    <option key={p.domain} value={p.domain}>
+                      {p.label}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </label>
           </span>
@@ -261,7 +277,6 @@ function SocrataCard({
   ds,
   canLoadInBrowser,
   canSaveToFolder,
-  isScanning,
   loadingId,
   savingId,
   onExplore,
@@ -298,7 +313,7 @@ function SocrataCard({
         {canLoadInBrowser && (
           <button
             type="button"
-            disabled={loadingId === id || isScanning}
+            disabled={loadingId === id}
             onClick={() => onExplore(url, filename, id, { rowLimit })}
             className={BTN_EXPLORE}
             aria-label={`Explore ${ds.name} from ${ds.domain}`}
@@ -341,7 +356,6 @@ export function TidyTuesdaySection({
   expanded,
   canLoadInBrowser,
   canSaveToFolder,
-  isScanning,
   loadingId,
   savingId,
   onExplore,
@@ -492,7 +506,7 @@ export function TidyTuesdaySection({
                     <button
                       key={file.name}
                       type="button"
-                      disabled={busy || (canLoadInBrowser && isScanning)}
+                      disabled={busy}
                       onClick={() => handleFile(week, file)}
                       className={`${BTN_EXPLORE} font-mono max-w-full truncate`}
                       title={file.name}

@@ -19,6 +19,7 @@ import { formatTooltipNumber } from "../chartTooltip";
 import { DEFAULT_CORR_DIVERGING, corrCellInk, corrFillT, sampleCorrDiverging } from "../corrMatrixStyle";
 import { buildCorrMatrix, buildPareto } from "../dsTransforms";
 import { type YAggregateOption } from "../recommendations";
+import { fillMaterialPath } from "./material";
 import { axisFont, barPath, densityStops, labelGutter } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
 import { numRange } from "./primitives";
@@ -87,7 +88,7 @@ export function renderFullPareto(
     ctx.globalAlpha = opts?.opacity ?? 0.85;
     ctx.beginPath();
     barPath(ctx, x, top, barW, bh, Math.min(corner, barW / 2, bh / 2), barDir);
-    ctx.fill();
+    fillMaterialPath(ctx, top, top + bh, opts);
     pushHit(opts, {
       shape: "rect", x, y: top, w: barW, h: bh,
       match: [[xi, b.label]],

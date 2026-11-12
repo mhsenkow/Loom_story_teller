@@ -96,7 +96,7 @@
 @container discover (max-width: 52rem) {
   .discover-layout-label { display: none; }
   .discover-layout-picker button { padding-inline: .3rem; }
-  .discover-sentence { gap: .2rem .45rem; font-size: .6875rem; }
+  .discover-sentence { flex-wrap: wrap; gap: .2rem .45rem; font-size: .6875rem; }
   .discover-sentence select { max-width: 8.5rem; }
 }
 .discover-sentence select:hover { border-bottom-color: var(--loom-accent); }
@@ -256,6 +256,7 @@
 .discover-story-open:hover .discover-story-cta,
 .discover-story-open:focus-visible .discover-story-cta,
 .discover-story-open[aria-busy="true"] .discover-story-cta { opacity: 1; }
+@media (pointer: coarse) { .discover-story-cta { opacity: 1; } }
 .discover-story-copy {
   display: flex; flex: 1; flex-direction: column; gap: .35rem;
   width: 100%; min-width: 0; padding: .625rem .75rem .5rem;
@@ -339,6 +340,12 @@
   background: transparent; border: 0; outline: 0; min-width: 0; width: 100%;
   min-height: 2.625rem; font-size: .9375rem; color: var(--loom-text);
 }
+/* iPad focuses a field and Safari zooms the page when the type is under 16px. */
+@media (pointer: coarse) and (min-width: 768px) {
+  .discover-search input,
+  .discover-sentence select { font-size: 16px; }
+  .discover-sentence select { min-height: 2.25rem; }
+}
 .discover-search input::placeholder { color: var(--loom-muted); }
 .discover-search-icon { color: var(--loom-muted); font-size: 1.25rem; flex-shrink: 0; }
 .discover-search-clear {
@@ -384,11 +391,7 @@
   .discover-footer-meta { order: 2; width: 100%; font-size: .6875rem; }
   .discover-search { order: 1; min-width: 0; }
   .discover-search input { min-height: 2.75rem; font-size: 1rem; }
-  .discover-method summary { font-size: 0; }
-  .discover-method summary::after {
-    content: "?"; font-size: .75rem; display: grid; place-items: center;
-    width: 1.75rem; height: 1.75rem; border: 1px solid var(--loom-border); border-radius: 50%;
-  }
+  .discover-method summary { font-size: .6875rem; }
   .discover-grid { grid-template-columns: repeat(auto-fill, minmax(min(100%, 9rem), 1fr)); gap: .4rem; }
   .discover-grid-lead, .discover-grid-wide, .discover-grid-brief { grid-column: auto; }
   .discover-layout-flow .discover-grid-lead .discover-story-preview > div,
@@ -403,7 +406,9 @@
     font-size: .8125rem; line-height: 1.3;
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
   }
-  .discover-story-blurb { display: none; }
+  .discover-story-blurb {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+  }
   .discover-story-proof { padding: .1rem .3rem .1rem .45rem; }
   .discover-story-meta { flex: 1; }
   /* 11px floor for card meta (not 12px: the nowrap meta must still fit 9rem tiles). */
@@ -546,6 +551,8 @@ code, pre, .font-mono { font-variant-ligatures: none; }
   --overlay-blur: blur(6px);
   --panel-border-w: 1px;
   --btn-radius: var(--radius-md);
+  --chart-line-cap: round;
+  --chart-line-join: round;
 
   /* Default categorical (first 8) — keep in sync with chartPalettes THEME_CHART.dark */
   --chart-1: #74b9ff;
@@ -777,8 +784,8 @@ html[data-theme="frost"] {
   --color-text: #f1f5f9;
   --color-muted: #a8b8cc;
   --color-label: #c5d0de;
-  --color-accent: #c4b5fd;
-  --color-accent-2: #fca5a5;
+  --color-accent: #7dd3fc;
+  --color-accent-2: #2dd4bf;
   --color-border: rgba(148, 163, 184, 0.32);
   --color-success: #6ee7b7;
   --color-warning: #fcd34d;
@@ -786,18 +793,18 @@ html[data-theme="frost"] {
   --loom-accent-text: var(--color-accent);
   --btn-primary-fg: #0f172a;
   --glass-blur: blur(16px) saturate(160%);
-  --selection-bg: rgba(196, 181, 253, 0.3);
+  --selection-bg: rgba(125, 211, 252, 0.3);
   --selection-text: #f1f5f9;
-  --shadow-1: 0 2px 12px rgba(139, 92, 246, 0.14);
+  --shadow-1: 0 2px 12px rgba(56, 189, 248, 0.16);
   --shadow-2: 0 8px 32px rgba(0, 0, 0, 0.5);
   --leading-ui: 1.42;
-  --chart-1: #c4b5fd;
-  --chart-2: #34d399;
-  --chart-3: #f87171;
-  --chart-4: #fbbf24;
-  --chart-5: #38bdf8;
-  --chart-6: #fb7185;
-  --chart-7: #a78bfa;
+  --chart-1: #7dd3fc;
+  --chart-2: #2dd4bf;
+  --chart-3: #a5b4fc;
+  --chart-4: #bae6fd;
+  --chart-5: #22d3ee;
+  --chart-6: #5eead4;
+  --chart-7: #818cf8;
   --chart-8: #94a3b8;
 }
 
@@ -819,9 +826,6 @@ html[data-theme="brutal"] {
   --loom-border-strong: var(--color-border);
   --loom-warning-text: #9e6900;
   --btn-primary-fg: #ffffff;
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
   --panel-border-w: 3px;
   --btn-radius: 0;
   --selection-bg: #e00000;
@@ -866,12 +870,12 @@ html[data-theme="loom"] {
   --leading-ui: 1.42;
   --track-ui: 0.01em;
   --chart-1: #e0b45a;
-  --chart-2: #a78bfa;
-  --chart-3: #ef8a8a;
-  --chart-4: #7ed687;
-  --chart-5: #74b9ff;
-  --chart-6: #ff8a65;
-  --chart-7: #ce93d8;
+  --chart-2: #c45c4a;
+  --chart-3: #e8d5b5;
+  --chart-4: #d4a574;
+  --chart-5: #c9a66b;
+  --chart-6: #a67c7c;
+  --chart-7: #f0e6d2;
   --chart-8: #b0aca4;
 }
 
@@ -892,9 +896,6 @@ html[data-theme="tank"] {
   --color-error: #ef8a8a;
   --loom-accent-text: var(--color-accent);
   --btn-primary-fg: #0a161c;
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
   --panel-border-w: 2px;
   --btn-radius: 0;
   --selection-bg: rgba(107, 184, 102, 0.38);
@@ -906,10 +907,10 @@ html[data-theme="tank"] {
   --weight-ui-medium: 600;
   --chart-1: #6bb866;
   --chart-2: #f0d44a;
-  --chart-3: #ef8a8a;
+  --chart-3: #5ec8c0;
   --chart-4: #64b5f6;
   --chart-5: #8ed07a;
-  --chart-6: #ff8a65;
+  --chart-6: #c8e67a;
   --chart-7: #4dd0e1;
   --chart-8: #7eb4c4;
 }
@@ -936,9 +937,6 @@ html[data-theme="nes"] {
   --on-error: #ffffff;
   --focus-ring: 3px solid #000000;
   --btn-primary-fg: #ffffff;
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
   --panel-border-w: 4px;
   --btn-radius: 0;
   --selection-bg: #d40028;
@@ -1020,9 +1018,9 @@ html[data-ui="ikea"] {
   --font-mono: Consolas, monospace;
   --leading-ui: 1.45;
   --font-optical: 0.98;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
 }
 
 html[data-ui="military"] {
@@ -1058,6 +1056,98 @@ html[data-ui="nyt"] {
   --track-ui: 0.01em;
   --leading-ui: 1.5;
   --font-optical: 1.03;
+}
+
+/* Theme geometry last — Look corners win over chrome faces. */
+html[data-theme="light"] {
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --btn-radius: var(--radius-md);
+  --panel-border-w: 1px;
+  --chart-line-cap: round;
+  --chart-line-join: round;
+}
+html[data-theme="dark"] {
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --btn-radius: var(--radius-md);
+  --panel-border-w: 1px;
+  --chart-line-cap: round;
+  --chart-line-join: round;
+}
+html[data-theme="contrast"] {
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --btn-radius: 0;
+  --panel-border-w: 2px;
+  --chart-line-cap: butt;
+  --chart-line-join: bevel;
+}
+html[data-theme="paper"] {
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 4px;
+  --btn-radius: var(--radius-md);
+  --panel-border-w: 1px;
+  --chart-line-cap: butt;
+  --chart-line-join: bevel;
+}
+html[data-theme="glass"] {
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 24px;
+  --btn-radius: var(--radius-md);
+  --panel-border-w: 1px;
+  --chart-line-cap: round;
+  --chart-line-join: round;
+}
+html[data-theme="frost"] {
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --btn-radius: var(--radius-md);
+  --panel-border-w: 1px;
+  --chart-line-cap: round;
+  --chart-line-join: round;
+}
+html[data-theme="brutal"] {
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --btn-radius: 0;
+  --panel-border-w: 3px;
+  --chart-line-cap: square;
+  --chart-line-join: miter;
+}
+html[data-theme="loom"] {
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --btn-radius: var(--radius-md);
+  --panel-border-w: 1px;
+  --chart-line-cap: round;
+  --chart-line-join: round;
+}
+html[data-theme="tank"] {
+  --radius-sm: 1px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --btn-radius: var(--radius-md);
+  --panel-border-w: 2px;
+  --chart-line-cap: square;
+  --chart-line-join: miter;
+}
+html[data-theme="nes"] {
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --btn-radius: 0;
+  --panel-border-w: 4px;
+  --chart-line-cap: square;
+  --chart-line-join: miter;
 }
 
 /* Subtle theme atmosphere */
@@ -1097,8 +1187,8 @@ html[data-theme="glass"] body {
 }
 html[data-theme="frost"] body {
   background-image:
-    radial-gradient(ellipse at 15% 0%, rgba(167, 139, 250, 0.14), transparent 40%),
-    radial-gradient(ellipse at 90% 80%, rgba(56, 189, 248, 0.08), transparent 45%);
+    radial-gradient(ellipse at 15% 0%, rgba(125, 211, 252, 0.14), transparent 40%),
+    radial-gradient(ellipse at 90% 80%, rgba(45, 212, 191, 0.08), transparent 45%);
 }
 html[data-theme="glass"] .loom-panel,
 html[data-theme="frost"] .loom-panel,
@@ -1153,7 +1243,7 @@ html {
   /* Phone / tablet layout tokens — see also bottom @media blocks */
   @media (max-width: 767px) {
     :root {
-      --topbar-height: 52px;
+      --topbar-height: 56px;
       --statusbar-height: 0px;
       --panel-width: 100%;
       --sidebar-width: min(100vw - 2.5rem, 20rem);
@@ -1620,11 +1710,33 @@ html[data-shell-mode="phone"]:not([data-shell-ready="1"]) main {
   min-width: 0;
 }
 
-/* Mobile exploration — larger taps, less chrome density */
+/* Mobile exploration — larger taps, less chrome density.
+   The 56px bar is unlayered so it wins over the 48px root token. */
 @media (max-width: 767px) {
+  :root {
+    --topbar-height: 56px;
+  }
+
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
+  }
+
+  /* Tools sit in the footer instead of floating over the plot, Dive, and Monitor. */
+  .suite-menu {
+    position: static;
+    right: auto;
+    bottom: auto;
+    margin-bottom: 0;
+    width: 100%;
+  }
+
+  .library-feed-footer {
+    padding-bottom: max(0.65rem, var(--safe-bottom));
+  }
+
+  body:has([role="dialog"]) [data-notes-fab] {
+    display: none;
   }
 
   body {
@@ -1947,16 +2059,42 @@ html[data-shell-mode="phone"]:not([data-shell-ready="1"]) main {
   --icon-cap: round;
   --icon-join: round;
 }
+html[data-theme="light"] {
+  --material-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --material-edge: color-mix(in srgb, var(--loom-surface) 80%, white);
+  --material-light: transparent;
+  --icon-stroke: 1.5;
+  --icon-cap: round;
+  --icon-join: round;
+}
+html[data-theme="dark"] {
+  --material-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 1px 3px rgba(0, 0, 0, 0.18);
+  --material-edge: transparent;
+  --material-light: transparent;
+  --icon-stroke: 1.6;
+  --icon-cap: round;
+  --icon-join: round;
+}
 html[data-theme="paper"] {
   --material-shadow: 0 2px 3px color-mix(in srgb, var(--loom-text) 6%, transparent), 0 8px 20px color-mix(in srgb, var(--loom-accent) 4%, transparent);
   --material-edge: color-mix(in srgb, var(--loom-surface) 75%, white);
   --icon-stroke: 1.4;
 }
-html[data-theme="glass"], html[data-theme="frost"] {
-  --material-shadow: 0 5px 20px color-mix(in srgb, var(--loom-accent) 9%, transparent);
-  --material-edge: color-mix(in srgb, var(--loom-text) 12%, transparent);
-  --material-light: color-mix(in srgb, var(--loom-accent) 7%, transparent);
+html[data-theme="glass"] {
+  --material-shadow: 0 8px 28px color-mix(in srgb, var(--loom-accent) 12%, transparent);
+  --material-edge: color-mix(in srgb, white 55%, transparent);
+  --material-light: color-mix(in srgb, var(--loom-accent) 10%, transparent);
   --icon-stroke: 1.5;
+  --icon-cap: round;
+  --icon-join: round;
+}
+html[data-theme="frost"] {
+  --material-shadow: 0 4px 16px color-mix(in srgb, #38bdf8 14%, transparent);
+  --material-edge: color-mix(in srgb, #7dd3fc 22%, transparent);
+  --material-light: color-mix(in srgb, #7dd3fc 8%, transparent);
+  --icon-stroke: 1.5;
+  --icon-cap: round;
+  --icon-join: round;
 }
 html[data-theme="loom"] {
   --material-shadow: 0 3px 12px color-mix(in srgb, var(--loom-bg) 70%, transparent);
@@ -2009,10 +2147,6 @@ button > svg[stroke="currentColor"], button > span > svg[stroke="currentColor"] 
 .loom-theme-palette i { display: block; width: 4px; height: 12px; }
 
 /* SVG data strokes share the Canvas theme grammar. Explicit curve controls stay separate. */
-:root { --chart-line-cap: round; --chart-line-join: round; }
-html[data-theme="paper"], html[data-theme="contrast"] { --chart-line-cap: butt; --chart-line-join: bevel; }
-html[data-theme="brutal"], html[data-theme="tank"], html[data-theme="nes"] { --chart-line-cap: square; --chart-line-join: miter; }
-
 .loom-data-line { stroke-linecap: var(--chart-line-cap); stroke-linejoin: var(--chart-line-join); }
 
 /* Plot surfaces match Canvas/export ink, independently of the workspace chrome. */
@@ -2377,6 +2511,11 @@ html[data-theme="nes"] .discover-header { border-bottom: 3px solid var(--chart-3
 @media (pointer: coarse) {
   .loom-seg-btn { min-height: 2.25rem; min-width: 2.25rem; }
   .loom-panel-select { height: 2.25rem; }
+  .library-pack-action {
+    min-height: 2.75rem;
+    padding-inline: .75rem;
+    font-size: .8125rem;
+  }
 }
 
 /* Give the chart room while reading on a phone; preserve the Ideas/Edit controls. */

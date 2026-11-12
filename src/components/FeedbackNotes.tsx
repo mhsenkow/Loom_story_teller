@@ -81,6 +81,7 @@ async function openUrl(url: string) {
 export function FeedbackNotes() {
   const setToast = useLoomStore((s) => s.setToast);
   const viewMode = useLoomStore((s) => s.viewMode);
+  const fileOpen = useLoomStore((s) => !!s.selectedFile);
   // On phones drawers and sheets cover the screen — the floating button would sit on their controls.
   const overlayOpen = useLoomStore(
     (s) => s.sidebarOpen || s.panelOpen || s.shareSheetOpen || s.vizSwipeOpen || s.socialExportReady,
@@ -165,8 +166,10 @@ export function FeedbackNotes() {
             onClick={() => setOpen(true)}
             className={`fixed left-[max(0.75rem,var(--safe-left))] z-[60] ${overlayOpen ? "max-md:hidden" : ""} grid size-11 place-items-center rounded-md border border-loom-border bg-loom-surface text-loom-muted shadow-md transition-colors hover:text-loom-text hover:border-loom-accent/50 md:size-9 ${
               viewMode === "chart"
-                ? "bottom-[max(11.5rem,calc(var(--safe-bottom)+10.75rem))] md:bottom-[max(2rem,calc(var(--safe-bottom)+0.75rem))]"
-                : "bottom-[max(2rem,calc(var(--safe-bottom)+0.75rem))]"
+                ? "bottom-[max(18.25rem,calc(var(--safe-bottom)+17.5rem))] md:bottom-[max(2rem,calc(var(--safe-bottom)+0.75rem))]"
+                : fileOpen
+                  ? "bottom-[max(8rem,calc(var(--safe-bottom)+7.25rem))] md:bottom-[max(2rem,calc(var(--safe-bottom)+0.75rem))]"
+                  : "bottom-[max(2rem,calc(var(--safe-bottom)+0.75rem))]"
             }`}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>

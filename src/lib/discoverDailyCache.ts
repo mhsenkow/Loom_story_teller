@@ -7,6 +7,8 @@
 import type { DiscoverStory } from "./discoverStories";
 import { CHART_KIND_OPTIONS } from "./recommendations";
 import { qualifyDiscoverChart } from "./discoverChartQuality";
+import { CURATED_OPEN_PACKS } from "./curatedPacks";
+import { discoverPackId, discoverPackPath, isDiscoverPackKind } from "./discoverPacks";
 import {
   SOURCE_BY_KIND,
   SOURCE_DEFS,
@@ -60,7 +62,7 @@ export function packDiscoverCache(
       return { ...idea, feed };
     },
   );
-  return { version: 1, algorithm: 5, savedAt, feeds, ideas };
+  return { version: 1, algorithm: 6, savedAt, feeds, ideas };
 }
 
 /** Reject incompatible/corrupt caches and keep every variant on its own feed. */
@@ -76,14 +78,16 @@ export function unpackDiscoverCache(
     entry.savedAt > now + 300_000 ||
     now - entry.savedAt > MAX_AGE ||
     !Array.isArray(entry.feeds) ||
-    entry.feeds.length > SOURCE_DEFS.length + 1 ||
+    entry.feeds.length > SOURCE_DEFS.length + 1 + CURATED_OPEN_PACKS.length ||
     !Array.isArray(entry.ideas) ||
     entry.ideas.length > 10_000
   )
     return null;
   const validKind = (kind: unknown): kind is DiscoverStory["kind"] =>
     typeof kind === "string" &&
-    (kind === "wiki" || Object.hasOwn(SOURCE_BY_KIND, kind));
+    (kind === "wiki" ||
+      Object.hasOwn(SOURCE_BY_KIND, kind) ||
+      (isDiscoverPackKind(kind) && CURATED_OPEN_PACKS.some((pack) => pack.id === discoverPackId(kind))));
   const feeds = entry.feeds.map((feed) => {
     if (
       !feed ||
@@ -184,9 +188,12 @@ export function unpackDiscoverCache(
       chart,
       hook: idea.hook === idea.chart.title ? chart.title : idea.hook,
       blurb: chart === idea.chart ? idea.blurb : chart.subtitle,
-      streamPath: `stream://${feed.kind}`,
-      fileName:
-        feed.kind === "wiki"
+      streamPath: isDiscoverPackKind(feed.kind)
+        ? discoverPackPath(discoverPackId(feed.kind) ?? "")
+        : `stream://${feed.kind}`,
+      fileName: isDiscoverPackKind(feed.kind)
+        ? CURATED_OPEN_PACKS.find((pack) => pack.id === discoverPackId(feed.kind))?.title ?? feed.kind
+        : feed.kind === "wiki"
           ? "Wikipedia Live"
           : SOURCE_BY_KIND[feed.kind].fileName,
       chartKind: idea.chart.kind,
@@ -196,7 +203,7 @@ export function unpackDiscoverCache(
   // Old picks stay visible while the expanded catalog refreshes in the background.
   const startOfDay = new Date(now).setHours(0, 0, 0, 0);
   const savedAt =
-    entry.algorithm === 5
+    entry.algorithm === 6
       ? entry.savedAt
       : Math.min(entry.savedAt, startOfDay - 1);
   return stories.length ? { stories, savedAt } : null;

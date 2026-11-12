@@ -25,6 +25,82 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-11-12e",
+    date: "2026-11-12",
+    title: "Fewer snags before you chart",
+    summary: "Settings names what you see, an iPad story opens clear of the file drawer, and a saved file tells you it landed.",
+    items: [
+      {
+        title: "Settings you can hear",
+        detail: "Theme buttons are announced by their names, and the layout section says Layout. Clearing saved uploads on this device asks first.",
+      },
+      {
+        title: "A story opens on the chart",
+        detail: "On iPad, opening a pick closes the file drawer. Phone cards keep the sentence under the headline, and Open stays visible without a hover.",
+      },
+      {
+        title: "Saving and searching",
+        detail: "Saving a public table confirms in a toast. Data.gov search starts empty. The library footer says DuckDB only in the Mac app.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12d",
+    date: "2026-11-12",
+    title: "A wider first look",
+    summary: "What’s interesting now opens with public tables as well as live feeds.",
+    items: [
+      {
+        title: "Public tables on the first screen",
+        detail: "The opening scan charts Gapminder, child mortality, happiness, the Keeling curve, Eurostat population, airline safety, college majors, Brent crude, and the other curated tables that fit a quick download. The global power-plant file stays in the library — it is too large for that first pass. On iPhone and iPad the live feeds stay in that same first look.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12c",
+    date: "2026-11-12",
+    title: "More public data, ready to chart",
+    summary: "Discover connects more open catalogs in the app, including full histories and more city and state portals.",
+    items: [
+      {
+        title: "Catalogs open inside Loom",
+        detail: "More public portals now connects Our World in Data, Eurostat, NASA, OpenFEMA, air quality, OpenSky, the World Bank, and FiveThirtyEight. New tables cover child mortality, happiness, maternal mortality, human development, forests, PM2.5, EU population, FEMA declarations, college majors, airline safety, dangerous driving, and Brent crude.",
+      },
+      {
+        title: "More city and state portals",
+        detail: "City and state open data adds shortcuts for New Orleans, Oakland, Cambridge, Edmonton, Winnipeg, Honolulu, Kansas City, and states including Texas, Colorado, Oregon, Michigan, and Pennsylvania.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12b",
+    date: "2026-11-12",
+    title: "Clearer on a phone",
+    summary: "The view switcher, notes button, and tools stay out of the way of charts, stories, and the data library.",
+    items: [
+      {
+        title: "Room for every space",
+        detail: "On a phone the view tabs are no longer clipped, the data sidebar leaves only a slim strip of the page behind it, and the notes button sits above Preview. Search and tools dock in the footer so they don’t cover a chart, Dive, or a monitor.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12-themes",
+    date: "2026-11-12",
+    title: "Themes with their own corners",
+    summary: "Each look now has its own radii, materials, and chart colors — Glass is round, Paper is ruled, Tank is a bezel.",
+    items: [
+      {
+        title: "A full look, not just a palette",
+        detail: "Light, Dark, Contrast, Paper, Glass, Frost, Brutal, Loom, Tank and NES each set corners, edges and chart finishes. Bars follow the look: Glass glazes and rounds, Paper prints in ink, Tank etches, Brutal stays square.",
+      },
+      {
+        title: "Charts that match the room",
+        detail: "Frost uses ice-cyan series instead of Dark’s candy colors; Loom leans gold and wine; Tank stays phosphor green and amber. Follow theme pairs Glass with generous corners.",
+      },
+    ],
+  },
+  {
     id: "2026-11-12-community",
     date: "2026-11-12",
     title: "Community, and stories that say something",

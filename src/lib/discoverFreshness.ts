@@ -4,10 +4,12 @@
 // =================================================================
 
 import type { DiscoverKind, DiscoverStory } from "./discoverStories";
+import { isDiscoverPackKind } from "./discoverPacks";
 import { effectivePollIntervalMs } from "./sourceRegistry";
 
 export function discoverRefreshInterval(kind: DiscoverKind): number {
   if (kind === "wiki") return 60_000;
+  if (isDiscoverPackKind(kind)) return 86_400_000;
   const cadence = effectivePollIntervalMs(kind);
   return cadence > 0 ? Math.max(60_000, cadence) : 86_400_000;
 }
@@ -24,9 +26,9 @@ export function discoverFreshness(
   const captured = story.capturedAt;
   if (captured == null || !Number.isFinite(captured) || captured > now + 60_000)
     return {
-      due: true,
-      label: "Check time unknown",
-      shortLabel: "?",
+      due: false,
+      label: "Saved pick",
+      shortLabel: "saved",
       title: "This saved snapshot has no verified check time.",
     };
   const age = Math.max(0, now - captured);

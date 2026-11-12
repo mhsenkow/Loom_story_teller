@@ -118,6 +118,14 @@ export function renderFullBar(
       const breadth = stackMode === "grouped" ? band * 0.8 / ns : Math.min(band * 0.72, 96);
       let positive = 0, negative = 0;
       const total = grid[gi]!.reduce((sum, v) => sum + Math.abs(v), 0) || 1;
+      let lastPos = -1, lastNeg = -1;
+      if (stackMode !== "grouped") {
+        for (let si = 0; si < ns; si++) {
+          const stacked = plotted[gi]![si]!;
+          if (stacked > 0) lastPos = si;
+          else if (stacked < 0) lastNeg = si;
+        }
+      }
       for (let si = 0; si < ns; si++) {
         const raw = grid[gi]![si]!;
         const val = plotted[gi]![si]!;
@@ -135,8 +143,10 @@ export function renderFullBar(
         ctx.globalAlpha = alpha;
         ctx.beginPath();
         if (stackMode === "grouped") barPath(ctx, x, y, bw, bh, cornerR, horizontal ? hBarDir(val) : vBarDir(val));
-        else ctx.rect(x, y, bw, bh);
-        fillMaterialPath(ctx, bounds.top, bounds.bottom, opts);
+        else if ((si === lastPos && val > 0) || (si === lastNeg && val < 0)) {
+          barPath(ctx, x, y, bw, bh, cornerR, horizontal ? hBarDir(val) : vBarDir(val));
+        } else ctx.rect(x, y, bw, bh);
+        fillMaterialPath(ctx, y, y + bh, opts);
         if (showDataLabels && bw >= 24 && bh >= 16) {
           const text = stackMode === "percent" ? `${Math.round(val)}%` : formatDataValue(raw);
           ctx.font = axisFont(opts);
@@ -243,7 +253,7 @@ export function renderFullBar(
       ctx.beginPath();
       if (g.val !== 0) barPath(ctx, left, yMid - barT / 2, len, barT, cornerR, hBarDir(g.val));
       else ctx.rect(left, yMid - barT / 2, len, barT);
-      fillMaterialPath(ctx, rect.top, rect.bottom, opts);
+      fillMaterialPath(ctx, yMid - barT / 2, yMid - barT / 2 + barT, opts);
     }
     entries.forEach(([label, val], i) => {
       const yMid = rect.top + band * (i + 0.5);
@@ -257,7 +267,7 @@ export function renderFullBar(
       ctx.beginPath();
       if (val !== 0) barPath(ctx, left, yMid - barT / 2, len, barT, cornerR, hBarDir(val));
       else ctx.rect(left, yMid - barT / 2, len, barT);
-      fillMaterialPath(ctx, rect.top, rect.bottom, opts);
+      fillMaterialPath(ctx, yMid - barT / 2, yMid - barT / 2 + barT, opts);
       ctx.globalAlpha = 1;
       ctx.fillStyle = axisLabelColor;
       ctx.font = valueFont;
@@ -300,7 +310,7 @@ export function renderFullBar(
     ctx.globalAlpha = 0.22;
     ctx.beginPath();
     barPath(ctx, cx - barW / 2, top, barW, bh, cornerR, vBarDir(g.val));
-    fillMaterialPath(ctx, rect.top, rect.bottom, opts);
+    fillMaterialPath(ctx, top, top + bh, opts);
   }
   entries.forEach(([label, val], i) => {
     const cx = rect.left + band * (i + 0.5);
@@ -313,7 +323,7 @@ export function renderFullBar(
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     barPath(ctx, cx - barW / 2, top, barW, bh, cornerR, vBarDir(val));
-    fillMaterialPath(ctx, rect.top, rect.bottom, opts);
+    fillMaterialPath(ctx, top, top + bh, opts);
     if (showDataLabels) {
       const lbl = formatDataValue(val);
       ctx.globalAlpha = 1;
@@ -347,6 +357,7 @@ export function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown
   const values = rows.map((r) => chartNumber(r[xi]));
   const bins = histogramBins(values);
   if (!bins) return;
+  const cornerR = opts?.barCornerRadius ?? 3;
   const rect = plotOf(w, h, pad, opts);
   const maxC = Math.max(1, ...bins.counts);
   const ys = niceZeroScale(0, maxC, opts?.tickCount ?? 5);
@@ -369,9 +380,13 @@ export function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown
     const x0 = X(a);
     const x1 = X(b);
     const top = Y(c);
+    const bw = Math.max(1, x1 - x0 - 1);
+    const bh = Math.max(1, rect.bottom - top);
     ctx.fillStyle = cols[0]!;
     ctx.globalAlpha = alpha;
-    ctx.fillRect(x0 + 0.5, top, Math.max(1, x1 - x0 - 1), rect.bottom - top);
+    ctx.beginPath();
+    barPath(ctx, x0 + 0.5, top, bw, bh, cornerR, "up");
+    fillMaterialPath(ctx, top, top + bh, opts);
     if (firstRow[i]! >= 0) {
       pushHit(opts, {
         shape: "rect", x: x0, y: rect.top, w: x1 - x0, h: rect.bottom - rect.top,

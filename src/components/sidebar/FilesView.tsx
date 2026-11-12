@@ -4,6 +4,7 @@ import type { ChangeEvent, RefObject } from "react";
 import { extensionIcon, formatBytes, formatNumber } from "@/lib/format";
 import type { FileEntry } from "@/lib/store";
 import { requestDiscoverScan } from "@/lib/discoverStories";
+import { isDesktop } from "@/lib/tauri";
 import { WEB_FILE_ACCEPT, WEB_FILE_ACCEPT_LABEL } from "@/lib/webFormats";
 import { WEB_VAULT_LABEL, isWebVaultPath, type LinkedFolderMeta, type LinkedFolderScanProgress } from "@/lib/webDataFolder";
 
@@ -366,7 +367,7 @@ export function FilesView({
             ? `${formatNumber(files.reduce((a, f) => a + f.row_count, 0))} total rows`
             : "idle"}
         </span>
-        <span>DuckDB</span>
+        {isDesktop() ? <span>DuckDB</span> : null}
       </div>
     </>
   );

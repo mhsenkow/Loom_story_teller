@@ -19,7 +19,7 @@ export function isAdditiveDiscoverMeasure(kind: string, field: string): boolean 
 }
 
 export function qualifyDiscoverChart(
-  kind: SourceKind | "wiki",
+  kind: string,
   chart: ChartRecommendation,
 ): ChartRecommendation | null {
   if (chart.emojiMap && (chart.emojiMap.field !== chart.emojiField || !parseChartEmojiMap(chart.emojiMap))) return null;
@@ -43,7 +43,7 @@ export function qualifyDiscoverChart(
     (kind === "bitcoin" && [chart.yField, other].includes("height"))
   )
     return null;
-  const units = SOURCE_BY_KIND[kind].units;
+  const units = SOURCE_BY_KIND[kind as SourceKind]?.units;
   const left = units?.[chart.yField];
   const right = units?.[other];
   if (!dual && chart.seriesNormalize) return chart;

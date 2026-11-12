@@ -74,8 +74,40 @@ it("preserves explicit edge grammar in saved chart styles and SVG", () => {
 
 it("inherits material and restores flat without losing other theme rules", () => {
   expect(resolveThemeChartStyle("glass").markMaterial).toBe("glaze");
+  expect(resolveThemeChartStyle("frost").markMaterial).toBe("glaze");
   expect(resolveThemeChartStyle("paper").markMaterial).toBe("ink");
+  expect(resolveThemeChartStyle("loom").markMaterial).toBe("satin");
   expect(resolveThemeChartStyle("tank").markMaterial).toBe("etched");
+  expect(resolveThemeChartStyle("light").markMaterial).toBe("flat");
   expect(resolveThemeChartStyle("glass", { markMaterial: "flat" })).toMatchObject({ markMaterial: "flat", lineJoin: "round" });
   expect(sanitizeChartVisualOverrides({ markMaterial: "satin" })?.markMaterial).toBe("satin");
+});
+
+const THEME_RADIUS_MD: Record<(typeof THEMES)[number], string> = {
+  light: "6px",
+  dark: "8px",
+  contrast: "0",
+  paper: "3px",
+  glass: "16px",
+  frost: "10px",
+  brutal: "0",
+  loom: "8px",
+  tank: "2px",
+  nes: "0",
+};
+
+describe("theme geometry", () => {
+  for (const theme of THEMES) {
+    it(`${theme}: CSS radius matches the look`, () => {
+      expect(resolveThemeToken(theme, "--radius-md")).toBe(THEME_RADIUS_MD[theme]);
+    });
+  }
+  it("Glass is rounder than Paper, Paper rounder than Brutal", () => {
+    expect(parseFloat(resolveThemeToken("glass", "--radius-md")!)).toBeGreaterThan(parseFloat(resolveThemeToken("paper", "--radius-md")!));
+    expect(parseFloat(resolveThemeToken("paper", "--radius-md")!)).toBeGreaterThan(parseFloat(resolveThemeToken("brutal", "--radius-md")!));
+  });
+  it("Glass bars round more than Brutal", () => {
+    expect(resolveThemeChartStyle("glass").barCornerRadius).toBe(8);
+    expect(resolveThemeChartStyle("brutal").barCornerRadius).toBe(0);
+  });
 });

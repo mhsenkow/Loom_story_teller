@@ -85,7 +85,7 @@ export default function SettingsTab() {
             System
           </button>
           {THEMES.map((t) => (
-            <button aria-label="setAppSettings((prev) => ({ ...prev, theme: t as AppTheme }))}"
+            <button aria-label={THEME_LABEL[t]}
               key={t}
               type="button"
               aria-pressed={themePref === t}
@@ -116,9 +116,9 @@ export default function SettingsTab() {
       </div>
 
       <div className="loom-pairing-card">
-        <label className="flex items-center justify-between gap-3 cursor-pointer">
+        <label htmlFor="loom-follow-theme" className="flex items-center justify-between gap-3 cursor-pointer">
           <span className="text-sm font-semibold">Follow theme</span>
-          <input aria-label="setAppSettings((prev) => (" type="checkbox" checked={!!appSettings.themePairing}
+          <input id="loom-follow-theme" type="checkbox" aria-label="Follow theme" checked={!!appSettings.themePairing}
             onChange={(event) => setAppSettings((prev) => ({ ...prev, themePairing: event.target.checked }))} />
         </label>
         <p className="text-2xs text-loom-label mt-2">{themePref === "system" ? "System follows your device’s light/dark appearance with neutral type and chrome." : THEME_PAIRINGS[normalizeTheme(themePref)].description}</p>
@@ -126,7 +126,7 @@ export default function SettingsTab() {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-loom-text mb-1">Chrome</h3>
+        <h3 className="text-sm font-semibold text-loom-text mb-1">Layout</h3>
         <p className="text-2xs text-loom-label mb-2">Spacing, corners, and borders. Typeface below takes priority.</p>
         <div className="grid grid-cols-2 gap-1.5">
           {UI_CHROMES.map((u) => (
@@ -219,7 +219,8 @@ export default function SettingsTab() {
             Reset preferences
           </Button>
           <WorkspaceBackupControls />
-          <Button variant="danger" size="sm" className="w-full justify-center" onClick={() => {
+          <Button variant="danger" size="sm" className="w-full justify-center min-h-11" onClick={() => {
+            if (typeof window !== "undefined" && !window.confirm("Clear saved uploads and linked folder access on this device?")) return;
             void clearRetainedLocalData().then(() => setToast("Cleared retained uploads & linked folder access"));
           }}>
             Clear retained browser data
@@ -229,8 +230,7 @@ export default function SettingsTab() {
 
       <div className="pt-2 border-t border-loom-border">
         <p className="text-2xs text-loom-muted">
-          Chart → Visual uses Theme palette colors from the active theme. Looks sync to{" "}
-          <span className="font-mono">ibm.tools.shared</span> when available.
+          Chart colors follow the theme you pick. Saved looks stay on this device.
         </p>
       </div>
     </div>

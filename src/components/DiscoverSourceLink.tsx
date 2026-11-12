@@ -12,6 +12,7 @@ import {
   discoverSourceBrief,
   type DiscoverKind,
 } from "@/lib/discoverStories";
+import { isDiscoverPackKind } from "@/lib/discoverPacks";
 
 export function DiscoverSourceLink({
   kind,
@@ -102,7 +103,9 @@ export function DiscoverSourceLink({
           <span className="block text-loom-text font-medium text-xs leading-snug">{brief.label}</span>
           <span className="block">{brief.tldr}</span>
           <span className="block text-loom-label">{brief.credit}</span>
-          <span className="block text-loom-accent/90 pt-0.5">Click · Inspect this feed</span>
+          <span className="block text-loom-accent/90 pt-0.5">
+            {isDiscoverPackKind(kind) ? "Click · Inspect this table" : "Click · Inspect this feed"}
+          </span>
         </span>
       )}
     </span>

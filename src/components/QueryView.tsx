@@ -244,7 +244,7 @@ export function QueryView() {
           <div className="flex-1 min-w-0" />
           {queryHistory.length > 0 && (
             <select
-              className="loom-input text-2xs font-mono max-w-[140px] py-1"
+              className="loom-input text-2xs font-mono max-w-[13rem] sm:max-w-[140px] py-1"
               value=""
               onChange={(e) => {
                 const sql = e.target.value;
@@ -263,7 +263,7 @@ export function QueryView() {
           )}
           {querySnippets.length > 0 && (
             <select
-              className="loom-input text-2xs font-mono max-w-[140px] py-1"
+              className="loom-input text-2xs font-mono max-w-[13rem] sm:max-w-[140px] py-1"
               value=""
               onChange={(e) => {
                 const name = e.target.value;
@@ -283,7 +283,7 @@ export function QueryView() {
           )}
           {selectedFile?.path === "stream://wiki" && (
             <select
-              className="loom-input text-2xs font-mono max-w-[140px] py-1"
+              className="loom-input text-2xs font-mono max-w-[13rem] sm:max-w-[140px] py-1"
               value=""
               onChange={(e) => {
                 const idx = parseInt(e.target.value, 10);
@@ -304,7 +304,7 @@ export function QueryView() {
             if (!snippets?.length) return null;
             return (
               <select
-                className="loom-input text-2xs font-mono max-w-[140px] py-1"
+                className="loom-input text-2xs font-mono max-w-[13rem] sm:max-w-[140px] py-1"
                 value=""
                 onChange={(e) => {
                   const idx = parseInt(e.target.value, 10);

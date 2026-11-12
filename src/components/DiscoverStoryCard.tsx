@@ -16,6 +16,7 @@ import { discoverFreshness } from "@/lib/discoverFreshness";
 import { readableDiscoverText, discoverFieldLabel } from "@/lib/discoverEditorial";
 import { DISCOVER_FAMILIES, discoverFamily } from "@/lib/discoverChartCatalog";
 import { feedRef } from "@/lib/sourceRef";
+import { isDiscoverPackKind } from "@/lib/discoverPacks";
 import { SourcePrefMenu, useSourcePref } from "./SourcePrefControls";
 import type { DiscoverFlowTier } from "@/lib/discoverFlowLayout";
 import { VoteControl } from "./VoteControl";
@@ -59,7 +60,7 @@ export const DiscoverStoryCard = memo(function DiscoverStoryCard({
   const visibleSettings = settings.slice(0, SETTINGS_VISIBLE);
   const hiddenSettings = settings.length - visibleSettings.length;
   const freshness = discoverFreshness(story, now);
-  const sourceRef = feedRef(story.kind);
+  const sourceRef = isDiscoverPackKind(story.kind) ? story.kind : feedRef(story.kind);
   const pref = useSourcePref(sourceRef);
   const clock = now ?? Date.now();
   const recentlyUpdated =

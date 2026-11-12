@@ -922,7 +922,7 @@ function fillBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number,
   ctx.beginPath();
   if (!radius || typeof ctx.roundRect !== "function") ctx.rect(x, y, w, h);
   else ctx.roundRect(x, y, w, h, Math.min(radius, Math.abs(w) / 2, Math.abs(h) / 2));
-  fillMaterialPath(ctx, y, y + h, { markMaterial: style.markMaterial, lineJoin: style.lineJoin, themeText });
+  fillMaterialPath(ctx, y, y + h, { markMaterial: style.markMaterial, lineJoin: style.lineJoin, lineWidth: style.lineWidth, themeText });
 }
 
 function drawBar(
@@ -986,6 +986,8 @@ function drawBar(
       for (let gi = 0; gi < nx; gi++) {
         const total = totals[gi]! || 1;
         let acc = 0;
+        let lastSi = -1;
+        for (let si = 0; si < ns; si++) if (grid[gi]![si]! > 0) lastSi = si;
         const x = pad + gi * groupW + (groupW - barW) / 2;
         for (let si = 0; si < ns; si++) {
           const val = grid[gi]![si]!;
@@ -994,7 +996,7 @@ function drawBar(
           const segH = share * plotH;
           ctx.fillStyle = COL[si % COL.length];
           ctx.globalAlpha = 0.85;
-          fillBar(ctx, x, h - pad - acc - segH, barW, segH, radius, style, themeText);
+          fillBar(ctx, x, h - pad - acc - segH, barW, segH, si === lastSi ? radius : 0, style, themeText);
           acc += segH;
         }
       }

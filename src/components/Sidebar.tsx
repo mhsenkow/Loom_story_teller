@@ -99,7 +99,7 @@ export function Sidebar() {
         aria-label={sidebarOverlays ? "Data sidebar" : undefined}
         className={`flex flex-col h-full border-r border-loom-border bg-loom-surface overflow-hidden transition-[width] duration-200 ease-out
           ${dataSourcesExpanded ? "flex-1 min-w-0 max-[1099px]:fixed max-[1099px]:inset-0 max-[1099px]:z-40 max-[1099px]:w-full" : "flex-shrink-0"}
-          ${!dataSourcesExpanded ? "max-[1099px]:fixed max-[1099px]:inset-y-0 max-[1099px]:left-0 max-[1099px]:z-40 max-[1099px]:w-[min(100vw-2.5rem,20rem)] max-[1099px]:shadow-loom-lg" : ""}
+          ${!dataSourcesExpanded ? "max-[1099px]:fixed max-[1099px]:inset-y-0 max-[1099px]:left-0 max-[1099px]:z-40 max-md:w-[calc(100vw-2.5rem)] md:max-[1099px]:w-[min(100vw-2.5rem,20rem)] max-[1099px]:shadow-loom-lg" : ""}
           min-[1100px]:relative min-[1100px]:shadow-none`}
         style={{
           ...(width !== undefined && !(sidebarOverlays && !dataSourcesExpanded) ? { width: `${width}px` } : {}),

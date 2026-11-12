@@ -196,13 +196,13 @@ export function sourceAffinity(ref: SourceRef, prefs: SourcePreferences = cached
  * affinity, or HIDDEN_RANK_PENALTY for hidden feeds. Only non-zero kinds appear.
  */
 export function discoverAffinityMap(
-  kinds: readonly FeedKind[],
+  kinds: readonly string[],
   prefs: SourcePreferences = cached,
   now = Date.now(),
-): Partial<Record<FeedKind, number>> {
-  const out: Partial<Record<FeedKind, number>> = {};
+): Partial<Record<string, number>> {
+  const out: Partial<Record<string, number>> = {};
   for (const kind of kinds) {
-    const ref = feedRef(kind);
+    const ref = kind.startsWith("pack:") ? kind : feedRef(kind as FeedKind);
     const v = isHidden(ref, prefs) ? HIDDEN_RANK_PENALTY : sourceAffinity(ref, prefs, now);
     if (v !== 0) out[kind] = v;
   }

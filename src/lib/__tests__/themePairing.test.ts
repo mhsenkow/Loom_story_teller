@@ -21,6 +21,11 @@ describe("coordinated looks", () => {
       expect(useLoomStore.getState().chartVisualOverrides).toEqual({ fontFamily: "Lora", lineWidth: 4 });
     }
   });
+  it("pairs Glass with Ikea corners", () => {
+    expect(THEME_PAIRINGS.glass.uiChrome).toBe("ikea");
+    useLoomStore.getState().setAppSettings((s) => ({ ...s, themePairing: true, theme: "glass" }));
+    expect(useLoomStore.getState().appSettings.uiChrome).toBe("ikea");
+  });
   it("releases pairing on a manual font change and can rejoin", () => {
     useLoomStore.getState().setAppSettings((s) => ({ ...s, theme: "paper", themePairing: true }));
     useLoomStore.getState().setAppSettings((s) => ({ ...s, font: "geist" }));

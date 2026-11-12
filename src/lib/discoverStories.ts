@@ -6,11 +6,11 @@
 // Progressive: callers can stream stories as each source finishes.
 // =================================================================
 
-import { recommendSourceStory, recommendStreamStory } from "./recommendations";
+import { recommend, recommendSourceStory, recommendStreamStory } from "./recommendations";
 import type { ChartRecommendation } from "./recommendations";
 import { discoverRecipeKey, discoverRecipeId } from "./discoverChartCatalog";
 import { createDiscoverAssessor, type DiscoverInsight } from "./discoverSignals";
-import { orderDiscoverStories } from "./discoverRanking";
+import { balanceDiscoverPacks, keepDiscoverPackLeads, orderDiscoverStories } from "./discoverRanking";
 import { discoverSnapshotFingerprint, stampDiscoverDataChanges } from "./discoverUpdates";
 import type { ColumnInfo, QueryResult } from "./store";
 import { applyChartTimeWindow } from "./chartTime";
@@ -29,10 +29,28 @@ import {
   streamStatus,
   type SourceKind,
 } from "./tauri";
+import type { CuratedPack } from "./curatedPacks";
 import { SOURCE_BY_KIND, SOURCE_DEFS, SOURCE_EXPLORE_ROWS } from "./sourceRegistry";
 import { discoverAffinityMap } from "./sourcePreferences";
-
-export type DiscoverKind = SourceKind | "wiki";
+import { fetchCsvTextWeb } from "./openDataCatalog";
+import { parseCsvToInspectResultAsync } from "./parseCsvAsync";
+import {
+  DISCOVER_PACK_MAX_BYTES,
+  DISCOVER_PACK_TIMEOUT_MS,
+  DISCOVER_PACK_VARIANTS,
+  DISCOVER_PACK_VARIANTS_MOBILE,
+  curatedPackById,
+  discoverPackCategory,
+  discoverPackId,
+  discoverPackKind,
+  discoverPackPath,
+  discoverPackEarlyCount,
+  discoverPacksForScan,
+  isDiscoverPackKind,
+  thinDiscoverRows,
+  type DiscoverPackKind,
+} from "./discoverPacks";
+export type DiscoverKind = SourceKind | "wiki" | DiscoverPackKind;
 
 export interface DiscoverStory {
   id: string;
@@ -60,6 +78,10 @@ export interface DiscoverStory {
   dataChangedAt?: number;
   /** The feed's evidence-based headline (carries discoverHookFor's hook); leads its question group. */
   headline?: boolean;
+  /** Remote CSV for a curated public table. Live feeds leave these unset. */
+  sourceUrl?: string;
+  sourceCredit?: string;
+  sourceHome?: string;
 }
 
 /** TLDR + credit for What’s interesting data chips (hover bubble / inspect). */
@@ -80,7 +102,20 @@ const WIKI_BRIEF: DiscoverSourceBrief = {
 
 export function discoverSourceBrief(kind: DiscoverKind): DiscoverSourceBrief {
   if (kind === "wiki") return WIKI_BRIEF;
-  const def = SOURCE_BY_KIND[kind];
+  const packId = discoverPackId(kind);
+  if (packId) {
+    const pack = curatedPackById(packId);
+    return {
+      label: pack?.title ?? packId,
+      tldr: pack?.blurb ?? "A public table you can chart.",
+      credit: pack?.source ?? "Open data",
+      homepage: pack?.url ?? "",
+    };
+  }
+  const def = SOURCE_BY_KIND[kind as SourceKind];
+  if (!def) {
+    return { label: kind, tldr: "A public table you can chart.", credit: "Open data", homepage: "" };
+  }
   return {
     label: def.label,
     tldr: def.description,
@@ -171,7 +206,7 @@ const retainedDiscoverFeeds = new Set<DiscoverKind>();
 export function retainDiscoverFeed(kind: DiscoverKind): void {
   if (activeDiscoverScans.size) retainedDiscoverFeeds.add(kind);
   if (kind === "wiki") discoverStartedWiki = null;
-  else discoverStartedSources.delete(kind);
+  else if (!isDiscoverPackKind(kind)) discoverStartedSources.delete(kind);
 }
 
 export async function stopDiscoverProbes(owner?: symbol): Promise<void> {
@@ -241,10 +276,20 @@ import { discoverHookFor } from "./discoverHooks";
 export { discoverHookFor } from "./discoverHooks";
 
 
-const FILE_NAMES: Record<DiscoverKind, string> = {
+const FILE_NAMES: Record<SourceKind | "wiki", string> = {
   ...(Object.fromEntries(SOURCE_DEFS.map((d) => [d.kind, d.fileName])) as Record<SourceKind, string>),
   wiki: "Wikipedia Live",
 };
+
+function discoverFileName(kind: DiscoverKind): string {
+  if (isDiscoverPackKind(kind)) return curatedPackById(discoverPackId(kind) ?? "")?.title ?? kind;
+  return FILE_NAMES[kind] ?? kind;
+}
+
+function discoverOpenPath(kind: DiscoverKind): string {
+  const packId = discoverPackId(kind);
+  return packId ? discoverPackPath(packId) : `stream://${kind}`;
+}
 
 type ProbeStatus = "ok" | "empty" | "error" | "timeout";
 
@@ -278,7 +323,14 @@ function* buildDiscoverStorySteps(
   sample: QueryResult,
   candidates: ChartRecommendation[],
   maxVariants = VARIANTS_PER_SOURCE,
-  snapshot: { capturedAt?: number; snapshotCached?: boolean } = {},
+  snapshot: {
+    capturedAt?: number;
+    snapshotCached?: boolean;
+    sourceUrl?: string;
+    sourceCredit?: string;
+    sourceHome?: string;
+    category?: string;
+  } = {},
 ): Generator<void, DiscoverStory[]> {
   const windowHasRows = new Map<string, boolean>();
   const hasRows = (chart: ChartRecommendation) => {
@@ -300,11 +352,14 @@ function* buildDiscoverStorySteps(
   const makeStory = (chart: ChartRecommendation, index: number): DiscoverStory => editorialDiscoverStory({
     id: `discover-${kind}${index ? `-alt${index}` : ""}`,
     kind,
-    streamPath: `stream://${kind}`,
-    fileName: FILE_NAMES[kind] ?? kind,
+    streamPath: discoverOpenPath(kind),
+    fileName: discoverFileName(kind),
+    sourceUrl: snapshot.sourceUrl,
+    sourceCredit: snapshot.sourceCredit,
+    sourceHome: snapshot.sourceHome,
     hook: index ? chart.title : primary.hook,
     blurb: index ? chart.subtitle || primary.blurb : primary.blurb,
-    category: primary.category,
+    category: snapshot.category ?? primary.category,
     chartKind: chart.kind,
     chart,
     score: primary.score,
@@ -486,6 +541,36 @@ async function probeWikiWithStatus(signal: AbortSignal, owner: symbol): Promise<
   }
 }
 
+async function probeCuratedPack(pack: CuratedPack, signal: AbortSignal): Promise<DiscoverStory[]> {
+  if (signal.aborted) return [];
+  const fetched = await fetchCsvTextWeb(pack.url, { maxBytes: DISCOVER_PACK_MAX_BYTES });
+  if (signal.aborted || !fetched.text.trim()) return [];
+  const parsed = await parseCsvToInspectResultAsync(`${pack.id}.csv`, fetched.text);
+  const sample = thinDiscoverRows(parsed.sample, SOURCE_EXPLORE_ROWS);
+  if (!sample.rows.length || signal.aborted) return [];
+  const charts = recommend(parsed.stats, sample, pack.title);
+  const stories = await buildDiscoverStoriesAsync(
+    [
+      discoverPackKind(pack.id),
+      parsed.stats,
+      sample,
+      charts,
+      Math.min(variantsPerSource(), isMobileOs() ? DISCOVER_PACK_VARIANTS_MOBILE : DISCOVER_PACK_VARIANTS),
+      {
+        capturedAt: Date.now(),
+        sourceUrl: pack.url,
+        sourceCredit: pack.source,
+        sourceHome: pack.url,
+        category: discoverPackCategory(pack),
+      },
+    ],
+    signal,
+  );
+  const lead = stories.find((story) => story.headline) ?? stories[0];
+  if (lead) lead.score = Math.max(lead.score, 78);
+  return stories;
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   return new Promise((resolve) => {
     const t = setTimeout(() => resolve(null), ms);
@@ -562,7 +647,8 @@ export async function scanDiscoverStories(
   };
 
   // Loved feeds survive the mobile cap and are probed first; hidden ones go last.
-  const affinity = discoverAffinityMap([...SCAN_KINDS, "wiki"]);
+  const packList = typeof window === "undefined" ? [] : discoverPacksForScan(opts.kinds);
+  const affinity = discoverAffinityMap([...SCAN_KINDS, "wiki", ...packList.map((pack) => discoverPackKind(pack.id))]);
   let pendingFlush: DiscoverStory[] = [];
   let flushScheduled = false;
   const flushPending = () => {
@@ -631,6 +717,26 @@ export async function scanDiscoverStories(
       },
     );
   }
+  if (packList.length) {
+    const earlyIds = new Set(discoverPacksForScan().slice(0, discoverPackEarlyCount()).map((pack) => pack.id));
+    const early = packList.filter((pack) => earlyIds.has(pack.id));
+    const later = packList.filter((pack) => !early.some((item) => item.id === pack.id));
+    const packJob = (pack: CuratedPack) => async () => {
+      if (isAborted()) return;
+      const stories = await withTimeout(probeCuratedPack(pack, controller.signal), DISCOVER_PACK_TIMEOUT_MS);
+      if (isAborted() || !stories?.length) return;
+      pushMany(stories);
+    };
+    const earlyJobs = early.map(packJob);
+    const laterJobs = later.map(packJob);
+    const mixed: (() => Promise<void>)[] = [];
+    const waves = Math.max(jobs.length, earlyJobs.length);
+    for (let i = 0; i < waves; i++) {
+      if (earlyJobs[i]) mixed.push(earlyJobs[i]!);
+      if (jobs[i]) mixed.push(jobs[i]!);
+    }
+    jobs.splice(0, jobs.length, ...mixed, ...laterJobs);
+  }
   let nextJob = 0;
   const worker = async () => {
     while (!isAborted() && nextJob < jobs.length) {
@@ -675,7 +781,8 @@ export async function refreshDiscoverStories(
   const changed = new Set(newer.map((story) => story.kind));
   const merged = [...stories.filter((story) => !changed.has(story.kind)), ...newer];
   const stamped = stampDiscoverDataChanges(stories, merged).map((story, i) => changed.has(story.kind) ? story : merged[i]!);
-  return applyDiversityFilters(stamped, discoverStoryLimit(), discoverAffinityMap([...SCAN_KINDS, "wiki"]));
+  const packKinds = [...new Set(stories.map((story) => story.kind).filter(isDiscoverPackKind))];
+  return applyDiversityFilters(stamped, discoverStoryLimit(), discoverAffinityMap([...SCAN_KINDS, "wiki", ...packKinds]));
 }
 
 /**
@@ -688,13 +795,13 @@ export async function refreshDiscoverStories(
 export function applyDiversityFilters(
   stories: DiscoverStory[],
   limit: number,
-  affinity: Partial<Record<DiscoverKind, number>> = {},
+  affinity: Partial<Record<string, number>> = {},
 ): DiscoverStory[] {
   if (!stories.length || limit <= 0) return [];
   const byScore = (a: DiscoverStory, b: DiscoverStory) => b.score - a.score;
-  if (stories.length <= limit) return [...stories].sort(byScore);
   const rank = (story: DiscoverStory) => story.score + (affinity[story.kind] ?? 0);
   const sorted = [...stories].sort((a, b) => rank(b) - rank(a));
+  if (stories.length <= limit) return balanceDiscoverPacks(sorted, sorted, limit).sort(byScore);
 
   const maxPerSource = Math.max(2, Math.ceil(limit * 0.2));
   const selected = orderDiscoverStories(sorted, rank, limit, maxPerSource);
@@ -702,5 +809,5 @@ export function applyDiversityFilters(
     const used = new Set(selected.map((s) => s.id));
     selected.push(...orderDiscoverStories(sorted.filter((s) => !used.has(s.id)), rank, limit - selected.length));
   }
-  return selected.sort(byScore);
+  return balanceDiscoverPacks(keepDiscoverPackLeads(selected, sorted, limit), sorted, limit).sort(byScore);
 }

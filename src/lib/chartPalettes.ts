@@ -86,15 +86,15 @@ export type ThemeUiColors = {
 
 /** Canonical UI colors per look theme (keep in sync with globals.css). */
 export const THEME_UI: Record<LookTheme, ThemeUiColors> = {
-  light: { bg: "#f0efeb", text: "#141414", muted: "#5a5a5a", label: "#3d3d3d", border: "#c4c4be", accent: "#b84e1f" },
+  light: { bg: "#f0efeb", text: "#141414", muted: "#5a5a5a", label: "#3f3f3f", border: "#c4c4be", accent: "#b84e1f" },
   dark: { bg: "#0a0a0c", text: "#ececf1", muted: "#9e9eac", label: "#b4b4c0", border: "#2e2e36", accent: "#6a5ce0" },
   contrast: { bg: "#000000", text: "#ffffff", muted: "#c8c8c8", label: "#ffffff", border: "#ffffff", accent: "#ffff00" },
-  paper: { bg: "#e6dfd2", text: "#1a1610", muted: "#5c5548", label: "#3f3a32", border: "#bdb3a0", accent: "#7a3d0f" },
+  paper: { bg: "#e6dfd2", text: "#1a1610", muted: "#5c5548", label: "#3d372c", border: "#bdb3a0", accent: "#7a3d0f" },
   glass: { bg: "#dce6f4", text: "#0b1220", muted: "#4b5b70", label: "#334155", border: "#64748b", accent: "#6d28d9" },
-  frost: { bg: "#060a14", text: "#f1f5f9", muted: "#a8b8cc", label: "#c8d4e4", border: "#64748b", accent: "#c4b5fd" },
-  brutal: { bg: "#ffffff", text: "#000000", muted: "#2a2a2a", label: "#111111", border: "#000000", accent: "#e00000" },
-  loom: { bg: "#0a0a0f", text: "#f0ede8", muted: "#b0aca4", label: "#d0ccc4", border: "#2e2e3c", accent: "#e0b45a" },
-  tank: { bg: "#0a161c", text: "#d4eef2", muted: "#7eb4c4", label: "#a8d4e0", border: "#2a5266", accent: "#6bb866" },
+  frost: { bg: "#060a14", text: "#f1f5f9", muted: "#a8b8cc", label: "#c5d0de", border: "#64748b", accent: "#7dd3fc" },
+  brutal: { bg: "#ffffff", text: "#000000", muted: "#2a2a2a", label: "#000000", border: "#000000", accent: "#e00000" },
+  loom: { bg: "#0a0a0f", text: "#f0ede8", muted: "#b0aca4", label: "#c8c4bc", border: "#2e2e3c", accent: "#e0b45a" },
+  tank: { bg: "#0a161c", text: "#d4eef2", muted: "#7eb4c4", label: "#9ec9d6", border: "#2a5266", accent: "#6bb866" },
   // Charts paint on light surface so axis/footnote text stays AA (chrome bg stays blue).
   nes: { bg: "#f7f7f7", text: "#0a0a0a", muted: "#1a1a1a", label: "#0a0a0a", border: "#000000", accent: "#d40028" },
 };
@@ -109,10 +109,10 @@ export const THEME_CHART: Record<LookTheme, string[]> = {
   contrast: ["#ffff00", "#00ff9d", "#ff5555", "#00ccff", "#ff8844", "#bb99ff", "#66bbff", "#ffffff"],
   paper: ["#7a3d0f", "#2f5a40", "#8a2424", "#8a6800", "#24526a", "#5c4068", "#4e5e3e", "#5c5548"],
   glass: ["#6d28d9", "#047857", "#b91c1c", "#b45309", "#1d4ed8", "#be185d", "#0e7490", "#4b5b70"],
-  frost: ["#c4b5fd", "#34d399", "#f87171", "#fbbf24", "#38bdf8", "#fb7185", "#a78bfa", "#94a3b8"],
+  frost: ["#7dd3fc", "#2dd4bf", "#a5b4fc", "#bae6fd", "#22d3ee", "#5eead4", "#818cf8", "#94a3b8"],
   brutal: ["#e00000", "#0000cc", "#006600", "#c28100", "#000000", "#cc00cc", "#008888", "#555555"],
-  loom: ["#e0b45a", "#a78bfa", "#ef8a8a", "#7ed687", "#74b9ff", "#ff8a65", "#ce93d8", "#b0aca4"],
-  tank: ["#6bb866", "#f0d44a", "#ef8a8a", "#64b5f6", "#8ed07a", "#ff8a65", "#4dd0e1", "#7eb4c4"],
+  loom: ["#e0b45a", "#c45c4a", "#e8d5b5", "#d4a574", "#c9a66b", "#a67c7c", "#f0e6d2", "#b0aca4"],
+  tank: ["#6bb866", "#f0d44a", "#5ec8c0", "#64b5f6", "#8ed07a", "#c8e67a", "#4dd0e1", "#7eb4c4"],
   nes: ["#d40028", "#9d8700", "#1a8ad4", "#008800", "#000000", "#c57422", "#5c9277", "#881400"],
 };
 

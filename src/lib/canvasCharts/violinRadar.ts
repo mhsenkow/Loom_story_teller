@@ -13,7 +13,8 @@ import { type ChartRenderOpts } from "../chartRenderTypes";
 import { resolveLayoutDirection } from "../chartSupport";
 import { formatTooltipNumber } from "../chartTooltip";
 import { type YAggregateOption } from "../recommendations";
-import { axisFont, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
+import { fillMaterialPath } from "./material";
+import { axisFont, barPath, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
 import { numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
@@ -340,7 +341,12 @@ export function renderFullWaterfall(ctx: CanvasRenderingContext2D, rows: unknown
     const bottom = Math.max(Y(bar.start), Y(bar.end));
     ctx.fillStyle = bar.total ? totalColor : bar.value >= 0 ? up : down;
     ctx.globalAlpha = alpha;
-    ctx.fillRect(cx - barW / 2, top, barW, Math.max(1, bottom - top));
+    const bh = Math.max(1, bottom - top);
+    const x = cx - barW / 2;
+    const dir = Y(bar.end) < Y(bar.start) ? "up" : "down";
+    ctx.beginPath();
+    barPath(ctx, x, top, barW, bh, opts?.barCornerRadius ?? 3, dir);
+    fillMaterialPath(ctx, top, bottom, opts);
     if (i > 0) {
       // Connector from the previous step's end
       ctx.globalAlpha = 1;

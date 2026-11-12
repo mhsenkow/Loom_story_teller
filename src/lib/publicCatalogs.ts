@@ -40,18 +40,42 @@ export interface SocrataDataset {
   permalink: string;
 }
 
+export type SocrataPortalGroup = "city" | "state" | "agency";
+
 /** Portals worth a shortcut; every other Socrata domain is still searchable. */
-export const SOCRATA_PORTALS: { domain: string; label: string }[] = [
-  { domain: "data.cityofnewyork.us", label: "New York City" },
-  { domain: "data.cityofchicago.org", label: "Chicago" },
-  { domain: "data.sfgov.org", label: "San Francisco" },
-  { domain: "data.seattle.gov", label: "Seattle" },
-  { domain: "data.lacity.org", label: "Los Angeles" },
-  { domain: "datahub.austintexas.gov", label: "Austin" },
-  { domain: "www.dallasopendata.com", label: "Dallas" },
-  { domain: "data.ny.gov", label: "New York State" },
-  { domain: "data.wa.gov", label: "Washington State" },
-  { domain: "data.cdc.gov", label: "CDC" },
+export const SOCRATA_PORTALS: { domain: string; label: string; group: SocrataPortalGroup }[] = [
+  { domain: "datahub.austintexas.gov", label: "Austin", group: "city" },
+  { domain: "data.cityofberkeley.info", label: "Berkeley", group: "city" },
+  { domain: "data.cambridgema.gov", label: "Cambridge", group: "city" },
+  { domain: "data.cityofchicago.org", label: "Chicago", group: "city" },
+  { domain: "data.cincinnati-oh.gov", label: "Cincinnati", group: "city" },
+  { domain: "www.dallasopendata.com", label: "Dallas", group: "city" },
+  { domain: "data.edmonton.ca", label: "Edmonton", group: "city" },
+  { domain: "data.cityofgainesville.org", label: "Gainesville", group: "city" },
+  { domain: "data.honolulu.gov", label: "Honolulu", group: "city" },
+  { domain: "data.kcmo.org", label: "Kansas City", group: "city" },
+  { domain: "data.lacity.org", label: "Los Angeles", group: "city" },
+  { domain: "data.montgomerycountymd.gov", label: "Montgomery County", group: "city" },
+  { domain: "data.nola.gov", label: "New Orleans", group: "city" },
+  { domain: "data.cityofnewyork.us", label: "New York City", group: "city" },
+  { domain: "data.oaklandca.gov", label: "Oakland", group: "city" },
+  { domain: "data.providenceri.gov", label: "Providence", group: "city" },
+  { domain: "data.sfgov.org", label: "San Francisco", group: "city" },
+  { domain: "data.seattle.gov", label: "Seattle", group: "city" },
+  { domain: "data.winnipeg.ca", label: "Winnipeg", group: "city" },
+  { domain: "data.colorado.gov", label: "Colorado", group: "state" },
+  { domain: "data.ct.gov", label: "Connecticut", group: "state" },
+  { domain: "data.delaware.gov", label: "Delaware", group: "state" },
+  { domain: "data.michigan.gov", label: "Michigan", group: "state" },
+  { domain: "data.mo.gov", label: "Missouri", group: "state" },
+  { domain: "data.novascotia.ca", label: "Nova Scotia", group: "state" },
+  { domain: "data.ny.gov", label: "New York State", group: "state" },
+  { domain: "data.oregon.gov", label: "Oregon", group: "state" },
+  { domain: "data.pa.gov", label: "Pennsylvania", group: "state" },
+  { domain: "data.texas.gov", label: "Texas", group: "state" },
+  { domain: "data.vermont.gov", label: "Vermont", group: "state" },
+  { domain: "data.wa.gov", label: "Washington State", group: "state" },
+  { domain: "data.cdc.gov", label: "CDC", group: "agency" },
 ];
 
 /** Starter searches for phones (one tap → results). */

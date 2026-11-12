@@ -5,7 +5,7 @@ describe("vegaThemeConfig", () => {
   it("uses light-theme label colors for SVG export config", () => {
     const cfg = vegaExportConfigForTheme("light");
     const axis = cfg.axis as { labelColor?: string; titleColor?: string };
-    expect(axis.labelColor).toBe("#3d3d3d");
+    expect(axis.labelColor).toBe("#3f3f3f");
     expect(axis.titleColor).toBe("#141414");
     expect(cfg.background).toBe("#f0efeb");
   });

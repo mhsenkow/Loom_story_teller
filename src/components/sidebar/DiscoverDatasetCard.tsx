@@ -12,7 +12,6 @@ export function DiscoverDatasetCard({
   expanded,
   isWeb,
   canSaveToFolder,
-  isScanning,
   loadingId,
   savingId,
   onPreview,
@@ -31,7 +30,7 @@ export function DiscoverDatasetCard({
   onSave: (url: string, filename: string, resourceId: string) => void;
 }) {
   const csv = firstCsvResource(ds);
-  const exploreBusy = csv != null && (loadingId === csv.id || isScanning);
+  const exploreBusy = csv != null && loadingId === csv.id;
 
   return (
     <div className={`border border-loom-border rounded-md p-3 space-y-2.5 bg-loom-surface/40 ${expanded ? "flex flex-col min-w-0" : ""}`}>

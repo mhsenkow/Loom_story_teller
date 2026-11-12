@@ -39,6 +39,7 @@ import { CkanDiscoverToolbar } from "./CkanDiscoverToolbar";
 import { DatasetPreviewModal } from "./DatasetPreviewModal";
 import { DiscoverDatasetCard } from "./DiscoverDatasetCard";
 import { FeedBrowser } from "./FeedBrowser";
+import { PublicPortalsSection } from "./PublicPortalsSection";
 import { packRef } from "@/lib/sourceRef";
 import {
   LoveButton,
@@ -154,13 +155,11 @@ export function DataRegionView({
     sort: DataGovSortKey;
     rows: (typeof DATA_GOV_ROW_OPTIONS)[number];
   }>({
-    q: isWeb ? "csv" : "",
-    sort: isWeb ? "relevance" : "newest",
+    q: "",
+    sort: "newest",
     rows: 80,
   });
-  const [dataGovQueryDraft, setDataGovQueryDraft] = useState(
-    isWeb ? "csv" : "",
-  );
+  const [dataGovQueryDraft, setDataGovQueryDraft] = useState("");
   const [dataGovLocalFilter, setDataGovLocalFilter] = useState("");
 
   const [ukDatasets, setUkDatasets] = useState<DataGovDataset[]>([]);
@@ -266,8 +265,11 @@ export function DataRegionView({
     try {
       await saveCsvToFolder(mountedFolder, url, filename);
       await onRescanFolder();
+      useLoomStore.getState().setToast(`Saved ${filename} to your folder`);
     } catch (e) {
       console.error("Save failed:", e);
+      const message = e instanceof Error && e.message ? e.message : "Couldn’t save that file";
+      useLoomStore.getState().setToast(message);
     } finally {
       setSavingId(null);
     }
@@ -861,7 +863,7 @@ export function DataRegionView({
                       {canLoadInBrowser && (
                         <button
                           type="button"
-                          disabled={loadingId === pack.id || isScanning}
+                          disabled={loadingId === pack.id}
                           onClick={() =>
                             void handleLoadCsv(
                               pack.url,
@@ -872,7 +874,7 @@ export function DataRegionView({
                               },
                             )
                           }
-                          className="text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50"
+                          className="library-pack-action text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-accent/40 text-loom-accent hover:bg-loom-accent/10 disabled:opacity-50"
                         >
                           {loadingId === pack.id ? "Loading…" : "Explore CSV"}
                         </button>
@@ -888,7 +890,7 @@ export function DataRegionView({
                               pack.id,
                             )
                           }
-                          className="text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text disabled:opacity-50"
+                          className="library-pack-action text-2xs px-2 py-1 max-md:min-h-9 max-md:px-3 max-md:text-xs rounded border border-loom-border text-loom-muted hover:text-loom-text disabled:opacity-50"
                         >
                           {savingId === pack.id ? "Saving…" : "Save to folder"}
                         </button>
@@ -899,7 +901,7 @@ export function DataRegionView({
                         rel="noopener noreferrer"
                         className="text-2xs text-loom-muted hover:text-loom-accent"
                       >
-                        Open source
+                        Download CSV
                       </a>
                     </div>
                     <div className="library-card-actions">
@@ -966,94 +968,17 @@ export function DataRegionView({
           </>
         ) : null}
 
-        {/* More portals */}
         {section === "discover" && portal === "more" && (
-          <>
-            <section>
-              <SectionHeading
-                title="More portals"
-                lede="Browse catalogs in a tab, then bring CSVs back here."
-              />
-              <ul className="space-y-2.5 px-1">
-                <li>
-                  <a
-                    href="https://data.europa.eu/en/data"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-loom-text hover:text-loom-accent"
-                  >
-                    data.europa.eu
-                  </a>
-                  <p className="text-2xs text-loom-muted">
-                    EU open data portal
-                  </p>
-                </li>
-                <li>
-                  <a
-                    href="https://ourworldindata.org/data"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-loom-text hover:text-loom-accent"
-                  >
-                    Our World in Data
-                  </a>
-                  <p className="text-2xs text-loom-muted">
-                    Global development &amp; health
-                  </p>
-                </li>
-                <li>
-                  <a
-                    href="https://data.nasa.gov"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-loom-text hover:text-loom-accent"
-                  >
-                    data.nasa.gov
-                  </a>
-                  <p className="text-2xs text-loom-muted">NASA open science</p>
-                </li>
-                <li>
-                  <a
-                    href="https://www.fema.gov/about/openfema/data-sets"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-loom-text hover:text-loom-accent"
-                  >
-                    OpenFEMA datasets
-                  </a>
-                  <p className="text-2xs text-loom-muted">
-                    US disaster &amp; emergency data
-                  </p>
-                </li>
-                <li>
-                  <a
-                    href="https://openaq.org"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-loom-text hover:text-loom-accent"
-                  >
-                    OpenAQ
-                  </a>
-                  <p className="text-2xs text-loom-muted">
-                    Global air quality measurements
-                  </p>
-                </li>
-                <li>
-                  <a
-                    href="https://opensky-network.org"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-loom-text hover:text-loom-accent"
-                  >
-                    OpenSky Network
-                  </a>
-                  <p className="text-2xs text-loom-muted">
-                    Live ADS-B aircraft positions
-                  </p>
-                </li>
-              </ul>
-            </section>
-          </>
+          <PublicPortalsSection
+            expanded={expanded}
+            canLoadInBrowser={canLoadInBrowser}
+            canSaveToFolder={!!canSaveToFolder}
+            isScanning={isScanning}
+            loadingId={loadingId}
+            savingId={savingId}
+            onExplore={(url, filename, id, opts) => void handleLoadCsv(url, filename, id, opts)}
+            onSave={(url, filename, id) => void handleSaveToFolder(url, filename, id)}
+          />
         )}
       </div>
       {previewDataset && (

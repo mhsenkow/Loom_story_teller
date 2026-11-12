@@ -21,6 +21,8 @@ Proposed targets — measure with `npm run build` transfer sizes, Vitest perf he
 | Worker source poll | p95 ≤ 5 s upstream + parse | Same | `catalog-proxy.ts` |
 | IndexedDB import | No full-table `getAll` on eviction | Same | `webFileStore.ts` |
 
+**Opening public tables (2026-11-12):** A full What’s interesting scan also fetches curated CSVs under 1.8 MB. The global power-plant file stays in the library. Each table is strided to 12,000 rows and keeps at most 40 chart variants on desktop, 8 on iPad and iPhone. The 120-card mobile gallery keeps at most two of those per table. Probes share the existing worker pool (6 on desktop, 3 on mobile) with a 12 second cap per table. The ≤ 8 s desktop figure above is the live-feed target; this note does not claim a new device timing for the extra downloads.
+
 **Representative inputs:** `.loom-data` 10k-row scatter sample; live `stream://usgs` buffer; 500-row web upload.
 
 **Regression gates:** `make ci` (tsc, Vitest, build); optional `npm run bundle-budget` when changing imports.

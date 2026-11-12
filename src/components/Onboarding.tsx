@@ -68,14 +68,15 @@ import {
   streamStart,
   streamStatus,
 } from "@/lib/tauri";
-import { SOURCE_BY_KIND } from "@/lib/sourceRegistry";
+import { SOURCE_BY_KIND, type SourceKind } from "@/lib/sourceRegistry";
 import {
   discoverAffinityMap,
   HIDDEN_RANK_PENALTY,
 } from "@/lib/sourcePreferences";
 import { isGeoFamilyKind } from "@/lib/geoMaps";
 import { DISCOVER_FAMILIES, discoverFamily } from "@/lib/discoverChartCatalog";
-import { discoverSpotlights } from "@/lib/discoverRanking";
+import { discoverSpotlights, surfaceDiscoverPacks } from "@/lib/discoverRanking";
+import { discoverPacksForScan, isDiscoverPackKind } from "@/lib/discoverPacks";
 import {
   resolveStartupIntent,
   shouldOpenOnboarding,
@@ -598,7 +599,7 @@ export function Onboarding() {
     const byStory = new Map(
       questions.map((group) => [group.stories[0]!, group]),
     );
-    return rankDiscoverStories([...byStory.keys()], (story) => {
+    const ranked = rankDiscoverStories([...byStory.keys()], (story) => {
       const affinity = sourceAffinity[story.kind] ?? 0;
       const fresh = story.dataChangedAt
         ? Math.max(
@@ -615,6 +616,7 @@ export function Onboarding() {
         : 0;
       return best + (affinity === HIDDEN_RANK_PENALTY ? 0 : affinity) + fresh + community;
     }).map((story) => byStory.get(story)!);
+    return surfaceDiscoverPacks(ranked);
   }, [visible, sortMode, sourceAffinity, rankedAt, socialCounts]);
   const spotlights = useMemo(
     () => discoverSpotlights(groups.map((g) => g.stories[0]!)),
@@ -664,24 +666,31 @@ export function Onboarding() {
       try {
         // Keep the evidence people selected stable while its feed reconnects.
         const { stats, sample } = story;
+        const pack = isDiscoverPackKind(story.kind);
         const file = {
           path: story.streamPath,
           name: story.fileName,
-          extension: "stream",
+          extension: pack ? "csv" : "stream",
           row_count: sample.total_rows,
           size_bytes: 0,
           ...(story.capturedAt
             ? { capturedAt: new Date(story.capturedAt).toISOString() }
             : {}),
-          ...(story.kind === "wiki"
+          ...(story.sourceUrl ? { sourceUrl: story.sourceUrl } : {}),
+          ...(pack
             ? {
-                sourceHome: "https://www.wikimedia.org/",
-                sourceCredit: "Wikimedia recent changes · CC BY-SA",
+                sourceHome: story.sourceHome,
+                sourceCredit: story.sourceCredit,
               }
-            : {
-                sourceHome: SOURCE_BY_KIND[story.kind]?.homepage,
-                sourceCredit: SOURCE_BY_KIND[story.kind]?.attribution,
-              }),
+            : story.kind === "wiki"
+              ? {
+                  sourceHome: "https://www.wikimedia.org/",
+                  sourceCredit: "Wikimedia recent changes · CC BY-SA",
+                }
+              : {
+                  sourceHome: SOURCE_BY_KIND[story.kind as SourceKind]?.homepage,
+                  sourceCredit: SOURCE_BY_KIND[story.kind as SourceKind]?.attribution,
+                }),
         };
         const charts = stories
           .filter((candidate) => candidate.kind === story.kind)
@@ -715,14 +724,12 @@ export function Onboarding() {
         }
         setDataRegionOpen(false);
         setDataSourcesExpanded(false);
-        if (
-          typeof window !== "undefined" &&
-          window.matchMedia("(max-width: 767px)").matches
-        ) {
+        if (typeof window !== "undefined") {
           const st = useLoomStore.getState();
-          if (st.sidebarOpen) st.toggleSidebar();
-          // Inspect needs the panel; chart-open still collapses chrome on phones.
-          if (dest !== "inspect" && st.panelOpen) st.togglePanel();
+          const phone = window.matchMedia("(max-width: 767px)").matches;
+          // The library drawer stays a fixed overlay through iPad widths.
+          if (window.matchMedia("(max-width: 1099px)").matches && st.sidebarOpen) st.toggleSidebar();
+          if (phone && dest !== "inspect" && st.panelOpen) st.togglePanel();
         }
         dismiss();
         // Cached charts open immediately. Reconnect without holding the tap hostage to a poll.
@@ -733,7 +740,7 @@ export function Onboarding() {
               if (!s0.running) await streamStart();
               const s = await streamStatus();
               useLoomStore.getState().setStreamStatus(s);
-            } else {
+            } else if (!isDiscoverPackKind(story.kind)) {
               const s0 = await sourceStatus(story.kind);
               if (!s0.running) await sourceStart(story.kind);
               const s = await sourceStatus(story.kind);
@@ -1282,8 +1289,9 @@ export function Onboarding() {
             <p className="discover-kicker">Finding your next story</p>
             <h3>A world of data. A fresh perspective.</h3>
             <p>
-              Checking {ALL_SOURCE_KINDS.length + 1} sources for chart ideas.
-              Stories appear as each source responds.
+              Checking {ALL_SOURCE_KINDS.length + 1} live feeds and{" "}
+              {discoverPacksForScan().length} public tables. Stories appear as
+              each one responds.
             </p>
             <div className="discover-skeletons" aria-hidden="true">
               {[0, 1, 2].map((key) => (
@@ -1454,7 +1462,7 @@ export function Onboarding() {
                 data-testid="discover-hidden-toggle"
               >
                 {showHiddenSources
-                  ? "Hide hidden"
+                  ? "Showing hidden sources"
                   : `${hiddenSourceCount} hidden · Show`}
               </button>
             )}
@@ -1480,7 +1488,7 @@ export function Onboarding() {
               onClick={browseSources}
               className="discover-header-link"
             >
-              Your data <span aria-hidden>↗</span>
+              Browse datasets <span aria-hidden>↗</span>
             </button>
             <details className="discover-method">
               <summary>How picks work</summary>

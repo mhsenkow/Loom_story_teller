@@ -1,13 +1,16 @@
 // =================================================================
 // Loom — Discover feed hooks (LOOM-184)
 // =================================================================
-// One function per live source; DISCOVER_HOOKS is exhaustive over DiscoverKind.
+// One function per live source; DISCOVER_HOOKS covers live feeds and Wikipedia.
+// Curated public tables use hookDefault and a topic category from the pack.
 // Magnitude / severity tiers + seasonal score boosts for discover ranking.
 // =================================================================
 
 import type { ChartRecommendation } from "./recommendations";
 import type { QueryResult } from "./store";
 import type { DiscoverKind } from "./discoverStories";
+import type { SourceKind } from "./sourceRegistry";
+import { isDiscoverPackKind } from "./discoverPacks";
 import { stormLevel } from "./webStreams";
 
 export type DiscoverHookResult = {
@@ -1764,7 +1767,7 @@ function hookDefault(
     };
 }
 
-export const DISCOVER_HOOKS: { [K in DiscoverKind]: DiscoverHookFn } = {
+export const DISCOVER_HOOKS: { [K in SourceKind | "wiki"]: DiscoverHookFn } = {
   "usgs": hook_usgs,
   "hn": hook_hn,
   "lobsters": hook_lobsters,
@@ -1834,7 +1837,7 @@ export function discoverHookFor(
   chart: ChartRecommendation,
 ): DiscoverHookResult {
   const n = sample.rows.length;
-  const fn = DISCOVER_HOOKS[kind] ?? hookDefault;
+  const fn = isDiscoverPackKind(kind) ? hookDefault : DISCOVER_HOOKS[kind];
   const result = fn(n, sample, chart);
   return {
     ...result,
