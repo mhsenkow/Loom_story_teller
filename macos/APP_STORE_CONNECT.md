@@ -87,6 +87,10 @@ xcrun altool --upload-app --type macos \
 
 Signing: **Apple Distribution** (app) + **3rd Party Mac Developer Installer** (pkg). Identity overrides: `APPLE_DISTRIBUTION_IDENTITY`, `APPLE_INSTALLER_IDENTITY`.
 
+## Build uploaded (2026-11-12)
+- **Version:** CFBundleShortVersionString `0.1.2` · CFBundleVersion `13` (`tauri.appstore.conf.json`)
+- ChartView split / health cleanup + community stories wave; site parity at loom.ibm.io
+
 ## Build attached (2026-10-27)
 - **Build:** CFBundleVersion `12` attached · **WAITING_FOR_REVIEW** (submission `f382ec2e-0526-4432-b0af-cd7be6b211d8`, submitted 2026-10-27T17:57:06Z)
 - Delivery `69cbd01e-d0f8-4158-b2ac-0883cf4b2d2a` — ChartView LOOM-141 + draw wiring; listing copy says CSV/SQLite (no unsigned DuckDB extensions)

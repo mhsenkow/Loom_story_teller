@@ -68,6 +68,10 @@ Privacy: https://loom.ibm.io/privacy
 ## Icon / logo
 Yes — build **22** includes App Icon appearance themes (Any / Dark / Tinted) from `ios/App/.../AppIcon.appiconset` (`AppIcon-1024.png`, `-dark`, `-tinted`). Canonical mark: `brand/loom-icon-1024.png`. Regenerate with `node scripts/prepare-app-icons.mjs` then `npx tauri icon brand/loom-icon-1024.png`.
 
+## Build uploaded (2026-11-12)
+- Tauri IPA via `make tablet-weave` + `./scripts/ios-submit.sh upload` — delivery `3edb9aa9-fd7e-4bdb-9537-82d87cbc49ec` (shell-plugin link fix; opener for external URLs)
+- Attach in ASC when processing finishes; Capacitor build **33** remains the prior review binary until swapped
+
 ## Live ASC status (2026-10-27)
 - Version **1.0** · build **33** attached · **WAITING_FOR_REVIEW** (submission `dee02292-0cf1-48c0-95ab-3bd8002b91f7`, submitted 2026-10-27T17:56:56Z)
 - Review notes updated for build 33 (chart engine reliability / loom.ibm.io parity)
