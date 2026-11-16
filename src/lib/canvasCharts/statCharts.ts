@@ -207,11 +207,12 @@ export function renderFullCorrMatrix(
       const y = rect.top + r * cellH;
       const fill = sampleCorrDiverging(stops, t);
       ctx.fillStyle = fill;
-      ctx.globalAlpha = 0.35 + Math.abs(corr) * 0.65;
+      const cellAlpha = (0.35 + Math.abs(corr) * 0.65) * (opts?.opacity ?? 1);
+      ctx.globalAlpha = cellAlpha;
       ctx.fillRect(x + 0.5, y + 0.5, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
-      if ((opts?.showDataLabels || cellW > 36) && cellW > 28 && cellH > 18) {
+      if ((opts?.showDataLabels ?? cellW > 36) && cellW > 28 && cellH > 18) {
         ctx.globalAlpha = 1;
-        ctx.fillStyle = corrCellInk(corr, fill, ink.bg, ink.text, 0.35 + Math.abs(corr) * 0.65);
+        ctx.fillStyle = corrCellInk(corr, fill, ink.bg, ink.text, cellAlpha);
         ctx.font = axisFont(opts, chartTypeRamp(opts?.axisFontSize).cell);
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -246,7 +247,7 @@ export function renderFullCorrMatrix(
     const x = rect.left + (i + 0.5) * cellW;
     ctx.save();
     ctx.translate(x, rect.bottom + 4);
-    ctx.rotate(-Math.PI / 4);
+    ctx.rotate(-(opts?.tickRotation ?? 45) * Math.PI / 180);
     ctx.fillText(fitTextEllipsis(ctx, lab, 70), 0, 0);
     ctx.restore();
   });

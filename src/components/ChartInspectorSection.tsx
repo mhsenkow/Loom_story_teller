@@ -8,15 +8,17 @@ export function ChartInspectorSection({
   open,
   onToggle,
   children,
+  sectionId,
 }: {
   title: string;
   open: boolean;
   onToggle: () => void;
   children: ReactNode;
+  sectionId?: string;
 }) {
   const id = useId();
   return (
-    <section className="space-y-2 border-t border-loom-border/60 pt-2">
+    <section data-chart-inspector-section={sectionId} className="space-y-2 border-t border-loom-border/60 pt-2">
       <button
         type="button"
         aria-expanded={open}

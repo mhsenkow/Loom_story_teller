@@ -629,10 +629,10 @@ function renderProjectedPoints(
 
   const n = pts.length;
   const density = n > 4000 ? 0.6 : n > 1500 ? 0.75 : 1;
-  const base = radiusFromPointSize(opts.pointSize, mode === "bubbles" ? 5 : 3.2) * density;
+  const base = radiusFromPointSize(opts.pointSize, mode === "bubbles" ? 5 : 3.2, mini) * density;
   const rMin = Math.max(mini ? 1.6 : 2.2, mode === "bubbles" ? base * 0.6 : base * 0.7);
   const rMax = mode === "bubbles"
-    ? Math.max(rMin * 2, Math.min(mini ? 9 : 26, Math.min(w, h) * (mini ? 0.06 : 0.045)))
+    ? Math.max(rMin * 2, Math.min(mini ? 9 : 52, Math.min(w, h) * (mini ? 0.06 : 0.045) * (base / (5 * density))))
     : Math.max(rMin * 2, base * 2.2);
   const scale = sized ? sizeScale(pts, rMin, rMax, !!opts.channelInvert?.size) : null;
   const radius = (p: GeoPoint) => (scale ? scale.radiusOf(p.size) : Math.max(rMin, base));
@@ -772,7 +772,7 @@ function renderGlobeLike(
   const pitch = opts.pitch ?? (centroid ? (Math.max(-60, Math.min(60, centroid[1])) * Math.PI) / 180 : 0.25);
   const zoom = opts.zoom ?? 1;
 
-  const base = radiusFromPointSize(opts.pointSize, 3.2);
+  const base = radiusFromPointSize(opts.pointSize, 3.2, mini);
   const rMin = Math.max(mini ? 1.6 : 2.2, base * 0.7);
   const scale = sizeI >= 0 ? sizeScale(pts, rMin, Math.max(rMin * 2, base * 2.6)) : null;
   const showKey = !mini && !!scale;
@@ -928,7 +928,7 @@ function renderArcMap(
       ctx.stroke(new Path2D(p));
     }
   }
-  const r = Math.max(mini ? 1.6 : 2.4, radiusFromPointSize(opts.pointSize, 2.8));
+  const r = Math.max(mini ? 1.6 : 2.4, radiusFromPointSize(opts.pointSize, 2.8, mini));
   for (const p of pts.slice(0, 600)) {
     const xy = projection([p.lon, p.lat]);
     if (!xy) continue;

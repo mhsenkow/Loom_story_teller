@@ -1,5 +1,6 @@
 "use client";
 
+import EmptyState from "../EmptyState";
 import { useChartTheme } from "@/components/useChartTheme";
 import { resolveThemeChartStyle } from "@/lib/themeChartStyle";
 import { lazy, Suspense, useState, useCallback, useMemo, useEffect, useId, type ReactNode, type DragEvent } from "react";
@@ -17,7 +18,10 @@ import { ChartColorControls } from "@/components/ChartColorControls";
 import { ChartColorInput } from "@/components/ChartColorInput";
 import { getThemeUiColors } from "@/lib/chartPalettes";
 import { ChartLookLibrary } from "@/components/ChartLookLibrary";
-import { ChartInspectorSection } from "@/components/ChartInspectorSection";
+import { ChartVisualInspector } from "@/components/ChartVisualInspector";
+import { ChartNumberControl } from "@/components/ChartNumberControl";
+import { chartDefinition, type ChartVisualSectionId } from "@/lib/chartDefinitions";
+import { CHART_NUMBER_CONTROLS } from "@/lib/chartDefinitions/controls";
 import { chartSpacePadding } from "@/lib/chartSpace";
 import { goToDashboardsAfterSave, saveChartView } from "@/lib/saveChartView";
 import { AXIS_LABEL_COLOR_SWATCHES, AXIS_LINE_COLOR_SWATCHES } from "@/lib/chartPalettes";
@@ -31,7 +35,6 @@ import { formatChartAggregationSummary, chartCapabilities, defaultYAggregate, en
 import { chromeDomId, chromeSectionFor, type ChartChromeTarget } from "@/lib/chartChromeLink";
 import { CHART_TOOLTIP_MODES, type ChartTooltipMode } from "@/lib/chartTooltipMode";
 import { ATLAS_OPTIONS } from "@/lib/geoAtlas";
-import { isGeoFamilyKind } from "@/lib/geoMaps";
 
 import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
 import { GROUP_INTO_CHOICES, clampGroupInto } from "@/lib/channelGroups";
@@ -974,7 +977,6 @@ export default function ChartPanelTab() {
     ),
   );
   const [visualSections, setVisualSections] = useState<Record<string, boolean>>({ design: true });
-  const toggleVisualSection = (key: string) => setVisualSections((prev) => ({ ...prev, [key]: !prev[key] }));
 
   // Chart click on an axis / title → switch tab and scroll the matching control into view.
   // Hover only outlines the chart; it does not open or scroll the panel.
@@ -1633,48 +1635,24 @@ export default function ChartPanelTab() {
 
   if (!activeChart) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-        <p className="text-sm text-loom-muted">No chart selected</p>
-        <p className="text-2xs text-loom-muted mt-1">Pick a suggestion from the Chart view</p>
-      </div>
+      <EmptyState title="No chart selected">Pick a suggestion from the Chart view to start shaping your data.</EmptyState>
     );
   }
   const rowCount = sampleRows?.rows.length ?? 0;
   const totalRows = sampleRows?.total_rows ?? rowCount;
   const aggSummary = formatChartAggregationSummary(activeChart);
-  const caps = chartCapabilities(activeChart.kind);
+  const definition = chartDefinition(activeChart.kind);
+  const caps = definition.capabilities;
   const channelLabels = encodingChannelLabels(activeChart.kind);
   const showX = caps.xChannel;
   const showY = caps.yChannel;
   const showColor = caps.colorChannel;
   const showSize = caps.sizeChannel;
   const showZ = caps.zChannel;
-  /** Size is a defining channel for these kinds — keep it in primary Channels. */
-  const sizeInPrimary =
-    activeChart.kind === "pyramid" ||
-    activeChart.kind === "slope" ||
-    activeChart.kind === "dumbbell" ||
-    activeChart.kind === "dataCube" ||
-    activeChart.kind === "bubble" ||
-    activeChart.kind === "geoBubbles" ||
-    activeChart.kind === "geoPoints" ||
-    activeChart.kind === "globe" ||
-    activeChart.kind === "globeTrail" ||
-    activeChart.kind === "chernoff" ||
-    activeChart.kind === "glyphStar" ||
-    activeChart.kind === "flower" ||
-    activeChart.kind === "beeswarm" ||
-    activeChart.kind === "bucketField" ||
-    activeChart.kind === "trailRibbon" ||
-    activeChart.kind === "isoScatter" ||
-    activeChart.kind === "firefly" ||
-    activeChart.kind === "scatter3d" ||
-    activeChart.kind === "loomWeave" ||
-    activeChart.kind === "connectedScatter";
+  const sizeInPrimary = definition.channels.size.primary;
   const kindBlurb = encodingKindBlurb(activeChart.kind);
   const isDataCube = activeChart.kind === "dataCube";
-  const zChannelLabel =
-    activeChart.kind === "quakeTerrain" ? "Height" : isDataCube ? "Depth" : "Z";
+  const zChannelLabel = definition.channels.z.label;
   const cubeAggregate: YAggregateOption = activeChart.sizeField ? (activeChart.yAggregate ?? "sum") : "count";
   const showAggregate = caps.aggregate;
   const isHeat = activeChart.kind === "heatmap" || activeChart.kind === "hexbin";
@@ -1762,7 +1740,7 @@ export default function ChartPanelTab() {
     });
   const xColOptions = gateOptions("x", allColOptions);
   const yColOptions = gateOptions("y", allColOptions);
-  const sizeColOptions = gateOptions("size", numericOptions.length ? numericOptions : allColOptions);
+  const sizeColOptions = gateOptions("size", activeChart.kind === "connectedScatter" || !numericOptions.length ? allColOptions : numericOptions);
   const zColOptions = gateOptions("z", isDataCube ? allColOptions : numericOptions);
   const tooltipSelectedCount = activeChart.tooltipFields?.length ?? 0;
   const extraChannelCount = [
@@ -1774,16 +1752,806 @@ export default function ChartPanelTab() {
     showSymbolEnc && activeChart.emojiField,
   ].filter(Boolean).length;
   const panelHints = encodingPanelHints(activeChart, columnStats);
-  const showSeriesTools =
-    caps.rollingWindow ||
-    caps.seriesNormalize ||
-    caps.residualOverlay ||
-    caps.anomalyHighlight ||
-    caps.bumpMode ||
-    caps.wordCloudMode ||
-    caps.pyramidScaleMode;
+  const showSeriesTools = definition.inspector.seriesTools;
   const xDistinct = columnStats.find((c) => c.name === activeChart.xField)?.distinct_count ?? 0;
   const topNChoices = TOP_N_OPTIONS.filter((opt) => xDistinct <= 0 || opt.value <= Math.max(xDistinct, 10));
+
+  const visualSectionContent: Record<ChartVisualSectionId, () => ReactNode> = {
+    personal: () => (<>
+              <ChartLookLibrary />
+            </>),
+    design: () => (<>
+              <div className="flex items-center gap-1 mb-0.5">
+                <p className="text-2xs text-loom-muted leading-snug flex-1 min-w-0">
+                  Presets replace the whole look. Shuffle randomizes sections you haven’t kept.
+                </p>
+                <EncodingInfoTip
+                  label="About design system"
+                  text="Tufte / Bauhaus / Newspaper / Military (and friends) replace ink, axes, and atmosphere. Keep chips below only affect Shuffle look — same idea as Fields Keep for ✦/⟳."
+                />
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {(Object.keys(VISUAL_PRESETS) as VisualPresetId[]).map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    title={VISUAL_PRESET_BLURB[id]}
+                    onClick={() => {
+                      pushChartEditUndo();
+                      setChartVisualOverrides({ ...VISUAL_PRESETS[id].overrides });
+                      setToast(`Applied ${VISUAL_PRESETS[id].name} look`, { undo: true });
+                    }}
+                    className={`px-2.5 py-1.5 min-h-9 text-2xs rounded border ${
+                      id === "tufte" || id === "bauhaus" || id === "newspaper" || id === "military"
+                        ? "border-loom-accent/50 text-loom-text bg-loom-accent/5 hover:bg-loom-accent/12"
+                        : id === "clarity"
+                          ? "border-loom-accent/60 text-loom-accent bg-loom-accent/10 hover:bg-loom-accent/15"
+                          : "border-loom-border text-loom-text hover:border-loom-accent hover:bg-loom-accent/10"
+                    }`}
+                  >
+                    {VISUAL_PRESETS[id].name}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    pushChartEditUndo();
+                    setChartVisualOverrides(emptyChartVisualOverrides());
+                    setToast("Reset visual overrides", { undo: true });
+                  }}
+                  className="px-2.5 py-1.5 min-h-9 text-2xs rounded border border-loom-border text-loom-muted hover:text-loom-text"
+                >
+                  Reset visual
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    pushChartEditUndo();
+                    const next = shuffleVisualOverrides(chartVisualOverrides, visualLocks);
+                    setChartVisualOverrides(next);
+                    const kept = VISUAL_SHUFFLE_SECTIONS.filter((s) => visualLocks[s.id]).map((s) => s.label);
+                    setToast(
+                      kept.length
+                        ? `Shuffled look · kept ${kept.join(", ")}`
+                        : "Shuffled look · color + design",
+                      { undo: true },
+                    );
+                  }}
+                  className="px-2.5 py-1.5 min-h-9 text-2xs rounded border border-loom-accent/50 text-loom-accent hover:bg-loom-accent/10"
+                  title="Randomize Visual sections that aren’t marked Keep"
+                >
+                  Shuffle look
+                </button>
+              </div>
+              <ShuffleKeepRow
+                tip="Only affects Shuffle look. Kept sections stay; the rest reshuffle. Same pattern as Fields Keep for field shuffle / random chart."
+                chips={VISUAL_SHUFFLE_SECTIONS.map((s) => ({
+                  id: s.id,
+                  label: s.label,
+                  on: !!visualLocks[s.id],
+                  onToggle: () => toggleVisualLock(s.id),
+                }))}
+              />
+            </>),
+    color: () => (<>
+              <ChartColorControls chart={activeChart} columns={columnStats} rows={sampleRows} visual={chartVisualOverrides} theme={effectiveTheme} colorblind={!!appSettings.colorblindCharts} onChange={editChartVisualOverrides} />
+            </>),
+    look: () => (<>
+              {activeChart && ["bar", "pie"].includes(activeChart.kind) && <label className="block text-2xs text-loom-muted">Mark material
+                <select aria-label="Mark material" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.markMaterial ?? "auto"} onChange={(event) => updateOverride("markMaterial", event.target.value === "auto" ? undefined : event.target.value as ChartVisualOverrides["markMaterial"])}>
+                  <option value="auto">Follow theme · {inheritedStyle.markMaterial}</option>
+                  <option value="flat">Flat</option><option value="glaze">Glaze</option><option value="satin">Satin</option><option value="ink">Printed edge</option><option value="etched">Etched edge</option>
+                </select>
+              </label>}
+
+              <IconToggleGroup
+                label="Detail"
+                value={chartVisualOverrides.chartDetail ?? "viz"}
+                onChange={(v) => updateOverride("chartDetail", v)}
+                options={[
+                  { value: "plain", label: "Plain", icon: Ico.plain },
+                  { value: "viz", label: "Viz", icon: Ico.viz },
+                  { value: "deep", label: "Deep", icon: Ico.deep },
+                ]}
+              />
+              {caps.markMotif && (
+                <div
+                  id={chromeDomId("marks")}
+                  className={chartChromeFocus?.target === "marks" ? "rounded-md ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""}
+                  onMouseEnter={() => focusChromeFromPanel("marks")}
+                  onMouseLeave={clearChromeFromPanel}
+                >
+                  <IconToggleGroup
+                    label="Mark motif"
+                    value={chartVisualOverrides.markMotif ?? "dots"}
+                    onChange={(v) => updateOverride("markMotif", v)}
+                    options={[
+                      { value: "dots", label: "Dots", icon: Ico.dots },
+                      { value: "squares", label: "Squares", icon: Ico.squares },
+                      { value: "ticks", label: "Ticks", icon: Ico.ticks },
+                      { value: "bar", label: "Bar", icon: Ico.bar },
+                      { value: "ring", label: "Ring", icon: Ico.ring },
+                    ]}
+                  />
+                </div>
+              )}
+              {caps.cartesian && (
+                <div
+                  id={chromeDomId("axes")}
+                  className={chartChromeFocus?.target === "axes" ? "rounded-md ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""}
+                  onMouseEnter={() => focusChromeFromPanel("axes")}
+                  onMouseLeave={clearChromeFromPanel}
+                >
+                  <IconToggleGroup
+                    label="Axis style"
+                    value={chartVisualOverrides.axisStyle ?? "rule"}
+                    onChange={(v) => updateOverride("axisStyle", v)}
+                    options={[
+                      { value: "rule", label: "Rule", icon: Ico.rule },
+                      { value: "ladder", label: "Ladder", icon: Ico.ladder },
+                      { value: "mercury", label: "Mercury", icon: Ico.mercury },
+                      { value: "spine", label: "Spine", icon: Ico.spine },
+                      { value: "index", label: "Index", icon: Ico.index },
+                      { value: "tape", label: "Tape", icon: Ico.tape },
+                    ]}
+                  />
+                </div>
+              )}
+              <div
+                id={chromeDomId("title")}
+                className={chartChromeFocus?.target === "title" ? "rounded-md ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""}
+                onMouseEnter={() => focusChromeFromPanel("title")}
+                onMouseLeave={clearChromeFromPanel}
+              >
+                <IconToggleGroup
+                  label="Title layout"
+                  value={chartVisualOverrides.titleLayout ?? "pair"}
+                  onChange={(v) => updateOverride("titleLayout", v)}
+                  options={[
+                    { value: "pair", label: "Pair", icon: Ico.pair },
+                    { value: "stack", label: "Stack", icon: Ico.stack },
+                    { value: "spine", label: "Spine", icon: Ico.titleSpine },
+                    { value: "caption", label: "Caption", icon: Ico.caption },
+                    { value: "ticket", label: "Ticket", icon: Ico.ticket },
+                    { value: "slab", label: "Slab", icon: Ico.slab },
+                  ]}
+                />
+              </div>
+              <IconToggleGroup
+                label="Frame"
+                value={chartVisualOverrides.chartFrame ?? "focus"}
+                onChange={(v) => updateOverride("chartFrame", v)}
+                options={[
+                  { value: "hero", label: "Hero", icon: Ico.hero },
+                  { value: "compact", label: "Compact", icon: Ico.compact },
+                  { value: "focus", label: "Focus", icon: Ico.focus },
+                ]}
+              />
+              <div className="space-y-1.5">
+                <p className="text-2xs text-loom-muted flex items-center gap-1">
+                  Source / time info
+                  <EncodingInfoTip
+                    label="About source info"
+                    text="Drawn on the chart (and in Share / PNG). Includes source credit, an automatic date range when a time column exists, and the color ramp."
+                  />
+                </p>
+                <select
+                  className="loom-input loom-panel-select w-full"
+                  value={chartVisualOverrides.sourceFootnote ?? "credit"}
+                  onChange={(e) =>
+                    updateOverride(
+                      "sourceFootnote",
+                      e.target.value as "off" | "name" | "credit" | "full",
+                    )
+                  }
+                  aria-label="Source footnote detail"
+                >
+                  <option value="off">Off</option>
+                  <option value="name">Name only</option>
+                  <option value="credit">Name + credit</option>
+                  <option value="full">Full lineage</option>
+                </select>
+                {(chartVisualOverrides.sourceFootnote ?? "credit") !== "off" && (
+                  <>
+                    <label className="block text-2xs text-loom-muted">
+                      Place
+                      <select
+                        className="loom-input loom-panel-select w-full"
+                        value={chartVisualOverrides.chromeInfoBand ?? "footer"}
+                        onChange={(e) =>
+                          updateOverride(
+                            "chromeInfoBand",
+                            e.target.value === "header" ? "header" : "footer",
+                          )
+                        }
+                        aria-label="Source info placement"
+                      >
+                        <option value="footer">Footer (under chart)</option>
+                        <option value="header">Header (under title)</option>
+                      </select>
+                    </label>
+                    <IconToggleGroup
+                      label="Align"
+                      value={chartVisualOverrides.sourceFootnoteAlign ?? "left"}
+                      onChange={(v) => updateOverride("sourceFootnoteAlign", v)}
+                      options={[
+                        { value: "left", label: "Left", icon: Ico.alignLeft },
+                        { value: "center", label: "Center", icon: Ico.alignCenter },
+                        { value: "right", label: "Right", icon: Ico.alignRight },
+                      ]}
+                    />
+                  </>
+                )}
+              </div>
+              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
+                <input
+                  type="checkbox"
+                  checked={chartVisualOverrides.ghostEnabled ?? false}
+                  onChange={(e) => updateOverride("ghostEnabled", e.target.checked)}
+                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                />
+                Ghost overlay
+              </label>
+              {chartVisualOverrides.ghostEnabled && (
+                <div className="space-y-2.5 pl-0.5">
+                  <IconToggleGroup
+                    label="Ghost weight"
+                    value={chartVisualOverrides.ghostWeight ?? "soft"}
+                    onChange={(v) => updateOverride("ghostWeight", v)}
+                    options={[
+                      { value: "whisper", label: "Whisper", icon: Ico.whisper },
+                      { value: "soft", label: "Soft", icon: Ico.soft },
+                      { value: "firm", label: "Firm", icon: Ico.firm },
+                    ]}
+                  />
+                  <IconToggleGroup
+                    label="Ghost place"
+                    value={chartVisualOverrides.ghostPlace ?? "se"}
+                    onChange={(v) => updateOverride("ghostPlace", v)}
+                    options={[
+                      { value: "nw", label: "Top left", icon: Ico.nw },
+                      { value: "ne", label: "Top right", icon: Ico.ne },
+                      { value: "sw", label: "Bottom left", icon: Ico.sw },
+                      { value: "se", label: "Bottom right", icon: Ico.se },
+                    ]}
+                  />
+                </div>
+              )}
+            </>),
+    cloud: () => (<>
+                <WordCloudControls value={chartVisualOverrides} chartFamily={previewFont}
+                  wordField={activeChart.xField || "Words"}
+                  sizeLabel={!activeChart.yField || activeChart.yAggregate === "count" ? "row count" : `${(Y_AGGREGATE_OPTIONS.find((option) => option.value === (activeChart.yAggregate ?? "sum"))?.label ?? "sum").toLowerCase()} of ${activeChart.yField}`}
+                  mode={activeChart.wordCloudMode ?? "cloud"} limit={activeChart.topN ?? 80}
+                  onLimit={(topN) => patchChartExtra({ topN })}
+                  onEdit={editChartVisualOverrides} />
+              </>),
+    type: () => (<>
+
+              <ChartTypographyControls value={chartVisualOverrides} family={previewFont}
+                appFamily={resolveChartFontFamily(undefined, appSettings.font, appSettings.faces)}
+                title={previewTitle} subtitle={`${activeChart?.xField ?? "Category Aa"}${activeChart?.yField ? ` · ${activeChart.yField}` : ""}`}
+                inheritedWeight={inheritedStyle.titleFontWeight ?? 600} onEdit={editChartVisualOverrides} />
+              {caps.tickLabelRotation ? (
+                <div className="space-y-1">
+                  <IconToggleGroup
+                    label="X tick label angle"
+                    value={chartVisualOverrides.tickRotation ?? 0}
+                    onChange={(v) => updateOverride("tickRotation", v)}
+                    options={[
+                      { value: 0, label: "0°", icon: Ico.rot0 },
+                      { value: 30, label: "30°", icon: Ico.rot30 },
+                      { value: 45, label: "45°", icon: Ico.rot45 },
+                      { value: 60, label: "60°", icon: Ico.rot60 },
+                      { value: 90, label: "90°", icon: Ico.rot90 },
+                    ]}
+                  />
+                  <p className="text-2xs text-loom-muted leading-snug">
+                    Angles numeric labels along the bottom X axis. Category names and bar end-labels are separate.
+                  </p>
+                </div>
+              ) : caps.cartesian ? (
+                <p className="text-2xs text-loom-muted leading-snug rounded-md border border-loom-border/50 bg-loom-elevated/30 px-2 py-1.5">
+                  {activeChart.kind === "bar" || activeChart.kind === "pareto" || activeChart.kind === "lollipop" || activeChart.kind === "waterfall"
+                    ? "This chart uses category names + value labels on marks — no rotatable X tick numbers."
+                    : "X tick label angle doesn’t apply to this chart type."}
+                </p>
+              ) : null}
+                </>),
+    map: () => (<>
+                <div>
+                  <span className="block text-2xs text-loom-muted mb-1">Geography</span>
+                  <div className="grid grid-cols-2 gap-1" role="radiogroup" aria-label="Basemap">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={(chartVisualOverrides.geoAtlas ?? "auto") === "auto"}
+                      title="Pick from the region column or chart kind"
+                      onClick={() => updateOverride("geoAtlas", "auto")}
+                      className={`min-h-8 rounded border px-2 text-2xs text-left ${
+                        (chartVisualOverrides.geoAtlas ?? "auto") === "auto"
+                          ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                          : "border-loom-border text-loom-muted hover:text-loom-text"
+                      }`}
+                    >
+                      Auto
+                    </button>
+                    {ATLAS_OPTIONS.map((option) => {
+                      const selected = chartVisualOverrides.geoAtlas === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          role="radio"
+                          aria-checked={selected}
+                          title={option.description}
+                          onClick={() => updateOverride("geoAtlas", option.value)}
+                          className={`min-h-8 rounded border px-2 text-2xs text-left ${
+                            selected
+                              ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                              : "border-loom-border text-loom-muted hover:text-loom-text"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-2xs text-loom-muted mt-1.5 leading-snug">
+                    Globes and lat/lon maps default to the full world. Switch to US states or counties when the story is domestic.
+                  </p>
+                </div>
+              </>),
+    marks: () => (<>
+
+              {caps.pointMarker && (
+                <>
+                  <ChartNumberControl control={CHART_NUMBER_CONTROLS.pointSize} value={chartVisualOverrides.pointSize ?? CHART_NUMBER_CONTROLS.pointSize.defaultValue} onChange={value => updateOverride("pointSize", value)} />
+                  <div>
+                    <span className="block text-2xs text-loom-muted mb-1">Marker</span>
+                    <div className="grid grid-cols-7 gap-1" role="radiogroup" aria-label="Mark shape" onKeyDown={onRadioGroupKeyDown}>
+                      {MARK_SHAPE_OPTIONS.map((shape, shapeIdx) => {
+                        const shapeMode = (chartVisualOverrides.markerMode ?? "shape") === "shape";
+                        const selected =
+                          shapeMode &&
+                          (chartVisualOverrides.markShape ?? inheritedStyle.markShape ?? "circle") === shape.value;
+                        return (
+                          <button
+                            key={shape.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            aria-label={shape.label}
+                            tabIndex={radioTabIndex(selected, shapeIdx, shapeMode)}
+                            title={shape.label}
+                            onClick={() => editChartVisualOverrides({ markerMode: "shape", markShape: shape.value })}
+                            className={`h-8 rounded border text-base leading-none ${
+                              selected
+                                ? "border-loom-accent bg-loom-accent/15 text-loom-text"
+                                : "border-loom-border text-loom-muted hover:text-loom-text"
+                            }`}
+                          >
+                            <span aria-hidden>{MARK_SHAPE_ICON[shape.value]}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="grid grid-cols-8 gap-1 mt-2" role="radiogroup" aria-label="Emoji marker" onKeyDown={onRadioGroupKeyDown}>
+                      {CURATED_MARK_EMOJIS.map((emoji, emojiIdx) => {
+                        const selected =
+                          chartVisualOverrides.markerMode === "emoji" &&
+                          chartVisualOverrides.markEmoji === emoji;
+                        return (
+                          <button
+                            key={emoji}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            aria-label={`Emoji marker ${emoji}`}
+                            tabIndex={radioTabIndex(
+                              selected,
+                              emojiIdx,
+                              chartVisualOverrides.markerMode === "emoji" &&
+                                (CURATED_MARK_EMOJIS as readonly string[]).includes(chartVisualOverrides.markEmoji ?? ""),
+                            )}
+                            onClick={() => editChartVisualOverrides({ markerMode: "emoji", markEmoji: emoji })}
+                            className={`h-8 rounded border text-base leading-none ${
+                              selected
+                                ? "border-loom-accent bg-loom-accent/15"
+                                : "border-loom-border hover:bg-loom-elevated"
+                            }`}
+                          >
+                            {emoji}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {showSymbolEnc && (
+                      <p className="text-2xs text-loom-muted mt-1.5 leading-snug">
+                        One marker for every point. For a symbol per category, use Fields → Emoji or Shape from column.
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
+              {caps.markPoints && (
+                <>
+                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={chartVisualOverrides.markStroke ?? false}
+                      onChange={(e) => updateOverride("markStroke", e.target.checked)}
+                      className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                    />
+                    Mark outline
+                  </label>
+                  {chartVisualOverrides.markStroke && (
+                    <div className="space-y-2">
+                      <div>
+                        <label className="block text-2xs text-loom-muted mb-0.5">Stroke width</label>
+                        <input aria-label="Stroke width"
+                          type="number"
+                          min={0.5}
+                          max={3}
+                          step={0.5}
+                          value={chartVisualOverrides.markStrokeWidth ?? 1}
+                          onChange={(e) => updateOverride("markStrokeWidth", Number(e.target.value) || undefined)}
+                          className="loom-input w-full text-xs h-8 py-0"
+                        />
+                      </div>
+                      <p className="text-2xs text-loom-muted">Outline color{!chartVisualOverrides.markStrokeColor || chartVisualOverrides.markStrokeColor === "auto" ? " · follows each mark" : " · custom"}</p>
+                      <ChartColorInput label="Outline color" value={chartVisualOverrides.markStrokeColor && chartVisualOverrides.markStrokeColor !== "auto" ? chartVisualOverrides.markStrokeColor : getThemeUiColors(effectiveTheme).text} onChange={(color) => updateOverride("markStrokeColor", color)} />
+                      <button type="button" className="loom-btn-ghost text-2xs min-h-9" onClick={() => updateOverride("markStrokeColor", undefined)}>Match mark color</button>
+                    </div>
+                  )}
+                  <div className="loom-slider-row">
+                    <span className="truncate text-2xs text-loom-muted">Jitter (px)</span>
+                    <input aria-label="Jitter (px)"
+                      type="range"
+                      min={0}
+                      max={10}
+                      value={chartVisualOverrides.markJitter ?? 0}
+                      onChange={(e) => updateOverride("markJitter", Number(e.target.value))}
+                    />
+                    <span className="loom-slider-value">{chartVisualOverrides.markJitter ?? 0}</span>
+                  </div>
+                  <div>
+                    <label className="block text-2xs text-loom-muted mb-1">Size scale</label>
+                    <input aria-label="Size scale"
+                      type="range"
+                      min={0.5}
+                      max={2}
+                      step={0.1}
+                      value={chartVisualOverrides.sizeScale ?? 1}
+                      onChange={(e) => updateOverride("sizeScale", Number(e.target.value))}
+                      className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
+                    />
+                    <span className="text-2xs font-mono text-loom-muted ml-2">
+                      {(chartVisualOverrides.sizeScale ?? 1).toFixed(1)}×
+                      {activeChart.sizeField && (() => {
+                        const s = chartVisualOverrides.sizeScale ?? 1;
+                        return (
+                          <span className="ml-1 text-loom-muted/80" title="Size range multiplier (smallest to largest)">
+                            {" "}(range {(0.4 * s).toFixed(1)}× – {(1.2 * s).toFixed(1)}×)
+                          </span>
+                        );
+                      })()}
+                    </span>
+                  </div>
+                </>
+              )}
+              {caps.barMarks && (
+                <ChartNumberControl control={CHART_NUMBER_CONTROLS.barCornerRadius} value={chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? CHART_NUMBER_CONTROLS.barCornerRadius.defaultValue} onChange={value => updateOverride("barCornerRadius", value)} />
+              )}
+              {caps.lineMarks && (
+                <>
+                  <IconToggleGroup
+                    label="Line style"
+                    value={chartVisualOverrides.lineStrokeStyle ?? "solid"}
+                    onChange={(v) => updateOverride("lineStrokeStyle", v)}
+                    options={[
+                      { value: "solid", label: "Solid", icon: Ico.solid },
+                      { value: "dashed", label: "Dashed", icon: Ico.dashed },
+                      { value: "dotted", label: "Dotted", icon: Ico.dotted },
+                    ]}
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-2xs text-loom-label">Line endings
+                      <select aria-label="Line endings" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.lineCap ?? "theme"}
+                        onChange={(e) => updateOverride("lineCap", e.target.value === "theme" ? undefined : e.target.value as "round" | "butt" | "square")}>
+                        <option value="theme">Follow theme</option><option value="round">Rounded</option><option value="butt">Flat</option><option value="square">Square</option>
+                      </select>
+                    </label>
+                    <label className="text-2xs text-loom-label">Line corners
+                      <select aria-label="Line corners" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.lineJoin ?? "theme"}
+                        onChange={(e) => updateOverride("lineJoin", e.target.value === "theme" ? undefined : e.target.value as "round" | "bevel" | "miter")}>
+                        <option value="theme">Follow theme</option><option value="round">Rounded</option><option value="bevel">Beveled</option><option value="miter">Sharp</option>
+                      </select>
+                    </label>
+                  </div>
+                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
+                    <input
+                      type="checkbox"
+                      checked={chartVisualOverrides.lineCurveSmooth ?? false}
+                      onChange={(e) => updateOverride("lineCurveSmooth", e.target.checked)}
+                      className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                    />
+                    Smooth curve
+                  </label>
+                </>
+              )}
+              </>),
+    axes: () => (<>
+
+              <ColorSwatchGroup
+                label="Axis line color"
+                value={chartVisualOverrides.axisLineColor ?? "theme"}
+                onChange={(v) => updateOverride("axisLineColor", v === "theme" ? undefined : v)}
+                options={AXIS_LINE_COLOR_SWATCHES}
+              />
+              <div className="loom-slider-row">
+                <span className="truncate text-2xs text-loom-muted">Axis line width</span>
+                <input aria-label="Axis line width"
+                  type="range"
+                  min={0.5}
+                  max={4}
+                  step={0.5}
+                  value={chartVisualOverrides.axisLineWidth ?? 1}
+                  onChange={(e) => updateOverride("axisLineWidth", Number(e.target.value))}
+                />
+                <span className="loom-slider-value">{chartVisualOverrides.axisLineWidth ?? 1}</span>
+              </div>
+              {caps.grid && <><IconToggleGroup
+                label="Grid style"
+                value={chartVisualOverrides.gridStyle ?? inheritedStyle.gridStyle ?? "solid"}
+                onChange={(v) => updateOverride("gridStyle", v)}
+                options={[
+                  { value: "solid", label: "Solid", icon: Ico.solid },
+                  { value: "dashed", label: "Dashed", icon: Ico.dashed },
+                  { value: "dotted", label: "Dotted", icon: Ico.dotted },
+                  { value: "none", label: "None", icon: Ico.none },
+                ]}
+              />
+              <ChartNumberControl control={CHART_NUMBER_CONTROLS.gridOpacity} value={chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? CHART_NUMBER_CONTROLS.gridOpacity.defaultValue} onChange={value => updateOverride("gridOpacity", value)} /></>}
+              <div className="loom-slider-row">
+                <span className="truncate text-2xs text-loom-muted">Tick count</span>
+                <input aria-label="Tick count"
+                  type="range"
+                  min={3}
+                  max={10}
+                  value={chartVisualOverrides.tickCount ?? 5}
+                  onChange={(e) => updateOverride("tickCount", Number(e.target.value))}
+                />
+                <span className="loom-slider-value">{chartVisualOverrides.tickCount ?? 5}</span>
+              </div>
+              <ColorSwatchGroup
+                label="Axis label color"
+                value={chartVisualOverrides.axisLabelColor ?? "theme"}
+                onChange={(v) => updateOverride("axisLabelColor", v === "theme" ? undefined : v)}
+                options={AXIS_LABEL_COLOR_SWATCHES}
+              />
+
+              {caps.grid && <label
+                id={chromeDomId("grid")}
+                className={`flex items-center gap-2 text-2xs text-loom-muted cursor-pointer rounded-md ${
+                  chartChromeFocus?.target === "grid" ? "ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""
+                }`}
+                onMouseEnter={() => focusChromeFromPanel("grid")}
+                onMouseLeave={clearChromeFromPanel}
+              >
+                <input
+                  type="checkbox"
+                  checked={chartVisualOverrides.showGrid ?? (chartVisualOverrides.chartDetail !== "plain")}
+                  onChange={(e) => updateOverride("showGrid", e.target.checked)}
+                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                />
+                Show grid
+              </label>}
+            </>),
+    layout: () => (<>
+              <div>
+                <label htmlFor="chart-space-use" className="block text-2xs text-loom-muted mb-1">Space use</label>
+                <select id="chart-space-use" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.spaceUse ?? "auto"} onChange={(e) => updateOverride("spaceUse", e.target.value === "auto" ? undefined : e.target.value as "fill" | "roomy")}>
+                  <option value="auto">Auto · use available room</option>
+                  <option value="fill">Fill · larger plot</option>
+                  <option value="roomy">Roomy · more breathing room</option>
+                </select>
+                <p className="text-2xs text-loom-muted mt-1">Keeps room for readable labels. Fixed aspect ratios, device previews, and manual sizing still apply.</p>
+                {(chartVisualOverrides.canvasWidth != null || chartVisualOverrides.canvasHeight != null || chartVisualOverrides.plotWidth != null) && (
+                  <button type="button" className="mt-1 text-xs text-loom-accent underline underline-offset-2" onClick={() => editChartVisualOverrides({ canvasWidth: undefined, canvasHeight: undefined, plotX: undefined, plotY: undefined, plotWidth: undefined, plotHeight: undefined })}>Restore automatic sizing</button>
+                )}
+              </div>
+              <div>
+                <label className="block text-2xs text-loom-muted mb-1">Chart padding (px)</label>
+                <input aria-label="Chart padding (px)"
+                  type="range"
+                  min={16}
+                  max={96}
+                  value={chartSpacePadding(chartVisualOverrides.spaceUse, 800, chartVisualOverrides.chartPadding, chartVisualOverrides.chartFrame)}
+                  aria-valuetext={chartVisualOverrides.chartPadding == null ? "Auto, adapts to available space" : `${chartVisualOverrides.chartPadding} pixels`}
+                  onChange={(e) => updateOverride("chartPadding", Number(e.target.value))}
+                  className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
+                />
+                <span className="text-2xs tabular-nums text-loom-muted">{chartVisualOverrides.chartPadding ?? "Auto"}</span>
+                {chartVisualOverrides.chartPadding != null && <button type="button" onClick={() => updateOverride("chartPadding", undefined)} className="ml-2 text-xs text-loom-accent underline underline-offset-2">Auto padding</button>}
+              </div>
+              <div
+                id={chromeDomId("legend")}
+                className={chartChromeFocus?.target === "legend" || chartChromeFocus?.target === "color" ? "rounded-md ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""}
+                onMouseEnter={() => focusChromeFromPanel("legend")}
+                onMouseLeave={clearChromeFromPanel}
+              >
+                <label className="block text-2xs text-loom-muted mb-1 flex items-center gap-1">
+                  Legend / key
+                  <EncodingInfoTip
+                    label="About legend"
+                    text="Use the Arrange icon in the chart tools (beside Refresh), then drag the key (handles resize). Placement is saved in the share link. Or pick a corner here."
+                  />
+                </label>
+                <select aria-label="Legend position"
+                  value={chartVisualOverrides.legendPosition ?? "auto"}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "custom") {
+                      editChartVisualOverrides({ legendPosition: "custom" });
+                    } else {
+                      editChartVisualOverrides({
+                        legendPosition: v,
+                        legendOffsetX: undefined,
+                        legendOffsetY: undefined,
+                        legendWidth: undefined,
+                        legendHeight: undefined,
+                      });
+                    }
+                  }}
+                  className="loom-input loom-panel-select w-full"
+                  disabled={!caps.legend}
+                >
+                  {(isHeat ? [["auto", "Show color scale"], ["none", "Hide color scale"]] : [
+                    ["auto", activeChart?.kind === "line" ? "Auto (line ends when they fit)" : "Auto (emptiest corner)"],
+                    ["custom", "Custom (drag on chart)"],
+                    ["top-right", "Top right"],
+                    ["top-left", "Top left"],
+                    ["bottom-right", "Bottom right"],
+                    ["bottom-left", "Bottom left"],
+                    ["none", "None"],
+                  ]).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+                {caps.legend && (chartVisualOverrides.legendPosition ?? "auto") === "custom" && (
+                  <button
+                    type="button"
+                    className="text-2xs text-loom-muted hover:text-loom-text mt-1"
+                    onClick={() => {
+                      editChartVisualOverrides({
+                        legendPosition: "auto",
+                        legendOffsetX: undefined,
+                        legendOffsetY: undefined,
+                        legendWidth: undefined,
+                        legendHeight: undefined,
+                      });
+                    }}
+                  >
+                    Reset to auto
+                  </button>
+                )}
+                {!caps.legend && (
+                  <p className="text-2xs text-loom-muted mt-0.5">Legend isn’t used for this chart type.</p>
+                )}
+              </div>
+              {caps.dataLabels && (
+                <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={chartVisualOverrides.showDataLabels ?? (chartVisualOverrides.chartDetail === "deep")}
+                    onChange={(e) => updateOverride("showDataLabels", e.target.checked)}
+                    className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                  />
+                  Data labels
+                </label>
+              )}
+            </>),
+    atmosphere: () => (<>
+
+              <div>
+                <label className="block text-2xs text-loom-muted mb-1">Background</label>
+                <select aria-label="Background"
+                  value={chartVisualOverrides.backgroundStyle ?? "default"}
+                  onChange={(e) => updateOverride("backgroundStyle", e.target.value)}
+                  className="loom-input loom-panel-select w-full"
+                >
+                  {["default", "tufte", "newsprint", "bauhaus", "carbon", "blueprint", "ruled", "gradient", "paper", "transparent"].map((b) => (
+                    <option key={b} value={b}>
+                      {b === "default" ? "Default"
+                        : b === "tufte" ? "Tufte clean"
+                        : b === "newsprint" ? "Newsprint"
+                        : b === "bauhaus" ? "Bauhaus blocks"
+                        : b === "carbon" ? "Carbon hatch"
+                        : b === "blueprint" ? "Blueprint"
+                        : b === "ruled" ? "Ruled notebook"
+                        : b === "gradient" ? "Gradient vignette"
+                        : b === "paper" ? "Paper grain"
+                        : "Transparent"}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {(activeChart.kind === "scatter" || activeChart.kind === "bubble") && <div>
+                <label className="block text-2xs text-loom-muted mb-1">Blend mode</label>
+                <select aria-label="Blend mode"
+                  value={chartVisualOverrides.blendMode ?? "source-over"}
+                  onChange={(e) => updateOverride("blendMode", e.target.value as GlobalCompositeOperation)}
+                  className="loom-input loom-panel-select w-full"
+                >
+                  {BLEND_MODE_OPTIONS.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>}
+              {caps.markPoints && (
+                <>
+                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={chartVisualOverrides.glowEnabled ?? false}
+                      onChange={(e) => updateOverride("glowEnabled", e.target.checked)}
+                      className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                    />
+                    Glow on marks
+                  </label>
+                  {chartVisualOverrides.glowEnabled && (
+                    <div className="loom-slider-row">
+                      <span className="truncate text-2xs text-loom-muted">Glow intensity</span>
+                      <input aria-label="Glow intensity"
+                        type="range"
+                        min={1}
+                        max={20}
+                        value={chartVisualOverrides.glowIntensity ?? 8}
+                        onChange={(e) => updateOverride("glowIntensity", Number(e.target.value))}
+                      />
+                      <span className="loom-slider-value">{chartVisualOverrides.glowIntensity ?? 8}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={chartVisualOverrides.animateEntrance ?? false}
+                  onChange={(e) => updateOverride("animateEntrance", e.target.checked)}
+                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
+                />
+                Animate entrance
+              </label>
+
+              <ChartNumberControl control={CHART_NUMBER_CONTROLS.opacity} value={chartVisualOverrides.opacity ?? CHART_NUMBER_CONTROLS.opacity.defaultValue} onChange={value => updateOverride("opacity", value)} />
+            </>),
+    notes: () => (<>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPromptDialog({
+                      title: "Annotation text",
+                      defaultValue: "",
+                      onConfirm: (text) => {
+                        if (text?.trim()) addChartAnnotation(activeChart.id, text.trim());
+                      }
+                    });
+                  }}
+                  className="w-full px-2 py-1 text-2xs rounded border border-loom-border text-loom-text hover:border-loom-accent"
+                >
+                  Add note
+                </button>
+                {(chartAnnotations[activeChart.id] ?? []).map((a) => (
+                  <div key={a.id} className="flex items-center justify-between gap-1 text-2xs text-loom-text bg-loom-elevated/50 rounded px-2 py-1">
+                    <span className="truncate min-w-0">{a.text}</span>
+                    <button type="button" onClick={() => removeChartAnnotation(activeChart.id, a.id)} className="shrink-0 text-loom-muted hover:text-loom-text" aria-label="Remove">×</button>
+                  </div>
+                ))}
+              </>),
+  };
 
   return (
     <div className="flex flex-col min-h-0">
@@ -2413,7 +3181,7 @@ export default function ChartPanelTab() {
                     onDragLeave={handleDragLeave}
                     onDrop={handleDrop("size")}
                     onChange={(v) => applyEncodingExtra("size", v === "" ? "__none__" : v)}
-                    invert={activeChart.sizeField || isDataCube ? {
+                    invert={activeChart.kind !== "connectedScatter" && (activeChart.sizeField || isDataCube) ? {
                       on: !!activeChart.channelInvert?.size,
                       always: isDataCube && !activeChart.sizeField,
                       hint: activeChart.channelInvert?.size
@@ -3076,890 +3844,14 @@ export default function ChartPanelTab() {
             <div className="flex items-center justify-between gap-2">
               <span className="text-2xs text-loom-muted">Your chart, your style</span>
               <div className="flex gap-1">
-                <button type="button" onClick={() => setVisualSections(Object.fromEntries(["design", "personal", "color", "look", "type", "cloud", "map", "marks", "axes", "layout", "atmosphere", "notes"].map((key) => [key, true])))} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Expand all</button>
-                <button type="button" onClick={() => setVisualSections({ cloud: false, map: false })} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Collapse all</button>
+                <button type="button" onClick={() => setVisualSections(Object.fromEntries(definition.inspector.visualSections.map(({ id }) => [id, true])))} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Expand all</button>
+                <button type="button" onClick={() => setVisualSections(Object.fromEntries(definition.inspector.visualSections.map(({ id }) => [id, false])))} className="loom-btn-ghost min-h-9 px-1.5 text-2xs">Collapse all</button>
               </div>
             </div>
-            <ChartInspectorSection title="My looks" open={!!visualSections.personal} onToggle={() => toggleVisualSection("personal")}>
-              <ChartLookLibrary />
-            </ChartInspectorSection>
-            {(!caps.cartesian || !caps.markPoints) && (
-              <p className="text-2xs text-loom-muted leading-snug rounded-md border border-loom-border/60 bg-loom-elevated/40 px-2.5 py-2">
-                Controls that don’t affect {chartKindLabel(activeChart.kind)} are hidden
-                {!caps.cartesian ? " (no axes / grid)" : ""}
-                {!caps.markPoints && caps.cartesian ? " · mark shape / jitter apply to scatter" : ""}
-                .
-              </p>
-            )}
-            {/* Presets — full replace */}
-            <ChartInspectorSection title="Design system" open={!!visualSections.design} onToggle={() => toggleVisualSection("design")}>
-              <div className="flex items-center gap-1 mb-0.5">
-                <p className="text-2xs text-loom-muted leading-snug flex-1 min-w-0">
-                  Presets replace the whole look. Shuffle randomizes sections you haven’t kept.
-                </p>
-                <EncodingInfoTip
-                  label="About design system"
-                  text="Tufte / Bauhaus / Newspaper / Military (and friends) replace ink, axes, and atmosphere. Keep chips below only affect Shuffle look — same idea as Fields Keep for ✦/⟳."
-                />
-              </div>
-              <div className="flex flex-wrap gap-1.5">
-                {(Object.keys(VISUAL_PRESETS) as VisualPresetId[]).map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    title={VISUAL_PRESET_BLURB[id]}
-                    onClick={() => {
-                      pushChartEditUndo();
-                      setChartVisualOverrides({ ...VISUAL_PRESETS[id].overrides });
-                      setToast(`Applied ${VISUAL_PRESETS[id].name} look`, { undo: true });
-                    }}
-                    className={`px-2.5 py-1.5 min-h-9 text-2xs rounded border ${
-                      id === "tufte" || id === "bauhaus" || id === "newspaper" || id === "military"
-                        ? "border-loom-accent/50 text-loom-text bg-loom-accent/5 hover:bg-loom-accent/12"
-                        : id === "clarity"
-                          ? "border-loom-accent/60 text-loom-accent bg-loom-accent/10 hover:bg-loom-accent/15"
-                          : "border-loom-border text-loom-text hover:border-loom-accent hover:bg-loom-accent/10"
-                    }`}
-                  >
-                    {VISUAL_PRESETS[id].name}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => {
-                    pushChartEditUndo();
-                    setChartVisualOverrides(emptyChartVisualOverrides());
-                    setToast("Reset visual overrides", { undo: true });
-                  }}
-                  className="px-2.5 py-1.5 min-h-9 text-2xs rounded border border-loom-border text-loom-muted hover:text-loom-text"
-                >
-                  Reset visual
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    pushChartEditUndo();
-                    const next = shuffleVisualOverrides(chartVisualOverrides, visualLocks);
-                    setChartVisualOverrides(next);
-                    const kept = VISUAL_SHUFFLE_SECTIONS.filter((s) => visualLocks[s.id]).map((s) => s.label);
-                    setToast(
-                      kept.length
-                        ? `Shuffled look · kept ${kept.join(", ")}`
-                        : "Shuffled look · color + design",
-                      { undo: true },
-                    );
-                  }}
-                  className="px-2.5 py-1.5 min-h-9 text-2xs rounded border border-loom-accent/50 text-loom-accent hover:bg-loom-accent/10"
-                  title="Randomize Visual sections that aren’t marked Keep"
-                >
-                  Shuffle look
-                </button>
-              </div>
-              <ShuffleKeepRow
-                tip="Only affects Shuffle look. Kept sections stay; the rest reshuffle. Same pattern as Fields Keep for field shuffle / random chart."
-                chips={VISUAL_SHUFFLE_SECTIONS.map((s) => ({
-                  id: s.id,
-                  label: s.label,
-                  on: !!visualLocks[s.id],
-                  onToggle: () => toggleVisualLock(s.id),
-                }))}
-              />
-            </ChartInspectorSection>
+            <ChartVisualInspector definition={definition} open={visualSections}
+              onToggle={(id, next) => setVisualSections(previous => ({ ...previous, [id]: next }))}
+              content={visualSectionContent} />
 
-            {/* Color palettes */}
-            <ChartInspectorSection title="Color" open={!!visualSections.color} onToggle={() => toggleVisualSection("color")}>
-              <ChartColorControls chart={activeChart} columns={columnStats} rows={sampleRows} visual={chartVisualOverrides} theme={effectiveTheme} colorblind={!!appSettings.colorblindCharts} onChange={editChartVisualOverrides} />
-            </ChartInspectorSection>
-
-            {/* Look spectrum — only controls that affect this chart kind */}
-            <ChartInspectorSection title="Composition" open={!!visualSections.look} onToggle={() => toggleVisualSection("look")}>
-              {activeChart && ["bar", "pie"].includes(activeChart.kind) && <label className="block text-2xs text-loom-muted">Mark material
-                <select aria-label="Mark material" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.markMaterial ?? "auto"} onChange={(event) => updateOverride("markMaterial", event.target.value === "auto" ? undefined : event.target.value as ChartVisualOverrides["markMaterial"])}>
-                  <option value="auto">Follow theme · {inheritedStyle.markMaterial}</option>
-                  <option value="flat">Flat</option><option value="glaze">Glaze</option><option value="satin">Satin</option><option value="ink">Printed edge</option><option value="etched">Etched edge</option>
-                </select>
-              </label>}
-
-              <IconToggleGroup
-                label="Detail"
-                value={chartVisualOverrides.chartDetail ?? "viz"}
-                onChange={(v) => updateOverride("chartDetail", v)}
-                options={[
-                  { value: "plain", label: "Plain", icon: Ico.plain },
-                  { value: "viz", label: "Viz", icon: Ico.viz },
-                  { value: "deep", label: "Deep", icon: Ico.deep },
-                ]}
-              />
-              {caps.markMotif && (
-                <div
-                  id={chromeDomId("marks")}
-                  className={chartChromeFocus?.target === "marks" ? "rounded-md ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""}
-                  onMouseEnter={() => focusChromeFromPanel("marks")}
-                  onMouseLeave={clearChromeFromPanel}
-                >
-                  <IconToggleGroup
-                    label="Mark motif"
-                    value={chartVisualOverrides.markMotif ?? "dots"}
-                    onChange={(v) => updateOverride("markMotif", v)}
-                    options={[
-                      { value: "dots", label: "Dots", icon: Ico.dots },
-                      { value: "squares", label: "Squares", icon: Ico.squares },
-                      { value: "ticks", label: "Ticks", icon: Ico.ticks },
-                      { value: "bar", label: "Bar", icon: Ico.bar },
-                      { value: "ring", label: "Ring", icon: Ico.ring },
-                    ]}
-                  />
-                </div>
-              )}
-              {caps.cartesian && (
-                <div
-                  id={chromeDomId("axes")}
-                  className={chartChromeFocus?.target === "axes" ? "rounded-md ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""}
-                  onMouseEnter={() => focusChromeFromPanel("axes")}
-                  onMouseLeave={clearChromeFromPanel}
-                >
-                  <IconToggleGroup
-                    label="Axis style"
-                    value={chartVisualOverrides.axisStyle ?? "rule"}
-                    onChange={(v) => updateOverride("axisStyle", v)}
-                    options={[
-                      { value: "rule", label: "Rule", icon: Ico.rule },
-                      { value: "ladder", label: "Ladder", icon: Ico.ladder },
-                      { value: "mercury", label: "Mercury", icon: Ico.mercury },
-                      { value: "spine", label: "Spine", icon: Ico.spine },
-                      { value: "index", label: "Index", icon: Ico.index },
-                      { value: "tape", label: "Tape", icon: Ico.tape },
-                    ]}
-                  />
-                </div>
-              )}
-              <div
-                id={chromeDomId("title")}
-                className={chartChromeFocus?.target === "title" ? "rounded-md ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""}
-                onMouseEnter={() => focusChromeFromPanel("title")}
-                onMouseLeave={clearChromeFromPanel}
-              >
-                <IconToggleGroup
-                  label="Title layout"
-                  value={chartVisualOverrides.titleLayout ?? "pair"}
-                  onChange={(v) => updateOverride("titleLayout", v)}
-                  options={[
-                    { value: "pair", label: "Pair", icon: Ico.pair },
-                    { value: "stack", label: "Stack", icon: Ico.stack },
-                    { value: "spine", label: "Spine", icon: Ico.titleSpine },
-                    { value: "caption", label: "Caption", icon: Ico.caption },
-                    { value: "ticket", label: "Ticket", icon: Ico.ticket },
-                    { value: "slab", label: "Slab", icon: Ico.slab },
-                  ]}
-                />
-              </div>
-              <IconToggleGroup
-                label="Frame"
-                value={chartVisualOverrides.chartFrame ?? "focus"}
-                onChange={(v) => updateOverride("chartFrame", v)}
-                options={[
-                  { value: "hero", label: "Hero", icon: Ico.hero },
-                  { value: "compact", label: "Compact", icon: Ico.compact },
-                  { value: "focus", label: "Focus", icon: Ico.focus },
-                ]}
-              />
-              <div className="space-y-1.5">
-                <p className="text-2xs text-loom-muted flex items-center gap-1">
-                  Source / time info
-                  <EncodingInfoTip
-                    label="About source info"
-                    text="Drawn on the chart (and in Share / PNG). Includes source credit, an automatic date range when a time column exists, and the color ramp."
-                  />
-                </p>
-                <select
-                  className="loom-input loom-panel-select w-full"
-                  value={chartVisualOverrides.sourceFootnote ?? "credit"}
-                  onChange={(e) =>
-                    updateOverride(
-                      "sourceFootnote",
-                      e.target.value as "off" | "name" | "credit" | "full",
-                    )
-                  }
-                  aria-label="Source footnote detail"
-                >
-                  <option value="off">Off</option>
-                  <option value="name">Name only</option>
-                  <option value="credit">Name + credit</option>
-                  <option value="full">Full lineage</option>
-                </select>
-                {(chartVisualOverrides.sourceFootnote ?? "credit") !== "off" && (
-                  <>
-                    <label className="block text-2xs text-loom-muted">
-                      Place
-                      <select
-                        className="loom-input loom-panel-select w-full"
-                        value={chartVisualOverrides.chromeInfoBand ?? "footer"}
-                        onChange={(e) =>
-                          updateOverride(
-                            "chromeInfoBand",
-                            e.target.value === "header" ? "header" : "footer",
-                          )
-                        }
-                        aria-label="Source info placement"
-                      >
-                        <option value="footer">Footer (under chart)</option>
-                        <option value="header">Header (under title)</option>
-                      </select>
-                    </label>
-                    <IconToggleGroup
-                      label="Align"
-                      value={chartVisualOverrides.sourceFootnoteAlign ?? "left"}
-                      onChange={(v) => updateOverride("sourceFootnoteAlign", v)}
-                      options={[
-                        { value: "left", label: "Left", icon: Ico.alignLeft },
-                        { value: "center", label: "Center", icon: Ico.alignCenter },
-                        { value: "right", label: "Right", icon: Ico.alignRight },
-                      ]}
-                    />
-                  </>
-                )}
-              </div>
-              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
-                <input
-                  type="checkbox"
-                  checked={chartVisualOverrides.ghostEnabled ?? false}
-                  onChange={(e) => updateOverride("ghostEnabled", e.target.checked)}
-                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                />
-                Ghost overlay
-              </label>
-              {chartVisualOverrides.ghostEnabled && (
-                <div className="space-y-2.5 pl-0.5">
-                  <IconToggleGroup
-                    label="Ghost weight"
-                    value={chartVisualOverrides.ghostWeight ?? "soft"}
-                    onChange={(v) => updateOverride("ghostWeight", v)}
-                    options={[
-                      { value: "whisper", label: "Whisper", icon: Ico.whisper },
-                      { value: "soft", label: "Soft", icon: Ico.soft },
-                      { value: "firm", label: "Firm", icon: Ico.firm },
-                    ]}
-                  />
-                  <IconToggleGroup
-                    label="Ghost place"
-                    value={chartVisualOverrides.ghostPlace ?? "se"}
-                    onChange={(v) => updateOverride("ghostPlace", v)}
-                    options={[
-                      { value: "nw", label: "Top left", icon: Ico.nw },
-                      { value: "ne", label: "Top right", icon: Ico.ne },
-                      { value: "sw", label: "Bottom left", icon: Ico.sw },
-                      { value: "se", label: "Bottom right", icon: Ico.se },
-                    ]}
-                  />
-                </div>
-              )}
-            </ChartInspectorSection>
-            {activeChart.kind === "wordCloud" && (
-              <ChartInspectorSection
-                title="Word cloud"
-                open={visualSections.cloud !== false}
-                onToggle={() => setVisualSections((prev) => ({ ...prev, cloud: prev.cloud === false }))}
-              >
-                <WordCloudControls value={chartVisualOverrides} chartFamily={previewFont}
-                  wordField={activeChart.xField || "Words"}
-                  sizeLabel={!activeChart.yField || activeChart.yAggregate === "count" ? "row count" : `${(Y_AGGREGATE_OPTIONS.find((option) => option.value === (activeChart.yAggregate ?? "sum"))?.label ?? "sum").toLowerCase()} of ${activeChart.yField}`}
-                  mode={activeChart.wordCloudMode ?? "cloud"} limit={activeChart.topN ?? 80}
-                  onLimit={(topN) => patchChartExtra({ topN })}
-                  onEdit={editChartVisualOverrides} />
-              </ChartInspectorSection>
-            )}
-
-            {/* Typography */}
-            <ChartInspectorSection title="Typography" open={!!visualSections.type} onToggle={() => toggleVisualSection("type")}>
-
-              <ChartTypographyControls value={chartVisualOverrides} family={previewFont}
-                appFamily={resolveChartFontFamily(undefined, appSettings.font, appSettings.faces)}
-                title={previewTitle} subtitle={`${activeChart?.xField ?? "Category Aa"}${activeChart?.yField ? ` · ${activeChart.yField}` : ""}`}
-                inheritedWeight={inheritedStyle.titleFontWeight ?? 600} onEdit={editChartVisualOverrides} />
-              {caps.tickLabelRotation ? (
-                <div className="space-y-1">
-                  <IconToggleGroup
-                    label="X tick label angle"
-                    value={chartVisualOverrides.tickRotation ?? 0}
-                    onChange={(v) => updateOverride("tickRotation", v)}
-                    options={[
-                      { value: 0, label: "0°", icon: Ico.rot0 },
-                      { value: 30, label: "30°", icon: Ico.rot30 },
-                      { value: 45, label: "45°", icon: Ico.rot45 },
-                      { value: 60, label: "60°", icon: Ico.rot60 },
-                      { value: 90, label: "90°", icon: Ico.rot90 },
-                    ]}
-                  />
-                  <p className="text-2xs text-loom-muted leading-snug">
-                    Angles numeric labels along the bottom X axis. Category names and bar end-labels are separate.
-                  </p>
-                </div>
-              ) : caps.cartesian ? (
-                <p className="text-2xs text-loom-muted leading-snug rounded-md border border-loom-border/50 bg-loom-elevated/30 px-2 py-1.5">
-                  {activeChart.kind === "bar" || activeChart.kind === "pareto" || activeChart.kind === "lollipop" || activeChart.kind === "waterfall"
-                    ? "This chart uses category names + value labels on marks — no rotatable X tick numbers."
-                    : "X tick label angle doesn’t apply to this chart type."}
-                </p>
-              ) : null}
-                </ChartInspectorSection>
-
-            {isGeoFamilyKind(activeChart.kind) && (
-              <ChartInspectorSection
-                title="Basemap"
-                open={visualSections.map !== false}
-                onToggle={() => toggleVisualSection("map")}
-              >
-                <div>
-                  <span className="block text-2xs text-loom-muted mb-1">Geography</span>
-                  <div className="grid grid-cols-2 gap-1" role="radiogroup" aria-label="Basemap">
-                    <button
-                      type="button"
-                      role="radio"
-                      aria-checked={(chartVisualOverrides.geoAtlas ?? "auto") === "auto"}
-                      title="Pick from the region column or chart kind"
-                      onClick={() => updateOverride("geoAtlas", "auto")}
-                      className={`min-h-8 rounded border px-2 text-2xs text-left ${
-                        (chartVisualOverrides.geoAtlas ?? "auto") === "auto"
-                          ? "border-loom-accent bg-loom-accent/15 text-loom-text"
-                          : "border-loom-border text-loom-muted hover:text-loom-text"
-                      }`}
-                    >
-                      Auto
-                    </button>
-                    {ATLAS_OPTIONS.map((option) => {
-                      const selected = chartVisualOverrides.geoAtlas === option.value;
-                      return (
-                        <button
-                          key={option.value}
-                          type="button"
-                          role="radio"
-                          aria-checked={selected}
-                          title={option.description}
-                          onClick={() => updateOverride("geoAtlas", option.value)}
-                          className={`min-h-8 rounded border px-2 text-2xs text-left ${
-                            selected
-                              ? "border-loom-accent bg-loom-accent/15 text-loom-text"
-                              : "border-loom-border text-loom-muted hover:text-loom-text"
-                          }`}
-                        >
-                          {option.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-2xs text-loom-muted mt-1.5 leading-snug">
-                    Globes and lat/lon maps default to the full world. Switch to US states or counties when the story is domestic.
-                  </p>
-                </div>
-              </ChartInspectorSection>
-            )}
-
-            {/* Marks — only for kinds that draw marks this way */}
-            {(caps.pointMarker || caps.barMarks || caps.lineMarks) && (
-            <ChartInspectorSection title={caps.barMarks ? "Bars" : caps.lineMarks ? (activeChart.kind === "area" ? "Area" : "Lines") : caps.pointMarker ? "Points" : "Marks"} open={!!visualSections.marks} onToggle={() => toggleVisualSection("marks")}>
-
-              {caps.pointMarker && (
-                <>
-                  <div className="loom-slider-row">
-                    <span className="truncate text-2xs text-loom-muted">Point size</span>
-                    <input aria-label="Point size"
-                      type="range"
-                      min={2}
-                      max={24}
-                      value={chartVisualOverrides.pointSize ?? 12}
-                      onChange={(e) => updateOverride("pointSize", Number(e.target.value))}
-                    />
-                    <span className="loom-slider-value">{chartVisualOverrides.pointSize ?? 12}</span>
-                  </div>
-                  <div>
-                    <span className="block text-2xs text-loom-muted mb-1">Marker</span>
-                    <div className="grid grid-cols-7 gap-1" role="radiogroup" aria-label="Mark shape" onKeyDown={onRadioGroupKeyDown}>
-                      {MARK_SHAPE_OPTIONS.map((shape, shapeIdx) => {
-                        const shapeMode = (chartVisualOverrides.markerMode ?? "shape") === "shape";
-                        const selected =
-                          shapeMode &&
-                          (chartVisualOverrides.markShape ?? inheritedStyle.markShape ?? "circle") === shape.value;
-                        return (
-                          <button
-                            key={shape.value}
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            aria-label={shape.label}
-                            tabIndex={radioTabIndex(selected, shapeIdx, shapeMode)}
-                            title={shape.label}
-                            onClick={() => editChartVisualOverrides({ markerMode: "shape", markShape: shape.value })}
-                            className={`h-8 rounded border text-base leading-none ${
-                              selected
-                                ? "border-loom-accent bg-loom-accent/15 text-loom-text"
-                                : "border-loom-border text-loom-muted hover:text-loom-text"
-                            }`}
-                          >
-                            <span aria-hidden>{MARK_SHAPE_ICON[shape.value]}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div className="grid grid-cols-8 gap-1 mt-2" role="radiogroup" aria-label="Emoji marker" onKeyDown={onRadioGroupKeyDown}>
-                      {CURATED_MARK_EMOJIS.map((emoji, emojiIdx) => {
-                        const selected =
-                          chartVisualOverrides.markerMode === "emoji" &&
-                          chartVisualOverrides.markEmoji === emoji;
-                        return (
-                          <button
-                            key={emoji}
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            aria-label={`Emoji marker ${emoji}`}
-                            tabIndex={radioTabIndex(
-                              selected,
-                              emojiIdx,
-                              chartVisualOverrides.markerMode === "emoji" &&
-                                (CURATED_MARK_EMOJIS as readonly string[]).includes(chartVisualOverrides.markEmoji ?? ""),
-                            )}
-                            onClick={() => editChartVisualOverrides({ markerMode: "emoji", markEmoji: emoji })}
-                            className={`h-8 rounded border text-base leading-none ${
-                              selected
-                                ? "border-loom-accent bg-loom-accent/15"
-                                : "border-loom-border hover:bg-loom-elevated"
-                            }`}
-                          >
-                            {emoji}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    {showSymbolEnc && (
-                      <p className="text-2xs text-loom-muted mt-1.5 leading-snug">
-                        One marker for every point. For a symbol per category, use Fields → Emoji or Shape from column.
-                      </p>
-                    )}
-                  </div>
-                </>
-              )}
-              {caps.markPoints && (
-                <>
-                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={chartVisualOverrides.markStroke ?? false}
-                      onChange={(e) => updateOverride("markStroke", e.target.checked)}
-                      className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                    />
-                    Mark outline
-                  </label>
-                  {chartVisualOverrides.markStroke && (
-                    <div className="space-y-2">
-                      <div>
-                        <label className="block text-2xs text-loom-muted mb-0.5">Stroke width</label>
-                        <input aria-label="Stroke width"
-                          type="number"
-                          min={0.5}
-                          max={3}
-                          step={0.5}
-                          value={chartVisualOverrides.markStrokeWidth ?? 1}
-                          onChange={(e) => updateOverride("markStrokeWidth", Number(e.target.value) || undefined)}
-                          className="loom-input w-full text-xs h-8 py-0"
-                        />
-                      </div>
-                      <p className="text-2xs text-loom-muted">Outline color{!chartVisualOverrides.markStrokeColor || chartVisualOverrides.markStrokeColor === "auto" ? " · follows each mark" : " · custom"}</p>
-                      <ChartColorInput label="Outline color" value={chartVisualOverrides.markStrokeColor && chartVisualOverrides.markStrokeColor !== "auto" ? chartVisualOverrides.markStrokeColor : getThemeUiColors(effectiveTheme).text} onChange={(color) => updateOverride("markStrokeColor", color)} />
-                      <button type="button" className="loom-btn-ghost text-2xs min-h-9" onClick={() => updateOverride("markStrokeColor", undefined)}>Match mark color</button>
-                    </div>
-                  )}
-                  <div className="loom-slider-row">
-                    <span className="truncate text-2xs text-loom-muted">Jitter (px)</span>
-                    <input aria-label="Jitter (px)"
-                      type="range"
-                      min={0}
-                      max={10}
-                      value={chartVisualOverrides.markJitter ?? 0}
-                      onChange={(e) => updateOverride("markJitter", Number(e.target.value))}
-                    />
-                    <span className="loom-slider-value">{chartVisualOverrides.markJitter ?? 0}</span>
-                  </div>
-                  <div>
-                    <label className="block text-2xs text-loom-muted mb-1">Size scale</label>
-                    <input aria-label="Size scale"
-                      type="range"
-                      min={0.5}
-                      max={2}
-                      step={0.1}
-                      value={chartVisualOverrides.sizeScale ?? 1}
-                      onChange={(e) => updateOverride("sizeScale", Number(e.target.value))}
-                      className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
-                    />
-                    <span className="text-2xs font-mono text-loom-muted ml-2">
-                      {(chartVisualOverrides.sizeScale ?? 1).toFixed(1)}×
-                      {activeChart.sizeField && (() => {
-                        const s = chartVisualOverrides.sizeScale ?? 1;
-                        return (
-                          <span className="ml-1 text-loom-muted/80" title="Size range multiplier (smallest to largest)">
-                            {" "}(range {(0.4 * s).toFixed(1)}× – {(1.2 * s).toFixed(1)}×)
-                          </span>
-                        );
-                      })()}
-                    </span>
-                  </div>
-                </>
-              )}
-              {caps.barMarks && (
-                <div className="loom-slider-row">
-                  <span className="truncate text-2xs text-loom-muted">Bar corner radius (px)</span>
-                  <input aria-label="Bar corner radius (px)"
-                    type="range"
-                    min={0}
-                    max={12}
-                    value={chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}
-                    onChange={(e) => updateOverride("barCornerRadius", Number(e.target.value))}
-                  />
-                  <span className="loom-slider-value">{chartVisualOverrides.barCornerRadius ?? inheritedStyle.barCornerRadius ?? 3}</span>
-                </div>
-              )}
-              {caps.lineMarks && (
-                <>
-                  <IconToggleGroup
-                    label="Line style"
-                    value={chartVisualOverrides.lineStrokeStyle ?? "solid"}
-                    onChange={(v) => updateOverride("lineStrokeStyle", v)}
-                    options={[
-                      { value: "solid", label: "Solid", icon: Ico.solid },
-                      { value: "dashed", label: "Dashed", icon: Ico.dashed },
-                      { value: "dotted", label: "Dotted", icon: Ico.dotted },
-                    ]}
-                  />
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="text-2xs text-loom-label">Line endings
-                      <select aria-label="Line endings" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.lineCap ?? "theme"}
-                        onChange={(e) => updateOverride("lineCap", e.target.value === "theme" ? undefined : e.target.value as "round" | "butt" | "square")}>
-                        <option value="theme">Follow theme</option><option value="round">Rounded</option><option value="butt">Flat</option><option value="square">Square</option>
-                      </select>
-                    </label>
-                    <label className="text-2xs text-loom-label">Line corners
-                      <select aria-label="Line corners" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.lineJoin ?? "theme"}
-                        onChange={(e) => updateOverride("lineJoin", e.target.value === "theme" ? undefined : e.target.value as "round" | "bevel" | "miter")}>
-                        <option value="theme">Follow theme</option><option value="round">Rounded</option><option value="bevel">Beveled</option><option value="miter">Sharp</option>
-                      </select>
-                    </label>
-                  </div>
-                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer min-h-8">
-                    <input
-                      type="checkbox"
-                      checked={chartVisualOverrides.lineCurveSmooth ?? false}
-                      onChange={(e) => updateOverride("lineCurveSmooth", e.target.checked)}
-                      className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                    />
-                    Smooth curve
-                  </label>
-                </>
-              )}
-              </ChartInspectorSection>
-            )}
-
-            {/* Axes & Grid — cartesian charts only */}
-            {caps.cartesian && (
-            <ChartInspectorSection title="Axes & grid" open={!!visualSections.axes} onToggle={() => toggleVisualSection("axes")}>
-
-              <ColorSwatchGroup
-                label="Axis line color"
-                value={chartVisualOverrides.axisLineColor ?? "theme"}
-                onChange={(v) => updateOverride("axisLineColor", v === "theme" ? undefined : v)}
-                options={AXIS_LINE_COLOR_SWATCHES}
-              />
-              <div className="loom-slider-row">
-                <span className="truncate text-2xs text-loom-muted">Axis line width</span>
-                <input aria-label="Axis line width"
-                  type="range"
-                  min={0.5}
-                  max={4}
-                  step={0.5}
-                  value={chartVisualOverrides.axisLineWidth ?? 1}
-                  onChange={(e) => updateOverride("axisLineWidth", Number(e.target.value))}
-                />
-                <span className="loom-slider-value">{chartVisualOverrides.axisLineWidth ?? 1}</span>
-              </div>
-              <IconToggleGroup
-                label="Grid style"
-                value={chartVisualOverrides.gridStyle ?? inheritedStyle.gridStyle ?? "solid"}
-                onChange={(v) => updateOverride("gridStyle", v)}
-                options={[
-                  { value: "solid", label: "Solid", icon: Ico.solid },
-                  { value: "dashed", label: "Dashed", icon: Ico.dashed },
-                  { value: "dotted", label: "Dotted", icon: Ico.dotted },
-                  { value: "none", label: "None", icon: Ico.none },
-                ]}
-              />
-              <div className="loom-slider-row">
-                <span className="truncate text-2xs text-loom-muted">Grid opacity</span>
-                <input aria-label="Grid opacity"
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.1}
-                  value={chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5}
-                  onChange={(e) => updateOverride("gridOpacity", Number(e.target.value))}
-                />
-                <span className="loom-slider-value">{((chartVisualOverrides.gridOpacity ?? inheritedStyle.gridOpacity ?? 0.5) * 100).toFixed(0)}%</span>
-              </div>
-              <div className="loom-slider-row">
-                <span className="truncate text-2xs text-loom-muted">Tick count</span>
-                <input aria-label="Tick count"
-                  type="range"
-                  min={3}
-                  max={10}
-                  value={chartVisualOverrides.tickCount ?? 5}
-                  onChange={(e) => updateOverride("tickCount", Number(e.target.value))}
-                />
-                <span className="loom-slider-value">{chartVisualOverrides.tickCount ?? 5}</span>
-              </div>
-              <ColorSwatchGroup
-                label="Axis label color"
-                value={chartVisualOverrides.axisLabelColor ?? "theme"}
-                onChange={(v) => updateOverride("axisLabelColor", v === "theme" ? undefined : v)}
-                options={AXIS_LABEL_COLOR_SWATCHES}
-              />
-
-              <label
-                id={chromeDomId("grid")}
-                className={`flex items-center gap-2 text-2xs text-loom-muted cursor-pointer rounded-md ${
-                  chartChromeFocus?.target === "grid" ? "ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""
-                }`}
-                onMouseEnter={() => focusChromeFromPanel("grid")}
-                onMouseLeave={clearChromeFromPanel}
-              >
-                <input
-                  type="checkbox"
-                  checked={chartVisualOverrides.showGrid ?? (chartVisualOverrides.chartDetail !== "plain")}
-                  onChange={(e) => updateOverride("showGrid", e.target.checked)}
-                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                />
-                Show grid
-              </label>
-            </ChartInspectorSection>
-            )}
-
-            {/* Layout */}
-            <ChartInspectorSection title="Layout" open={!!visualSections.layout} onToggle={() => toggleVisualSection("layout")}>
-              <div>
-                <label htmlFor="chart-space-use" className="block text-2xs text-loom-muted mb-1">Space use</label>
-                <select id="chart-space-use" className="loom-input loom-panel-select w-full" value={chartVisualOverrides.spaceUse ?? "auto"} onChange={(e) => updateOverride("spaceUse", e.target.value === "auto" ? undefined : e.target.value as "fill" | "roomy")}>
-                  <option value="auto">Auto · use available room</option>
-                  <option value="fill">Fill · larger plot</option>
-                  <option value="roomy">Roomy · more breathing room</option>
-                </select>
-                <p className="text-2xs text-loom-muted mt-1">Keeps room for readable labels. Fixed aspect ratios, device previews, and manual sizing still apply.</p>
-                {(chartVisualOverrides.canvasWidth != null || chartVisualOverrides.canvasHeight != null || chartVisualOverrides.plotWidth != null) && (
-                  <button type="button" className="mt-1 text-xs text-loom-accent underline underline-offset-2" onClick={() => editChartVisualOverrides({ canvasWidth: undefined, canvasHeight: undefined, plotX: undefined, plotY: undefined, plotWidth: undefined, plotHeight: undefined })}>Restore automatic sizing</button>
-                )}
-              </div>
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Chart padding (px)</label>
-                <input aria-label="Chart padding (px)"
-                  type="range"
-                  min={16}
-                  max={96}
-                  value={chartSpacePadding(chartVisualOverrides.spaceUse, 800, chartVisualOverrides.chartPadding, chartVisualOverrides.chartFrame)}
-                  aria-valuetext={chartVisualOverrides.chartPadding == null ? "Auto, adapts to available space" : `${chartVisualOverrides.chartPadding} pixels`}
-                  onChange={(e) => updateOverride("chartPadding", Number(e.target.value))}
-                  className="w-full h-1.5 rounded-full appearance-none bg-loom-elevated accent-loom-accent"
-                />
-                <span className="text-2xs tabular-nums text-loom-muted">{chartVisualOverrides.chartPadding ?? "Auto"}</span>
-                {chartVisualOverrides.chartPadding != null && <button type="button" onClick={() => updateOverride("chartPadding", undefined)} className="ml-2 text-xs text-loom-accent underline underline-offset-2">Auto padding</button>}
-              </div>
-              <div
-                id={chromeDomId("legend")}
-                className={chartChromeFocus?.target === "legend" || chartChromeFocus?.target === "color" ? "rounded-md ring-2 ring-loom-accent/50 bg-loom-accent/10 p-1" : ""}
-                onMouseEnter={() => focusChromeFromPanel("legend")}
-                onMouseLeave={clearChromeFromPanel}
-              >
-                <label className="block text-2xs text-loom-muted mb-1 flex items-center gap-1">
-                  Legend / key
-                  <EncodingInfoTip
-                    label="About legend"
-                    text="Use the Arrange icon in the chart tools (beside Refresh), then drag the key (handles resize). Placement is saved in the share link. Or pick a corner here."
-                  />
-                </label>
-                <select aria-label="Legend position"
-                  value={chartVisualOverrides.legendPosition ?? "auto"}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === "custom") {
-                      editChartVisualOverrides({ legendPosition: "custom" });
-                    } else {
-                      editChartVisualOverrides({
-                        legendPosition: v,
-                        legendOffsetX: undefined,
-                        legendOffsetY: undefined,
-                        legendWidth: undefined,
-                        legendHeight: undefined,
-                      });
-                    }
-                  }}
-                  className="loom-input loom-panel-select w-full"
-                  disabled={!caps.legend}
-                >
-                  {(isHeat ? [["auto", "Show color scale"], ["none", "Hide color scale"]] : [
-                    ["auto", activeChart?.kind === "line" ? "Auto (line ends when they fit)" : "Auto (emptiest corner)"],
-                    ["custom", "Custom (drag on chart)"],
-                    ["top-right", "Top right"],
-                    ["top-left", "Top left"],
-                    ["bottom-right", "Bottom right"],
-                    ["bottom-left", "Bottom left"],
-                    ["none", "None"],
-                  ]).map(([value, label]) => (
-                    <option key={value} value={value}>{label}</option>
-                  ))}
-                </select>
-                {caps.legend && (chartVisualOverrides.legendPosition ?? "auto") === "custom" && (
-                  <button
-                    type="button"
-                    className="text-2xs text-loom-muted hover:text-loom-text mt-1"
-                    onClick={() => {
-                      editChartVisualOverrides({
-                        legendPosition: "auto",
-                        legendOffsetX: undefined,
-                        legendOffsetY: undefined,
-                        legendWidth: undefined,
-                        legendHeight: undefined,
-                      });
-                    }}
-                  >
-                    Reset to auto
-                  </button>
-                )}
-                {!caps.legend && (
-                  <p className="text-2xs text-loom-muted mt-0.5">Legend isn’t used for this chart type.</p>
-                )}
-              </div>
-              {caps.dataLabels && (
-                <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={chartVisualOverrides.showDataLabels ?? (chartVisualOverrides.chartDetail === "deep")}
-                    onChange={(e) => updateOverride("showDataLabels", e.target.checked)}
-                    className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                  />
-                  Data labels
-                </label>
-              )}
-            </ChartInspectorSection>
-
-            {/* Atmosphere */}
-            <ChartInspectorSection title="Atmosphere" open={!!visualSections.atmosphere} onToggle={() => toggleVisualSection("atmosphere")}>
-
-              <div>
-                <label className="block text-2xs text-loom-muted mb-1">Background</label>
-                <select aria-label="Background"
-                  value={chartVisualOverrides.backgroundStyle ?? "default"}
-                  onChange={(e) => updateOverride("backgroundStyle", e.target.value)}
-                  className="loom-input loom-panel-select w-full"
-                >
-                  {["default", "tufte", "newsprint", "bauhaus", "carbon", "blueprint", "ruled", "gradient", "paper", "transparent"].map((b) => (
-                    <option key={b} value={b}>
-                      {b === "default" ? "Default"
-                        : b === "tufte" ? "Tufte clean"
-                        : b === "newsprint" ? "Newsprint"
-                        : b === "bauhaus" ? "Bauhaus blocks"
-                        : b === "carbon" ? "Carbon hatch"
-                        : b === "blueprint" ? "Blueprint"
-                        : b === "ruled" ? "Ruled notebook"
-                        : b === "gradient" ? "Gradient vignette"
-                        : b === "paper" ? "Paper grain"
-                        : "Transparent"}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {(activeChart.kind === "scatter" || activeChart.kind === "bubble") && <div>
-                <label className="block text-2xs text-loom-muted mb-1">Blend mode</label>
-                <select aria-label="Blend mode"
-                  value={chartVisualOverrides.blendMode ?? "source-over"}
-                  onChange={(e) => updateOverride("blendMode", e.target.value as GlobalCompositeOperation)}
-                  className="loom-input loom-panel-select w-full"
-                >
-                  {BLEND_MODE_OPTIONS.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
-                  ))}
-                </select>
-              </div>}
-              {caps.markPoints && (
-                <>
-                  <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={chartVisualOverrides.glowEnabled ?? false}
-                      onChange={(e) => updateOverride("glowEnabled", e.target.checked)}
-                      className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                    />
-                    Glow on marks
-                  </label>
-                  {chartVisualOverrides.glowEnabled && (
-                    <div className="loom-slider-row">
-                      <span className="truncate text-2xs text-loom-muted">Glow intensity</span>
-                      <input aria-label="Glow intensity"
-                        type="range"
-                        min={1}
-                        max={20}
-                        value={chartVisualOverrides.glowIntensity ?? 8}
-                        onChange={(e) => updateOverride("glowIntensity", Number(e.target.value))}
-                      />
-                      <span className="loom-slider-value">{chartVisualOverrides.glowIntensity ?? 8}</span>
-                    </div>
-                  )}
-                </>
-              )}
-              <label className="flex items-center gap-2 text-2xs text-loom-muted cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={chartVisualOverrides.animateEntrance ?? false}
-                  onChange={(e) => updateOverride("animateEntrance", e.target.checked)}
-                  className="rounded border-loom-border bg-loom-elevated accent-loom-accent"
-                />
-                Animate entrance
-              </label>
-
-              <div className="loom-slider-row">
-                <span className="truncate text-2xs text-loom-muted">Opacity</span>
-                <input aria-label="Opacity"
-                  type="range"
-                  min={0.2}
-                  max={1}
-                  step={0.05}
-                  value={chartVisualOverrides.opacity ?? 0.7}
-                  onChange={(e) => updateOverride("opacity", Number(e.target.value))}
-                />
-                <span className="loom-slider-value">{((chartVisualOverrides.opacity ?? 0.7) * 100).toFixed(0)}%</span>
-              </div>
-            </ChartInspectorSection>
-
-            {/* Annotations */}
-            {activeChart && (
-              <ChartInspectorSection title="Annotations" open={!!visualSections.notes} onToggle={() => toggleVisualSection("notes")}>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPromptDialog({
-                      title: "Annotation text",
-                      defaultValue: "",
-                      onConfirm: (text) => {
-                        if (text?.trim()) addChartAnnotation(activeChart.id, text.trim());
-                      }
-                    });
-                  }}
-                  className="w-full px-2 py-1 text-2xs rounded border border-loom-border text-loom-text hover:border-loom-accent"
-                >
-                  Add note
-                </button>
-                {(chartAnnotations[activeChart.id] ?? []).map((a) => (
-                  <div key={a.id} className="flex items-center justify-between gap-1 text-2xs text-loom-text bg-loom-elevated/50 rounded px-2 py-1">
-                    <span className="truncate min-w-0">{a.text}</span>
-                    <button type="button" onClick={() => removeChartAnnotation(activeChart.id, a.id)} className="shrink-0 text-loom-muted hover:text-loom-text" aria-label="Remove">×</button>
-                  </div>
-                ))}
-              </ChartInspectorSection>
-            )}
 
           </div>
       </div>

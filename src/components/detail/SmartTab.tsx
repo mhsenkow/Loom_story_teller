@@ -6,7 +6,9 @@ import { runAnomaly, type AnomalyMethod, runTrend, runReferenceLines, runCluster
 import { isNumericColumnType } from "@/lib/dataCubeSchema";
 import { corrCellInk, corrFillT, sampleCorrDiverging, DEFAULT_CORR_DIVERGING } from "@/lib/corrMatrixStyle";
 import { clampSmartFloat, SMART_Z } from "@/lib/smartInputClamp";
+import EmptyState from "../EmptyState";
 import AnalysisCards from "./AnalysisCards";
+import ChartAnalysisCard from "./ChartAnalysisCard";
 
 export default function SmartTab() {
   const anomalyColId = useId();
@@ -68,15 +70,14 @@ export default function SmartTab() {
 
   if (!activeChart) {
     return (
-      <div className="p-4 text-center text-sm text-loom-muted">
-        Select a chart to run smart analytics. Results visualize on the chart.
-      </div>
+      <EmptyState title="Choose a chart to explore">Select a chart, then look for unusual values and possible trends.</EmptyState>
     );
   }
 
   return (
     <div className="p-3 space-y-4">
-      <AnalysisCards key={activeChart.id} />
+      <ChartAnalysisCard key={`${activeChart.id}:${activeChart.kind}`} />
+      {activeChart.kind === "line" && <details><summary className="text-sm font-medium cursor-pointer">Line forecast overlays and events</summary><AnalysisCards key={activeChart.id} /></details>}
       <details className="space-y-3"><summary className="text-sm font-medium cursor-pointer">More analysis tools</summary>
       <button type="button" className="loom-btn-ghost text-xs" onClick={clearSmart}>Clear all analysis and events</button>
       {/* Anomaly detection */}

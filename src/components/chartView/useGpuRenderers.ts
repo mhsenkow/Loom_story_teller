@@ -1,3 +1,4 @@
+import { findChartDefinition } from "@/lib/chartDefinitions";
 // WebGPU renderer lifecycle, geo atlas, and scatter upload/pan passes (LOOM-141).
 import { useEffect, useMemo } from "react";
 import type { MutableRefObject, RefObject } from "react";
@@ -13,7 +14,6 @@ import { isGeoFamilyKind } from "@/lib/geoMaps";
 import { notifyChartPainted } from "@/lib/chartPaintSignal";
 import { densityPointBudget } from "@/lib/chartStagePixels";
 import type { GPUScatterPoint } from "@/lib/webgpu";
-import { isWebGpuDrawableScene } from "@/lib/gpuScenes";
 import { acquireSharedGpuDevice } from "@/lib/gpuDevice";
 import type { GpuCubeRenderer, GpuScatterRenderer, GpuSceneRenderer } from "./chartStageRefs";
 import { stageDpr } from "./constants";
@@ -152,9 +152,10 @@ export function useGpuRenderers(args: UseGpuRenderersArgs): UseGpuRenderersResul
     if (!canvas) return;
     let cancelled = false;
     const kind = activeChart?.kind ?? "";
-    const wantScene = isWebGpuDrawableScene(kind);
-    const wantCube = kind === "dataCube";
-    const wantScatter = kind === "scatter";
+    const gpu = findChartDefinition(kind)?.render.gpu ?? "none";
+    const wantScene = gpu === "scene";
+    const wantCube = gpu === "cube";
+    const wantScatter = gpu === "scatter";
 
     setGpuReady(false);
     if (!wantCube && !wantScene && !wantScatter) return;

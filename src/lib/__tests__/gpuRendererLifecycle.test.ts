@@ -231,17 +231,20 @@ describe("LoomRenderer buffer lifecycle", () => {
     await expect(r.render(0, 1, 0, 1)).resolves.toBeUndefined();
   });
 
-  it("renders by submitting one command buffer after an upload", async () => {
+  it("submits a clear for empty data, including after a populated frame", async () => {
     stubNavigatorGpu();
     const fake = createFakeDevice();
     const { canvas } = createCanvas();
     const r = new LoomRenderer();
     await r.init(canvas, createLease(fake).lease);
     await r.render(0, 1, 0, 1);
-    expect(fake.submits).toBe(0);
+    expect(fake.submits).toBe(1);
     r.uploadData(scatterPts(10));
     await r.render(0, 10, 0, 10, 8);
-    expect(fake.submits).toBe(1);
+    expect(fake.submits).toBe(2);
+    r.uploadData([]);
+    await r.render(0, 1, 0, 1);
+    expect(fake.submits).toBe(3);
   });
 
   it("aborts init (and frees its lease) when destroyed mid-init", async () => {

@@ -182,7 +182,7 @@ export function renderFullBox(ctx: CanvasRenderingContext2D, rows: unknown[][], 
     ctx.moveTo(cx - boxW * 0.25, Y(t.hi)); ctx.lineTo(cx + boxW * 0.25, Y(t.hi));
     ctx.stroke();
     ctx.fillStyle = color;
-    ctx.globalAlpha = 0.28;
+    ctx.globalAlpha = 0.28 * (opts?.opacity ?? 1);
     ctx.fillRect(cx - boxW / 2, q3y, boxW, Math.max(1, q1y - q3y));
     ctx.globalAlpha = 1;
     ctx.strokeRect(cx - boxW / 2, q3y, boxW, Math.max(1, q1y - q3y));
@@ -193,7 +193,7 @@ export function renderFullBox(ctx: CanvasRenderingContext2D, rows: unknown[][], 
     ctx.lineTo(cx + boxW / 2, Y(box.q2));
     ctx.stroke();
     ctx.fillStyle = color;
-    ctx.globalAlpha = 0.7;
+    ctx.globalAlpha = 0.7 * (opts?.opacity ?? 1);
     for (const v of t.outliers.slice(0, 200)) {
       ctx.beginPath();
       ctx.arc(cx, Y(v), 2, 0, Math.PI * 2);
@@ -396,6 +396,7 @@ export function renderFullArea(
       shape: "rect", x: x0, y: rect.top, w: Math.max(1, x1 - x0), h: rect.bottom - rect.top,
       match: tb.unit ? [] : [[xi, key]],
       rowIndex: tb.unit ? tb.firstRow.get(key) : undefined,
+      analysisKey: JSON.stringify(["", "*", key]),
       ...(single ? { reading: { label: key, value: total, measure: vTitle, order: ki } } : {}),
       summary: single
         ? { columns: [xName, vTitle], row: [key, formatTooltipNumber(total)] }

@@ -1,10 +1,13 @@
 // LOOM-141 — ChartView orchestration (state, effects, layout)
 // @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
 "use client";
+import EmptyState from "../EmptyState";
+import { chartDefinition } from "@/lib/chartDefinitions";
 import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
 import type { ReactNode } from "react";
 import { GPU_GLOBE_ENABLED, stageDpr } from "./constants";
 import { useChartPaint } from "./useChartPaint";
+import { analyzeChart, chartAnalysisScope } from "@/lib/chartAnalysis";
 import { useChartExport } from "./useChartExport";
 import { useChartShortcuts } from "./useChartShortcuts";
 import { useChartStage } from "./useChartStage";
@@ -600,9 +603,14 @@ export function useChartViewCore(): ReactNode | null {
   const scenePinchRef = useRef<{ dist: number; zoom: number } | null>(null);
   /** Where the current press began; a click that ends a drag/brush/orbit must not pin. */
   const pointerDownAtRef = useRef<PressStart | null>(null);
+  const chartAnomalyConfig = smartResults?.chartAnomaly;
+  const chartAnomalies = useMemo(() => activeChart && chartSampleRows && chartAnomalyConfig?.enabled && chartAnomalyConfig.scope === chartAnalysisScope(activeChart)
+    ? analyzeChart(activeChart, chartSampleRows.rows, chartSampleRows.columns, chartAnomalyConfig) : null,
+    [activeChart, chartSampleRows, chartAnomalyConfig]);
+  const hasChartAnomalies = !!chartAnomalies?.flagged.length && chartAnomalies.overlay !== "none";
   const hasSmartOverlays =
     smartResults &&
-    ((smartResults.anomaly?.rowIndices?.length ?? 0) > 0 ||
+    (hasChartAnomalies || (smartResults.anomaly?.rowIndices?.length ?? 0) > 0 ||
       (smartResults.trend?.points?.length ?? 0) >= 2 ||
       (smartResults.forecast?.points?.length ?? 0) > 0 ||
       (smartResults.referenceLines?.lines?.length ?? 0) > 0 ||
@@ -626,7 +634,7 @@ export function useChartViewCore(): ReactNode | null {
     !!activeChart &&
     isWebGpuDrawableScene(activeChart.kind) &&
     gpuReady &&
-    !forceCanvasCapture &&
+    !forceCanvasCapture && !hasChartAnomalies &&
     !!sceneRendererRef.current;
   const useWebGpuGlobe =
     GPU_GLOBE_ENABLED &&
@@ -636,12 +644,12 @@ export function useChartViewCore(): ReactNode | null {
     chartVisualOverrides.markerMode !== "emoji" &&
     (!chartVisualOverrides.markShape || chartVisualOverrides.markShape === "circle") &&
     gpuReady &&
-    !forceCanvasCapture &&
+    !forceCanvasCapture && !hasChartAnomalies &&
     !!sceneRendererRef.current;
   const useWebGpuCube =
     activeChart?.kind === "dataCube" &&
     gpuReady &&
-    !forceCanvasCapture &&
+    !forceCanvasCapture && !hasChartAnomalies &&
     !!cubeRendererRef.current;
   const { dataCube, pivotTable, swapCubeAxes, rotateCubeAxes, replaceCubeAxis } = useDataCubeStage({
     activeChart,
@@ -658,17 +666,13 @@ export function useChartViewCore(): ReactNode | null {
     cubeTransitionRef,
     setCubeAnim,
   });
-  const orbitEnabled =
-    !!activeChart &&
-    (activeChart.kind === "scatter3d" ||
-      activeChart.kind === "dataCube" ||
-      activeChart.kind === "globe" ||
-      activeChart.kind === "globeTrail");
+  const orbitEnabled = !!activeChart && chartDefinition(activeChart.kind).interactions.camera;
   const exportStateRef = useRef({
     activeChart,
     gpuReady,
     vegaSpec,
     sampleRows: chartSampleRows,
+    hasChartAnomalies,
     chartVisualOverrides,
     chartFootnoteText,
     sceneOrbit,
@@ -682,6 +686,7 @@ export function useChartViewCore(): ReactNode | null {
     gpuReady,
     vegaSpec,
     sampleRows: chartSampleRows,
+    hasChartAnomalies,
     chartVisualOverrides,
     chartFootnoteText,
     sceneOrbit,
@@ -1244,6 +1249,7 @@ export function useChartViewCore(): ReactNode | null {
     chartVisualOverrides,
     chartTitleOverrides,
     smartResults,
+    chartAnomalies,
     themeUi,
     colors,
     opacity,
@@ -1338,10 +1344,7 @@ export function useChartViewCore(): ReactNode | null {
           header={suggestionHeader}
         />
         <div className="flex-1 flex flex-col items-center justify-center gap-3 p-6">
-          <p className="text-sm text-loom-muted text-center">Pick what goes on the chart in Fields, in the Chart panel</p>
-          <button type="button" onClick={openChartEditor} className="loom-btn-primary text-xs py-2 px-4 min-h-10">
-            Open Chart editor
-          </button>
+          <EmptyState title="Your next chart starts here" action={<button type="button" onClick={openChartEditor} className="loom-btn-primary">Open Chart editor</button>}>Pick what goes on the chart in Fields, in the Chart panel.</EmptyState>
         </div>
       </div>
     );

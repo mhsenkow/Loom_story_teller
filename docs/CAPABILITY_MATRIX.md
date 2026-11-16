@@ -30,3 +30,8 @@
 **Fallback copy:** When a capability is missing, Sidebar and Query show the same messages documented in [DOCS.md](../DOCS.md) (browser ingestion section).
 
 **Browserslist:** Derived from this matrix after `npm run build`; do not claim support for APIs not listed here.
+
+Chart analysis expansion (2026-11-16): shared TypeScript supports source-measure anomaly evidence and ordered-source forecast previews for all chart kinds. Native mark outlines cover bar, line, area, scatter, bubble, scatter3d, firefly and dataCube. Other kinds explicitly report source-row/frequency evidence rather than derived-bin, graph-topology or geographic anomalies. Highlighted accelerated charts use Canvas fallback; PNG retains outlines. Analysis settings and preview tables are not included in saved views, published links or SVG. Validated in Chrome on macOS; no new physical iOS/Android/Safari validation is claimed.
+
+
+Mobile refinement (2026-11-16): phone/tablet layouts and touch controls are covered in Chromium and WebKit viewport emulation on macOS, including landscape, nested explanations, reduced motion and simulated keyboard occlusion. Physical iOS/Android verification remains separate. Illustrations are inline SVG, use theme tokens and require no external assets.

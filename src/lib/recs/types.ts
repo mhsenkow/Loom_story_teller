@@ -1,11 +1,12 @@
+import { CHART_DEFINITION_LIST } from "../chartDefinitions";
 // =================================================================
 // Chart kind / recommendation types shared by every recs module.
 // (split from recommendations.ts — LOOM-195; public API re-exported there)
 // =================================================================
 
-import { GEO_MAP_KIND_OPTIONS, type GeoMapKind } from "../geoMapsRec";
-import { GPU_SCENE_KIND_OPTIONS, type GpuSceneKind } from "../gpuScenesRec";
-import { ODD_CHART_KIND_OPTIONS, type OddChartKind } from "../oddChartsRec";
+import { type GeoMapKind } from "../geoMapsRec";
+import { type GpuSceneKind } from "../gpuScenesRec";
+import { type OddChartKind } from "../oddChartsRec";
 
 export type ChartKind =
   | "scatter"
@@ -52,39 +53,7 @@ export const Y_AGGREGATE_OPTIONS: { value: YAggregateOption; label: string }[] =
 ];
 
 /** Display options for chart-type selector (dot/line/rect/pie etc). */
-export const CHART_KIND_OPTIONS: { value: ChartKind; label: string }[] = [
-  { value: "scatter", label: "Scatter" },
-  { value: "bubble", label: "Bubble" },
-  { value: "hexbin", label: "Hexbin" },
-  { value: "line", label: "Line" },
-  { value: "bar", label: "Bar" },
-  { value: "lollipop", label: "Lollipop" },
-  { value: "dumbbell", label: "Dumbbell" },
-  { value: "area", label: "Area" },
-  { value: "pie", label: "Pie" },
-  { value: "funnel", label: "Funnel" },
-  { value: "histogram", label: "Histogram" },
-  { value: "waterfall", label: "Waterfall" },
-  { value: "strip", label: "Strip" },
-  { value: "violin", label: "Violin" },
-  { value: "ridgeline", label: "Ridgeline" },
-  { value: "box", label: "Box" },
-  { value: "radar", label: "Radar" },
-  { value: "parallel", label: "Parallel coords" },
-  { value: "heatmap", label: "Heatmap" },
-  { value: "treemap", label: "Treemap" },
-  { value: "sunburst", label: "Sunburst" },
-  { value: "forceBubble", label: "Force Bubble" },
-  { value: "sankey", label: "Sankey" },
-  { value: "network", label: "Network" },
-  { value: "arcDiagram", label: "Arc diagram" },
-  { value: "pareto", label: "Pareto" },
-  { value: "corrMatrix", label: "Correlation matrix" },
-  { value: "choropleth", label: "Choropleth map" },
-  ...ODD_CHART_KIND_OPTIONS,
-  ...GPU_SCENE_KIND_OPTIONS,
-  ...GEO_MAP_KIND_OPTIONS,
-];
+export const CHART_KIND_OPTIONS: { value: ChartKind; label: string }[] = CHART_DEFINITION_LIST.map(({kind, label}) => ({value: kind, label}));
 
 export interface ChartRecommendation {
   id: string;

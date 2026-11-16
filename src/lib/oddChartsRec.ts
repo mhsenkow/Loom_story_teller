@@ -99,6 +99,13 @@ export const ODD_NON_CARTESIAN = new Set<string>([
 ]);
 
 export interface OddRenderOpts {
+  axisStyle?: string;
+  axisLineColor?: string;
+  axisLineWidth?: number;
+  showGrid?: boolean;
+  gridStyle?: string;
+  gridOpacity?: number;
+  tickCount?: number;
   /** Reader-facing names parallel to columns (axes, legends, captions). Never used for lookup. */
   fieldDisplayNames?: string[];
   lineCap?: CanvasLineCap;

@@ -25,6 +25,26 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-11-16",
+    date: "2026-11-16",
+    title: "Charts you can dig into",
+    summary: "Analysis works across more chart types, phone editing is roomier, and chart controls follow through more reliably.",
+    items: [
+      {
+        title: "More room to explore on your phone",
+        detail: "Analysis has a roomier editor, easier touch controls and readable scrolling results. Number fields let you finish typing, explanations keep keyboard focus, and illustrated empty states help you find the next step. Motion respects your preferences.",
+      },
+      {
+        title: "Analyze beyond the line",
+        detail: "Find unusual bar totals, series values, scatter coordinates and cube cells. Every chart offers source-data anomaly evidence and ordered forecast previews, with explanations of what is being compared and links back to contributing rows.",
+      },
+      {
+        title: "Chart controls that follow through",
+        detail: "Point sizes, opacity, grid styling and value labels respond more consistently across charts. Chord and Mosaic honor Average, Min and Max, and connected scatter can be ordered by a date column. Accelerated scatter clears old points when its data becomes empty.",
+      },
+    ],
+  },
+  {
     id: "2026-11-12e",
     date: "2026-11-12",
     title: "Fewer snags before you chart",

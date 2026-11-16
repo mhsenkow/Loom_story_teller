@@ -1,5 +1,8 @@
 // Active chart paint pass (extracted from ChartView useEffect — LOOM-141)
 // @ts-nocheck — LOOM-141: ChartViewRuntime bag until typed
+import { drawChartAnomalies } from "@/lib/chartAnalysisOverlay";
+import type { ChartAnomalyReport } from "@/lib/chartAnalysis";
+import { chartDefinition } from "@/lib/chartDefinitions";
 import { categoryIndex, radiusFromPointSize, drawEmptyMessage, resolveChartInk } from "@/lib/chartInk";
 import { groupChartChannels } from "@/lib/channelGroups";
 import { usesScatterNavigation } from "@/lib/chartInteractionSurface";
@@ -95,6 +98,7 @@ export type ChartPaintParams = {
   chartVisualOverrides: import("@/lib/chartVisualTypes").ChartVisualOverrides;
   chartTitleOverrides: Record<string, string | null>;
   smartResults: SmartResults | null;
+  chartAnomalies?: ChartAnomalyReport | null;
   themeUi: ReturnType<typeof getThemeUiColors>;
   colors: string[];
   opacity: number;
@@ -159,6 +163,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
     chartVisualOverrides,
     chartTitleOverrides,
     smartResults,
+    chartAnomalies,
     themeUi,
     colors,
     opacity,
@@ -251,6 +256,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
       // The HTML pivot bar carries the legend live; Canvas draws it only for capture / export.
       showLegend: chartVisualOverrides.legendPosition !== "none" && (forceCanvasCapture || !!socialExportReady),
       hovered: cubeHover,
+      anomalyCells: chartAnomalies?.cells,
       footerReserve: chartFootnoteReservePx(chartFootnoteText, {
         hasColorRamp: !!chartColorInfo?.stops?.length,
         pad: 24,
@@ -749,6 +755,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
           }
           ctx.restore();
           for (const hit of cellHits) {
+            if (hit.analysisKey) { const key = JSON.parse(hit.analysisKey); key[0] = panel.key; hit.analysisKey = JSON.stringify(key); }
             if (hit.rowIndex != null) hit.rowIndex = sourceIndexOf.get(panel.rows[hit.rowIndex]!) ?? hit.rowIndex;
             if (hit.match.length && rowIdx >= 0) hit.match.push([rowIdx, panel.key]);
           }
@@ -845,7 +852,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
         case "pareto": renderFullPareto(ctx, rows, xIdx, yIdx, w, h, pad, ropts); break;
         case "corrMatrix": renderFullCorrMatrix(ctx, rows, cols, w, h, pad, ropts); break;
         default:
-          if (isGeoMapKind(activeChart.kind)) {
+          if (chartDefinition(activeChart.kind).render.canvas === "geo") {
             renderGeoMapCanvas(
               activeChart.kind,
               ctx,
@@ -887,7 +894,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
                 atlas: geoAtlasBundle,
               },
             );
-          } else if (isGpuSceneKind(activeChart.kind)) {
+          } else if (chartDefinition(activeChart.kind).render.canvas === "scene") {
             const packed = extractGpuScenePoints(
               rows,
               cols,
@@ -928,7 +935,7 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
                 hits,
               });
             }
-          } else if (isOddChartKind(activeChart.kind)) {
+          } else if (chartDefinition(activeChart.kind).render.canvas === "odd") {
             renderOddChart(
               activeChart.kind,
               ctx,
@@ -948,6 +955,13 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
                 fontFamily: opts.fontFamily,
                 axisFontSize: opts.axisFontSize,
                 tickRotation: opts.tickRotation,
+                axisStyle: opts.axisStyle,
+                axisLineColor: opts.axisLineColor,
+                axisLineWidth: opts.axisLineWidth,
+                showGrid: opts.showGrid,
+                gridStyle: opts.gridStyle,
+                gridOpacity: opts.gridOpacity,
+                tickCount: opts.tickCount,
                 axisLabelColor: opts.axisLabelColor,
                 themeText: opts.themeText,
                 themeMuted: opts.themeMuted,
@@ -982,6 +996,8 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
               },
               false,
             );
+          } else {
+            throw new Error(`No Canvas adapter registered for ${activeChart.kind}`);
           }
           break;
       }
@@ -1089,6 +1105,15 @@ export function paintActiveChart(p: ChartPaintParams): (() => void) | undefined 
         ctx.font = chartFont(chartTypeRamp(opts.axisFontSize).mark, fontFamily);
         ctx.fillText("rows", tx, gy + 44);
         ctx.restore();
+      }
+      if (chartAnomalies?.overlay === "marks" && chartAnomalies.flagged.length) {
+        const flagged = new Set(chartAnomalies.rowIndices.map(i => chartSampleRows.rowSourceIndices?.[i] ?? i));
+        const seriesKeys = chartDefinition(activeChart.kind).analysis.basis === "series" ? new Set(chartAnomalies.flagged.flatMap(p => {
+          if (!p.markKey) return [];
+          const key = JSON.parse(p.markKey); key[1] = "*";
+          return [p.markKey, JSON.stringify(key)];
+        })) : undefined;
+        drawChartAnomalies(ctx, hits, rows, flagged, sub.sourceIndices, colors[2] ?? themeUi.text, themeUi.bg, usesScatterNavigation(activeChart), seriesKeys);
       }
       if (!useFacets && smartResults) {
         drawSmartOverlays(

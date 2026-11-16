@@ -29,7 +29,7 @@ export const auditRows: unknown[][] = Array.from({ length: 90 }, (_, i) => [
   new Date(Date.UTC(2026, 0, Math.floor(i / 3) + 1)).toISOString().slice(0, 10),
 ]);
 
-const oddEnc: Partial<Record<ChartKind, [number, number, number, number]>> = {
+export const oddEnc: Partial<Record<ChartKind, [number, number, number, number]>> = {
   bump: [7, 2, 1, -1], stream: [7, 2, 1, -1], horizon: [7, 2, -1, -1],
   calendar: [7, 2, -1, -1], ecdf: [2, -1, 1, -1], sparkGrid: [7, 2, 1, -1],
   density: [2, -1, 1, -1], qq: [2, -1, -1, -1], connectedScatter: [2, 3, -1, 7],

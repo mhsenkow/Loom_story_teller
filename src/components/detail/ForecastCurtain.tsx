@@ -1,6 +1,7 @@
 // Method comparison for the forecast curtain. Selecting one redraws the dashed path.
 "use client";
 
+import AnalysisNumberInput from "../AnalysisNumberInput";
 import { FORECAST_METHOD_LABEL, type ForecastMethod } from "@/lib/timeSeriesAnalysis";
 
 export const FORECAST_METHOD_ORDER: ForecastMethod[] = ["naive", "line", "holt", "seasonal"];
@@ -68,7 +69,7 @@ export function ForecastMethodList({ method, season, code, onMethod, onSeason }:
       <p><span className="text-loom-muted">The shade. </span>{selected.band}</p>
     </div>
     {method === "seasonal" && <label className="block text-xs text-loom-muted">Points in one cycle
-      <input aria-label="Season length" className="loom-input mt-1 w-full" type="number" min={2} max={24} value={season} onChange={event => onSeason(Math.max(2, Math.min(24, Math.round(Number(event.target.value) || 12))))} />
+      <AnalysisNumberInput label="Season length" value={season} min={2} max={24} onCommit={onSeason} />
     </label>}
     <p className="text-xs text-loom-muted">Every method needs 8 plotted points, a horizon from 1 to 50, and an X axis that moves forward. The horizon counts plotted intervals, not necessarily days. Empty values are skipped. The result describes the loaded data, not unseen rows.</p>
     <details><summary className="cursor-pointer text-sm text-loom-text">Full calculation code · TypeScript</summary><pre className="mt-2 overflow-auto max-h-72 whitespace-pre text-2xs" tabIndex={0}><code>{code}</code></pre></details>

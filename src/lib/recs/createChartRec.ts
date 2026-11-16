@@ -1,3 +1,4 @@
+import { CHART_DEFINITION_LIST, chartDefinition } from "../chartDefinitions";
 // =================================================================
 // createChartRec — build one ChartRecommendation (Vega-Lite spec + encodings) for a kind.
 // (split from recommendations.ts — LOOM-195; public API re-exported there)
@@ -103,31 +104,23 @@ export function createScatterRec(
 }
 
 /** Kinds whose X (or slice / stage / identity) is a category. */
-export const CATEGORY_X_KINDS = new Set<string>([
-  "bar", "pareto", "lollipop", "pie", "treemap", "sunburst", "forceBubble", "funnel", "waterfall", "box", "violin",
-  "beeswarm", "dumbbell", "pyramid", "slope", "radialBar", "waffle", "isotype", "isoBars", "mosaic", "rose", "errorBars", "wordCloud",
-  "chord", "sankey", "network", "arcDiagram", "bucketField",
-]);
+export const CATEGORY_X_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("CATEGORY_X_KINDS")).map(d => d.kind));
 /** One glyph per row/entity — an identity column (country, name) rather than a few groups. */
-export const IDENTITY_X_KINDS = new Set<string>(["chernoff", "glyphStar", "flower"]);
+export const IDENTITY_X_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("IDENTITY_X_KINDS")).map(d => d.kind));
 /** Kinds whose Y is the group axis. */
-export const CATEGORY_Y_KINDS = new Set<string>(["strip", "ridgeline"]);
+export const CATEGORY_Y_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("CATEGORY_Y_KINDS")).map(d => d.kind));
 /** Kinds whose X is an ordering — time reads best. */
-export const ORDERED_X_KINDS = new Set<string>(["line", "area", "bump", "stream", "horizon", "spiral", "calendar", "sparkGrid", "stripes"]);
+export const ORDERED_X_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("ORDERED_X_KINDS")).map(d => d.kind));
 /** Kinds that place marks on two continuous axes (density, territories, points). */
-export const NUMERIC_XY_KINDS = new Set<string>(["scatter", "bubble", "hexbin", "contour", "isoScatter", "voronoi", "connectedScatter"]);
+export const NUMERIC_XY_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("NUMERIC_XY_KINDS")).map(d => d.kind));
 /** Kinds that bin a numeric X (Y is a count). */
-export const NUMERIC_X_KINDS = new Set<string>(["histogram", "ecdf", "density", "qq"]);
+export const NUMERIC_X_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("NUMERIC_X_KINDS")).map(d => d.kind));
 /** Kinds that plot a numeric Y against their X (no count fallback). */
-export const NUMERIC_Y_KINDS = new Set<string>([
-  "line", "area", "bump", "stream", "horizon", "spiral", "sparkGrid", "stripes", "errorBars", "box", "violin", "beeswarm", "dumbbell", "slope", "pyramid",
-]);
+export const NUMERIC_Y_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("NUMERIC_Y_KINDS")).map(d => d.kind));
 /** Kinds that split a whole into parts — slice sizes need non-negative totals. */
-export const PART_TO_WHOLE_KINDS = new Set<string>([
-  "pie", "treemap", "sunburst", "waffle", "isotype", "forceBubble", "radialBar", "funnel", "mosaic", "pareto", "rose",
-]);
+export const PART_TO_WHOLE_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("PART_TO_WHOLE_KINDS")).map(d => d.kind));
 /** Kinds where Color is a required second category (target / segment). */
-export const CATEGORY_COLOR_KINDS = new Set<string>(["mosaic", "chord", "sankey", "network", "arcDiagram"]);
+export const CATEGORY_COLOR_KINDS = new Set<string>(CHART_DEFINITION_LIST.filter(d => d.adaptation.includes("CATEGORY_COLOR_KINDS")).map(d => d.kind));
 
 /**
  * Adapt an encoding when switching chart type: keep fields that suit the new kind,
@@ -446,7 +439,7 @@ export function createChartRec(
   switch (kind) {
     case "bar":
     case "pareto": {
-      const agg = aggForMeasure("sum");
+      const agg = aggForMeasure(chartDefinition(kind).defaultAggregate);
       enc.x = { field: xField, type: "nominal", sort: "-y" };
       const yEnc: Record<string, unknown> = yField
         ? { field: yField, type: "quantitative", aggregate: agg }
@@ -491,7 +484,7 @@ export function createChartRec(
       subtitle = "how many rows fall in each range";
       break;
     case "line": {
-      const agg = aggForMeasure("mean");
+      const agg = aggForMeasure(chartDefinition(kind).defaultAggregate);
       enc.x = { field: xField, type: "temporal" };
       enc.y = yField ? { field: yField, type: "quantitative", aggregate: agg } : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };

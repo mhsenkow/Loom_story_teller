@@ -117,7 +117,7 @@ export function useMobileLiveEdit(): boolean {
   // The sheet needs room for its navigation and usable controls below it.
   const hasPreviewRoom = useMediaQuery("(min-height: 740px)");
   const live = useLoomStore(
-    (s) => s.panelOpen && s.viewMode === "chart" && s.panelTab === "chart",
+    (s) => s.panelOpen && s.viewMode === "chart" && s.panelTab === "chart" && (s.chartPanelSection === "encoding" || s.chartPanelSection === "visual"),
   );
   return isMobile && hasPreviewRoom && live;
 }

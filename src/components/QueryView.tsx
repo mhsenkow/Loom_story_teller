@@ -7,6 +7,7 @@
 
 "use client";
 
+import EmptyState from "./EmptyState";
 import { useLoomStore } from "@/lib/store";
 import { useShallow } from "zustand/react/shallow";
 import { viewModeName } from "@/lib/viewModes";
@@ -620,19 +621,9 @@ export function QueryView() {
             </table>
           </>
         ) : queryResult && !queryError ? (
-          <div className="flex flex-col items-center justify-center gap-1 h-full px-4 text-center">
-            <p className="text-sm text-loom-text">No rows returned</p>
-            {queryResult.columns.length > 0 && (
-              <p className="text-2xs text-loom-muted font-mono max-w-full truncate" title={queryResult.columns.join(", ")}>
-                Columns: {queryResult.columns.join(", ")}
-              </p>
-            )}
-          </div>
+          <EmptyState compact variant="filter" title="No rows returned">Try widening your WHERE conditions or checking the source table.{queryResult.columns.length > 0 && <p className="mt-2 font-mono break-words">Columns: {queryResult.columns.join(", ")}</p>}</EmptyState>
         ) : !queryError ? (
-          <div className="flex flex-col items-center justify-center gap-1 h-full px-4 text-center">
-            <p className="text-sm text-loom-muted">Run a query to see results</p>
-            <p className="text-2xs text-loom-muted">Press Execute or ⌘/Ctrl + Enter in the editor</p>
-          </div>
+          <EmptyState compact variant="query" title="Run a query to see results">Press Execute or ⌘/Ctrl + Enter in the editor.</EmptyState>
         ) : null}
       </div>
     </div>

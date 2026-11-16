@@ -1,6 +1,7 @@
 // Outcome-first chart analysis controls; shared configuration stays in Zustand.
 "use client";
 
+import AnalysisNumberInput from "../AnalysisNumberInput";
 import { useState, useMemo, type ReactNode } from "react";
 import { ANOMALY_SOURCE, FORECAST_SOURCES } from "@/lib/timeSeriesAnalysisSource";
 import { useShallow } from "zustand/react/shallow";
@@ -39,7 +40,7 @@ function AnalysisCard({ title, outcome, status, explained, onExplain, children, 
   return <section className="loom-card p-3 space-y-3">
     <div className="flex items-center gap-2">
       <h3 className="text-sm font-semibold flex-1">{title}</h3>
-      <button type="button" className="loom-btn-ghost min-w-8 min-h-8" aria-label={`About ${title.toLowerCase()}`} aria-expanded={explained} onClick={onExplain}>ⓘ</button>
+      <button type="button" className="loom-btn-ghost min-w-8 min-h-8" aria-label={`About ${title.toLowerCase()}`} aria-expanded={explained} onClick={event => { event.currentTarget.focus({ preventScroll: true }); onExplain(); }}>ⓘ</button>
       {toggle && <button type="button" className="loom-btn-ghost text-xs min-h-8" aria-label={`${enabled ? "Hide" : "Show"} ${title.toLowerCase()}`} aria-pressed={enabled} onClick={toggle}>{enabled ? "Visible" : "Hidden"}</button>}
       {remove && <button type="button" className="loom-btn-ghost min-w-8 min-h-8" aria-label={`Remove ${title.toLowerCase()}`} onClick={remove}>×</button>}
     </div>
@@ -63,7 +64,6 @@ export default function AnalysisCards() {
   const isLiveFeed = useLoomStore((s) => !!s.selectedFile?.path.startsWith("stream://"));
   const setView = useLoomStore(s => s.setViewMode);
   const apply = (patch: Partial<TimeSeriesAnalysis>) => { update(patch); setView("chart"); };
-  const clamp = (value: string, min: number, max: number) => Math.max(min, Math.min(max, Math.round(Number(value) || min)));
   const methodLabel = FORECAST_METHOD_LABEL[config.forecast?.method ?? method];
   const chooseMethod = (next: ForecastMethod) => {
     setMethod(next);
@@ -81,14 +81,14 @@ export default function AnalysisCards() {
       status={config.forecast ? unavailable || series.count < 8 ? "Paused · needs a supported chart with 8 plotted points" : `${config.forecast.enabled ? "On chart" : "Hidden"} · ${methodLabel} · ${config.forecast.horizon} future intervals` : `Next add uses ${methodLabel}`}
       toggle={config.forecast ? () => update({ forecast: { ...config.forecast!, enabled: !config.forecast!.enabled } }) : undefined}
       remove={config.forecast ? () => update({ forecast: undefined }) : undefined}>
-      <label className="block text-xs text-loom-muted">Forecast ahead <span className="text-loom-text">· intervals</span><input aria-label="Forecast intervals" className="loom-input w-full mt-1" type="number" min={1} max={50} value={horizon} onChange={e => setHorizon(clamp(e.target.value, 1, 50))} /></label>
+      <label className="block text-xs text-loom-muted">Forecast ahead <span className="text-loom-text">· intervals</span><AnalysisNumberInput label="Forecast intervals" value={horizon} min={1} max={50} onCommit={setHorizon} /></label>
       <button type="button" disabled={!!unavailable || series.count < 8} className="loom-btn-primary w-full text-xs disabled:opacity-50" onClick={() => apply({ forecast: { enabled: true, horizon, method, season } })}>{config.forecast ? "Update forecast" : "Add forecast"}</button>
     </AnalysisCard>
     <AnalysisCard title="Anomaly detection" outcome="Spot values that break the recent pattern." enabled={config.anomaly?.enabled} explained={curtain === "anomaly"} onExplain={() => setCurtain("anomaly")}
       status={config.anomaly ? unavailable || series.count <= config.anomaly.window ? "Paused · needs more history than the lookback window" : `${config.anomaly.enabled ? "On chart" : "Hidden"} · previous ${config.anomaly.window} points · sensitivity ${config.anomaly.threshold}` : "Add rings around unusual plotted values"}
       toggle={config.anomaly ? () => update({ anomaly: { ...config.anomaly!, enabled: !config.anomaly!.enabled } }) : undefined}
       remove={config.anomaly ? () => update({ anomaly: undefined }) : undefined}>
-      <label className="block text-xs text-loom-muted">Look back · points<input aria-label="Anomaly lookback" className="loom-input w-full mt-1" type="number" min={5} max={50} value={window} onChange={e => setWindow(clamp(e.target.value, 5, 50))} /></label>
+      <label className="block text-xs text-loom-muted">Look back · points<AnalysisNumberInput label="Anomaly lookback" value={window} min={5} max={50} onCommit={setWindow} /></label>
       <label className="block text-xs text-loom-muted">Sensitivity<select className="loom-input w-full mt-1" value={threshold} onChange={e => setThreshold(Number(e.target.value))}><option value={2.5}>More sensitive</option><option value={3.5}>Balanced</option><option value={5}>Only large departures</option></select></label>
       <button type="button" disabled={!!unavailable || series.count <= window} className="loom-btn-primary w-full text-xs disabled:opacity-50" onClick={() => apply({ anomaly: { enabled: true, window, threshold } })}>{config.anomaly ? "Update detection" : "Find anomalies"}</button>
       {isLiveFeed && (

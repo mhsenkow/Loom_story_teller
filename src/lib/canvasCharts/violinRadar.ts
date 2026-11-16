@@ -1,3 +1,4 @@
+import { radiusFromPointSize } from "../chartInk";
 import { chartNumber } from "../chartNumbers";
 // =================================================================
 // Canvas 2D violin, radar, waterfall and lollipop renderers.
@@ -225,7 +226,7 @@ export function renderFullRadar(
   ctx.restore();
 
   const symbols = markSymbols(opts, opts?.fieldNames ?? columnNames, rows);
-  const vertexR = symbols.active ? Math.max(4, (opts?.pointSize ?? 10) * 0.5) : 3.5;
+  const vertexR = radiusFromPointSize(opts?.pointSize, symbols.active ? 5 : 3.5);
   groupEntries.forEach(([gName, gRows], gi) => {
     const avgs = groupAvgs[gi]!;
     const symbol = symbols.of(gRows[0]);
@@ -238,7 +239,7 @@ export function renderFullRadar(
 
     const color = palette[gi % palette.length]!;
     ctx.fillStyle = color;
-    ctx.globalAlpha = 0.15;
+    ctx.globalAlpha = 0.15 * (opts?.opacity ?? 1);
     ctx.beginPath();
     normals.forEach((_, i) => {
       const p = vertex(i);
@@ -250,7 +251,7 @@ export function renderFullRadar(
 
     ctx.strokeStyle = color;
     ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.9;
+    ctx.globalAlpha = opts?.opacity ?? 0.9;
     ctx.stroke();
 
     ctx.fillStyle = color;
@@ -454,7 +455,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
     drawChartGrid(ctx, w, h, rect, opts, { x: [xs.min, xs.max], y: null });
 
     const bandH = (rect.bottom - rect.top) / entries.length;
-    const dotR = Math.max(3, Math.min(6, bandH * 0.3));
+    const dotR = Math.max(2, Math.min(radiusFromPointSize(opts?.pointSize, 6), bandH * 0.3));
     const centers: number[] = [];
     entries.forEach(({ label, value, cat, row }, i) => {
       const cy = rect.top + (i + 0.5) * bandH;
@@ -502,7 +503,7 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
   if (opts) opts.scales = { y: Y, valueAxis: "y", rect };
   drawChartGrid(ctx, w, h, rect, opts, { x: null, y: [ys.min, ys.max] });
   const band = (rect.right - rect.left) / entries.length;
-  const dotR = Math.max(3, Math.min(6, band * 0.25));
+  const dotR = Math.max(2, Math.min(radiusFromPointSize(opts?.pointSize, 6), band * 0.25));
   const centers: number[] = [];
   entries.forEach(({ label, value, cat, row }, i) => {
     const cx = rect.left + (i + 0.5) * band;

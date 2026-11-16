@@ -14,7 +14,10 @@ export function getFocusableElements(root: HTMLElement | null): HTMLElement[] {
 
 /** Move focus to the next/previous focusable node inside `root`, wrapping at edges. */
 export function trapTabKey(root: HTMLElement, e: KeyboardEvent): boolean {
-  if (e.key !== "Tab") return false;
+  if (e.key !== "Tab" || e.defaultPrevented) return false;
+  // A portal dialog owns its keyboard events; an underlying sheet must not steal them.
+  const dialog = e.target instanceof Element ? e.target.closest('[role="dialog"]') : null;
+  if (dialog && !dialog.contains(root)) return false;
   const focusable = getFocusableElements(root);
   if (focusable.length === 0) {
     e.preventDefault();

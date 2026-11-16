@@ -1,3 +1,4 @@
+import { findChartDefinition } from "./chartDefinitions";
 // =================================================================
 // WebGPU scatter eligibility — one predicate for draw + PNG export
 // =================================================================
@@ -43,7 +44,7 @@ export function canUseWebGpuScatter(input: WebGpuScatterEligibilityInput): boole
   if (hasCanvasArrangement(input.overrides)) return false;
   const chart = input.chart;
   return (
-    input.kind === "scatter" &&
+    !!input.kind && findChartDefinition(input.kind)?.render.gpu === "scatter" &&
     input.gpuReady &&
     !input.forceCanvasCapture &&
     !input.hasSmartOverlays &&

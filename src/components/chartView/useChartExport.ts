@@ -56,7 +56,8 @@ export function useChartExport(ctx: {
         const capturing =
           !!st.previewCapture || !!st.socialExportTarget || st.socialExportReady;
         const smart = st.smartResults;
-        const exportHasSmartOverlays = Boolean(
+        const hasChartAnomalies = !!exportStateRef.current.hasChartAnomalies;
+        const exportHasSmartOverlays = hasChartAnomalies || Boolean(
           smart &&
             ((smart.anomaly?.rowIndices?.length ?? 0) > 0 ||
               (smart.trend?.points?.length ?? 0) >= 2 ||
@@ -111,7 +112,7 @@ export function useChartExport(ctx: {
             // them here dropped the city color key from Share / Save PNGs — composite the
             // live stage instead so the export matches what you see.
             // Particle GPU scenes still re-draw on Canvas for a reliable readback.
-            const needsSceneCanvas = isGpuSceneKind(ac.kind) && !isWebGpuGlobeKind(ac.kind) && !hasCanvasArrangement(overrides);
+            const needsSceneCanvas = !hasChartAnomalies && isGpuSceneKind(ac.kind) && !isWebGpuGlobeKind(ac.kind) && !hasCanvasArrangement(overrides);
             if (needsSceneCanvas && exp.sampleRows?.rows.length) {
               ctx.save();
               ctx.scale(w / cssW, h / cssH);
@@ -225,7 +226,7 @@ export function useChartExport(ctx: {
           return null;
         }
       });
-      const svgMode = svgExportMode(vegaSpec);
+      const svgMode = svgExportMode(vegaSpec, exportStateRef.current.activeChart?.kind);
       setSvgExportLabel(
         (svgMode === "approx" || ARRANGEMENT_KEYS.some((key) => savedChartVisualOverrides[key] != null))
           ? "Vega approximation — use PNG to preserve canvas arrangement"

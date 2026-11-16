@@ -583,11 +583,11 @@ export function categoryIndex(rows: unknown[][], ci: number): Map<string, number
 
 /**
  * Mark radius from a `pointSize` option. ChartView passes Visual → Point
- * size in UI units (12 = default ≈ the renderer's base radius); thumbnail
- * callers pass a literal radius (≈2–4 px). Values ≥ 6 are treated as UI units.
+ * size in UI units (12 = the renderer's base radius). Thumbnail callers
+ * explicitly request literal pixels; small UI values must never switch units.
  */
-export function radiusFromPointSize(pointSize: number | undefined, baseRadius: number): number {
+export function radiusFromPointSize(pointSize: number | undefined, baseRadius: number, literalPixels = false): number {
   if (pointSize == null || !Number.isFinite(pointSize) || pointSize <= 0) return baseRadius;
-  if (pointSize >= 6) return baseRadius * Math.max(0.35, Math.min(2.5, pointSize / 12));
-  return pointSize;
+  if (literalPixels && pointSize < 6) return pointSize;
+  return baseRadius * Math.max(1 / 6, Math.min(2.5, pointSize / 12));
 }

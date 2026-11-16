@@ -302,6 +302,16 @@ export class LoomRenderer {
     padPx: number = 0,
     padYPx?: number,
   ): Promise<void> {
+    if (this.device && this.context && this.pointCount === 0) {
+      const encoder = this.device.createCommandEncoder();
+      const pass = encoder.beginRenderPass({ colorAttachments: [{
+        view: this.context.getCurrentTexture().createView(),
+        clearValue: this.getClearValue(), loadOp: "clear", storeOp: "store",
+      }] });
+      pass.end();
+      this.device.queue.submit([encoder.finish()]);
+      return this.device.queue.onSubmittedWorkDone();
+    }
     if (
       !this.device || !this.context || !this.computePipeline ||
       !this.renderPipeline || !this.uniformBuffer ||

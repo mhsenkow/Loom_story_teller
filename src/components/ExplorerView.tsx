@@ -7,6 +7,7 @@
 
 "use client";
 
+import IllustratedEmptyState from "./EmptyState";
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLoomStore } from "@/lib/store";
@@ -1292,11 +1293,10 @@ export function ExplorerView() {
             <tbody>
               {displayRows.length === 0 && (
                 <tr>
-                  <td colSpan={columns.length + 2} className="px-4 py-8 text-center font-sans text-xs text-loom-muted">
-                    No rows match the current filters.{" "}
-                    <button
+                  <td colSpan={columns.length + 2} aria-label="No rows match the current filters" className="px-4 py-8 text-center font-sans text-xs text-loom-muted">
+                    <IllustratedEmptyState compact variant="filter" title="No rows match the current filters" action={<button
                       type="button"
-                      className="text-loom-accent hover:underline"
+                      className="loom-btn-ghost text-loom-accent"
                       onClick={() => {
                         setTableFilterRowIndices(null);
                         for (const t of Object.values(filterDebounceRef.current)) clearTimeout(t);
@@ -1306,7 +1306,7 @@ export function ExplorerView() {
                       }}
                     >
                       Clear filters
-                    </button>
+                    </button>}>Reset the filters to see your data again.</IllustratedEmptyState>
                   </td>
                 </tr>
               )}
@@ -1386,9 +1386,7 @@ export function ExplorerView() {
             <TableSkeleton rows={12} cols={Math.min(columnStats.length || 5, 8)} />
           </div>
         ) : sampleRows && sampleRows.rows.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-sm text-loom-muted">
-            No rows
-          </div>
+          <IllustratedEmptyState title="No rows yet">This dataset has no observations. Try another source or refresh it when new data is available.</IllustratedEmptyState>
         ) : (
           <div className="flex items-center justify-center h-full text-sm text-loom-muted">
             Loading data...

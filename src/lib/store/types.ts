@@ -36,6 +36,7 @@ export type { ChartVisualOverrides } from "../chartVisualTypes";
 export type { ColumnInfo, QueryResult } from "../queryTypes";
 
 export interface SmartResults {
+  chartAnomaly?: import("../chartAnalysis").ChartAnomalyConfig | null;
   analysis?: import("../timeSeriesAnalysis").TimeSeriesAnalysis | null;
   anomaly?: AnomalyResult | null;
   forecast?: ForecastResult | null;

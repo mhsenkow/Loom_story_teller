@@ -295,7 +295,7 @@ export function renderFullLine(
       ctx.fillStyle = color;
       for (const p of pts) {
         ctx.beginPath();
-        ctx.arc(p.x, p.y, pts.length === 1 ? 4 : 2.5, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, Math.max(2, markR * (pts.length === 1 ? 1 : 0.65)), 0, Math.PI * 2);
         ctx.fill();
       }
       applyLineDash(ctx, opts?.lineStrokeStyle);
@@ -318,6 +318,7 @@ export function renderFullLine(
         // Bucketed keys aren't raw values — identify the bucket by its first row
         match: tb.unit ? [] : ci >= 0 ? [[xi, p.key], [ci, s.name]] : [[xi, p.key]],
         rowIndex: tb.unit ? tb.firstRow.get(p.key) : undefined,
+        ...(!s.compare ? { analysisKey: JSON.stringify(["", ci >= 0 ? s.name : "", p.key]) } : {}),
         ...(!s.compare ? { reading: { label: p.key, value: p.v, measure: measureTitle, series: s.name, order: p.t } } : {}),
         summary: ci >= 0
           ? { columns: [xName, cName, measureTitle], row: [p.key, s.name, formatTooltipNumber(p.v)] }

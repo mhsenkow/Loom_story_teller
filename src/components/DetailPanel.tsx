@@ -7,6 +7,9 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useRef } from "react";
+import EmptyState from "./EmptyState";
+import { useVisualViewport } from "@/lib/useVisualViewport";
+import { FOCUSABLE_SELECTOR } from "@/lib/focusTrap";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useIsMobile, useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
 import { useLoomStore, type PanelTab } from "@/lib/store";
@@ -37,20 +40,14 @@ function GearIcon() {
 
 function EmptyDatasetState() {
   return (
-    <div className="flex flex-col items-center justify-center h-full px-6 py-10 gap-3 text-center">
-      <p className="text-sm text-loom-muted leading-relaxed">Open a dataset to see its stats and build a chart.</p>
-      <button
-        type="button"
-        className="loom-btn-primary text-xs py-1.5 px-3"
-        onClick={() => {
-          const st = useLoomStore.getState();
-          if (!st.sidebarOpen) st.toggleSidebar();
-          st.setDataRegionOpen(true);
-        }}
-      >
-        Open Data library
-      </button>
-    </div>
+    <EmptyState title="Start with a little data" action={
+      <button type="button" className="loom-btn-primary" onClick={() => {
+        const st = useLoomStore.getState();
+        if (st.panelOpen) st.togglePanel();
+        if (!st.sidebarOpen) st.toggleSidebar();
+        st.setDataRegionOpen(true);
+      }}>Open Data library</button>
+    }>Open a dataset to see its stats and build a chart.</EmptyState>
   );
 }
 
@@ -72,12 +69,21 @@ export function DetailPanel() {
   const liveEdit = useMobileLiveEdit();
   const isMobile = useIsMobile();
   const panelRef = useRef<HTMLElement>(null);
+  const viewport = useVisualViewport();
+  useEffect(() => {
+    if (!panelOpen || !isMobile) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const frame = requestAnimationFrame(() => panelRef.current?.querySelector<HTMLElement>(FOCUSABLE_SELECTOR)?.focus({ preventScroll: true }));
+    return () => { cancelAnimationFrame(frame); if (opener?.isConnected) opener.focus({ preventScroll: true }); };
+  }, [panelOpen, isMobile]);
 
   useFocusTrap(panelRef, panelOpen && isMobile);
 
   useEffect(() => {
     if (!panelOpen || !isMobile) return;
     const onKey = (e: KeyboardEvent) => {
+      const dialog = e.target instanceof Element ? e.target.closest('[role="dialog"]') : null;
+      if (dialog && dialog !== panelRef.current) return;
       if (e.key === "Escape") {
         if (e.target instanceof Element && e.target.closest("[data-loom-field-picker]")) return;
         e.preventDefault();
@@ -111,16 +117,16 @@ export function DetailPanel() {
           fixed inset-x-0 bottom-0 z-40 w-full
           border-t border-loom-border rounded-t-2xl shadow-loom-lg
           md:max-h-none md:rounded-none md:shadow-none md:inset-auto
-          ${liveEdit ? "" : "h-[min(88dvh,44rem)]"}
+          ${liveEdit ? "" : "loom-detail-sheet-modal h-[min(88dvh,44rem)]"}
         `}
-        style={{ paddingBottom: "var(--safe-bottom)", ...(liveEdit ? { height: MOBILE_LIVE_EDIT_SHEET } : {}) }}
+        style={{ paddingBottom: "var(--safe-bottom)", ...(isMobile && viewport.bottomInset > 0 ? { bottom: viewport.bottomInset, maxHeight: Math.max(160, viewport.height - 8) } : {}), ...(liveEdit ? { height: MOBILE_LIVE_EDIT_SHEET } : {}) }}
       >
         <div className={`md:hidden relative flex items-center justify-between px-4 shrink-0 ${liveEdit ? "h-4" : "pt-3.5 pb-1.5"}`}>
           <div className="pointer-events-none absolute left-1/2 top-2 h-1 w-10 -translate-x-1/2 rounded-full bg-loom-border/80" />
           {!liveEdit && <span className="text-sm font-semibold text-loom-text tracking-tight">
             {TABS.find((t) => t.key === panelTab)?.label ?? "Details"}
           </span>}
-          <button type="button" onClick={togglePanel} className={`loom-btn-ghost min-h-9 min-w-9 flex items-center justify-center text-loom-muted text-lg leading-none rounded-md ${liveEdit ? "absolute right-2 top-4 z-10" : ""}`} aria-label="Close">
+          <button type="button" onClick={togglePanel} className={`loom-btn-ghost min-h-11 min-w-11 flex items-center justify-center text-loom-muted text-lg leading-none rounded-md ${liveEdit ? "absolute right-2 top-4 z-10" : ""}`} aria-label="Close">
             ×
           </button>
         </div>
@@ -169,7 +175,7 @@ export function DetailPanel() {
         </div>
 
         <div role="tabpanel" id="panel-content" aria-labelledby={`panel-tab-${panelTab}`} className="flex-1 overflow-y-auto">
-          <Suspense fallback={<div className="p-4 text-sm text-loom-muted">Loading panel…</div>}>
+          <Suspense fallback={<div className="p-4 text-sm text-loom-muted" role="status">Loading panel…</div>}>
             <DetailTabContent panelTab={panelTab} hasDataset={Boolean(selectedFile)} />
           </Suspense>
         </div>

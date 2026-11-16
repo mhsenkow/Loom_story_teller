@@ -6,6 +6,7 @@
 // pixels are always Canvas 2D (same contract as ChartView).
 // =================================================================
 
+import { addDensityCell, densityValue, type DensityCell } from "./canvasCharts/densityCells";
 import type { YAggregateOption } from "./recommendations";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
@@ -107,7 +108,13 @@ export function renderOddChart(
       themeMuted: ink.muted,
       themeText: ink.text,
       themeBorder: ink.border,
-      axisLineColor: inkTint(ink, 0.38),
+      axisLineColor: opts.axisLineColor ?? inkTint(ink, 0.38),
+      axisLineWidth: opts.axisLineWidth,
+      axisStyle: opts.axisStyle,
+      showGrid: opts.showGrid,
+      gridStyle: opts.gridStyle,
+      gridOpacity: opts.gridOpacity,
+      tickCount: opts.tickCount,
       axisFontSize: chartTypeRamp(opts.axisFontSize).tick,
       tickRotation: opts.tickRotation,
     },
@@ -252,7 +259,7 @@ function basePlot(env: OddEnv): PlotRect {
 }
 
 function gridLook(env: OddEnv): ChartLookOpts {
-  return { ...env.look, themeBorder: inkTint(env.ink, env.ink.light ? 0.12 : 0.14), gridOpacity: 1 };
+  return { ...env.look, themeBorder: inkTint(env.ink, env.ink.light ? 0.12 : 0.14), gridOpacity: env.opts.gridOpacity ?? 1 };
 }
 
 function numericColumn(rows: unknown[][], i: number): boolean {
@@ -842,7 +849,7 @@ function drawChernoff(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
     const cy = cellTop + (g.ch - labelH) / 2;
     ctx.beginPath();
     ctx.ellipse(cx, cy, R * (0.8 + f[0]! * 0.3), R * (0.85 + f[1]! * 0.25), 0, 0, Math.PI * 2);
-    ctx.fillStyle = withAlpha(env.single, 0.3);
+    ctx.fillStyle = withAlpha(env.single, 0.3 * env.alpha);
     ctx.fill();
     ctx.strokeStyle = ink.text;
     ctx.lineWidth = mini ? 1 : 1.5;
@@ -920,7 +927,7 @@ function drawGlyphStar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
       else ctx.lineTo(px, py);
     }
     ctx.closePath();
-    ctx.fillStyle = withAlpha(env.single, 0.4);
+    ctx.fillStyle = withAlpha(env.single, 0.4 * env.alpha);
     ctx.fill();
     ctx.strokeStyle = env.single;
     ctx.lineWidth = 1.5;
@@ -976,7 +983,7 @@ function drawFlower(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
         cx,
         cy,
       );
-      ctx.fillStyle = withAlpha(env.colors[p % env.colors.length]!, 0.7);
+      ctx.fillStyle = withAlpha(env.colors[p % env.colors.length]!, env.alpha);
       ctx.fill();
     }
     ctx.fillStyle = ink.text;
@@ -1036,7 +1043,7 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   let gx: number;
   let gy: number;
   let legendBox: { x: number; y: number; w: number; vertical: boolean } | null = null;
-  if (mini) {
+  if (mini || env.opts.legendPosition === "none") {
     size = Math.min(availW, availH);
     gx = base.left + (availW - size) / 2;
     gy = base.top + (availH - size) / 2;
@@ -1475,15 +1482,15 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     ctx.lineTo(x1, sy(p.b));
     ctx.stroke();
     ctx.globalAlpha = 1;
-    mark(ctx, env, p.row, x0, sy(p.a), mini ? 2.2 : 3.5, lineColor, 1, mini ? null : ink.bg);
-    mark(ctx, env, p.row, x1, sy(p.b), mini ? 2.2 : 3.5, lineColor, 1, mini ? null : ink.bg);
+    mark(ctx, env, p.row, x0, sy(p.a), mini ? 2.2 : radiusFromPointSize(env.opts.pointSize, 3.5), lineColor, 1, mini ? null : ink.bg);
+    mark(ctx, env, p.row, x1, sy(p.b), mini ? 2.2 : radiusFromPointSize(env.opts.pointSize, 3.5), lineColor, 1, mini ? null : ink.bg);
     const ri = firstRowIndex(rows, xi, p.c);
     const summary: OddSummary = {
       columns: [fieldName(env, xi), `${fieldName(env, yi)} (mean)`, `${fieldName(env, si)} (mean)`],
       row: [p.c, p.a, p.b],
     };
-    hitCircle(env, x0, sy(p.a), mini ? 2.2 : 3.5, [[xi, p.c], [yi, String(p.a)]], ri, summary);
-    hitCircle(env, x1, sy(p.b), mini ? 2.2 : 3.5, [[xi, p.c], [si, String(p.b)]], ri, summary);
+    hitCircle(env, x0, sy(p.a), mini ? 2.2 : radiusFromPointSize(env.opts.pointSize, 3.5), [[xi, p.c], [yi, String(p.a)]], ri, summary);
+    hitCircle(env, x1, sy(p.b), mini ? 2.2 : radiusFromPointSize(env.opts.pointSize, 3.5), [[xi, p.c], [si, String(p.b)]], ri, summary);
   }
   if (mini) return;
   const targets = pairs.map((p) => sy(p.b));
@@ -1645,7 +1652,7 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
     if (!mini) {
       model.keys.forEach((_, i) => {
         const v = values[i]!.get(s);
-        if (v != null) mark(ctx, env, seriesRow.get(s), xAt(i), deltaMode ? yAtDelta(v) : yAt(v), 3.2, color, 1, ink.bg);
+        if (v != null) mark(ctx, env, seriesRow.get(s), xAt(i), deltaMode ? yAtDelta(v) : yAt(v), radiusFromPointSize(env.opts.pointSize, 3.2), color, 1, ink.bg);
       });
     }
     const sRow = seriesRow.get(s);
@@ -1654,7 +1661,7 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
       const v = values[i]!.get(s);
       if (v == null) return;
       const rank = ranks[i]!.get(s);
-      hitCircle(env, xAt(i), deltaMode ? yAtDelta(v) : yAt(v), mini ? 2 : 3.2, [[xi, key], [ci, s]], sRi, {
+      hitCircle(env, xAt(i), deltaMode ? yAtDelta(v) : yAt(v), mini ? 2 : radiusFromPointSize(env.opts.pointSize, 3.2), [[xi, key], [ci, s]], sRi, {
         columns: [fieldName(env, xi), fieldName(env, ci), deltaMode ? "Δ rank" : "rank"],
         row: [key, s, deltaMode ? v : (rank ?? null)],
       });
@@ -1775,13 +1782,13 @@ function drawStream(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.fillText(fitTextEllipsis(ctx, `${formatAxisValue(barV, nt.step)} ${fieldName(env, yi)}`, Math.max(40, ph)), 0, 0);
     ctx.restore();
   }
-  if (series.length < 2 && ci < 0) return;
+  if (env.opts.legendPosition === "none" || (series.length < 2 && ci < 0)) return;
   // Direct labels where a layer is thick enough; otherwise a legend panel.
   const canLabelAll = series.every((_, si0) => {
     const L = layers[si0]!;
     return L.bot.some((b, i) => b - L.top[i]! >= 14);
   });
-  if (canLabelAll) {
+  if (canLabelAll && (!env.opts.legendPosition || env.opts.legendPosition === "auto")) {
     ctx.font = oddFont(env, 10, 600);
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1851,7 +1858,7 @@ function drawHorizon(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       }
       ctx.lineTo(xAt(pts[pts.length - 1]!.pos), plot.bottom);
       ctx.closePath();
-      ctx.fillStyle = shade(sign > 0 ? posColor : negColor, b);
+      ctx.fillStyle = withAlpha(shade(sign > 0 ? posColor : negColor, b), env.alpha);
       ctx.fill();
     }
   }
@@ -2044,18 +2051,21 @@ function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
 function drawChord(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
   if (xi < 0 || ci < 0) return "Chord needs two category columns";
   const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
-  const flowsM = new Map<string, number>();
-  const nodeTotal = new Map<string, number>();
-  for (const r of rows) {
+  const flowCells = new Map<string, DensityCell>();
+  rows.forEach((r, i) => {
     const a = String(r[xi]);
     const b = String(r[ci]);
-    if (a === b) continue;
-    const add = yi >= 0 && how !== "count" ? toNum(r[yi]) : 1;
-    if (!Number.isFinite(add) || add <= 0) continue;
-    const key = `${a}||${b}`;
-    flowsM.set(key, (flowsM.get(key) ?? 0) + add);
-    nodeTotal.set(a, (nodeTotal.get(a) ?? 0) + add);
-    nodeTotal.set(b, (nodeTotal.get(b) ?? 0) + add);
+    if (a !== b) addDensityCell(flowCells, JSON.stringify([a, b]), r[yi], i);
+  });
+  const flowsM = new Map<string, number>();
+  const nodeTotal = new Map<string, number>();
+  for (const [key, cell] of flowCells) {
+    const value = densityValue(cell, yi < 0 ? "count" : how);
+    if (value == null || value <= 0) continue;
+    flowsM.set(key, value);
+    const [a, b] = JSON.parse(key) as [string, string];
+    nodeTotal.set(a, (nodeTotal.get(a) ?? 0) + value);
+    nodeTotal.set(b, (nodeTotal.get(b) ?? 0) + value);
   }
   if (!flowsM.size) return "No connections between the two categories";
   const { mini, ink } = env;
@@ -2067,7 +2077,7 @@ function drawChord(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     targetIdx.has(n) && !sourceSet.has(n) ? env.colors[targetIdx.get(n)! % env.colors.length]! : inkTint(ink, 0.55);
   const flows = [...flowsM.entries()]
     .map(([k, v]) => {
-      const [a, b] = k.split("||");
+      const [a, b] = JSON.parse(k) as [string, string];
       return { a: a!, b: b!, v };
     })
     .filter((f) => idx.has(f.a) && idx.has(f.b));
@@ -2087,7 +2097,7 @@ function drawChord(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     ctx.beginPath();
     ctx.moveTo(cx + Math.cos(a0) * R, cy + Math.sin(a0) * R);
     ctx.quadraticCurveTo(cx, cy, cx + Math.cos(a1) * R, cy + Math.sin(a1) * R);
-    ctx.strokeStyle = withAlpha(env.colors[(targetIdx.get(f.b) ?? 0) % env.colors.length]!, 0.3 + 0.5 * (f.v / maxV));
+    ctx.strokeStyle = withAlpha(env.colors[(targetIdx.get(f.b) ?? 0) % env.colors.length]!, (0.3 + 0.5 * (f.v / maxV)) * env.alpha);
     ctx.lineWidth = 1 + (mini ? 3 : 7) * (f.v / maxV);
     ctx.stroke();
   });
@@ -2177,7 +2187,7 @@ function drawVoronoi(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     ctx.beginPath();
     poly.forEach((v, k) => (k === 0 ? ctx.moveTo(v.x, v.y) : ctx.lineTo(v.x, v.y)));
     ctx.closePath();
-    ctx.fillStyle = withAlpha(colorOf(p.c), ci >= 0 ? 0.32 : 0.16);
+    ctx.fillStyle = withAlpha(colorOf(p.c), (ci >= 0 ? 0.32 : 0.16) * env.alpha);
     ctx.fill();
     ctx.strokeStyle = withAlpha(ink.bg, 0.9);
     ctx.lineWidth = 1;
@@ -2464,23 +2474,25 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   const xs = [...new Set(rows.map((r) => String(r[xi])))].slice(0, 10);
   const catIdx = categoryIndex(rows, ci);
   const ys = [...catIdx.keys()].slice(0, 8);
-  const cell = new Map<string, number>();
-  for (const r of rows) {
+  const cells = new Map<string, DensityCell>();
+  rows.forEach((r, i) => {
     const a = String(r[xi]);
     const b = String(r[ci]);
-    if (!xs.includes(a) || !ys.includes(b)) continue;
-    const add = yi >= 0 && how !== "count" ? toNum(r[yi]) : 1;
-    if (!Number.isFinite(add) || add <= 0) continue;
-    const key = `${a}||${b}`;
-    cell.set(key, (cell.get(key) ?? 0) + add);
+    if (xs.includes(a) && ys.includes(b)) addDensityCell(cells, JSON.stringify([a, b]), r[yi], i);
+  });
+  const cell = new Map<string, number>();
+  for (const [key, stats] of cells) {
+    const value = densityValue(stats, yi < 0 ? "count" : how);
+    if (value != null && value > 0) cell.set(key, value);
   }
-  const colTotals = xs.map((a) => ys.reduce((s, b) => s + (cell.get(`${a}||${b}`) ?? 0), 0));
+  const colTotals = xs.map((a) => ys.reduce((s, b) => s + (cell.get(JSON.stringify([a, b])) ?? 0), 0));
   const grand = colTotals.reduce((a, b) => a + b, 0);
   if (!(grand > 0)) return "No positive values to tile";
   const { mini, ink } = env;
   const legend = ys.map((b) => ({ label: b, color: env.colors[(catIdx.get(b) ?? 0) % env.colors.length]! }));
   const base = basePlot(env);
-  const legH = mini ? 0 : drawSwatchRow(ctx, legend, 0, 0, base.right - base.left, ink, env.font, { axisFontSize: env.opts.axisFontSize, measureOnly: true, maxRows: 2 });
+  const showLegend = !mini && env.opts.legendPosition !== "none";
+  const legH = !showLegend ? 0 : drawSwatchRow(ctx, legend, 0, 0, base.right - base.left, ink, env.font, { axisFontSize: env.opts.axisFontSize, measureOnly: true, maxRows: 2 });
   const plot = mini ? base : { ...base, bottom: Math.min(base.bottom, env.h - 6 - legH - 22) };
   const pw = plot.right - plot.left;
   const ph = plot.bottom - plot.top;
@@ -2492,7 +2504,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     let yCursor = plot.top;
     const colTotal = colTotals[ai]! || 1;
     ys.forEach((b) => {
-      const v = cell.get(`${a}||${b}`) ?? 0;
+      const v = cell.get(JSON.stringify([a, b])) ?? 0;
       const segH = (v / colTotal) * ph;
       if (segH <= 0) return;
       const color = env.colors[(catIdx.get(b) ?? 0) % env.colors.length]!;
@@ -2534,7 +2546,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   ctx.textAlign = "center";
   ctx.fillText(fitTextEllipsis(ctx, `Share within ${fieldName(env, xi)} · width = ${aggregateAxisTitle(how, fieldName(env, yi) || null).toLowerCase()}`, ph), 0, 0);
   ctx.restore();
-  drawSwatchRow(ctx, legend, plot.left, plot.bottom + 20, pw, ink, env.font, { axisFontSize: env.opts.axisFontSize, maxRows: 2, align: "center" });
+  if (showLegend) drawSwatchRow(ctx, legend, plot.left, plot.bottom + 20, pw, ink, env.font, { axisFontSize: env.opts.axisFontSize, maxRows: 2, align: "center" });
 }
 
 // ---- contour ---------------------------------------------------------------
@@ -2614,7 +2626,7 @@ function drawContour(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     for (let i = 0; i < gw; i++) {
       const t = (grid[j]![i]! + grid[j]![i + 1]! + grid[j + 1]![i]! + grid[j + 1]![i + 1]!) / (4 * gmax);
       if (t < 0.04) continue;
-      ctx.fillStyle = colorAt(t);
+      ctx.fillStyle = withAlpha(colorAt(t), env.alpha);
       ctx.fillRect(plot.left + i * cellW, plot.top + j * cellH, cellW + 0.6, cellH + 0.6);
     }
   }
@@ -2643,7 +2655,7 @@ function drawContour(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   for (const th of levels) {
     const segs = isoSegments(grid.map((r) => r.map((v) => v / gmax)), th);
     ctx.strokeStyle = th >= 0.6 ? inkOn(colorAt(th)) : withAlpha(ink.text, 0.45);
-    ctx.globalAlpha = 0.75;
+    ctx.globalAlpha = env.alpha;
     ctx.lineWidth = 1;
     ctx.beginPath();
     for (const [x0, y0, x1, y1] of segs) {
@@ -2758,7 +2770,7 @@ function drawCalendar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
     const x = ox + col * cell + gap / 2;
     const y = oy + row * cell + gap / 2;
     const v = values.get(d);
-    ctx.fillStyle = v == null ? empty : colorAt((v - lo) / span);
+    ctx.fillStyle = v == null ? empty : withAlpha(colorAt((v - lo) / span), env.alpha);
     ctx.fillRect(x, y, cell - gap, cell - gap);
     if (v == null) continue;
     const iso = new Date(d * DAY_MS).toISOString().slice(0, 10);
@@ -3038,11 +3050,11 @@ function drawSparkGrid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     for (const p of pts) ctx.lineTo(sx(p.i), sy(p.v));
     ctx.lineTo(sx(pts[pts.length - 1]!.i), inner.b);
     ctx.closePath();
-    ctx.fillStyle = withAlpha(color, 0.14);
+    ctx.fillStyle = withAlpha(color, 0.14 * env.alpha);
     ctx.fill();
     ctx.beginPath();
     pts.forEach((p, k) => (k ? ctx.lineTo(sx(p.i), sy(p.v)) : ctx.moveTo(sx(p.i), sy(p.v))));
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = withAlpha(color, env.alpha);
     ctx.lineWidth = mini ? 1 : 1.6;
     ctx.lineJoin = env.opts.lineJoin ?? "round";
     ctx.lineCap = env.opts.lineCap ?? "round";
@@ -3141,7 +3153,7 @@ function drawDensity(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     // Soft fill fading to the baseline, then the curve.
     const grad = ctx.createLinearGradient(0, plot.top, 0, plot.bottom);
     // Many overlapping groups: lines only (fills would stack into a wash).
-    grad.addColorStop(0, withAlpha(color, curves.length > 1 ? 0.24 : 0.42));
+    grad.addColorStop(0, withAlpha(color, (curves.length > 1 ? 0.24 : 0.42) * env.alpha));
     grad.addColorStop(1, withAlpha(color, 0.03));
     if (curves.length <= 3) {
       ctx.beginPath();
@@ -3154,7 +3166,7 @@ function drawDensity(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     }
     ctx.beginPath();
     c.d.forEach((d, i) => (i ? ctx.lineTo(xAt(i), sy(d)) : ctx.moveTo(xAt(i), sy(d))));
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = withAlpha(color, env.alpha);
     ctx.lineWidth = mini ? 1.2 : 2;
     ctx.stroke();
     // Rug of raw values along the floor.
@@ -3353,7 +3365,7 @@ function drawConnectedScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], 
     }
   }
   ctx.globalAlpha = 1;
-  const r = mini ? 1.6 : pts.length > 150 ? 2.2 : 3.4;
+  const r = mini ? 1.6 : radiusFromPointSize(env.opts.pointSize, pts.length > 150 ? 2.2 : 3.4);
   pts.forEach((p, i) => {
     mark(ctx, env, rows[p.ri], sx(p.x), sy(p.y), i === 0 || i === pts.length - 1 ? r * 1.5 : r, colorAt(i), 1, mini ? null : ink.bg);
     hitCircle(env, sx(p.x), sy(p.y), Math.max(r, 4), [[xi, String(rows[p.ri]![xi])], [yi, String(rows[p.ri]![yi])]], p.ri, {
@@ -3424,7 +3436,7 @@ function drawStripes(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   const sw = (plot.right - plot.left) / pts.length;
   pts.forEach((p, i) => {
     const x = plot.left + i * sw;
-    ctx.fillStyle = colorAt(p.v);
+    ctx.fillStyle = withAlpha(colorAt(p.v), env.alpha);
     ctx.fillRect(Math.floor(x), plot.top, Math.ceil(sw) + 0.5, bottom - plot.top);
     hitRect(env, x, plot.top, sw, bottom - plot.top, [], undefined, {
       columns: [fieldName(env, xi), measure, "vs average"],
@@ -3673,7 +3685,7 @@ function paintPackedWords(
   for (const p of placed) {
     ctx.font = wordFont(env, p.f, cloudWeight(p.rank, cloudWeightMode(env)));
     ctx.fillStyle = p.color;
-    ctx.globalAlpha = p.rank < 12 ? 1 : Math.max(0.7, env.alpha);
+    ctx.globalAlpha = env.alpha;
     ctx.fillText(p.word, p.x, p.y);
     const match: [number, string][] = [[xi, p.word]];
     // "Higher market_cap" is a side title, not a cell. Only a real group value
@@ -3914,7 +3926,7 @@ function drawErrorBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     ctx.stroke();
     ctx.restore();
   }
-  const r = Math.max(2.5, Math.min(6, band * 0.22));
+  const r = Math.max(2, Math.min(radiusFromPointSize(env.opts.pointSize, 6), band * 0.22));
   stats.forEach((s, i) => {
     const cy = plot.top + (i + 0.5) * band;
     // Color splits the raw dots; the estimate stays in ink so it reads over them.
@@ -3924,13 +3936,13 @@ function drawErrorBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     if (!mini && s.vals.length <= 300) {
       s.vals.forEach((v, j) => {
         const jy = cy + (jitter(s.k, j) - 0.5) * band * 0.55;
-        ctx.fillStyle = withAlpha(dotColor(j), ci >= 0 ? 0.5 : 0.22);
+        ctx.fillStyle = withAlpha(dotColor(j), (ci >= 0 ? 0.5 : 0.22) * env.alpha);
         ctx.beginPath();
         ctx.arc(sx(v), jy, 1.6, 0, Math.PI * 2);
         ctx.fill();
       });
     }
-    ctx.strokeStyle = color;
+    ctx.strokeStyle = withAlpha(color, env.alpha);
     ctx.lineWidth = mini ? 1.2 : 2;
     ctx.lineCap = "round";
     ctx.beginPath();
@@ -3941,7 +3953,7 @@ function drawErrorBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     ctx.moveTo(sx(s.hi), cy - r * 0.8);
     ctx.lineTo(sx(s.hi), cy + r * 0.8);
     ctx.stroke();
-    mark(ctx, env, rows[s.ri], sx(s.mean), cy, r, color, 1, mini ? null : ink.bg);
+    mark(ctx, env, rows[s.ri], sx(s.mean), cy, r, color, env.alpha, mini ? null : ink.bg);
     hitRect(env, plot.left, cy - band / 2, plot.right - plot.left, band, [[xi, s.k]], s.ri, {
       columns: [fieldName(env, xi), `${fieldName(env, yi)} (mean)`, "95% CI", "rows"],
       row: [s.k, s.mean, `${formatDataValue(s.lo)} – ${formatDataValue(s.hi)}`, s.n],

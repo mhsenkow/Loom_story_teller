@@ -1,0 +1,352 @@
+{
+  "scatter": {
+    "paint": "5b7224caa21f7a7f9e3334dec156d902ee4bb1b89a8b56b236c2ae82316d8500",
+    "hitCount": 90,
+    "metadata": "6831e048de5327cab65954a50c1c948174898e2148f243e2bd005e495f3e6f5b"
+  },
+  "bubble": {
+    "paint": "52513efc4ac5b53bd0aa06d88891ee6703bd0f19d28d5b0142197657a0ae6311",
+    "hitCount": 90,
+    "metadata": "f3551622bb3974c33302a26a23f9557e7e775907fe5d85c51ae9e4f58dc8de00"
+  },
+  "hexbin": {
+    "paint": "ed0c85924669b64d439ece8f0625848ac1edb391f21c2782fa1a2644950877ff",
+    "hitCount": 72,
+    "metadata": "85f1de1032674d85665710d95ae7af02a147a99e0eac3ed3fdfe639f32027fb1"
+  },
+  "line": {
+    "paint": "35a37fabc7539b01b47482484094f20d891c491c8bbf2a575935974792ca6de4",
+    "hitCount": 93,
+    "metadata": "5d71d566ee2199386863f7d9e8be8c11d57cb93cd2113313a97a34f69b2b51f1"
+  },
+  "bar": {
+    "paint": "e23d980856659294a2081f0846b98f5f5fb324dbb13734c04a67bb3ccd90ba45",
+    "hitCount": 15,
+    "metadata": "ef84ece090973b35655b1812533691319320ccb0e4fd928250e39445989f74bc"
+  },
+  "lollipop": {
+    "paint": "3c3c35cec16dab5a983b1b3ff4b273bd8e940a0284121f825450e5e623242ee9",
+    "hitCount": 5,
+    "metadata": "97bbe9ea04a2692a21c732ee4a2cf78e18e83e8374a6aa066f2fabf92efc1ae1"
+  },
+  "dumbbell": {
+    "paint": "454ff8817e8388ea30bd874906f8b4981d90fad5c8be578e3493fc225b3ff43b",
+    "hitCount": 5,
+    "metadata": "67f6f0a02b1df56a7e7d6f533a37fa02ebf26ca1caf94dc51741d555eabcce33"
+  },
+  "area": {
+    "paint": "366a695180a667301e0203f4bb68a63bdf720e285549608a0f80e1c02a219d69",
+    "hitCount": 30,
+    "metadata": "2ed87ada156ccdff6f9f7bd67400a2989f0065fbef5d274fd0d3b367bdef7160"
+  },
+  "pie": {
+    "paint": "05cd9248c14956a609034fbdd49a906ae09f32064b55490b22e953d6f79090be",
+    "hitCount": 5,
+    "metadata": "f7d793f2e44c8ff364dc9e51d2225e0bf3c1c6a809fa7993ca361ab744f5bd23"
+  },
+  "funnel": {
+    "paint": "d5ddcb1d7c5248711b0d3d02dcf5cf44cb8e81447740b753a4abf30f108bd818",
+    "hitCount": 5,
+    "metadata": "0dba454f34b2839789edd9bab219535eef3f4d02d52462357dd711aed79a46a0"
+  },
+  "histogram": {
+    "paint": "074dcf2ebc9af738f45cdeeeed6dc7a8c69ec0ad2a4870f5bab640162491bd6e",
+    "hitCount": 9,
+    "metadata": "4e6a313f15e097cf5e37c12be0c9a36eb32ce56d2ad3911be9d3f17a2a4ecb58"
+  },
+  "waterfall": {
+    "paint": "c594eba140bdc0118b0cc5fb3d27fa4183a0fdf49ad6bc361c7fa6eb46cf4e0c",
+    "hitCount": 6,
+    "metadata": "3e56983048e3b19b03736505defc64653786044c3515a8b3e2207b6dcb192d15"
+  },
+  "strip": {
+    "paint": "9d41cddeff6131b03ccdbeaab49213df3532d7f0a34bae334c98b415ce4bba42",
+    "hitCount": 90,
+    "metadata": "0bc40e87d359fc04482b0a1bc32e259e7dc34f160334e4784e78429f1abf8d12"
+  },
+  "violin": {
+    "paint": "51ee89ac5d332cd8f81535e6e41129f942c3065e1bbdd5b93378e2f4ae2b2d1f",
+    "hitCount": 5,
+    "metadata": "1423a17a1427fc98197f7500a4257102bd187115c707fe893b7d045f0d3c2361"
+  },
+  "ridgeline": {
+    "paint": "00e81d44544274b4731bcba2ee90c45e2bfb4d4587edd44aed1271a011cc28ae",
+    "hitCount": 5,
+    "metadata": "c986630cfb475f62ad904984d3052dbec59679d3111e081ea97602ec487164a3"
+  },
+  "box": {
+    "paint": "3f139296f38f05b6c68467d7e40f19c930f3e05f0c5f62a8109fcca757ed7524",
+    "hitCount": 5,
+    "metadata": "3d5ea17195902b59e92e0c585e8790e2dabe7d2a9786f3f987fa9ce422a9bf36"
+  },
+  "radar": {
+    "paint": "09f8215742f2367effc79a1c03d0bfd668fe71945b68db2362cf56550d70b2bb",
+    "hitCount": 15,
+    "metadata": "746adef269e9fffdf98d7073dd22883703493dc540d8196a8fddd44ce10b8ee9"
+  },
+  "parallel": {
+    "paint": "0fc978a527b41a4a910eac676571e61b37252ae54ab0a6f91315620658c7fd0b",
+    "hitCount": 450,
+    "metadata": "0b11f997220dc7370bc3706e6209601d6c1ad12f6db18ecd5b429d16debedde1"
+  },
+  "heatmap": {
+    "paint": "371ddcf5cd67a05119f6f67efb373bedf87b1c16da8d2a17d6850c74a3f5b7d1",
+    "hitCount": 15,
+    "metadata": "607c4ac4e1b49ae2fb6eda814cfbb85a79b61a7f8b78e34e27b6b05042b3ffe1"
+  },
+  "treemap": {
+    "paint": "127a04025955523a4f9d4ede321d3c9b48ffbf18d4298166fbbbe4eba3814769",
+    "hitCount": 5,
+    "metadata": "7fe6fcc456f2331666d0fe00ebca459568c3ca1aca98a6911601ba592d3d98c2"
+  },
+  "sunburst": {
+    "paint": "d4653fce9c989ffaa7e2ab1f3bacf873d51c7dcd189bdcebbaf54da3b037ed4c",
+    "hitCount": 20,
+    "metadata": "9c60df6eefc24edb3eadb11b87a0a1928aba84413b00b58d88fe18401bd7ba84"
+  },
+  "forceBubble": {
+    "paint": "ecbc18a3515450a4a3e78bd4b0e92daceaa8ca562dfe388f45731667f5a4c447",
+    "hitCount": 5,
+    "metadata": "944898f84afb7af384842b8bf2b266dd2dcda077be6482e2c01e14837ea23e8e"
+  },
+  "sankey": {
+    "paint": "04fdc45dc31406352ac5a5ee42ec2f6e014c893526f56bc652a2fa9302651cd9",
+    "hitCount": 8,
+    "metadata": "b6f8ebd49fe5a8b8639877667f3991320590ea6ec5c93cee4404a70bf775949d"
+  },
+  "network": {
+    "paint": "f812b7aa2f9f966ada70f9855c80561300a357b9387a6ffba21db1b693d84f55",
+    "hitCount": 8,
+    "metadata": "72df8bb3f6c4e42f9adb3f10f493f875f688051b9bf2c79d193a1c8bad8af8d3"
+  },
+  "arcDiagram": {
+    "paint": "ebb08e3147cccda3b36ac73117bb8315fc1069d2cf399c6ccdab3d77e72dca7b",
+    "hitCount": 8,
+    "metadata": "6275c69ae1351f7e4ed9d36ee5f8d591abeeb2f563f7d86ca826a9c5f198e20e"
+  },
+  "pareto": {
+    "paint": "f6bb5302cffbe6be52e1bf72fcbdfecbe64405fe14da59a42bd93c53cd15afc6",
+    "hitCount": 5,
+    "metadata": "df0dd1b4d8e1affe21e5bcad76f7d24837b1bf8a83d45d91885cc53fba429f61"
+  },
+  "corrMatrix": {
+    "paint": "4b1a8ecb6b0ba79ebcca117461738f2d20c709694b7442d875556b9609a41911",
+    "hitCount": 25,
+    "metadata": "aeb7d2d59c2e14b70dd8e76526460df53bb03ef19cb732c214ccf02d45d02468"
+  },
+  "choropleth": {
+    "paint": "fc7db915888ab400b39c318e735a5c8edc23ed78c41b81c40537e65f7e8b9652",
+    "hitCount": 5,
+    "metadata": "1bd19b8d27fd68d0515478fdc7bfb9ffc11a5a9f2d50ad9b8e69fc4073e00232"
+  },
+  "bucketField": {
+    "paint": "d1fa3db01da6ae4f719e6e5b05c95e8e6f15474a11892f286ada2f489cbf7a37",
+    "hitCount": 90,
+    "metadata": "2902cb4ef14e829be921356d6e6f83d17de4fadcdb885c397edb786c29825a26"
+  },
+  "beeswarm": {
+    "paint": "17c96f1a0ed383d2ff2d78a267c05c6dd20f0b36f6eb5bc6cd41465a2f77e461",
+    "hitCount": 90,
+    "metadata": "494ae3ff444105d29660900d654feb010b2005861e8aeb8e77e27fc381d31ddf"
+  },
+  "chernoff": {
+    "paint": "3bd09ef726a4bcd161ef20256885df7ff23be81327ee3124c8bd2efe7b93c414",
+    "hitCount": 5,
+    "metadata": "7fa852b80abe0bf0800465e56dd4e21a53256e0688fb0ecb09760c85f681d4bf"
+  },
+  "glyphStar": {
+    "paint": "8e78bf65640787fc84f8cb9a2d51d59dff6b0f0b9ff26c00bc596763c39231eb",
+    "hitCount": 5,
+    "metadata": "5103e20d9584adf9245d71549bf060f1f31c6f60729e0fc3ce850fac7fca5071"
+  },
+  "waffle": {
+    "paint": "d9e3679b384a53341c84caa85942ac8bbc2525de3874a05f92b740bf86de5331",
+    "hitCount": 100,
+    "metadata": "d245d9713e0868e7354598fac1552df6e4c2cb2708aabd2da448820899fb2a86"
+  },
+  "isotype": {
+    "paint": "9046814c5b17c038689197a3cd1401adfc5bcfc32338e5081a973bbc2b7e9695",
+    "hitCount": 5,
+    "metadata": "8bc90bb1ef24627b6a9f65c871a326303b915140bbfb38adc149574fe19e35b2"
+  },
+  "pyramid": {
+    "paint": "37914539597f48b34af881af00f2ca3974e40e7101a735a2cb66697f29c2e61b",
+    "hitCount": 10,
+    "metadata": "8b6ec06e40cadc6acad4ad3fb9347292a3f7dc25e46a510e838c72a61277f71d"
+  },
+  "slope": {
+    "paint": "83497727743eb70a9c91a80ef9bf4168ec7308c9181b573bf08b1755855d0ab2",
+    "hitCount": 10,
+    "metadata": "afbdec70d070dd5fe91641f962599c8791928be6c60d46c3a62b87f7e1ef67c3"
+  },
+  "bump": {
+    "paint": "b86c1c30a5119be90eb5ab33935b81e56edddb63094eed40352a486289a57387",
+    "hitCount": 60,
+    "metadata": "703492cc62306f3675cd208f95289f7f1e6ba35e261236f958ae838e45a82060"
+  },
+  "stream": {
+    "paint": "72f970b3be4dded2b007d287af58ddb8b3e2c735be6484c2a328a87ee12e1911",
+    "hitCount": 90,
+    "metadata": "fbeb31a05275c5517e7c36fb2f19048c4e1bc0ebf35ffeafb4d51923e5111753"
+  },
+  "horizon": {
+    "paint": "278cda18e933024ea7f567c8771ad184ccc16f943ef812a989832729971fd2a6",
+    "hitCount": 30,
+    "metadata": "65f9c3897262d6a987ff7597363cb273f533f90c67000fb81f5d76dc9c90f963"
+  },
+  "spiral": {
+    "paint": "4a4779fa2ac35ba6f19ffce8185dd0054a1d28b6631640edd34bf5d1fbcb45d6",
+    "hitCount": 90,
+    "metadata": "c8141e94f4cee490dc1b49824f16ed833f7fcdcbaa245b9e2a4b3b32bf45d82f"
+  },
+  "radialBar": {
+    "paint": "6b95d52d502b7c6d1711502ec0e6c9aaca543a835dad7c41443a11889ab11895",
+    "hitCount": 5,
+    "metadata": "adc241e6f39473e53be1be30d1fabce2ea00a4e2a9f766f62fc168ab37d480f4"
+  },
+  "chord": {
+    "paint": "184687122fad06c18de9319ab16982de0324ad02481ec7e51027983af015b5f4",
+    "hitCount": 8,
+    "metadata": "97864eec067542d0fbcf9dd4aa860a290f64409fa8af7e1bd3789e230e2efb6b"
+  },
+  "voronoi": {
+    "paint": "09f9a9ca06f7e04b9606d8359ef39acd400cbc1de48a30db56d8d2d94a53381c",
+    "hitCount": 90,
+    "metadata": "f0a60062c2cf581a70bd69bd892d626094d114cef495ffd7641729725ac23339"
+  },
+  "isoBars": {
+    "paint": "0b25fe85bf1eac4b209a4a1d83e5ae4594d9a7d617eace86b9cebcd0c3dcfac5",
+    "hitCount": 5,
+    "metadata": "83a0a8c98c4c23550ac54cf7f9ad04ebdb2d0c290f7d30c1c394269265952e77"
+  },
+  "isoScatter": {
+    "paint": "2b77cb901b1e80b2ac3e8978b0d097c76864cfa8aaaff0e63b53f6e3274d42d9",
+    "hitCount": 90,
+    "metadata": "757826680e7ae55846c105b66cb0a3487f443720bf26b122f9a1a89d02e53151"
+  },
+  "flower": {
+    "paint": "bf863b51edd1d829d7f27078d600128bffd891d94abc34c5fd749236906355dd",
+    "hitCount": 5,
+    "metadata": "f14303ad281567befa74566e077027d5be25860409a11873d1e962fa69c76517"
+  },
+  "mosaic": {
+    "paint": "d22aba0fa0f7b4bcb9e8de2c0316416cdd891813971f4d38cbb59d9e270747fc",
+    "hitCount": 15,
+    "metadata": "0376b5ee1b59058af747429b7261dcfad1a55ab77fd4ca407fe4bcfa77b74356"
+  },
+  "contour": {
+    "paint": "f542964c535412515f14be688dc69d32478759d4d43917de902a76dc62469a93",
+    "hitCount": 230,
+    "metadata": "5ce499b6439c9151a20c174708854cd0ac8e916c164bc83ed5ac6018c279b85a"
+  },
+  "calendar": {
+    "paint": "2bd821ec76257209338e3d94892b9315cd2afa1ad7ee0bd0fcc94ed383a4eb97",
+    "hitCount": 30,
+    "metadata": "f836a4374dca9c24a07220563179ed74d1a1717dc3ec7b03418daf526d967ee1"
+  },
+  "rose": {
+    "paint": "804831cea86a7d9ad9dbdd4d334d6f2dc91e41ba699f3723c18e1343a6675676",
+    "hitCount": 15,
+    "metadata": "7650b2b8b850265b044efbf8ba5199cb32943f0d9f1bd179c11b95cba68277f9"
+  },
+  "ecdf": {
+    "paint": "e0d6d68b977cd2cdb58429a396c8e4bb9ac63d83c3692040842c76ca49261776",
+    "hitCount": 90,
+    "metadata": "845834c57dc73cb61bfa5968db118c4ba85c3a2320cbb2d190c54826208d1008"
+  },
+  "sparkGrid": {
+    "paint": "a6b70ade4bd0c45eaf1b1d52dda016a3c9468212cd2b255acb5ec70cb95ff0b2",
+    "hitCount": 90,
+    "metadata": "6e010dc0eafe6be7fc151a4b519d3e91b9aea392a39e4fb8266ccb0d7731f5e6"
+  },
+  "density": {
+    "paint": "6e89230f95a0136d14f265b8482963f2114db7aa8540ff3f435a450904a4ed5f",
+    "hitCount": 120,
+    "metadata": "1ae78c7aa6f375cceacf0ed25b93999d5f5bc7fc756bd84317ee046e07a554dd"
+  },
+  "qq": {
+    "paint": "3c8e976498e301e7cc7a88e159d2345b8359c2ad74f6710c4a0617cedbb46c50",
+    "hitCount": 90,
+    "metadata": "ad38c53e64de8f52c58516cbc4213dffe989953a5e0564f6c4be4e914355457a"
+  },
+  "connectedScatter": {
+    "paint": "f02d46482880d15a99a395753f02d66cf2709ad9bac323807749643116458da9",
+    "hitCount": 30,
+    "metadata": "36e7e9f5d7a397c49f4dadb35fb22d27c405d50b8914299af6e319de3713cc2c"
+  },
+  "stripes": {
+    "paint": "9eb072aab1ff7f7f49e19647b139823b140d176d53f87e560d939522527324b8",
+    "hitCount": 30,
+    "metadata": "aa07b53d95c212b6fbf8741c1bec5897e56d45460576042ca15c6536c83d6e84"
+  },
+  "wordCloud": {
+    "paint": "0185f338c570e7dd98b3e98d45cec601a0339d2cfc68a79f5fc1e5dec6798ecb",
+    "hitCount": 4,
+    "metadata": "6162928d206982c54a6a019479df35707b76b3dc5939e5589e7743eb029f740c"
+  },
+  "errorBars": {
+    "paint": "a3da78ab971c09b5ad68c2bef9472817bfa49b77732f125c36817e0aa32c076a",
+    "hitCount": 5,
+    "metadata": "5447b003f6872bc5c05ae61c7bb7d5e2be4d2daf917a6ec984b6c8bef5cfe9b7"
+  },
+  "scatter3d": {
+    "paint": "823a0ee64c9f752cc0e5be44b490a07f94df576bd227b39be8020f04dd6eca05",
+    "hitCount": 90,
+    "metadata": "8ff2891fac36c52758a5057e800cbb4e16a8c6f1e3a786392213f586c110da05"
+  },
+  "trailRibbon": {
+    "paint": "2cac15206984f82125bceaa38b43c4e3bc84631cd93c8fc2096366fc3a2c89e5",
+    "hitCount": 90,
+    "metadata": "a5ed76c9283266dc43f176f6e3f280b925c11582ef3a14778d089cd6e5b34f8a"
+  },
+  "quakeTerrain": {
+    "paint": "264f2dc7856bfeb0c90964f36f1b7443a5f1a5e0c18f2c9052ce2dc6cd2a16ff",
+    "hitCount": 90,
+    "metadata": "b30f66db718d19a2df07c5394c09e3262e44c8d5c67d5383f209a6b6f9dcb1f3"
+  },
+  "firefly": {
+    "paint": "3e3e2a2a6975c20e77120eafe51b5e0725aed44ec27f2e463af61dc46472896b",
+    "hitCount": 90,
+    "metadata": "8a17dd81a354ec76cb1967f216cbf19cae5888ae1907ca83b94482834585071b"
+  },
+  "loomWeave": {
+    "paint": "6733cec8c1754ff6e37c910fe98fb22efa3e10d084005c6d059ad64a41e58722",
+    "hitCount": 72,
+    "metadata": "8672e97d6f8d9c73293c803d6d10c4f028bd30a4f0c0652484da07f7d0c64acc"
+  },
+  "dataCube": {
+    "paint": "b7da04a0f5d97a9b63ffb8362a2fba564ba30ec9d942d409b0bab545fcdc14b7",
+    "hitCount": 0,
+    "metadata": "44f4a7082a9fc1349d7466d9800dc9b2f719174fdaaa3eb1d07ed43e465b570b"
+  },
+  "geoPoints": {
+    "paint": "c030178bf3ba544658667a1a552a7dce7198051159bd1100dc7d6fbce1c228d5",
+    "hitCount": 90,
+    "metadata": "ea2948b8e5ad7b6ae11c10d6c4a40893a1214b872e47e6bcc7281199893c87c7"
+  },
+  "geoBubbles": {
+    "paint": "84375cd5a2c5cc6a58f1dacafe00b3969b4b4f31e3ec32970937137c46374365",
+    "hitCount": 90,
+    "metadata": "a23df96655b1ed646189a540810024e43acca7e06082674d7f00dffc3c5fb028"
+  },
+  "geoHex": {
+    "paint": "f0253b225c721fcb2d6f9c7c5be93770b7228a438cefe3327e430a131137e585",
+    "hitCount": 6,
+    "metadata": "2640e48f233efbb93602ced6cee98a2a2f57c21506aa7f851520f8ba4ecc66e4"
+  },
+  "globe": {
+    "paint": "2876fe5abf1b00311b059135e5c22eb970aab4e29e08c1d29070d05440ab5422",
+    "hitCount": 39,
+    "metadata": "4de7ee7a7aecaec72ef958f65ecb05934675a64bac99b31a6e066d811588d175"
+  },
+  "globeTrail": {
+    "paint": "71501d103744faa1e4f6b7d6f1042485452f980811884f4bf3ba6a9dd309cb0c",
+    "hitCount": 39,
+    "metadata": "3bb56b36f5d7e093425d6e576bee1de1a7cd719c05bf4ee50f010a971b29f489"
+  },
+  "arcMap": {
+    "paint": "1304bb566631f211f5824eef40cddbf9d4a61f6231acf8f38461cd8c9725811b",
+    "hitCount": 90,
+    "metadata": "b6d26aed3e51e421f7737f5785339661e7fd8fd823db5f51c90b113ea8375868"
+  }
+}

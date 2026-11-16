@@ -51,9 +51,9 @@ export function FocusCurtain({ open, title, onClose, children }: { open: boolean
         <header className="flex items-center gap-3 border-b border-loom-border px-5 py-4">
           <p className="sr-only">Forecast explanation</p>
           <h2 id="loom-focus-title" className="flex-1 text-base font-semibold">{title}</h2>
-          <button type="button" className="loom-btn-ghost min-h-8 min-w-8" aria-label="Close" onClick={onClose}>×</button>
+          <button type="button" className="loom-btn-ghost min-h-11 min-w-11" aria-label="Close" onClick={onClose}>×</button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5">{children}</div>
       </aside>
     </div>,
     document.body,

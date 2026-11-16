@@ -117,7 +117,7 @@ export function renderGpuSceneCanvas(
   } else if (kind === "loomWeave") {
     drawLoomWeave(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, opts.axisFontSize, opts);
   } else if (kind === "trailRibbon") {
-    drawTrailRibbons(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, radiusFromPointSize(opts.pointSize, 2.6), opts.axisFontSize, opts);
+    drawTrailRibbons(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, radiusFromPointSize(opts.pointSize, 2.6, mini), opts.axisFontSize, opts);
   } else if (kind === "firefly") {
     drawFireflyField(ctx, packed, w, h, pad, colors, ink, font, mini, opacity, opts);
   } else {
@@ -236,7 +236,7 @@ function drawFireflyField(
   const { sx, sy, left, right, top, bottom } = fireflyLayout(packed, w, h, pad, mini, opts.axisFontSize);
   const pts = fireflyGlowPoints(packed);
   const crowd = fireflyDensity(pts.length, right - left, bottom - top);
-  const base = radiusFromPointSize(opts.pointSize, 3) * (mini ? 0.7 : 1);
+  const base = radiusFromPointSize(opts.pointSize, 3, mini) * (mini ? 0.7 : 1);
   const density = crowd.size;
   // Dim sparks first so the brightest land on top.
   const order = pts.map((_, i) => i).sort((a, b) => pts[a]!.size - pts[b]!.size);
@@ -292,7 +292,7 @@ function drawOrbitPoints(
   const f = orbitFrame(w, h, pad, opts.yaw ?? 0.55, opts.pitch ?? 0.35, opts.zoom ?? 1, mini);
   const firefly = kind === "firefly";
   const opacity = opts.opacity ?? 0.85;
-  const base = radiusFromPointSize(opts.pointSize, 3);
+  const base = radiusFromPointSize(opts.pointSize, 3, mini);
   const corners = UNIT_CORNERS.map((c) => projectUnit(f, c[0], c[1], c[2]));
   let far = 0;
   corners.forEach((c, i) => { if (c.depth > corners[far]!.depth) far = i; });
@@ -655,6 +655,7 @@ function drawQuakeTerrain(
     const bo = orientIsoCell(b.c, b.r, cols, rows, floorOrient);
     return ao.c + ao.r - (bo.c + bo.r) || ao.c - bo.c;
   });
+  ctx.globalAlpha = opts.opacity ?? 0.85;
   for (const cell of cells) {
     const t = Math.max(0, Math.min(1, (cell.v - base0) / span));
     const hh = Math.max(1, t * elevMax);
@@ -711,6 +712,7 @@ function drawQuakeTerrain(
     }
   }
 
+  ctx.globalAlpha = 1;
   if (mini) return;
   const f = packed.fields;
   drawRampKey(ctx, {

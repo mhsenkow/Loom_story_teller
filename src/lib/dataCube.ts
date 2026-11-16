@@ -217,7 +217,7 @@ interface BinnedRows {
 }
 
 /** Bin every row once; the cube and the pivot table aggregate from the same bins. */
-function binRows(rows: unknown[][], columns: string[], enc: CubeEncoding, maxBins: number): BinnedRows | null {
+export function binRows(rows: unknown[][], columns: string[], enc: CubeEncoding, maxBins: number): BinnedRows | null {
   if (!enc.yField || !enc.zField) return null;
   const xi = columns.indexOf(enc.xField);
   const yi = columns.indexOf(enc.yField);
@@ -641,6 +641,8 @@ export interface DataCubeRenderOpts extends CubeCellStyle {
   showLegend?: boolean;
   /** Hovered cell; `zi: null` highlights the whole depth pillar (pivot table roll-up). */
   hovered?: { xi: number; yi: number; zi: number | null } | null;
+  /** Statistical flags use voxel coordinates; independent of camera/pivot position. */
+  anomalyCells?: ReadonlySet<string>;
   /** Thumbnail mode — no labels / legend. */
   mini?: boolean;
   /**
@@ -808,6 +810,10 @@ export function drawDataCubeVoxels(ctx: CanvasRenderingContext2D, cube: DataCube
       ctx.fillStyle = rgba(rgb, k, alpha);
       ctx.strokeStyle = rgba(rgb, k * 0.7, Math.min(1, alpha + 0.15 * cubeCellAlphaScale(cell, opts)));
       ctx.lineWidth = opts.mini ? 0.5 : 0.75;
+      if (opts.anomalyCells?.has(`${cell.xi}:${cell.yi}:${cell.zi}`) && (opts.slice == null || opts.slice === cell.zi)) {
+        ctx.strokeStyle = opts.themeText ?? opts.ramp[0];
+        ctx.lineWidth = 3;
+      }
       ctx.beginPath();
       pts.forEach((p, i) => (i === 0 ? ctx.moveTo(p.sx, p.sy) : ctx.lineTo(p.sx, p.sy)));
       ctx.closePath();

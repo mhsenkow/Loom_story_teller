@@ -130,6 +130,8 @@ export type HitTarget = (
   summary?: { columns: string[]; row: (string | number | null)[] };
   /** Exact plotted value for plain-language readings; never parse formatted tooltip strings. */
   reading?: { label: string; value: number; measure: string; series?: string; order?: number };
+  /** Exact series observation for statistical highlights, including time buckets. */
+  analysisKey?: string;
   /** A duplicate readout such as an endpoint key, rather than another observation. */
   auxiliary?: boolean;
 };

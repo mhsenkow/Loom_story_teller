@@ -4,11 +4,15 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import ChartPanelTab from "../detail/ChartPanelTab";
 import { useLoomStore } from "@/lib/store";
 import { CHART_KIND_OPTIONS } from "@/lib/recommendations";
+import { chartCapabilities } from "@/lib/chartSupport";
+import { chartDefinition } from "@/lib/chartDefinitions";
+import { chartNumberControls } from "@/lib/chartDefinitions/controls";
 
 beforeEach(() => {
   useLoomStore.getState().reset();
@@ -57,6 +61,21 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it("lets connected scatter order by a date, with undo and no misleading size inversion", () => {
+  useLoomStore.setState(s => ({
+    chartPanelSection: "encoding",
+    activeChart: { ...s.activeChart!, kind: "connectedScatter", xField: "revenue", yField: "previous", sizeField: null },
+    columnStats: [...s.columnStats, { ...s.columnStats[1], name: "previous" }, { name: "date", data_type: "DATE", null_count: 0, distinct_count: 3, min_value: "2026-01-01", max_value: "2026-01-03" }],
+  }));
+  render(<ChartPanelTab />);
+  fireEvent.click(within(document.getElementById("loom-chrome-size")!).getByRole("button", { name: "Order" }));
+  fireEvent.click(screen.getByRole("option", { name: /date/ }));
+  expect(useLoomStore.getState().activeChart?.sizeField).toBe("date");
+  expect(screen.queryByRole("button", { name: /Invert size/ })).toBeNull();
+  act(() => useLoomStore.getState().undoChartEdit());
+  expect(useLoomStore.getState().activeChart?.sizeField).toBeNull();
+});
+
 describe("full chart catalog inspector", () => {
   it.each(CHART_KIND_OPTIONS)("$label opens every editor section", ({ value: kind }) => {
     useLoomStore.setState(s => ({
@@ -69,6 +88,21 @@ describe("full chart catalog inspector", () => {
       fireEvent.click(tab);
       expect(tab).toHaveAttribute("aria-selected", "true");
       expect(document.getElementById(tab.getAttribute("aria-controls")!)).toBeVisible();
+    }
+    fireEvent.click(screen.getByRole("tab", { name: "Visual" }));
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    expect(Array.from(document.querySelectorAll("[data-chart-inspector-section]")).map(section => section.getAttribute("data-chart-inspector-section")))
+      .toEqual(chartDefinition(kind).inspector.visualSections.map(section => section.id));
+    const caps = chartCapabilities(kind);
+    expect(!!screen.queryByRole("checkbox", { name: "Show grid" })).toBe(caps.grid);
+    expect(!!screen.queryByRole("slider", { name: "Grid opacity" })).toBe(caps.grid);
+    const size = screen.queryByRole("slider", { name: "Point size" });
+    expect(!!size).toBe(caps.pointMarker);
+    if (size) {
+      fireEvent.change(size, { target: { value: "18" } });
+      expect(useLoomStore.getState().chartVisualOverrides.pointSize).toBe(18);
+      act(() => useLoomStore.getState().undoChartEdit());
+      expect(useLoomStore.getState().chartVisualOverrides.pointSize).toBeUndefined();
     }
   });
 });
@@ -212,7 +246,7 @@ it("keeps Analyze and Overlays in the chart section navigation with icons and ke
     expect(screen.getByRole("tab", { name }).querySelector('svg[aria-hidden="true"]')).not.toBeNull();
   }
   fireEvent.click(screen.getByRole("tab", { name: "Analyze" }));
-  expect(await screen.findByRole("heading", { name: "Go beyond the line" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Analyze this chart" })).toBeInTheDocument();
   expect(useLoomStore.getState().panelTab).toBe("chart");
   fireEvent.keyDown(screen.getByRole("tab", { name: "Analyze" }), { key: "ArrowRight" });
   expect(await screen.findByRole("heading", { name: "What else was happening?" })).toBeInTheDocument();
@@ -293,4 +327,24 @@ describe("typography editing journeys", () => {
     act(() => useLoomStore.getState().undoChartEdit());
     expect(useLoomStore.getState().chartVisualOverrides.wordCloudFont).toBe("Manrope");
   });
+});
+
+it.each(["bar", "scatter", "line"] as const)("%s generated numeric controls retain ranges, updates, undo and redo", kind => {
+  useLoomStore.setState(s => ({ activeChart: { ...s.activeChart!, id: kind, kind } }));
+  render(<ChartPanelTab />);
+  fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+  for (const control of chartNumberControls(chartDefinition(kind).capabilities).filter(control => control.surface !== "renderer")) {
+    const slider = screen.getByRole("slider", { name: control.label });
+    expect(slider).toHaveAttribute("min", String(control.min));
+    expect(slider).toHaveAttribute("max", String(control.max));
+    expect(slider).toHaveAttribute("step", String(control.step));
+    const before = useLoomStore.getState().chartVisualOverrides[control.key];
+    fireEvent.change(slider, { target: { value: String(control.max) } });
+    expect(useLoomStore.getState().chartVisualOverrides[control.key]).toBe(control.max);
+    act(() => useLoomStore.getState().undoChartEdit());
+    expect(useLoomStore.getState().chartVisualOverrides[control.key]).toBe(before);
+    act(() => useLoomStore.getState().redoChartEdit());
+    expect(useLoomStore.getState().chartVisualOverrides[control.key]).toBe(control.max);
+    act(() => useLoomStore.getState().undoChartEdit());
+  }
 });

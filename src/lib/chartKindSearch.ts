@@ -1,3 +1,4 @@
+import { findChartDefinition } from "./chartDefinitions";
 // =================================================================
 // Loom — Chart type catalog grouping + search
 // =================================================================
@@ -7,9 +8,6 @@
 // =================================================================
 
 import { CHART_KIND_OPTIONS, type ChartKind } from "./recommendations";
-import { ODD_CHART_KIND_OPTIONS } from "./oddCharts";
-import { GPU_SCENE_KIND_OPTIONS } from "./gpuScenes";
-import { GEO_MAP_KIND_OPTIONS } from "./geoMaps";
 import { CHART_KIND_VERNACULAR } from "./analysisVernacular";
 
 export type ChartKindGroup = "Classic" | "Creative" | "3D & GPU" | "Maps";
@@ -26,9 +24,10 @@ export interface ChartKindEntry {
 const SYNONYMS: Partial<Record<string, string>> = { ...CHART_KIND_VERNACULAR };
 
 function groupFor(kind: string): ChartKindGroup {
-  if (GEO_MAP_KIND_OPTIONS.some((o) => o.value === kind) || kind === "choropleth") return "Maps";
-  if (GPU_SCENE_KIND_OPTIONS.some((o) => o.value === kind)) return "3D & GPU";
-  if (ODD_CHART_KIND_OPTIONS.some((o) => o.value === kind)) return "Creative";
+  const family = findChartDefinition(kind)?.family;
+  if (family === "geo" || kind === "choropleth") return "Maps";
+  if (family === "scene") return "3D & GPU";
+  if (family === "odd") return "Creative";
   return "Classic";
 }
 
