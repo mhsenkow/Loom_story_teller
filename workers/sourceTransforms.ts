@@ -112,6 +112,23 @@ export function paprikaToGecko(body: unknown): Json[] {
   });
 }
 
+/** CoinLore `/api/tickers` (keyless, serves Cloudflare egress) → CoinGecko markets shape. */
+export function coinloreToGecko(body: unknown): Json[] {
+  return asArr(asObj(body).data).map((t) => {
+    const c = asObj(t);
+    return {
+      id: String(c.nameid ?? c.id ?? ""),
+      symbol: String(c.symbol ?? "").toLowerCase(),
+      name: String(c.name ?? ""),
+      current_price: numOrNull(c.price_usd),
+      market_cap: numOrNull(c.market_cap_usd),
+      total_volume: numOrNull(c.volume24),
+      price_change_percentage_24h: numOrNull(c.percent_change_24h),
+      market_cap_rank: numOrNull(c.rank),
+    };
+  });
+}
+
 // ---- Aircraft (ADSB.lol fallback → OpenSky `states`) ----
 
 /** Query points spread over the contiguous US (250 nm radius each). */
@@ -844,6 +861,20 @@ export function treasuryDebt(body: unknown): Columnar {
     columns: DEBT_COLUMNS,
     rows: [...byDate.entries()].sort((a, b) => a[0].localeCompare(b[0])).map((e) => e[1]),
   };
+}
+
+/** FRED quarterly GFDEBTN + FYGFDPUN CSV (millions USD) → the debt-to-the-penny columns. */
+export function fredDebtCsv(text: string): Columnar {
+  const rows: unknown[][] = [];
+  for (const line of text.split(/\r?\n/).slice(1)) {
+    const [date, tot, pub] = line.split(",");
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const total = numOrNull(tot);
+    if (total == null) continue;
+    const held = numOrNull(pub);
+    rows.push([date, total * 1e6, held == null ? null : held * 1e6, held == null ? null : (total - held) * 1e6]);
+  }
+  return { columns: DEBT_COLUMNS, rows };
 }
 
 // ---- NASA FIRMS VIIRS (USA 24h CSV) ----

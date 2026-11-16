@@ -65,9 +65,11 @@ import {
   nwisIvWide,
   openMeteoCities,
   paprikaToGecko,
+  coinloreToGecko,
   starlinkGp,
   steamTop,
   treasuryDebt,
+  fredDebtCsv,
   trimNwsAlerts,
   utcDay,
   londonDay,
@@ -99,6 +101,7 @@ import {
   faaRows,
   fdaRows,
   fedSpendingRows,
+  mtsAgencyRows,
   fireballRows,
   githubEventRows,
   iodaRows,
@@ -607,6 +610,8 @@ async function upstreamJson<T = unknown>(label: string, url: string, timeoutMs?:
   return (await upstream(label, url, { timeoutMs })).json() as Promise<T>;
 }
 
+const MEMPOOL_HOSTS = ["mempool.space", "mempool.emzy.de", "mempool.ninja"] as const;
+
 const SUBCACHE_ORIGIN = "https://loom-source.internal/upstream/";
 
 /** JSON from a slow-changing upstream, cached separately (e.g. GBFS station list, WB country list). */
@@ -917,7 +922,8 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
   },
 
   crypto: async () => {
-    // CoinGecko 429s Cloudflare's shared IPs often — CoinPaprika mapped into the same shape.
+    // CoinGecko 429s Cloudflare's shared IPs and CoinPaprika answers them 402 — both
+    // stay first in case they recover; CoinLore serves CF egress. All map to Gecko shape.
     try {
       return await upstreamText(
         "CoinGecko",
@@ -925,8 +931,13 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
         6_000,
       );
     } catch {
-      const body = await upstreamJson("CoinPaprika", "https://api.coinpaprika.com/v1/tickers?limit=50");
-      return JSON.stringify(paprikaToGecko(body));
+      try {
+        const body = await upstreamJson("CoinPaprika", "https://api.coinpaprika.com/v1/tickers?limit=50", 6_000);
+        return JSON.stringify(paprikaToGecko(body));
+      } catch {
+        const body = await upstreamJson("CoinLore", "https://api.coinlore.net/api/tickers/?start=0&limit=50");
+        return JSON.stringify(coinloreToGecko(body));
+      }
     }
   },
 
@@ -1062,11 +1073,25 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     // Newest 15 blocks, then 3 older pages (~60 blocks). Heights are consecutive, so the
     // older pages' start heights are known up front — fetch them in parallel so a cold
     // cache answers well inside the browser's wait. A failed page just means fewer blocks.
-    const first = await upstreamJson("mempool.space", "https://mempool.space/api/v1/blocks", 15_000);
+    // mempool.space sometimes stalls from Cloudflare egress — fall back to public mempool
+    // instances running the same API (same block/fee/pool fields).
+    let host = "";
+    let first: unknown;
+    let lastErr: unknown;
+    for (const h of MEMPOOL_HOSTS) {
+      try {
+        first = await upstreamJson(h, `https://${h}/api/v1/blocks`, 8_000);
+        host = h;
+        break;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    if (!host) throw lastErr instanceof Error ? lastErr : new Error("mempool: all hosts failed");
     const low = mempoolLowestHeight(first);
     const starts = low != null ? [1, 2, 3].map((k) => low - 1 - 15 * (k - 1)).filter((h) => h > 0) : [];
     const older = await Promise.allSettled(
-      starts.map((h) => upstreamJson("mempool.space", `https://mempool.space/api/v1/blocks/${h}`, 8_000)),
+      starts.map((h) => upstreamJson(host, `https://${host}/api/v1/blocks/${h}`, 8_000)),
     );
     const pages: unknown[] = [first, ...older.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []))];
     return JSON.stringify(mempoolBlocks(pages));
@@ -1074,14 +1099,21 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
 
   debt: async () => {
     // ≈ 8.4k business days since 1993 in one page (~2.8 MB upstream, ~0.4 MB out).
-    const body = await upstreamJson(
-      "US Treasury",
-      "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny" +
-        "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt" +
-        "&sort=-record_date&page%5Bsize%5D=10000",
-      20_000,
-    );
-    return JSON.stringify(treasuryDebt(body));
+    // fiscaldata intermittently fails TLS from Cloudflare (525) — FRED's quarterly series
+    // fill the same columns at coarser resolution until it recovers.
+    try {
+      const body = await upstreamJson(
+        "US Treasury",
+        "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny" +
+          "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt" +
+          "&sort=-record_date&page%5Bsize%5D=10000",
+        20_000,
+      );
+      return JSON.stringify(treasuryDebt(body));
+    } catch {
+      const csv = await upstreamText("FRED", "https://fred.stlouisfed.org/graph/fredgraph.csv?id=GFDEBTN,FYGFDPUN", 15_000);
+      return JSON.stringify(fredDebtCsv(csv));
+    }
   },
 
   firms: async () => {
@@ -1250,8 +1282,22 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
       powerballRows(await upstreamJson("NY Lottery", "https://data.ny.gov/resource/d6yy-54nr.json?$limit=5000&$order=draw_date%20DESC", 15_000)),
     ),
 
-  fed_spending: async () =>
-    JSON.stringify(fedSpendingRows(await upstreamJson("USAspending", "https://api.usaspending.gov/api/v2/references/toptier_agencies/", 20_000))),
+  fed_spending: async () => {
+    // USAspending times out / 525s from Cloudflare egress; the Monthly Treasury Statement
+    // (agency fiscal-YTD outlays) covers the same agencies when it does.
+    try {
+      return JSON.stringify(fedSpendingRows(await upstreamJson("USAspending", "https://api.usaspending.gov/api/v2/references/toptier_agencies/", 12_000)));
+    } catch {
+      const body = await upstreamJson(
+        "Treasury MTS",
+        "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/mts/mts_table_5" +
+          "?fields=record_date,classification_desc,current_fytd_net_outly_amt,record_fiscal_year" +
+          "&filter=data_type_cd:eq:T,sequence_level_nbr:eq:2&sort=-record_date&page%5Bsize%5D=200",
+        20_000,
+      );
+      return JSON.stringify(mtsAgencyRows(body));
+    }
+  },
 
   bikeshare: async (ctx) => {
     const settled = await Promise.allSettled(

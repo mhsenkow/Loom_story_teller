@@ -20,9 +20,11 @@ import {
   nwisIvWide,
   openMeteoCities,
   paprikaToGecko,
+  coinloreToGecko,
   starlinkGp,
   steamTop,
   treasuryDebt,
+  fredDebtCsv,
   trimNwsAlerts,
   utcDay,
   worldBankWide,
@@ -56,6 +58,18 @@ describe("Worker source transforms (shapes the browser parsers read)", () => {
     expect(out.features[0]!.properties).not.toHaveProperty("description");
     const rows = parseSourceRows("nws", out);
     expect(rows[0]!.slice(0, 7)).toEqual(["b", "New", "", "Severe", "", "", "Here"]);
+  });
+
+  it("coinloreToGecko feeds parseCrypto", () => {
+    const body = {
+      data: [
+        { id: "90", symbol: "BTC", name: "Bitcoin", nameid: "bitcoin", rank: 1, price_usd: "84644.12",
+          percent_change_24h: "2.19", market_cap_usd: "1686000000000.5", volume24: 31000000000.1 },
+      ],
+    };
+    const rows = parseSourceRows("crypto", coinloreToGecko(body));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual(["bitcoin", "BTC", "Bitcoin", 84644.12, 1686000000000.5, 31000000000.1, 2.19, 1]);
   });
 
   it("paprikaToGecko feeds parseCrypto", () => {
@@ -542,5 +556,16 @@ describe("Worker transform boundary cases (LOOM-498)", () => {
     }));
     const out = starlinkGp(items);
     expect(out.rows).toHaveLength(2500);
+  });
+});
+
+describe("fredDebtCsv", () => {
+  it("scales FRED millions into the debt columns and skips blank totals", () => {
+    const out = fredDebtCsv("observation_date,GFDEBTN,FYGFDPUN\n1966-01-01,,\n2026-04-01,39000000.0,31000000.0\n2026-07-01,39500000.0,\n");
+    expect(out.rows).toEqual([
+      ["2026-04-01", 39e12, 31e12, 8e12],
+      ["2026-07-01", 39.5e12, null, null],
+    ]);
+    expect(parseSourceRows("debt", out)).toHaveLength(2);
   });
 });
