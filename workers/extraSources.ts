@@ -580,6 +580,31 @@ export function fedSpendingRows(body: unknown): Columnar {
   );
 }
 
+/** Monthly Treasury Statement table 5 (fiscal-YTD net outlays) → fed_spending; used when USAspending is unreachable. */
+export function mtsAgencyRows(body: unknown): Columnar {
+  const all = arr(obj(body).data).map(obj);
+  const date = (r: Record<string, unknown>) => String(r.record_date ?? "");
+  const latest = all.reduce<string>((m, r) => (date(r) > m ? date(r) : m), "");
+  const out: Json[] = [];
+  for (const r of all) {
+    const desc = String(r.classification_desc ?? "");
+    if (date(r) !== latest || !desc.startsWith("Total--")) continue;
+    const outlays = r.current_fytd_net_outly_amt === "null" ? null : num(r.current_fytd_net_outly_amt);
+    out.push({
+      agency: desc.slice("Total--".length),
+      abbreviation: "",
+      toptier_code: "",
+      fiscal_year: num(r.record_fiscal_year),
+      budget_authority: null,
+      obligated: null,
+      outlays,
+    });
+  }
+  const total = out.reduce((t, r) => t + Math.max(0, Number(r.outlays ?? 0)), 0);
+  for (const r of out) r.pct_of_total = total > 0 && r.outlays != null ? round((Number(r.outlays) / total) * 100, 4) : null;
+  return columnar(FED_SPENDING_COLUMNS, out);
+}
+
 // ---- GBFS bike share (several Lyft systems) ----
 
 export const BIKESHARE_COLUMNS = ["system", "station_id", "name", "latitude", "longitude", "capacity", "bikes_available", "ebikes_available", "docks_available", "pct_full", "is_renting", "ts"];

@@ -24,6 +24,7 @@ import {
   starlinkGp,
   steamTop,
   treasuryDebt,
+  fredDebtCsv,
   trimNwsAlerts,
   utcDay,
   worldBankWide,
@@ -555,5 +556,16 @@ describe("Worker transform boundary cases (LOOM-498)", () => {
     }));
     const out = starlinkGp(items);
     expect(out.rows).toHaveLength(2500);
+  });
+});
+
+describe("fredDebtCsv", () => {
+  it("scales FRED millions into the debt columns and skips blank totals", () => {
+    const out = fredDebtCsv("observation_date,GFDEBTN,FYGFDPUN\n1966-01-01,,\n2026-04-01,39000000.0,31000000.0\n2026-07-01,39500000.0,\n");
+    expect(out.rows).toEqual([
+      ["2026-04-01", 39e12, 31e12, 8e12],
+      ["2026-07-01", 39.5e12, null, null],
+    ]);
+    expect(parseSourceRows("debt", out)).toHaveLength(2);
   });
 });

@@ -53,6 +53,7 @@ import {
   starlinkGp,
   steamTop,
   treasuryDebt,
+  fredDebtCsv,
   trimNwsAlerts,
   utcDay,
   londonDay,
@@ -84,6 +85,7 @@ import {
   faaRows,
   fdaRows,
   fedSpendingRows,
+  mtsAgencyRows,
   fireballRows,
   githubEventRows,
   iodaRows,
@@ -1045,14 +1047,21 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
 
   debt: async () => {
     // ≈ 8.4k business days since 1993 in one page (~2.8 MB upstream, ~0.4 MB out).
-    const body = await upstreamJson(
-      "US Treasury",
-      "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny" +
-        "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt" +
-        "&sort=-record_date&page%5Bsize%5D=10000",
-      20_000,
-    );
-    return JSON.stringify(treasuryDebt(body));
+    // fiscaldata intermittently fails TLS from Cloudflare (525) — FRED's quarterly series
+    // fill the same columns at coarser resolution until it recovers.
+    try {
+      const body = await upstreamJson(
+        "US Treasury",
+        "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v2/accounting/od/debt_to_penny" +
+          "?fields=record_date,tot_pub_debt_out_amt,debt_held_public_amt,intragov_hold_amt" +
+          "&sort=-record_date&page%5Bsize%5D=10000",
+        20_000,
+      );
+      return JSON.stringify(treasuryDebt(body));
+    } catch {
+      const csv = await upstreamText("FRED", "https://fred.stlouisfed.org/graph/fredgraph.csv?id=GFDEBTN,FYGFDPUN", 15_000);
+      return JSON.stringify(fredDebtCsv(csv));
+    }
   },
 
   firms: async () => {
@@ -1221,8 +1230,22 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
       powerballRows(await upstreamJson("NY Lottery", "https://data.ny.gov/resource/d6yy-54nr.json?$limit=5000&$order=draw_date%20DESC", 15_000)),
     ),
 
-  fed_spending: async () =>
-    JSON.stringify(fedSpendingRows(await upstreamJson("USAspending", "https://api.usaspending.gov/api/v2/references/toptier_agencies/", 20_000))),
+  fed_spending: async () => {
+    // USAspending times out / 525s from Cloudflare egress; the Monthly Treasury Statement
+    // (agency fiscal-YTD outlays) covers the same agencies when it does.
+    try {
+      return JSON.stringify(fedSpendingRows(await upstreamJson("USAspending", "https://api.usaspending.gov/api/v2/references/toptier_agencies/", 12_000)));
+    } catch {
+      const body = await upstreamJson(
+        "Treasury MTS",
+        "https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/mts/mts_table_5" +
+          "?fields=record_date,classification_desc,current_fytd_net_outly_amt,record_fiscal_year" +
+          "&filter=data_type_cd:eq:T,sequence_level_nbr:eq:2&sort=-record_date&page%5Bsize%5D=200",
+        20_000,
+      );
+      return JSON.stringify(mtsAgencyRows(body));
+    }
+  },
 
   bikeshare: async (ctx) => {
     const settled = await Promise.allSettled(

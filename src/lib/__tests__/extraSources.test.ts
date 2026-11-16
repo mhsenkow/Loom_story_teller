@@ -14,6 +14,8 @@ import {
   faaRows,
   fdaRows,
   fedSpendingRows,
+  mtsAgencyRows,
+  FED_SPENDING_COLUMNS,
   fireballRows,
   githubEventRows,
   gutenbergAuthor,
@@ -191,5 +193,26 @@ describe("extraSources transforms", () => {
     expect(rows.find((r) => r.key === "AS3")!.announcements).toBe(3);
     expect(rows.find((r) => r.key === "IPv4 /24")).toMatchObject({ announcements: 2, withdrawals: 1 });
     expect(new Set(rows.map((r) => r.id)).size).toBe(rows.length);
+  });
+});
+
+describe("Cloudflare-egress fallbacks", () => {
+  it("mtsAgencyRows keeps the latest month's agency totals with outlay shares", () => {
+    const row = (d: string, desc: string, amt: string) => ({
+      record_date: d, classification_desc: desc, current_fytd_net_outly_amt: amt, record_fiscal_year: "2027",
+    });
+    const out = mtsAgencyRows({
+      data: [
+        row("2026-10-31", "Total--Department of Defense--Military Programs", "300"),
+        row("2026-10-31", "Total--Department of Labor", "-100"),
+        row("2026-10-31", "Total On-Budget", "999"),
+        row("2026-10-31", "Total--Judicial Branch", "100"),
+        row("2026-09-30", "Total--Department of Labor", "5"),
+      ],
+    });
+    expect(out.columns).toEqual(FED_SPENDING_COLUMNS);
+    expect(out.rows).toHaveLength(3);
+    expect(out.rows[0]).toEqual(["Department of Defense--Military Programs", "", "", 2027, null, null, 300, 75]);
+    expect(parsed("fed_spending", out)).toHaveLength(3);
   });
 });

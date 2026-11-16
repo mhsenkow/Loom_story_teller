@@ -863,6 +863,20 @@ export function treasuryDebt(body: unknown): Columnar {
   };
 }
 
+/** FRED quarterly GFDEBTN + FYGFDPUN CSV (millions USD) → the debt-to-the-penny columns. */
+export function fredDebtCsv(text: string): Columnar {
+  const rows: unknown[][] = [];
+  for (const line of text.split(/\r?\n/).slice(1)) {
+    const [date, tot, pub] = line.split(",");
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    const total = numOrNull(tot);
+    if (total == null) continue;
+    const held = numOrNull(pub);
+    rows.push([date, total * 1e6, held == null ? null : held * 1e6, held == null ? null : (total - held) * 1e6]);
+  }
+  return { columns: DEBT_COLUMNS, rows };
+}
+
 // ---- NASA FIRMS VIIRS (USA 24h CSV) ----
 
 export const FIRMS_COLUMNS = [
