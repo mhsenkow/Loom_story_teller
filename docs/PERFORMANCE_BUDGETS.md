@@ -95,3 +95,5 @@ Final combined-tree export `2026-11-12T00:57:03.919Z` (November 11 local time) r
 
 
 **Mobile interaction refinement (2026-11-16):** Inline empty-state SVGs use existing theme colors and brief CSS transform/opacity entrances; no image downloads, timers, animation libraries or continuous effects. Analysis tables render at most 20 flagged rows or 50 forecast rows in their own scroll region. The sheet consumes the existing VisualViewport subscription and moves only when viewport metrics change. Partial numeric drafts commit on blur/Enter, reducing repeated statistical recomputation while typing. Reduced motion skips illustration/result entrances. Browser tests measure usability and layout, not physical-device frame timing.
+
+Final mobile build `2026-11-16T18:13:52.343Z` reports **447 kB First Load JS** for `/` (previous analysis pass 446 kB), within the 600 kB target. The 24 Chromium/WebKit journeys pass; no physical-mobile performance claim is made.
