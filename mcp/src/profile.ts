@@ -11,7 +11,10 @@ export interface ProfileResult {
   columns: ColumnInfo[];
   sampleRows: (string | number | boolean | null)[][];
   columnNames: string[];
+  /** Rows in the input (CSV rows after any byte trim, or JSON array length). */
   rowCount: number;
+  /** Rows actually profiled (capped at MAX_ROWS). */
+  sampledRows: number;
   truncated: boolean;
 }
 
@@ -44,6 +47,23 @@ function trimCsvToLastNewline(text: string): string {
   const last = text.lastIndexOf("\n");
   if (last <= 0) return text;
   return text.slice(0, last + 1);
+}
+
+/** Rename repeated headers to `a`, `a_2`, `a_3`, … so every column name is unique. */
+function dedupeHeaders(headers: string[]): string[] {
+  const seen = new Set<string>();
+  return headers.map((h) => {
+    let name = h;
+    for (let n = 2; seen.has(name); n++) name = `${h}_${n}`;
+    seen.add(name);
+    return name;
+  });
+}
+
+/** JSON cell → string for profiling; nested objects/arrays keep their JSON form. */
+function jsonCellText(v: unknown): string {
+  if (v == null) return "";
+  return typeof v === "object" ? JSON.stringify(v) : String(v);
 }
 
 /** Minimal CSV splitter — handles quoted fields. */
@@ -99,7 +119,7 @@ export function parseCsv(text: string): { headers: string[]; rows: string[][] } 
 
   const nonEmpty = lines.filter((l) => l.trim().length > 0);
   if (nonEmpty.length === 0) return { headers: [], rows: [] };
-  const headers = splitLine(nonEmpty[0]!).map((h, i) => h || `col_${i + 1}`);
+  const headers = dedupeHeaders(splitLine(nonEmpty[0]!).map((h, i) => h || `col_${i + 1}`));
   const rows = nonEmpty.slice(1).map(splitLine);
   return { headers, rows };
 }
@@ -135,12 +155,14 @@ export function profilePayload(input: {
       sampleRows: [],
       columnNames: columns.map((c) => c.name),
       rowCount: 0,
+      sampledRows: 0,
       truncated: false,
     };
   }
 
   let headers: string[] = [];
   let rawRows: string[][] = [];
+  let totalRows = 0;
   let truncated = false;
 
   if (input.csv) {
@@ -152,6 +174,7 @@ export function profilePayload(input: {
     const parsed = parseCsv(text);
     headers = parsed.headers;
     rawRows = parsed.rows.slice(0, MAX_ROWS);
+    totalRows = parsed.rows.length;
     if (parsed.rows.length > MAX_ROWS) truncated = true;
   } else if (input.json) {
     const text = input.json;
@@ -162,10 +185,11 @@ export function profilePayload(input: {
     if (Array.isArray(data) && data.length > 0 && typeof data[0] === "object" && data[0] !== null) {
       const objs = data.slice(0, MAX_ROWS) as Record<string, unknown>[];
       if (data.length > MAX_ROWS) truncated = true;
+      totalRows = data.length;
       const keySet = new Set<string>();
       for (const o of objs) Object.keys(o).forEach((k) => keySet.add(k));
       headers = [...keySet];
-      rawRows = objs.map((o) => headers.map((h) => (o[h] == null ? "" : String(o[h]))));
+      rawRows = objs.map((o) => headers.map((h) => jsonCellText(o[h])));
     } else {
       throw new Error("JSON must be an array of objects");
     }
@@ -174,7 +198,7 @@ export function profilePayload(input: {
   }
 
   if (headers.length === 0) {
-    return { columns: [], sampleRows: [], columnNames: [], rowCount: 0, truncated };
+    return { columns: [], sampleRows: [], columnNames: [], rowCount: 0, sampledRows: 0, truncated };
   }
 
   const columns: ColumnInfo[] = headers.map((name, i) => {
@@ -209,7 +233,8 @@ export function profilePayload(input: {
     columns,
     sampleRows,
     columnNames: headers,
-    rowCount: rawRows.length,
+    rowCount: totalRows,
+    sampledRows: rawRows.length,
     truncated,
   };
 }

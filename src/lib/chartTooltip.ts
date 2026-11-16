@@ -9,7 +9,7 @@ import { chartNumber } from "./chartNumbers";
 
 import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
 import { classifyKeys, histogramBins } from "./chartAxes";
-import { buildSpatialHitIndex, spatialCandidates } from "./spatialHitIndex";
+import { buildSpatialHitIndex, spatialCandidates, type SpatialHitIndex } from "./spatialHitIndex";
 
 /** Precomputed facet for bar charts (category × subcategory); used for canvas draw + hit-test. */
 export type BarFacetHitPayload = {
@@ -80,10 +80,14 @@ export function buildBarFacetGrid(
 }
 
 export type Canvas2DHitContext = {
+  /** Recipe used for the current paint; prevents stale reading cards during chart switches. */
+  readingChart?: ChartRecommendation;
   frameH?: number;
   kind: ChartKind;
   rows: (string | number | boolean | null)[][];
   columns: string[];
+  /** Map painted rows back to the loaded sample after filtering or thinning. */
+  rowSourceIndices?: number[];
   pad: number;
   w: number;
   h: number;
@@ -118,7 +122,16 @@ export type HitTarget = (
   match: [number, string][];
   /** Representative row when the mark isn't identified by exact values (bins, "Other"). */
   rowIndex?: number;
+  /**
+   * Drawn bounds when the hover area is padded (a bar's whole category band):
+   * focus rings hug the real shape while hovering stays forgiving.
+   */
+  mark?: { x: number; y: number; w: number; h: number };
   summary?: { columns: string[]; row: (string | number | null)[] };
+  /** Exact plotted value for plain-language readings; never parse formatted tooltip strings. */
+  reading?: { label: string; value: number; measure: string; series?: string; order?: number };
+  /** A duplicate readout such as an endpoint key, rather than another observation. */
+  auxiliary?: boolean;
 };
 
 function hitDistance(t: HitTarget, x: number, y: number): number | null {
@@ -142,14 +155,25 @@ function hitDistance(t: HitTarget, x: number, y: number): number | null {
   return a <= t.a1 ? 0 : null;
 }
 
+// One index per painted target list; pointer moves reuse it instead of rebuilding.
+const spatialIndexCache = new WeakMap<HitTarget[], { len: number; idx: SpatialHitIndex }>();
+
+/** Cached grid index for a paint's targets (rebuilt if the list grew or shrank). */
+export function spatialIndexFor(targets: HitTarget[]): SpatialHitIndex {
+  const cached = spatialIndexCache.get(targets);
+  if (cached && cached.len === targets.length) return cached.idx;
+  const idx = buildSpatialHitIndex(targets, { w: 8192, h: 8192 });
+  spatialIndexCache.set(targets, { len: targets.length, idx });
+  return idx;
+}
+
 /** Topmost / closest registered mark under the pointer. */
 export function pickHitTarget(targets: HitTarget[] | undefined, x: number, y: number): HitTarget | null {
   if (!targets?.length) return null;
   const scan =
     targets.length > 48
       ? (() => {
-          const idx = buildSpatialHitIndex(targets, { w: 8192, h: 8192 });
-          const near = spatialCandidates(idx, x, y);
+          const near = spatialCandidates(spatialIndexFor(targets), x, y, targets);
           return near.length ? near : targets;
         })()
       : targets;
@@ -180,7 +204,38 @@ export function rowForHitTarget(
     const r = rows[i]!;
     if (target.match.every(([ci, v]) => String(r[ci]) === v)) return i;
   }
+  // A bin, a pyramid side, or a word-cloud half labels the mark with text
+  // that is not a raw cell. The renderer still stored the representative row
+  // and the readout. A tooltip link stays strict: no fallback past the filter.
+  if (allowed) return null;
+  if (target.rowIndex != null && target.rowIndex >= 0 && target.rowIndex < rows.length) return target.rowIndex;
+  if (target.summary) return -1;
   return null;
+}
+
+/** Resolve against the painted groups, then read raw fields from the source row. */
+export function canvasHitReadout(
+  frame: Canvas2DHitContext,
+  target: HitTarget,
+  sample: { columns: string[]; rows: (string | number | boolean | null)[][] },
+  chart: ChartRecommendation,
+  link: TooltipLink | null = null,
+): { rowIndex: number; columns: string[]; row: (string | number | boolean | null)[] } | null {
+  const sourceIndex = (i: number) => frame.rowSourceIndices?.[i] ?? i;
+  const allowed = link ? new Set(frame.rows.flatMap((_, i) => {
+    const raw = sample.rows[sourceIndex(i)];
+    return raw && rowMatchesTooltipLink(sample.columns, raw, link) ? [i] : [];
+  })) : null;
+  const local = rowForHitTarget(target, frame.rows, allowed);
+  if (local == null) return null;
+  if (local < 0) return target.summary ? { rowIndex: -1, ...target.summary } : null;
+  const rowIndex = sourceIndex(local);
+  const raw = sample.rows[rowIndex];
+  if (!raw) return null;
+  return {
+    rowIndex,
+    ...mergeChartTooltip(target.summary, sample.columns, raw, resolveTooltipFieldNames(chart, sample.columns)),
+  };
 }
 
 /** Number for tooltips: grouped thousands, ≤2 decimals. */
@@ -257,11 +312,11 @@ export function allowedRowIndices(
 
 /** Default tooltip columns: encoding fields that exist in the table, de-duplicated. */
 export function resolveTooltipFieldNames(chart: ChartRecommendation, allColumns: string[]): string[] {
-  const fromChart = chart.tooltipFields?.filter((n) => allColumns.includes(n));
+  const fromChart = chart.tooltipFields?.filter((n) => allColumns.includes(n) && !n.includes("\u0000"));
   if (fromChart && fromChart.length > 0) return fromChart;
   const names: string[] = [];
   const push = (n: string | null | undefined) => {
-    if (!n || !allColumns.includes(n)) return;
+    if (!n || n.includes("\u0000") || !allColumns.includes(n)) return;
     if (!names.includes(n)) names.push(n);
   };
   push(chart.xField);
@@ -275,7 +330,7 @@ export function resolveTooltipFieldNames(chart: ChartRecommendation, allColumns:
   push(chart.opacityField);
   push(chart.shapeField);
   push(chart.emojiField);
-  return names.length > 0 ? names : [...allColumns].slice(0, 8);
+  return names.length > 0 ? names : [...allColumns].filter((n) => !n.includes("\u0000")).slice(0, 8);
 }
 
 export function projectRowForTooltip(
@@ -929,6 +984,10 @@ export function pickCanvasTooltipRowIndex(
     case "voronoi":
     case "isoScatter":
     case "contour":
+    case "ecdf":
+    case "density":
+    case "qq":
+    case "connectedScatter":
       return pickScatterCanvasNearest(rows, xIdx, yIdx, chartX, chartY, pad, w, h, allowed);
     case "waffle":
     case "isotype":
@@ -940,6 +999,12 @@ export function pickCanvasTooltipRowIndex(
     case "glyphStar":
     case "flower":
     case "mosaic":
+    case "calendar":
+    case "rose":
+    case "sparkGrid":
+    case "stripes":
+    case "wordCloud":
+    case "errorBars":
     case "chord":
     case "bump":
     case "stream":

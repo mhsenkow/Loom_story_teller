@@ -13,7 +13,8 @@ import { type ChartRenderOpts } from "../chartRenderTypes";
 import { resolveLayoutDirection } from "../chartSupport";
 import { formatTooltipNumber } from "../chartTooltip";
 import { type YAggregateOption } from "../recommendations";
-import { axisFont, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
+import { fillMaterialPath } from "./material";
+import { axisFont, barPath, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
 import { numRange } from "./primitives";
 import { DEFAULT_COLORS } from "./shared";
@@ -191,7 +192,8 @@ export function renderFullRadar(
       const angle = (Math.PI * 2 * (i % n)) / n - Math.PI / 2;
       const px = cx + Math.cos(angle) * r;
       const py = cy + Math.sin(angle) * r;
-      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
     }
     ctx.closePath();
     ctx.stroke();
@@ -240,7 +242,8 @@ export function renderFullRadar(
     ctx.beginPath();
     normals.forEach((_, i) => {
       const p = vertex(i);
-      i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
     });
     ctx.closePath();
     ctx.fill();
@@ -293,8 +296,10 @@ export function renderFullWaterfall(ctx: CanvasRenderingContext2D, rows: unknown
   const groups = new Map<string, number[]>();
   for (const r of rows) {
     const k = String(r[xi]);
+    const value = agg === "count" ? 1 : chartNumber(r[yi]);
+    if (!Number.isFinite(value)) continue;
     if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? chartNumber(r[yi]) : 1);
+    groups.get(k)!.push(value);
   }
   // Steps run in natural order for numbers / dates, otherwise first appearance
   const cls = classifyKeys([...groups.keys()]);
@@ -336,7 +341,12 @@ export function renderFullWaterfall(ctx: CanvasRenderingContext2D, rows: unknown
     const bottom = Math.max(Y(bar.start), Y(bar.end));
     ctx.fillStyle = bar.total ? totalColor : bar.value >= 0 ? up : down;
     ctx.globalAlpha = alpha;
-    ctx.fillRect(cx - barW / 2, top, barW, Math.max(1, bottom - top));
+    const bh = Math.max(1, bottom - top);
+    const x = cx - barW / 2;
+    const dir = Y(bar.end) < Y(bar.start) ? "up" : "down";
+    ctx.beginPath();
+    barPath(ctx, x, top, barW, bh, opts?.barCornerRadius ?? 3, dir);
+    fillMaterialPath(ctx, top, bottom, opts);
     if (i > 0) {
       // Connector from the previous step's end
       ctx.globalAlpha = 1;
@@ -402,8 +412,10 @@ export function renderFullLollipop(ctx: CanvasRenderingContext2D, rows: unknown[
   const groups = new Map<string, { vals: number[]; cat: string; row: unknown[] }>();
   for (const r of rows) {
     const k = String(r[xi]);
+    const value = agg === "count" ? 1 : chartNumber(r[yi]);
+    if (!Number.isFinite(value)) continue;
     if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "", row: r });
-    groups.get(k)!.vals.push(yi >= 0 ? chartNumber(r[yi]) : 1);
+    groups.get(k)!.vals.push(value);
   }
   const symbols = markSymbols(opts, opts?.fieldNames, rows);
   const drawHead = (row: unknown[], x: number, y: number, r: number, color: string) => {

@@ -10,6 +10,8 @@
 
 import { useEffect, useRef } from "react";
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
+import { hydrateSocialState } from "@/lib/store/socialSlice";
 import {
   getPersistedAppSettings,
   setPersistedAppSettings,
@@ -39,6 +41,7 @@ import {
   setPersistedSourcePreferences,
   KEY_SOURCE_PREFERENCES,
 } from "@/lib/persist";
+import { DATA_LIBRARY_KEY, parseDataLibrary } from "@/lib/dataLibrary";
 import { parseSourcePreferences } from "@/lib/sourcePreferences";
 import type { ViewMode } from "@/lib/store";
 import { parseLastSessionViewMode } from "@/lib/persistValidation";
@@ -65,7 +68,7 @@ export function HydrateStore() {
   const notifyStorageFailure = () => {
     if (storageToastShown.current) return;
     storageToastShown.current = true;
-    useLoomStore.getState().setToast("Couldn't save — browser storage is full");
+    useLoomStore.getState().setToast("Couldn’t save — this browser is out of space. Export a backup in Settings, then remove old files from Recent.");
   };
 
   useEffect(() => {
@@ -111,6 +114,30 @@ export function HydrateStore() {
     };
   }, []);
 
+  useEffect(() => {
+    // Community: this device's own votes, display name and show/hide preference.
+    useLoomStore.setState(hydrateSocialState());
+  }, []);
+
+  useEffect(() => {
+    let adopting = false;
+    const adopt = () => {
+      adopting = true;
+      try { useLoomStore.setState({ dataLibrary: parseDataLibrary(JSON.parse(localStorage.getItem(DATA_LIBRARY_KEY) ?? 'null')) }); }
+      catch { /* Preserve the current library if storage cannot be read. */ }
+      adopting = false;
+    };
+    adopt();
+    const unsubscribe = useLoomStore.subscribe((s, prev) => {
+      if (adopting || s.dataLibrary === prev.dataLibrary) return;
+      try { localStorage.setItem(DATA_LIBRARY_KEY, JSON.stringify({ v: 1, data: s.dataLibrary })); }
+      catch { notifyStorageFailure(); }
+    });
+    const onStorage = (e: StorageEvent) => { if (e.key === DATA_LIBRARY_KEY || e.key === null) adopt(); };
+    window.addEventListener('storage', onStorage);
+    return () => { unsubscribe(); window.removeEventListener('storage', onStorage); };
+  }, []);
+
   const skipFirstPersist = useRef({
     appSettings: true,
     recentFiles: true,
@@ -150,8 +177,34 @@ export function HydrateStore() {
     queryViews,
     dashboards,
     vizPreferences,
-    selectedFile,
-  } = useLoomStore();
+    selectedFile
+  } = useLoomStore(
+    useShallow((s) => ({
+      setAppSettings: s.setAppSettings,
+      setRecentFiles: s.setRecentFiles,
+      setLastSession: s.setLastSession,
+      setQueryHistory: s.setQueryHistory,
+      setQuerySnippets: s.setQuerySnippets,
+      setTablePrefs: s.setTablePrefs,
+      setTableViews: s.setTableViews,
+      setChartViews: s.setChartViews,
+      setQueryViews: s.setQueryViews,
+      setDashboards: s.setDashboards,
+      setVizPreferences: s.setVizPreferences,
+      appSettings: s.appSettings,
+      recentFiles: s.recentFiles,
+      lastSession: s.lastSession,
+      queryHistory: s.queryHistory,
+      querySnippets: s.querySnippets,
+      tablePrefs: s.tablePrefs,
+      tableViews: s.tableViews,
+      chartViews: s.chartViews,
+      queryViews: s.queryViews,
+      dashboards: s.dashboards,
+      vizPreferences: s.vizPreferences,
+      selectedFile: s.selectedFile,
+    })),
+  );
   const selectedPath = selectedFile?.path ?? null;
   const skipTablePrefsPathLoad = useRef(false);
 
@@ -408,7 +461,7 @@ export function HydrateStore() {
     skipFirstPersist.current.chartViews = false;
     for (const c of chartViews) {
       if (c.snapshotImageDataUrl?.startsWith("data:")) {
-        void putChartViewThumbnail(c.id, c.snapshotImageDataUrl);
+        void putChartViewThumbnail(c.id, c.snapshotImageDataUrl).catch(() => {});
       }
     }
     if (

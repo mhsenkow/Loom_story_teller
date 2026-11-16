@@ -41,7 +41,7 @@ describe("allowedOrigins (LOOM-654)", () => {
       if (cspOnly.has(host)) continue;
       expect(originAllowed(`https://${host}`, DEFAULT_ALLOWED_ORIGIN_HOSTS), host).toBe(true);
     }
-    const mcpUrl = read("mcp/src/index.ts").match(/const LOOM_URL = "(https:\/\/[^"]+)"/)?.[1];
+    const mcpUrl = read("mcp/src/tools.ts").match(/const LOOM_URL = "(https:\/\/[^"]+)"/)?.[1];
     expect(mcpUrl).toBeTruthy();
     expect(originAllowed(mcpUrl!, DEFAULT_ALLOWED_ORIGIN_HOSTS)).toBe(true);
   });

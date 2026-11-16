@@ -87,7 +87,7 @@ it("live feeds stay healthy", async () => {
 
   // 2–3. What users get: production payload → app parser → discover
   const health = (await realFetch(`${ORIGIN}/api/health`).then((r) => r.json()).catch(() => ({ sources: {} }))) as {
-    sources: Record<string, { state: string; lastOk?: number; error?: string }>;
+    sources: Record<string, { state: string; lastOk?: number; failingSince?: number; error?: string }>;
   };
   const union = new Set<string>();
   const down: string[] = [];
@@ -125,8 +125,11 @@ it("live feeds stay healthy", async () => {
   // 4. Long outages need a code fix, not patience
   const now = Date.now();
   for (const [kind, h] of Object.entries(health.sources ?? {})) {
-    if (h.state === "resting" && (!h.lastOk || now - h.lastOk > LONG_DOWN_MS))
-      failures.push(`${kind} resting ${h.lastOk ? `${Math.round((now - h.lastOk) / 3_600_000)} h` : "with no success on record"}: ${h.error ?? "unknown error"}`);
+    // Judge by how long the current failing run has lasted — a feed first seen
+    // failing today has no lastOk yet, which isn't evidence of a 48 h outage.
+    const downFor = h.failingSince ? now - h.failingSince : 0;
+    if (h.state === "resting" && downFor > LONG_DOWN_MS)
+      failures.push(`${kind} resting ${Math.round(downFor / 3_600_000)} h: ${h.error ?? "unknown error"}`);
   }
 
   const missing = CHART_KIND_OPTIONS.map((c) => c.value).filter((k) => !union.has(k));

@@ -10,10 +10,12 @@ import type {
   DashboardLayoutTemplate,
   DashboardSlot,
   LoomState,
+  PinnedMark,
   QueryResult,
 } from "./types";
 import { chartActivationPatch } from "./coreSlice";
 import { newLoomId } from "../loomId";
+import { sameMark } from "../markFocus";
 import { putChartViewThumbnail, removeChartViewThumbnail } from "../chartViewThumbnails";
 
 export function pointerViewsInitialState() {
@@ -35,19 +37,19 @@ export function createPointerViewsSlice(set: Setter) {
     setPngExportHandler: (fn: (() => Promise<Blob | null>) | null) => set({ pngExportHandler: fn }),
     setSvgExportHandler: (fn: (() => Promise<string | null>) | null) => set({ svgExportHandler: fn }),
     setSvgExportLabel: (label: string | null) => set({ svgExportLabel: label }),
-    setHoveredRowIndex: (idx: number | null) => set({ hoveredRowIndex: idx }),
+    // Same index → return state unchanged so pointer moves within one mark don't notify subscribers.
+    setHoveredRowIndex: (idx: number | null) => set((s) => (s.hoveredRowIndex === idx ? s : { hoveredRowIndex: idx })),
     setTooltipLink: (link: { field: string; value: string } | null) => set({ tooltipLink: link }),
-    addPinnedTooltip: (tt: {
-      chartId: string;
-      x: number;
-      y: number;
-      rowIndex: number;
-      row: (string | number | boolean | null)[];
-      columns: string[];
-    }) =>
-      set((s) => ({
-        pinnedTooltips: [...s.pinnedTooltips.slice(-4), { ...tt, id: newLoomId("pt-") }],
-      })),
+    togglePinnedTooltip: (pin: Omit<PinnedMark, "id">) =>
+      set((s) => {
+        const existing = s.pinnedTooltips.find((t) => t.chartId === pin.chartId && sameMark(t.ref, pin.ref));
+        if (existing) return { pinnedTooltips: s.pinnedTooltips.filter((t) => t !== existing) };
+        // Five pins per chart keeps the callouts readable.
+        const mine = s.pinnedTooltips.filter((t) => t.chartId === pin.chartId);
+        const drop = mine.length >= 5 ? mine[0] : null;
+        return { pinnedTooltips: [...s.pinnedTooltips.filter((t) => t !== drop), { ...pin, id: newLoomId("pt-") }] };
+      }),
+    setPinnedTooltips: (pins: PinnedMark[]) => set({ pinnedTooltips: pins }),
     removePinnedTooltip: (id: string) =>
       set((s) => ({ pinnedTooltips: s.pinnedTooltips.filter((t) => t.id !== id) })),
     clearPinnedTooltips: () => set({ pinnedTooltips: [] }),

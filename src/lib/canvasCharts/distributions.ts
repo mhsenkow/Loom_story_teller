@@ -338,7 +338,7 @@ export function renderFullArea(
   ctx.lineJoin = opts?.lineJoin ?? "round";
   const single = series.length === 1;
   series.forEach((_, si) => {
-    const color = cols[si % cols.length]!;
+    const color = cols[(opts?.seriesIndices?.get(series[si]!) ?? si) % cols.length]!;
     const top = single ? values[0]! : tops[si]!;
     const base = stacked.bases[si]!;
     const upper = model.keys.map((_, ki) => ({ x: X(ki), y: Y(top[ki]!) }));
@@ -396,6 +396,7 @@ export function renderFullArea(
       shape: "rect", x: x0, y: rect.top, w: Math.max(1, x1 - x0), h: rect.bottom - rect.top,
       match: tb.unit ? [] : [[xi, key]],
       rowIndex: tb.unit ? tb.firstRow.get(key) : undefined,
+      ...(single ? { reading: { label: key, value: total, measure: vTitle, order: ki } } : {}),
       summary: single
         ? { columns: [xName, vTitle], row: [key, formatTooltipNumber(total)] }
         : {
@@ -405,7 +406,7 @@ export function renderFullArea(
     });
   });
   const legend = [
-    ...series.map((label, si) => ({ label: label || "series", color: cols[si % cols.length]! })),
+    ...series.map((label, si) => ({ label: label || "series", color: cols[(opts?.seriesIndices?.get(label) ?? si) % cols.length]! })),
     ...overlayPts.map((ov, oi) => ({ label: ov.label, color: cols[(series.length + oi) % cols.length]! })),
   ];
   if (legend.length > 1) setLegend(opts, legend);

@@ -42,7 +42,7 @@ interface FakeTexture {
 function createFakeDevice() {
   const buffers: FakeBuffer[] = [];
   const textures: FakeTexture[] = [];
-  const writes: { buffer: FakeBuffer; bytes: number }[] = [];
+  const writes: { buffer: FakeBuffer; bytes: number; data: Float32Array }[] = [];
   let submits = 0;
   const device = {
     destroyed: false,
@@ -99,7 +99,7 @@ function createFakeDevice() {
     }),
     queue: {
       writeBuffer(buffer: FakeBuffer, _offset: number, data: ArrayBufferView) {
-        writes.push({ buffer, bytes: data.byteLength });
+        writes.push({ buffer, bytes: data.byteLength, data: new Float32Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)) });
       },
       submit() {
         submits += 1;
@@ -269,6 +269,22 @@ describe("LoomRenderer buffer lifecycle", () => {
 // ---- LoomSceneRenderer ----------------------------------------------
 
 describe("LoomSceneRenderer buffer lifecycle", () => {
+  it("uploads the shared CSS-pixel camera frame and clears a scene that becomes empty", async () => {
+    stubNavigatorGpu();
+    const fake = createFakeDevice();
+    const { canvas } = createCanvas();
+    const r = new LoomSceneRenderer();
+    await r.init(canvas, createLease(fake).lease);
+    r.uploadData(scenePts(3), sceneBounds, { mode: "scatter3d", orbitFrame: { cx: 160, cy: 115, scale: 37 } });
+    r.render(320, 240);
+    expect(Array.from(fake.writes.at(-1)!.data.slice(21, 24))).toEqual([160, 115, 37]);
+    expect(fake.writes.at(-1)!.bytes).toBe(96);
+    expect(fake.submits).toBe(1);
+    r.uploadData([], sceneBounds);
+    r.render(320, 240);
+    expect(fake.submits).toBe(2);
+    r.destroy();
+  });
   it("replaces (never accumulates) the data/screen buffers on every upload", async () => {
     stubNavigatorGpu();
     const fake = createFakeDevice();

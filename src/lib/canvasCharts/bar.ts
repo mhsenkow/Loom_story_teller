@@ -6,7 +6,7 @@ import { fillMaterialPath } from "./material";
 // =================================================================
 
 import { aggregateValues, fieldLabel, plotOf, pushHit, setLegend, valueTitle } from "./plumbing";
-import { classifyKeys, formatAxisValue, formatDataValue, histogramBins, linear, niceTicks, niceZeroScale } from "../chartAxes";
+import { classifyKeys, formatAxisValue, formatDataValue, histogramBins, linear, niceZeroScale } from "../chartAxes";
 import { DEFAULT_TOP_N, clampTopN } from "../chartFacets";
 import { drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks } from "../chartLooks";
 import { type ChartRenderOpts } from "../chartRenderTypes";
@@ -14,8 +14,8 @@ import { type BarFacetHitPayload, formatTooltipNumber } from "../chartTooltip";
 import { type YAggregateOption } from "../recommendations";
 import { axisFont, barPath, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
 import { contrastingInk } from "../chartLayout";
+import { chartTypeRamp } from "../chartType";
 import { DEFAULT_COLORS } from "./shared";
-
 export type BarModel = { entries: [string, number][]; rowCounts: Map<string, number>; ordered: boolean };
 
 /** Aggregate simple bars. Ordered keys (numbers, dates) keep their order; categories rank by value (Top N). */
@@ -33,7 +33,7 @@ export function computeBarModel(rows: unknown[][], xi: number, yi: number, agg: 
       if (!isNaN(v)) groups.get(k)!.push(v);
     }
   }
-  const all = [...groups.entries()].map(([label, vals]) => [label, aggregateValues(vals, agg)] as [string, number]);
+  const all = [...groups.entries()].filter(([, vals]) => vals.length > 0).map(([label, vals]) => [label, aggregateValues(vals, agg)] as [string, number]);
   const cls = classifyKeys(all.map((e) => e[0]));
   if (cls.kind !== "band" && cls.sorted.length >= 3 && cls.sorted.length <= Math.max(40, limit)) {
     const byKey = new Map(all);
@@ -89,7 +89,7 @@ export function renderFullBar(
     const bounds = { ...rect, left: rect.left + gutter };
     const band = (horizontal ? bounds.bottom - bounds.top : bounds.right - bounds.left) / nx;
     const cName = fieldLabel(opts, ci, "group");
-    const colorOf = (i: number) => cols[i % cols.length]!;
+    const colorOf = (i: number) => cols[(opts?.seriesIndices?.get(subLabels[i]!) ?? i) % cols.length]!;
     setLegend(opts, subLabels.map((label, si) => ({ label, color: colorOf(si) })));
     const plotted = stackMode === "percent" ? grid.map(row => {
       const total = row.reduce((sum, v) => sum + Math.abs(v), 0) || 1;
@@ -118,6 +118,14 @@ export function renderFullBar(
       const breadth = stackMode === "grouped" ? band * 0.8 / ns : Math.min(band * 0.72, 96);
       let positive = 0, negative = 0;
       const total = grid[gi]!.reduce((sum, v) => sum + Math.abs(v), 0) || 1;
+      let lastPos = -1, lastNeg = -1;
+      if (stackMode !== "grouped") {
+        for (let si = 0; si < ns; si++) {
+          const stacked = plotted[gi]![si]!;
+          if (stacked > 0) lastPos = si;
+          else if (stacked < 0) lastNeg = si;
+        }
+      }
       for (let si = 0; si < ns; si++) {
         const raw = grid[gi]![si]!;
         const val = plotted[gi]![si]!;
@@ -135,8 +143,10 @@ export function renderFullBar(
         ctx.globalAlpha = alpha;
         ctx.beginPath();
         if (stackMode === "grouped") barPath(ctx, x, y, bw, bh, cornerR, horizontal ? hBarDir(val) : vBarDir(val));
-        else ctx.rect(x, y, bw, bh);
-        fillMaterialPath(ctx, bounds.top, bounds.bottom, opts);
+        else if ((si === lastPos && val > 0) || (si === lastNeg && val < 0)) {
+          barPath(ctx, x, y, bw, bh, cornerR, horizontal ? hBarDir(val) : vBarDir(val));
+        } else ctx.rect(x, y, bw, bh);
+        fillMaterialPath(ctx, y, y + bh, opts);
         if (showDataLabels && bw >= 24 && bh >= 16) {
           const text = stackMode === "percent" ? `${Math.round(val)}%` : formatDataValue(raw);
           ctx.font = axisFont(opts);
@@ -197,7 +207,7 @@ export function renderFullBar(
     vMin = opts.sharedValueDomain.min;
     vMax = opts.sharedValueDomain.max;
   }
-  const colorOf = (i: number) => (colorByCategory ? cols[i % cols.length]! : cols[0]!);
+  const colorOf = (i: number) => (colorByCategory ? cols[(opts?.seriesIndices?.get(entries[i]![0]) ?? i) % cols.length]! : cols[0]!);
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "sum");
   const summaryFor = (label: string, val: number) => {
     const rowsIn = bm.rowCounts.get(label) ?? 0;
@@ -217,15 +227,20 @@ export function renderFullBar(
     // Category names read left-to-right in a gutter; values sit at the bar ends.
     const band = (rect.bottom - rect.top) / n;
     const labelW = labelGutter(ctx, entries.map((e) => e[0]), w, pad, opts);
-    const x0 = rect.left + labelW;
     const valueFont = axisFont(opts);
     const valueRoom = widestText(ctx, vals.map(formatDataValue), valueFont) + 10;
+    // Negative bars put their value labels on the left; keep them off the category names.
+    const needLeft = reverse ? vMax > 0 : vMin < 0;
+    const x0 = rect.left + labelW + (needLeft ? valueRoom : 0);
     const plotW = Math.max(8, rect.right - x0 - valueRoom);
+    // All-negative data has vMax 0: keep zero at the end rather than padding out to 1.
+    const hiV = vMax > vMin ? vMax : vMin + 1;
     const X = reverse
-      ? linear(vMin, vMax || 1, x0 + plotW, x0)
-      : linear(vMin, vMax || 1, x0, x0 + plotW);
+      ? linear(vMin, hiV, x0 + plotW, x0)
+      : linear(vMin, hiV, x0, x0 + plotW);
     if (opts) opts.scales = { x: X, valueAxis: "x", rect: { left: x0, top: rect.top, right: x0 + plotW, bottom: rect.bottom } };
     const barT = Math.max(2, Math.min(band * 0.72, 30));
+    const labelEvery = Math.max(1, Math.ceil((chartTypeRamp(opts?.axisFontSize).tick + 4) / Math.max(1, band)));
     const centers: number[] = [];
     for (const g of ghostCompare) {
       const yMid = rect.top + band * (g.at + 0.5);
@@ -238,7 +253,7 @@ export function renderFullBar(
       ctx.beginPath();
       if (g.val !== 0) barPath(ctx, left, yMid - barT / 2, len, barT, cornerR, hBarDir(g.val));
       else ctx.rect(left, yMid - barT / 2, len, barT);
-      fillMaterialPath(ctx, rect.top, rect.bottom, opts);
+      fillMaterialPath(ctx, yMid - barT / 2, yMid - barT / 2 + barT, opts);
     }
     entries.forEach(([label, val], i) => {
       const yMid = rect.top + band * (i + 0.5);
@@ -252,24 +267,26 @@ export function renderFullBar(
       ctx.beginPath();
       if (val !== 0) barPath(ctx, left, yMid - barT / 2, len, barT, cornerR, hBarDir(val));
       else ctx.rect(left, yMid - barT / 2, len, barT);
-      fillMaterialPath(ctx, rect.top, rect.bottom, opts);
+      fillMaterialPath(ctx, yMid - barT / 2, yMid - barT / 2 + barT, opts);
       ctx.globalAlpha = 1;
       ctx.fillStyle = axisLabelColor;
       ctx.font = valueFont;
       ctx.textBaseline = "middle";
       const tipRight = (val >= 0) !== reverse;
       ctx.textAlign = tipRight ? "left" : "right";
-      ctx.fillText(formatDataValue(val), tipRight ? left + len + 5 : left - 5, yMid);
+      if (i % labelEvery === 0) ctx.fillText(formatDataValue(val), tipRight ? left + len + 5 : left - 5, yMid);
       pushHit(opts, {
         shape: "rect", x: rect.left, y: rect.top + band * i, w: rect.right - rect.left, h: band,
+        mark: { x: Math.min(left, left + len), y: yMid - barT / 2, w: Math.abs(len), h: barT },
         match: [[xi, label]],
         summary: summaryFor(label, val),
+        reading: { label, value: val, measure: vTitle },
       });
     });
     ctx.textBaseline = "alphabetic";
     // Baseline at zero replaces the L-frame (category labels sit left of it)
     drawZeroLine(ctx, X(0), rect.top, X(0), rect.bottom, opts);
-    drawBandAxisY(ctx, entries.map((e) => e[0]), centers, band, x0 - 8, labelW - 10, opts);
+    drawBandAxisY(ctx, entries.map((e) => e[0]), centers, band, rect.left + labelW - 8, labelW - 10, opts);
     ctx.globalAlpha = 1;
     return;
   }
@@ -293,7 +310,7 @@ export function renderFullBar(
     ctx.globalAlpha = 0.22;
     ctx.beginPath();
     barPath(ctx, cx - barW / 2, top, barW, bh, cornerR, vBarDir(g.val));
-    fillMaterialPath(ctx, rect.top, rect.bottom, opts);
+    fillMaterialPath(ctx, top, top + bh, opts);
   }
   entries.forEach(([label, val], i) => {
     const cx = rect.left + band * (i + 0.5);
@@ -306,7 +323,7 @@ export function renderFullBar(
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     barPath(ctx, cx - barW / 2, top, barW, bh, cornerR, vBarDir(val));
-    fillMaterialPath(ctx, rect.top, rect.bottom, opts);
+    fillMaterialPath(ctx, top, top + bh, opts);
     if (showDataLabels) {
       const lbl = formatDataValue(val);
       ctx.globalAlpha = 1;
@@ -321,8 +338,10 @@ export function renderFullBar(
     }
     pushHit(opts, {
       shape: "rect", x: rect.left + band * i, y: rect.top, w: band, h: rect.bottom - rect.top,
+      mark: { x: rect.left + band * (i + 0.5) - barW / 2, y: Math.min(Y(0), Y(val)), w: barW, h: Math.max(val === 0 ? 0 : 1, Math.abs(Y(val) - Y(0))) },
       match: [[xi, label]],
       summary: summaryFor(label, val),
+      reading: { label, value: val, measure: vTitle },
     });
   });
   ctx.globalAlpha = 1;
@@ -338,6 +357,7 @@ export function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown
   const values = rows.map((r) => chartNumber(r[xi]));
   const bins = histogramBins(values);
   if (!bins) return;
+  const cornerR = opts?.barCornerRadius ?? 3;
   const rect = plotOf(w, h, pad, opts);
   const maxC = Math.max(1, ...bins.counts);
   const ys = niceZeroScale(0, maxC, opts?.tickCount ?? 5);
@@ -360,14 +380,19 @@ export function renderFullHistogram(ctx: CanvasRenderingContext2D, rows: unknown
     const x0 = X(a);
     const x1 = X(b);
     const top = Y(c);
+    const bw = Math.max(1, x1 - x0 - 1);
+    const bh = Math.max(1, rect.bottom - top);
     ctx.fillStyle = cols[0]!;
     ctx.globalAlpha = alpha;
-    ctx.fillRect(x0 + 0.5, top, Math.max(1, x1 - x0 - 1), rect.bottom - top);
+    ctx.beginPath();
+    barPath(ctx, x0 + 0.5, top, bw, bh, cornerR, "up");
+    fillMaterialPath(ctx, top, top + bh, opts);
     if (firstRow[i]! >= 0) {
       pushHit(opts, {
         shape: "rect", x: x0, y: rect.top, w: x1 - x0, h: rect.bottom - rect.top,
         match: [],
         rowIndex: firstRow[i]!,
+        reading: { label: `${formatAxisValue(a, bins.step)} – ${formatAxisValue(b, bins.step)}`, value: c, measure: "Count" },
         summary: {
           columns: [name, "Count"],
           row: [`${formatAxisValue(a, bins.step)} – ${formatAxisValue(b, bins.step)}`, formatTooltipNumber(c)],

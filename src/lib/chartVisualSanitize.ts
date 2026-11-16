@@ -2,6 +2,7 @@
 // chartVisualSanitize — whitelist + clamp for #chart= visual overrides
 // =================================================================
 
+import { parseCustomColors } from "./chartCustomColors";
 import type { ChartVisualOverrides } from "./chartVisualTypes";
 import { CHART_VISUAL_OVERRIDE_KEYS } from "./lookSystem";
 import { CURATED_MARK_EMOJIS, MARK_SHAPE_IDS } from "./chartMarks";
@@ -41,6 +42,8 @@ const CLAMPS: Partial<Record<keyof ChartVisualOverrides, ClampRule>> = {
   barCornerRadius: { min: 0, max: 12, int: true },
   glowIntensity: { min: 0, max: 20 },
   sizeScale: { min: 0.5, max: 3 },
+  wordCloudScale: { min: 0.6, max: 1.6 },
+  wordCloudGap: { min: 0, max: 16, int: true },
   tickRotation: { min: -90, max: 90 },
   titleFontWeight: { min: 100, max: 900, int: true },
   legendOffsetX: { min: 0, max: 1 },
@@ -72,6 +75,9 @@ const STRING_ENUMS: Partial<Record<keyof ChartVisualOverrides, readonly string[]
   geoAtlas: allOf<"geoAtlas">({
     auto: true, world: true, worldDetail: true, us: true, usCounties: true,
   }),
+  wordCloudArrange: allOf<"wordCloudArrange">({ spiral: true, rows: true, columns: true }),
+  wordCloudWeight: allOf<"wordCloudWeight">({ ranked: true, even: true, heavy: true }),
+  wordCloudSizing: allOf<"wordCloudSizing">({ sqrt: true, linear: true, log: true }),
   markerMode: allOf<"markerMode">({ shape: true, emoji: true }),
   // Plain-string overrides: the values the Visual panel and look presets write
   legendPosition: ["auto", "none", "custom", "top", "bottom", "left", "right", "top-left", "top-right", "bottom-left", "bottom-right"],
@@ -110,9 +116,14 @@ export function sanitizeChartVisualOverrides(
     }
     if (typeof val === "string") {
       if (BOOLEAN_KEYS.has(key) || CLAMPS[key]) continue;
+      if (key === "customColors") {
+        const colors = parseCustomColors(val);
+        if (colors) out.customColors = colors.join(",");
+        continue;
+      }
       const allowed = STRING_ENUMS[key];
       if (allowed && !allowed.includes(val)) continue;
-      if (key === "fontFamily" && val.length > 80) continue;
+      if ((key === "fontFamily" || key === "wordCloudFont") && val.length > 80) continue;
       if (key === "colorPalette" && val.length > 40) continue;
       (out as Record<string, string>)[k] = val;
       continue;

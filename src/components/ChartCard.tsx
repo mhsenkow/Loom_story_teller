@@ -36,7 +36,7 @@ import { partitionRowsByFacet, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacet
 import { cancelScheduledIdleCallback, scheduleIdleCallback } from "@/lib/idleCallback";
 import { buildFlowGraph, layoutForceNetwork, layoutArcDiagram, strokeArcLink } from "@/lib/flowGraphs";
 import { buildCorrMatrix, buildPareto, rollingMean, normalizeSeriesValues, scaleY, scaleDomain, type YScaleKind } from "@/lib/dsTransforms";
-import { downsampledRowsForThumb } from "@/lib/chartThumbnailCache";
+import { groupedChannelsForThumb } from "@/lib/chartThumbnailCache";
 import { screenDevicePixelRatio } from "@/lib/chartStagePixels";
 import { aggregateValues } from "@/lib/canvasCharts/plumbing";
 import { chartFont, resolveChartAxisFontSize } from "@/lib/chartType";
@@ -174,7 +174,6 @@ export function ChartCard({
 
     const xIdx = data.columns.indexOf(rec.xField);
     const yIdx = rec.yField ? data.columns.indexOf(rec.yField) : -1;
-    const cIdx = rec.colorField ? data.columns.indexOf(rec.colorField) : -1;
     const rowIdx = rec.rowField ? data.columns.indexOf(rec.rowField) : -1;
     const y2Idx = rec.y2Field ? data.columns.indexOf(rec.y2Field) : -1;
     const topN = rec.topN != null ? clampTopN(rec.topN) : null;
@@ -186,7 +185,10 @@ export function ChartCard({
 
     const pointPreview = ["scatter", "bubble", "strip"].includes(rec.kind)
       || isGeoFamilyKind(rec.kind) || isGpuSceneKind(rec.kind);
-    const rows = downsampledRowsForThumb(data, rec, pointPreview ? 1500 : Infinity);
+    const grouped = groupedChannelsForThumb(data, rec, pointPreview ? 1500 : Infinity);
+    const rows = grouped.rows;
+    const seriesField = grouped.colorField ?? (["line", "radar", "bump"].includes(rec.kind) ? rec.emojiField ?? grouped.shapeField : null);
+    const cIdx = seriesField ? grouped.columns.indexOf(seriesField) : -1;
     if (!rows.length) return;
 
     const paintPanel = (
@@ -210,7 +212,7 @@ export function ChartCard({
         cIdx,
         y2Idx,
         sizeIdx: rec.sizeField ? data.columns.indexOf(rec.sizeField) : -1,
-        columns: data.columns,
+        columns: grouped.columns,
         w: pw,
         h: ph,
         pad: panelPad,
@@ -229,6 +231,7 @@ export function ChartCard({
         residualOverlay: !!rec.residualOverlay,
         anomalyHighlight: !!rec.anomalyHighlight,
         bumpMode: rec.bumpMode ?? null,
+        wordCloudMode: rec.wordCloudMode ?? null,
         pyramidScaleMode: rec.pyramidScaleMode,
         deltaDisplay: rec.deltaDisplay,
         // Terrain Height is Z; older recs may still carry it on sizeField.
@@ -238,9 +241,9 @@ export function ChartCard({
         sizeField: rec.sizeField,
         xField: rec.xField,
         yField: rec.yField,
-        colorField: rec.colorField,
+        colorField: grouped.colorField,
         layoutDirection: rec.layoutDirection,
-        pointEncoding: rec,
+        pointEncoding: { ...rec, colorField: grouped.colorField, shapeField: grouped.shapeField },
         hero,
       });
       ctx.restore();
@@ -347,9 +350,8 @@ export function ChartCard({
       className={`
         group flex flex-col overflow-hidden text-left min-w-0
         border bg-loom-elevated
-        transition-[border-color,box-shadow,transform] duration-150
         focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent
-        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-[var(--radius-lg)] hover:border-transparent" : "rounded-[var(--radius-md)] hover:shadow-loom"}
+        ${hero ? "pointer-events-none border-0 ring-0 shadow-none rounded-[var(--radius-lg)] hover:border-transparent" : "loom-lift rounded-[var(--radius-md)] hover:shadow-loom"}
         ${!hero && isActive ? "border-loom-accent ring-2 ring-loom-accent/40 shadow-loom" : !hero ? "border-loom-border hover:border-loom-accent/50" : ""}
         ${compact ? "w-[152px] shrink-0 snap-start rounded-[var(--radius-sm)]" : "w-full"}
       `}
@@ -423,6 +425,7 @@ export function ChartCard({
             rec.residualOverlay ||
             rec.anomalyHighlight ||
             rec.bumpMode === "delta" ||
+            (rec.wordCloudMode && rec.wordCloudMode !== "cloud") ||
             rec.kind === "pareto" ||
             rec.kind === "corrMatrix" ||
             (rec.timeWindow && rec.timeWindow !== "all")) && (
@@ -480,6 +483,16 @@ export function ChartCard({
             {rec.bumpMode === "delta" && (
               <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
                 Δ rank
+              </span>
+            )}
+            {rec.wordCloudMode === "compare" && (
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
+                Compare
+              </span>
+            )}
+            {rec.wordCloudMode === "grid" && (
+              <span className="text-2xs px-1 py-px rounded border border-loom-border/80 text-loom-label">
+                Grid
               </span>
             )}
             {rec.kind === "pareto" && (
@@ -550,6 +563,7 @@ type PaintArgs = {
   residualOverlay?: boolean;
   anomalyHighlight?: boolean;
   bumpMode?: "rank" | "delta" | null;
+  wordCloudMode?: "cloud" | "compare" | "grid" | null;
   pyramidScaleMode?: ChartRecommendation["pyramidScaleMode"];
   deltaDisplay?: ChartRecommendation["deltaDisplay"];
   zField?: string | null;
@@ -756,6 +770,7 @@ function paintKind(ctx: CanvasRenderingContext2D, rows: unknown[][], a: PaintArg
         topN: a.topN,
         legendPosition: "none",
         bumpMode: a.bumpMode ?? undefined,
+        wordCloudMode: a.wordCloudMode ?? undefined,
         pyramidScaleMode: a.pyramidScaleMode ?? undefined,
         deltaDisplay: a.deltaDisplay ?? undefined,
         layoutDirection: a.layoutDirection,
@@ -907,7 +922,7 @@ function fillBar(ctx: CanvasRenderingContext2D, x: number, y: number, w: number,
   ctx.beginPath();
   if (!radius || typeof ctx.roundRect !== "function") ctx.rect(x, y, w, h);
   else ctx.roundRect(x, y, w, h, Math.min(radius, Math.abs(w) / 2, Math.abs(h) / 2));
-  fillMaterialPath(ctx, y, y + h, { markMaterial: style.markMaterial, lineJoin: style.lineJoin, themeText });
+  fillMaterialPath(ctx, y, y + h, { markMaterial: style.markMaterial, lineJoin: style.lineJoin, lineWidth: style.lineWidth, themeText });
 }
 
 function drawBar(
@@ -971,6 +986,8 @@ function drawBar(
       for (let gi = 0; gi < nx; gi++) {
         const total = totals[gi]! || 1;
         let acc = 0;
+        let lastSi = -1;
+        for (let si = 0; si < ns; si++) if (grid[gi]![si]! > 0) lastSi = si;
         const x = pad + gi * groupW + (groupW - barW) / 2;
         for (let si = 0; si < ns; si++) {
           const val = grid[gi]![si]!;
@@ -979,7 +996,7 @@ function drawBar(
           const segH = share * plotH;
           ctx.fillStyle = COL[si % COL.length];
           ctx.globalAlpha = 0.85;
-          fillBar(ctx, x, h - pad - acc - segH, barW, segH, radius, style, themeText);
+          fillBar(ctx, x, h - pad - acc - segH, barW, segH, si === lastSi ? radius : 0, style, themeText);
           acc += segH;
         }
       }
@@ -1111,32 +1128,6 @@ function drawLine(
     ctx.stroke();
   });
   ctx.setLineDash([]);
-  ctx.globalAlpha = 1;
-}
-
-function drawHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, colors: string[]) {
-  const stops = colors.length ? colors : FALLBACK_COLORS;
-  const xLabels = [...new Set(rows.map(r => String(r[xi])))].slice(0, 12);
-  const yLabels = [...new Set(rows.map(r => String(r[yi])))].slice(0, 12);
-  const counts = new Map<string, number>();
-  for (const row of rows) {
-    const k = `${row[xi]}|${row[yi]}`;
-    counts.set(k, (counts.get(k) ?? 0) + 1);
-  }
-  const maxC = Math.max(...counts.values(), 1);
-  const cellW = (w - 2 * pad) / xLabels.length;
-  const cellH = (h - 2 * pad) / yLabels.length;
-
-  xLabels.forEach((xL, xi2) => {
-    yLabels.forEach((yL, yi2) => {
-      const c = counts.get(`${xL}|${yL}`) ?? 0;
-      if (c <= 0) return;
-      const intensity = c / maxC;
-      ctx.globalAlpha = 0.3 + intensity * 0.7;
-      ctx.fillStyle = sampleContinuous(stops, 0.2 + intensity * 0.8);
-      ctx.fillRect(pad + xi2 * cellW, pad + yi2 * cellH, Math.max(1, cellW - 1), Math.max(1, cellH - 1));
-    });
-  });
   ctx.globalAlpha = 1;
 }
 
@@ -1411,7 +1402,8 @@ function drawViolin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number
     for (let b = 0; b < bins; b++) {
       const y = h - pad - (b / bins) * (h - 2 * pad);
       const dx = (counts[b] / maxC) * halfW;
-      b === 0 ? ctx.moveTo(cx - dx, y) : ctx.lineTo(cx - dx, y);
+      if (b === 0) ctx.moveTo(cx - dx, y);
+      else ctx.lineTo(cx - dx, y);
     }
     for (let b = bins - 1; b >= 0; b--) {
       const y = h - pad - (b / bins) * (h - 2 * pad);
@@ -1450,7 +1442,8 @@ function drawRadar(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames
     ctx.beginPath();
     for (let i = 0; i <= n; i++) {
       const angle = (Math.PI * 2 * (i % n)) / n - Math.PI / 2;
-      i === 0 ? ctx.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r) : ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      if (i === 0) ctx.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      else ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
     }
     ctx.closePath();
     ctx.stroke();
@@ -1490,7 +1483,8 @@ function drawRadar(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames
     means.forEach((v, i) => {
       const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
       const r = Math.max(0.04, v) * radius;
-      i === 0 ? ctx.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r) : ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      if (i === 0) ctx.moveTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
+      else ctx.lineTo(cx + Math.cos(angle) * r, cy + Math.sin(angle) * r);
     });
     ctx.closePath();
     ctx.fill();
@@ -1816,42 +1810,6 @@ function drawRidgeline(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: num
     ctx.fillStyle = COL[0]; ctx.globalAlpha = 0.5; ctx.fill();
     ctx.strokeStyle = COL[0]; ctx.globalAlpha = 0.9; ctx.lineWidth = 1; ctx.stroke();
   });
-  ctx.globalAlpha = 1;
-}
-
-function drawHexbin(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, stops: string[]) {
-  const [xMin, xMax] = numericRange(rows, xi);
-  const [yMin, yMax] = numericRange(rows, yi);
-  const hexR = Math.min(w, h) / 18;
-  const hexW = hexR * Math.sqrt(3), hexH = hexR * 1.5;
-  const counts = new Map<string, number>();
-  let maxC = 0;
-  for (const r of rows) {
-    const xv = Number(r[xi]), yv = Number(r[yi]);
-    if (isNaN(xv) || isNaN(yv)) continue;
-    const px = pad + ((xv - xMin) / (xMax - xMin || 1)) * (w - 2 * pad);
-    const py = h - pad - ((yv - yMin) / (yMax - yMin || 1)) * (h - 2 * pad);
-    const col = Math.round((px - pad) / hexW), row = Math.round((py - pad) / hexH);
-    const key = `${col},${row}`;
-    const n = (counts.get(key) ?? 0) + 1;
-    counts.set(key, n); if (n > maxC) maxC = n;
-  }
-  for (const [key, count] of counts) {
-    const [cs, rs] = key.split(",");
-    const col = Number(cs), row = Number(rs);
-    const cx = pad + col * hexW + (row % 2 ? hexW / 2 : 0);
-    const cy = pad + row * hexH;
-    const t = count / maxC;
-    ctx.fillStyle = sampleContinuous(stops, 0.2 + t * 0.8);
-    ctx.globalAlpha = 0.45 + t * 0.5;
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const ang = (Math.PI / 180) * (60 * i - 30);
-      const hx = cx + hexR * Math.cos(ang), hy = cy + hexR * Math.sin(ang);
-      if (i === 0) ctx.moveTo(hx, hy); else ctx.lineTo(hx, hy);
-    }
-    ctx.closePath(); ctx.fill();
-  }
   ctx.globalAlpha = 1;
 }
 

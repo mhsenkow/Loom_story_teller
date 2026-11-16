@@ -66,11 +66,11 @@ export function renderFullTreemap(ctx: CanvasRenderingContext2D, rows: unknown[]
   for (const r of rows) {
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "" });
-    const v = yi >= 0 ? chartNumber(r[yi]) : 1;
+    const v = agg === "count" ? 1 : chartNumber(r[yi]);
     if (!isNaN(v)) groups.get(k)!.vals.push(v);
   }
   const entries = [...groups.entries()]
-    .map(([label, g]) => ({ label, value: Math.abs(aggregateValues(g.vals, agg)), cat: g.cat }))
+    .map(([label, g]) => ({ label, value: aggregateValues(g.vals, agg), cat: g.cat }))
     .filter(e => e.value > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, opts?.topN != null ? clampTopN(opts.topN) : 40);
@@ -153,12 +153,12 @@ export function renderFullForceBubble(ctx: CanvasRenderingContext2D, rows: unkno
   for (const r of rows) {
     const k = String(r[xi]);
     if (!groups.has(k)) groups.set(k, { vals: [], cat: ci >= 0 ? String(r[ci]) : "" });
-    const v = yi >= 0 ? chartNumber(r[yi]) : 1;
+    const v = agg === "count" ? 1 : chartNumber(r[yi]);
     if (!isNaN(v)) groups.get(k)!.vals.push(v);
   }
 
   const entries = [...groups.entries()]
-    .map(([label, g]) => ({ label, value: Math.abs(aggregateValues(g.vals, agg)), cat: g.cat }))
+    .map(([label, g]) => ({ label, value: aggregateValues(g.vals, agg), cat: g.cat }))
     .filter(e => e.value > 0)
     .sort((a, b) => b.value - a.value)
     .slice(0, opts?.topN != null ? clampTopN(opts.topN) : 50);
@@ -428,21 +428,6 @@ export function renderFullNetwork(ctx: CanvasRenderingContext2D, rows: unknown[]
     ctx.lineWidth = 1.5;
     ctx.stroke();
 
-    if (n.r > 10) {
-      const fs = Math.max(chartTypeRamp(opts?.axisFontSize).mark, Math.min(12, n.r * 0.45));
-      ctx.fillStyle = contrastingInk(fill);
-      ctx.font = chartFont(fs, fontFamily, 600);
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(fitTextEllipsis(ctx, n.id, n.r * 1.8), n.x, n.y);
-    } else {
-      ctx.fillStyle = opts?.themeMuted ?? "#8b8b98";
-      ctx.font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily, 500);
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(fitTextEllipsis(ctx, n.id, 72), n.x + n.r + 4, n.y);
-    }
-
     pushHit(opts, {
       shape: "circle", cx: n.x, cy: n.y, r: Math.max(6, n.r),
       match: [[xi, n.id]],
@@ -451,6 +436,51 @@ export function renderFullNetwork(ctx: CanvasRenderingContext2D, rows: unknown[]
         row: [n.id, formatTooltipNumber(n.weight)],
       },
     });
+  }
+  // Tiny circles cannot carry legible names. Try outside placements and keep
+  // labels clear of other nodes and labels; hover still names every node.
+  if (!opts?.mini) {
+    const fs = chartTypeRamp(opts?.axisFontSize).mark;
+    ctx.font = chartFont(fs, fontFamily, 500);
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    type Label = { x: number; y: number; w: number; h: number; text: string };
+    const placed: Label[] = [];
+    const overlap = (a: Label, b: Label) => a.x < b.x + b.w + 4 && a.x + a.w + 4 > b.x && a.y < b.y + b.h + 3 && a.y + a.h + 3 > b.y;
+    for (const n of [...nodes].sort((a, b) => b.weight - a.weight)) {
+      const fullW = ctx.measureText(n.id).width;
+      if (fullW <= n.r * 1.7 && fs + 4 <= n.r * 1.6) {
+        ctx.fillStyle = contrastingInk(nodeColor.get(n.id) ?? palette[0]!);
+        ctx.fillText(n.id, n.x - fullW / 2, n.y);
+        placed.push({ x: n.x - fullW / 2, y: n.y - fs / 2, w: fullW, h: fs, text: n.id });
+        continue;
+      }
+      const candidates: Label[] = [];
+      for (const side of [1, -1, 0, 2]) {
+        const available = side === 1 ? w - n.x - n.r - 12 : side === -1 ? n.x - n.r - 12 : w - 16;
+        const text = fitTextEllipsis(ctx, n.id, Math.min(150, available));
+        if (!text || text === "…") continue;
+        const tw = ctx.measureText(text).width;
+        const x = side === 1 ? n.x + n.r + 4 : side === -1 ? n.x - n.r - 4 - tw : Math.max(8, Math.min(w - tw - 8, n.x - tw / 2));
+        const y = side === 0 ? n.y - n.r - fs - 4 : side === 2 ? n.y + n.r + 4 : n.y - fs / 2;
+        candidates.push({ x, y, w: tw, h: fs, text });
+      }
+      const label = candidates.sort((a, b) => b.text.length - a.text.length).find(box =>
+        box.y >= pad - 4 && box.y + box.h <= h - pad + 4 && !placed.some(p => overlap(box, p)) &&
+        !nodes.some(other => {
+          const x = Math.max(box.x - 3, Math.min(box.x + box.w + 3, other.x));
+          const y = Math.max(box.y - 3, Math.min(box.y + box.h + 3, other.y));
+          return Math.hypot(other.x - x, other.y - y) < other.r;
+        }));
+      if (!label) continue;
+      ctx.strokeStyle = opts?.themeBg ?? "#0e0e12";
+      ctx.lineWidth = 3;
+      ctx.lineJoin = "round";
+      ctx.strokeText(label.text, label.x, label.y + fs / 2);
+      ctx.fillStyle = opts?.themeText ?? "#ececf1";
+      ctx.fillText(label.text, label.x, label.y + fs / 2);
+      placed.push(label);
+    }
   }
   ctx.textBaseline = "alphabetic";
   ctx.globalAlpha = 1;
@@ -503,9 +533,9 @@ export function renderFullArcDiagram(ctx: CanvasRenderingContext2D, rows: unknow
     ctx.rotate(-Math.PI / 4);
     ctx.fillStyle = opts?.themeMuted ?? "#8b8b98";
     ctx.font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily, 500);
-    ctx.textAlign = "left";
+    ctx.textAlign = "right";
     ctx.textBaseline = "top";
-    ctx.fillText(fitTextEllipsis(ctx, n.id, 56), 0, 0);
+    ctx.fillText(fitTextEllipsis(ctx, n.id, Math.max(8, Math.min(56, (n.x - 8) * Math.SQRT2, (h - n.y - n.r - 12) * Math.SQRT2))), 0, 0);
     ctx.restore();
 
     pushHit(opts, {

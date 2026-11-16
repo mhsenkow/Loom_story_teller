@@ -4,6 +4,7 @@ import type { ChangeEvent, RefObject } from "react";
 import { extensionIcon, formatBytes, formatNumber } from "@/lib/format";
 import type { FileEntry } from "@/lib/store";
 import { requestDiscoverScan } from "@/lib/discoverStories";
+import { isDesktop } from "@/lib/tauri";
 import { WEB_FILE_ACCEPT, WEB_FILE_ACCEPT_LABEL } from "@/lib/webFormats";
 import { WEB_VAULT_LABEL, isWebVaultPath, type LinkedFolderMeta, type LinkedFolderScanProgress } from "@/lib/webDataFolder";
 
@@ -30,10 +31,10 @@ export function FilesView({
   linkedMeta,
   onLinkDeviceFolder,
   onResyncLinkedFolder,
-  onReconnectLinkedFolder,
-  onCancelFolderScan,
-  folderScan,
-  linkedAccessBlocked,
+  onReconnectLinkedFolder: _onReconnectLinkedFolder,
+  onCancelFolderScan: _onCancelFolderScan,
+  folderScan: _folderScan,
+  linkedAccessBlocked: _linkedAccessBlocked,
   onUnlinkDeviceFolder,
   webVaultFileCount,
   recentFiles,
@@ -101,14 +102,14 @@ export function FilesView({
           type="button"
           onClick={onOpenDataRegion}
           className="loom-btn-ghost w-full text-xs flex items-center justify-center gap-1.5 border border-loom-border"
-          title="Data & sources — discover and add data"
+          title="Data library — discover and add data"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <ellipse cx="12" cy="5" rx="9" ry="3" />
             <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
             <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
           </svg>
-          Data & sources
+          Data library
         </button>
         <div className="mt-2 pt-2 border-t border-loom-border/50">
           {isWeb ? (
@@ -133,7 +134,7 @@ export function FilesView({
                   <p className="text-[10px] text-loom-muted mt-0.5 pl-3.5">On this device</p>
                 )}
               </div>
-              <input
+              <input aria-label="loom web csv files"
                 ref={fileInputRef}
                 id="loom-web-csv-files"
                 type="file"
@@ -308,7 +309,7 @@ export function FilesView({
                     title={
                       canReopen
                         ? f.sourceUrl || f.path
-                        : "May need to Explore again from Data & sources (no saved URL)"
+                        : "May need to Explore again from Data library (no saved URL)"
                     }
                   >
                     {busy ? "Opening… " : ""}
@@ -336,10 +337,16 @@ export function FilesView({
       <div className="flex-1 overflow-y-auto py-1 min-h-0">
         {files.length === 0 && !isScanning && (
           <div className="px-4 py-8 text-center">
-            <p className="text-sm text-loom-muted">{isWeb ? "Nothing open yet" : "No data files found"}</p>
+            <p className="text-sm text-loom-muted">
+              {!isWeb ? "No data files found" : selectedFile ? "No files of your own yet" : "Nothing open yet"}
+            </p>
             <p className="text-xs text-loom-muted mt-1">
-              {isWeb ? "Try a live feed or curated pack in " : "Mount a folder or open "}
-              <button type="button" onClick={onOpenDataRegion} className="text-loom-accent hover:underline">Data & sources</button>
+              {!isWeb
+                ? "Mount a folder or open "
+                : selectedFile
+                  ? "Add one above, or find more feeds in "
+                  : "Try a live feed or curated pack in "}
+              <button type="button" onClick={onOpenDataRegion} className="text-loom-accent hover:underline">Data library</button>
             </p>
           </div>
         )}
@@ -360,7 +367,7 @@ export function FilesView({
             ? `${formatNumber(files.reduce((a, f) => a + f.row_count, 0))} total rows`
             : "idle"}
         </span>
-        <span>DuckDB</span>
+        {isDesktop() ? <span>DuckDB</span> : null}
       </div>
     </>
   );

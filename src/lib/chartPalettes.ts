@@ -1,8 +1,11 @@
 // Shared color system for chart visual overrides (right panel + ChartView).
 // Primary catalog: Loom data-viz palettes. "theme" follows look-system tokens.
 
+import { parseCustomColors } from "./chartCustomColors";
+
 import { resolveRuntimeTheme } from "./resolveEffectiveTheme";
 import { type LookTheme } from "./lookSystem";
+import { ensureContrast } from "./wcagColor";
 
 /** Dark-theme series stops — bumped luminance for AA on #0a0a0c (LOOM-071). */
 const LOOM_DEFAULT = ["#8b7cf8", "#34e0a1", "#ff8585", "#ffe066", "#4dcae8", "#f09578", "#c4b5fd", "#93c5fd"];
@@ -83,15 +86,15 @@ export type ThemeUiColors = {
 
 /** Canonical UI colors per look theme (keep in sync with globals.css). */
 export const THEME_UI: Record<LookTheme, ThemeUiColors> = {
-  light: { bg: "#f0efeb", text: "#141414", muted: "#5a5a5a", label: "#3d3d3d", border: "#c4c4be", accent: "#b84e1f" },
+  light: { bg: "#f0efeb", text: "#141414", muted: "#5a5a5a", label: "#3f3f3f", border: "#c4c4be", accent: "#b84e1f" },
   dark: { bg: "#0a0a0c", text: "#ececf1", muted: "#9e9eac", label: "#b4b4c0", border: "#2e2e36", accent: "#6a5ce0" },
   contrast: { bg: "#000000", text: "#ffffff", muted: "#c8c8c8", label: "#ffffff", border: "#ffffff", accent: "#ffff00" },
-  paper: { bg: "#e6dfd2", text: "#1a1610", muted: "#5c5548", label: "#3f3a32", border: "#bdb3a0", accent: "#7a3d0f" },
+  paper: { bg: "#e6dfd2", text: "#1a1610", muted: "#5c5548", label: "#3d372c", border: "#bdb3a0", accent: "#7a3d0f" },
   glass: { bg: "#dce6f4", text: "#0b1220", muted: "#4b5b70", label: "#334155", border: "#64748b", accent: "#6d28d9" },
-  frost: { bg: "#060a14", text: "#f1f5f9", muted: "#a8b8cc", label: "#c8d4e4", border: "#64748b", accent: "#c4b5fd" },
-  brutal: { bg: "#ffffff", text: "#000000", muted: "#2a2a2a", label: "#111111", border: "#000000", accent: "#e00000" },
-  loom: { bg: "#0a0a0f", text: "#f0ede8", muted: "#b0aca4", label: "#d0ccc4", border: "#2e2e3c", accent: "#e0b45a" },
-  tank: { bg: "#0a161c", text: "#d4eef2", muted: "#7eb4c4", label: "#a8d4e0", border: "#2a5266", accent: "#6bb866" },
+  frost: { bg: "#060a14", text: "#f1f5f9", muted: "#a8b8cc", label: "#c5d0de", border: "#64748b", accent: "#7dd3fc" },
+  brutal: { bg: "#ffffff", text: "#000000", muted: "#2a2a2a", label: "#000000", border: "#000000", accent: "#e00000" },
+  loom: { bg: "#0a0a0f", text: "#f0ede8", muted: "#b0aca4", label: "#c8c4bc", border: "#2e2e3c", accent: "#e0b45a" },
+  tank: { bg: "#0a161c", text: "#d4eef2", muted: "#7eb4c4", label: "#9ec9d6", border: "#2a5266", accent: "#6bb866" },
   // Charts paint on light surface so axis/footnote text stays AA (chrome bg stays blue).
   nes: { bg: "#f7f7f7", text: "#0a0a0a", muted: "#1a1a1a", label: "#0a0a0a", border: "#000000", accent: "#d40028" },
 };
@@ -101,16 +104,16 @@ const VIZ_CAT_8 = VIZ_CATEGORICAL.slice(0, 8);
 
 /** Chart series colors per look theme (keep in sync with globals.css --chart-*). */
 export const THEME_CHART: Record<LookTheme, string[]> = {
-  light: ["#b84e1f", "#008f62", "#b71c1c", "#c49200", "#007a96", "#6b5fd4", "#4a8fc0", "#5c574e"],
+  light: ["#b84e1f", "#008f62", "#b71c1c", "#a77c00", "#007a96", "#6b5fd4", "#4a8fc0", "#5c574e"],
   dark: ["#74b9ff", "#00d68f", "#ff7675", "#ffeaa7", "#00cec9", "#fab1a0", "#a29bfe", "#fd79a8"],
   contrast: ["#ffff00", "#00ff9d", "#ff5555", "#00ccff", "#ff8844", "#bb99ff", "#66bbff", "#ffffff"],
   paper: ["#7a3d0f", "#2f5a40", "#8a2424", "#8a6800", "#24526a", "#5c4068", "#4e5e3e", "#5c5548"],
   glass: ["#6d28d9", "#047857", "#b91c1c", "#b45309", "#1d4ed8", "#be185d", "#0e7490", "#4b5b70"],
-  frost: ["#c4b5fd", "#34d399", "#f87171", "#fbbf24", "#38bdf8", "#fb7185", "#a78bfa", "#94a3b8"],
-  brutal: ["#e00000", "#0000cc", "#006600", "#cc8800", "#000000", "#cc00cc", "#008888", "#555555"],
-  loom: ["#e0b45a", "#a78bfa", "#ef8a8a", "#7ed687", "#74b9ff", "#ff8a65", "#ce93d8", "#b0aca4"],
-  tank: ["#6bb866", "#f0d44a", "#ef8a8a", "#64b5f6", "#8ed07a", "#ff8a65", "#4dd0e1", "#7eb4c4"],
-  nes: ["#d40028", "#e8c800", "#1a8ad4", "#008800", "#000000", "#e88828", "#88d8b0", "#881400"],
+  frost: ["#7dd3fc", "#2dd4bf", "#a5b4fc", "#bae6fd", "#22d3ee", "#5eead4", "#818cf8", "#94a3b8"],
+  brutal: ["#e00000", "#0000cc", "#006600", "#c28100", "#000000", "#cc00cc", "#008888", "#555555"],
+  loom: ["#e0b45a", "#c45c4a", "#e8d5b5", "#d4a574", "#c9a66b", "#a67c7c", "#f0e6d2", "#b0aca4"],
+  tank: ["#6bb866", "#f0d44a", "#5ec8c0", "#64b5f6", "#8ed07a", "#c8e67a", "#4dd0e1", "#7eb4c4"],
+  nes: ["#d40028", "#9d8700", "#1a8ad4", "#008800", "#000000", "#c57422", "#5c9277", "#881400"],
 };
 
 /** Full palette catalog — system primary, then research adjuncts. */
@@ -311,6 +314,7 @@ export type ResolvedChartColors = {
 };
 
 export type ResolveChartColorsOpts = {
+  customColors?: string | null;
   paletteId?: string | null;
   theme?: string | null;
   colorblind?: boolean;
@@ -352,7 +356,7 @@ function stopsForPalette(p: ColorPalette, theme?: string | null): string[] {
 /** Discrete sample — ordered cycle; reverse flips stop order. */
 export function sampleCategorical(colors: string[], n: number, reverse = false): string[] {
   const src = reverse ? [...colors].reverse() : colors;
-  if (n <= 0) return [];
+  if (n <= 0 || src.length === 0) return [];
   if (n <= src.length) return src.slice(0, n);
   const out: string[] = [];
   for (let i = 0; i < n; i++) out.push(src[i % src.length]!);
@@ -421,6 +425,7 @@ function pickAutoPaletteId(
   const kind = chartKind ?? "";
   if (
     kind === "contour" ||
+    kind === "calendar" ||
     kind === "heatmap" ||
     kind === "choropleth" ||
     kind === "dataCube" ||
@@ -433,7 +438,7 @@ function pickAutoPaletteId(
   }
   if (kind === "waterfall") return "semantic";
   // r runs −1…+1 around a meaningful zero
-  if (kind === "corrMatrix") return "div-cool-warm";
+  if (kind === "corrMatrix" || kind === "stripes") return "div-cool-warm";
   if (colorFieldType === "quantitative" || colorFieldType === "ordinal") return "theme-sequential";
   return "theme";
 }
@@ -476,7 +481,13 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
     id = palette.id;
   }
 
-  let colors = stopsForPalette(palette, opts.theme);
+  const custom = parseCustomColors(opts.customColors);
+  let colors = custom ?? stopsForPalette(palette, opts.theme);
+  // Automatic accessibility colors adapt to the plot; authored hex stops stay exact.
+  if (!custom && opts.colorblind && inherited && id === "okabe") {
+    const bg = THEME_UI[resolveRuntimeTheme(opts.theme)].bg;
+    colors = colors.map((c) => ensureContrast(c, bg, true));
+  }
   if (reverse) colors = [...colors].reverse();
 
   const continuous =
@@ -487,10 +498,6 @@ export function resolveChartColors(opts: ResolveChartColorsOpts = {}): ResolvedC
     opts.chartKind === "treemap" ||
     opts.chartKind === "sunburst" ||
     opts.chartKind === "forceBubble";
-
-  if (!continuous && colors.length < 8) {
-    colors = sampleCategorical(colors, 8, false);
-  }
 
   return {
     kind: palette.kind,
@@ -543,6 +550,7 @@ export type ChartColorStatusInfo = {
 };
 
 type ChartColorStatusOpts = {
+  customColors?: string | null;
   paletteId?: string | null;
   scaleKind?: ResolveChartColorsOpts["scaleKind"];
   reverse?: boolean;
@@ -578,6 +586,7 @@ export function describeChartColorStatus(
 
   const resolved = resolveChartColors({
     paletteId,
+    customColors: opts.customColors,
     theme: opts.theme,
     colorblind: opts.colorblind,
     chartKind: chart.kind,
@@ -592,11 +601,11 @@ export function describeChartColorStatus(
     !!colorField ||
     resolved.continuous ||
     VALUE_RAMP_KINDS.has(chart.kind) ||
-    userPicked;
+    userPicked || !!parseCustomColors(opts.customColors);
   if (!atPlay) return null;
 
   const palette = getPaletteById(resolved.paletteId);
-  const name = palette?.name ?? resolved.paletteId;
+  const name = parseCustomColors(opts.customColors) ? "Custom colors" : palette?.name ?? resolved.paletteId;
   const rev = opts.reverse ? " ↺" : "";
   const role = (opts.channelLabel?.trim() || "color").toLowerCase();
   const fieldLabel = field ? `${role}: ${field}` : role;

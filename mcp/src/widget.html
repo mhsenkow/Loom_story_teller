@@ -93,7 +93,7 @@
     return;
   }
   list.textContent = "";
-  recs.slice(0, 8).forEach(function (r) {
+  recs.slice(0, 12).forEach(function (r) {
     var kind = String(r.kind || "chart").replace(/([A-Z])/g, " $1").trim();
     var article = document.createElement("article");
     article.className = "card";

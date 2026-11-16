@@ -12,6 +12,7 @@ import {
   discoverSourceBrief,
   type DiscoverKind,
 } from "@/lib/discoverStories";
+import { isDiscoverPackKind } from "@/lib/discoverPacks";
 
 export function DiscoverSourceLink({
   kind,
@@ -68,7 +69,8 @@ export function DiscoverSourceLink({
       <button
         type="button"
         className="
-          max-w-[5.5rem] truncate px-1.5 py-px text-[9px] uppercase tracking-wider font-medium
+          relative block max-w-[5.5rem] px-1.5 py-px text-[9px] max-md:text-[11px] uppercase tracking-wider font-medium
+          max-md:after:absolute max-md:after:-inset-2.5 max-md:after:content-['']
           rounded border border-loom-border/70 bg-loom-bg/85 text-loom-muted
           hover:text-loom-accent hover:border-loom-accent/40
           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-loom-accent
@@ -83,7 +85,8 @@ export function DiscoverSourceLink({
         }}
         onPointerDown={(e) => e.stopPropagation()}
       >
-        Data
+        {/* Truncate on the inner span so the button's enlarged phone hit area (::after) isn't clipped. */}
+        <span className="block truncate">Data</span>
       </button>
       {open && (
         <span
@@ -100,7 +103,9 @@ export function DiscoverSourceLink({
           <span className="block text-loom-text font-medium text-xs leading-snug">{brief.label}</span>
           <span className="block">{brief.tldr}</span>
           <span className="block text-loom-label">{brief.credit}</span>
-          <span className="block text-loom-accent/90 pt-0.5">Click · Inspect this feed</span>
+          <span className="block text-loom-accent/90 pt-0.5">
+            {isDiscoverPackKind(kind) ? "Click · Inspect this table" : "Click · Inspect this feed"}
+          </span>
         </span>
       )}
     </span>

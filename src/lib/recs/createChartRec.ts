@@ -3,6 +3,7 @@
 // (split from recommendations.ts — LOOM-195; public API re-exported there)
 // =================================================================
 
+import { clampGroupInto } from "../channelGroups";
 import { chartTimeWindowLabel, fieldLooksFutureDated } from "../chartTime";
 import { parseChartEmojiMap, type ChartEmojiMap } from "../chartEmoji";
 import { COLORS, defaultLineAreaAggregate, inferType, measureColumns } from "./columns";
@@ -104,7 +105,7 @@ export function createScatterRec(
 /** Kinds whose X (or slice / stage / identity) is a category. */
 export const CATEGORY_X_KINDS = new Set<string>([
   "bar", "pareto", "lollipop", "pie", "treemap", "sunburst", "forceBubble", "funnel", "waterfall", "box", "violin",
-  "beeswarm", "dumbbell", "pyramid", "slope", "radialBar", "waffle", "isotype", "isoBars", "mosaic",
+  "beeswarm", "dumbbell", "pyramid", "slope", "radialBar", "waffle", "isotype", "isoBars", "mosaic", "rose", "errorBars", "wordCloud",
   "chord", "sankey", "network", "arcDiagram", "bucketField",
 ]);
 /** One glyph per row/entity — an identity column (country, name) rather than a few groups. */
@@ -112,18 +113,18 @@ export const IDENTITY_X_KINDS = new Set<string>(["chernoff", "glyphStar", "flowe
 /** Kinds whose Y is the group axis. */
 export const CATEGORY_Y_KINDS = new Set<string>(["strip", "ridgeline"]);
 /** Kinds whose X is an ordering — time reads best. */
-export const ORDERED_X_KINDS = new Set<string>(["line", "area", "bump", "stream", "horizon", "spiral"]);
+export const ORDERED_X_KINDS = new Set<string>(["line", "area", "bump", "stream", "horizon", "spiral", "calendar", "sparkGrid", "stripes"]);
 /** Kinds that place marks on two continuous axes (density, territories, points). */
-export const NUMERIC_XY_KINDS = new Set<string>(["scatter", "bubble", "hexbin", "contour", "isoScatter", "voronoi"]);
+export const NUMERIC_XY_KINDS = new Set<string>(["scatter", "bubble", "hexbin", "contour", "isoScatter", "voronoi", "connectedScatter"]);
 /** Kinds that bin a numeric X (Y is a count). */
-export const NUMERIC_X_KINDS = new Set<string>(["histogram"]);
+export const NUMERIC_X_KINDS = new Set<string>(["histogram", "ecdf", "density", "qq"]);
 /** Kinds that plot a numeric Y against their X (no count fallback). */
 export const NUMERIC_Y_KINDS = new Set<string>([
-  "line", "area", "bump", "stream", "horizon", "spiral", "box", "violin", "beeswarm", "dumbbell", "slope", "pyramid",
+  "line", "area", "bump", "stream", "horizon", "spiral", "sparkGrid", "stripes", "errorBars", "box", "violin", "beeswarm", "dumbbell", "slope", "pyramid",
 ]);
 /** Kinds that split a whole into parts — slice sizes need non-negative totals. */
 export const PART_TO_WHOLE_KINDS = new Set<string>([
-  "pie", "treemap", "sunburst", "waffle", "isotype", "forceBubble", "radialBar", "funnel", "mosaic", "pareto",
+  "pie", "treemap", "sunburst", "waffle", "isotype", "forceBubble", "radialBar", "funnel", "mosaic", "pareto", "rose",
 ]);
 /** Kinds where Color is a required second category (target / segment). */
 export const CATEGORY_COLOR_KINDS = new Set<string>(["mosaic", "chord", "sankey", "network", "arcDiagram"]);
@@ -296,6 +297,7 @@ export function createChartRec(
     emojiMap?: ChartEmojiMap | null;
     yAggregate?: YAggregateOption | null;
     topN?: number | null;
+    groupInto?: number | null;
     y2Field?: string | null;
     comparePrevious?: boolean | null;
     tooltipFields?: string[] | null;
@@ -307,6 +309,7 @@ export function createChartRec(
     residualOverlay?: boolean | null;
     anomalyHighlight?: boolean | null;
     bumpMode?: "rank" | "delta" | null;
+    wordCloudMode?: "cloud" | "compare" | "grid" | null;
     pyramidScaleMode?: "auto" | "shared" | "independent" | null;
     deltaDisplay?: "off" | "diff" | "pct" | null;
     timeWindowField?: string | null;
@@ -316,7 +319,6 @@ export function createChartRec(
 ): ChartRecommendation | null {
   const numCols = measureColumns(columns);
   const nomCols = columns.filter((c) => inferType(c.data_type, c.name, c.min_value, c.max_value) === "nominal");
-  const timeCols = columns.filter((c) => inferType(c.data_type, c.name, c.min_value, c.max_value) === "temporal");
   // undefined = unset (may auto-fill for bubble/dumbbell); null = explicitly cleared
   const sizeFieldProvided = extra != null && "sizeField" in extra;
   let sizeField = sizeFieldProvided ? (extra!.sizeField ?? null) : undefined;
@@ -329,6 +331,8 @@ export function createChartRec(
   const emojiMap = extra?.emojiMap?.field === emojiField ? parseChartEmojiMap(extra.emojiMap) : undefined;
   const yAggregate = extra?.yAggregate ?? null;
   const topN = extra?.topN ?? null;
+  const groupInto = clampGroupInto(extra?.groupInto) ?? undefined;
+  const withGroup = <T extends ChartRecommendation>(rec: T): T => (groupInto ? { ...rec, groupInto } : rec);
   const y2Field = extra?.y2Field && numCols.some((c) => c.name === extra.y2Field) ? extra.y2Field : null;
   const comparePrevious = extra?.comparePrevious ?? null;
   const barStackMode = extra?.barStackMode ?? "grouped";
@@ -338,6 +342,10 @@ export function createChartRec(
   const residualOverlay = extra?.residualOverlay ?? null;
   const anomalyHighlight = extra?.anomalyHighlight ?? null;
   const bumpMode = extra?.bumpMode ?? null;
+  const wordCloudMode =
+    extra?.wordCloudMode === "compare" || extra?.wordCloudMode === "grid" || extra?.wordCloudMode === "cloud"
+      ? extra.wordCloudMode
+      : null;
   const pyramidScaleMode =
     extra?.pyramidScaleMode === "shared" ||
     extra?.pyramidScaleMode === "independent" ||
@@ -370,7 +378,7 @@ export function createChartRec(
       tooltipFields: extra?.tooltipFields,
       tooltipKeyField: extra?.tooltipKeyField ?? undefined,
     });
-    return {
+    return withGroup({
       ...scatter,
       shapeField: shapeField || undefined,
       emojiField: emojiField || undefined,
@@ -387,13 +395,13 @@ export function createChartRec(
         yScale && yScale !== "linear" ? `${yScale} Y` : null,
         timeBit,
       ].filter(Boolean).join(" · "),
-    };
+    });
   }
 
   if (kind === "corrMatrix") {
     if (numCols.length < 3) return null;
     const labels = numCols.slice(0, 8).map((c) => c.name);
-    return {
+    return withGroup({
       id: `corrMatrix-${labels.join("-")}`,
       kind: "corrMatrix",
       title: "Correlation matrix",
@@ -408,7 +416,7 @@ export function createChartRec(
       subtitle: timeBit
         ? `Pearson r across ${labels.length} measures · ${timeBit}`
         : `Pearson r across ${labels.length} measures`,
-    };
+    });
   }
 
   const barFacetId =
@@ -464,7 +472,7 @@ export function createChartRec(
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
       if (kind === "pareto") {
         title = yField ? `Pareto — ${yField} by ${xField}` : `Pareto — count by ${xField}`;
-        subtitle = "bars + cumulative % (80/20)";
+        subtitle = "bars rank the groups; the line adds them up";
       } else if (subOk && colorField) {
         title += ` × ${colorField}`;
         if (barStackMode === "grouped") subtitle = rowField ? `dodged by ${colorField}; facets by ${rowField}` : `grouped by ${colorField}`;
@@ -480,7 +488,7 @@ export function createChartRec(
       enc.y = { aggregate: "count", type: "quantitative" };
       enc.color = { value: COLORS[1] };
       title = `Distribution of ${xField}`;
-      subtitle = "binned count";
+      subtitle = "how many rows fall in each range";
       break;
     case "line": {
       const agg = aggForMeasure("mean");
@@ -507,7 +515,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "nominal" };
       enc.color = { ...(colorField && agg !== "count" ? { field: colorField } : {}), aggregate: agg, type: "quantitative", scale: { scheme: "viridis" } };
       title = `${xField} × ${yField}`;
-      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per cell` : "row count per cell";
+      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per cell` : "darker cells hold more rows";
       break;
     }
     case "strip":
@@ -520,7 +528,7 @@ export function createChartRec(
         ? { field: colorField, type: "nominal", scale: { range: COLORS } }
         : { field: yField, type: "nominal", scale: { range: COLORS }, legend: null };
       title = `${xField} by ${yField}`;
-      subtitle = colorField ? `colored by ${colorField}` : "strip plot";
+      subtitle = colorField ? `colored by ${colorField}` : "every row is a tick";
       break;
     case "box":
       if (!yField) return null;
@@ -528,7 +536,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "quantitative" };
       enc.color = { value: COLORS[2] };
       title = `${yField} by ${xField}`;
-      subtitle = "box plot";
+      subtitle = "each box holds the middle half of the values";
       break;
     case "area": {
       const agg = aggForMeasure("sum");
@@ -554,7 +562,7 @@ export function createChartRec(
         : { aggregate: "count", type: "quantitative" };
       enc.color = { field: xField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = "donut";
+      subtitle = "each slice is a share of the whole";
       break;
     }
     case "bubble": {
@@ -571,7 +579,7 @@ export function createChartRec(
       if (sizeField) enc.size = { field: sizeField, type: "quantitative", scale: { range: [16, 120] } };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = sizeField ? `${xField} vs ${yField} sized by ${sizeField}` : `${xField} vs ${yField}`;
-      subtitle = colorField ? `colored by ${colorField}` : (sizeField ? "three-variable relationship" : "bubble chart");
+      subtitle = colorField ? `colored by ${colorField}` : (sizeField ? "position and size show three measures" : "bigger bubbles mean more");
       break;
     }
     case "violin": {
@@ -580,7 +588,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = `${yField} distribution by ${xField}`;
-      subtitle = "violin — density per group";
+      subtitle = "wider means more values there";
       break;
     }
     case "radar": {
@@ -590,7 +598,7 @@ export function createChartRec(
         : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = "radar / spider chart";
+      subtitle = "further from the center means higher";
       break;
     }
     case "waterfall": {
@@ -613,7 +621,7 @@ export function createChartRec(
         ? { field: colorField, type: "nominal", scale: { range: COLORS } }
         : { value: COLORS[0] };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = colorField ? `colored by ${colorField}` : "lollipop — stem + dot";
+      subtitle = colorField ? `colored by ${colorField}` : "one dot per group, ranked";
       break;
     }
     case "dumbbell": {
@@ -627,7 +635,7 @@ export function createChartRec(
       enc.size = { field: sizeField, type: "quantitative", aggregate: yAggregate ?? "mean" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = `${yField} → ${sizeField} by ${xField}`;
-      subtitle = colorField ? `dumbbell · split by ${colorField}` : "dumbbell — start to end";
+      subtitle = colorField ? `dumbbell · split by ${colorField}` : "the gap between two values, per group";
       break;
     }
     case "ridgeline": {
@@ -636,7 +644,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "nominal" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = `${xField} ridges by ${yField}`;
-      subtitle = "ridgeline — overlapping densities";
+      subtitle = "one ridge per group — peaks show common values";
       break;
     }
     case "hexbin": {
@@ -647,7 +655,7 @@ export function createChartRec(
       enc.y = { field: yField, type: "quantitative", bin: { maxbins: 20 } };
       enc.color = { ...(colorField && agg !== "count" ? { field: colorField } : {}), aggregate: agg, type: "quantitative", scale: { scheme: "viridis" } };
       title = `${xField} × ${yField}`;
-      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per hex` : "row count per hex";
+      subtitle = colorField && agg !== "count" ? `${aggLabel(agg)} of ${colorField} per hex` : "darker hexes hold more points";
       break;
     }
     case "funnel": {
@@ -659,7 +667,7 @@ export function createChartRec(
         ? { field: yField, type: "quantitative", aggregate: agg }
         : { aggregate: "count", type: "quantitative" };
       title = yField ? `${aggLabel(agg)} of ${yField} funnel` : `Count funnel by ${xField}`;
-      subtitle = "funnel — stage conversion";
+      subtitle = "widest at the top, narrowing by size";
       break;
     }
     case "parallel": {
@@ -670,7 +678,7 @@ export function createChartRec(
         : { field: numCols.find(c => c.name !== xField)?.name ?? xField, type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = `Parallel: ${numCols.slice(0, 6).map(c => c.name).join(", ")}`;
-      subtitle = colorField ? `profiles by ${colorField}` : "parallel coordinates";
+      subtitle = colorField ? `profiles by ${colorField}` : "one line per row across every measure";
       break;
     }
     case "treemap": {
@@ -681,7 +689,7 @@ export function createChartRec(
         : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = colorField ? `nested by ${colorField}` : "treemap";
+      subtitle = colorField ? `nested by ${colorField}` : "bigger boxes mean more";
       break;
     }
     case "sunburst": {
@@ -699,7 +707,7 @@ export function createChartRec(
         enc.detail = { field: xField, type: "nominal" };
       }
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = colorField && colorField !== xField ? `inner ring: ${colorField}` : "sunburst";
+      subtitle = colorField && colorField !== xField ? `inner ring: ${colorField}` : "the inner ring splits into the outer ring";
       break;
     }
     case "choropleth": {
@@ -719,7 +727,7 @@ export function createChartRec(
         : { aggregate: "count", type: "quantitative" };
       if (colorField) enc.color = { field: colorField, type: "nominal", scale: { range: COLORS } };
       title = yField ? `${aggLabel(agg)} of ${yField} by ${xField}` : `Count by ${xField}`;
-      subtitle = "packed circles — size = value";
+      subtitle = "bigger circles mean more";
       break;
     }
     case "sankey":
@@ -764,7 +772,7 @@ export function createChartRec(
           yAggregate,
         });
         if (!gpu) return null;
-        return {
+        return withGroup({
           ...gpu,
           tooltipFields: extra?.tooltipFields,
           tooltipKeyField: extra?.tooltipKeyField,
@@ -772,7 +780,7 @@ export function createChartRec(
           timeWindow: timeWindow || undefined,
           // Direction rotates the isometric floor (terrain) — must survive GPU early-return.
           layoutDirection: layoutDirection || undefined,
-        };
+        });
       }
       if (isGeoMapKind(kind)) {
         const geo = buildGeoMapRec(kind, columns, xField, yField, colorField, {
@@ -780,7 +788,7 @@ export function createChartRec(
           yAggregate,
         });
         if (!geo) return null;
-        return {
+        return withGroup({
           ...geo,
           // Trails / arcs connect one entity's rows in time order — keep those picks.
           trailId: extra?.trailId ?? geo.trailId,
@@ -792,7 +800,7 @@ export function createChartRec(
           tooltipKeyField: extra?.tooltipKeyField,
           timeWindowField: timeWindowField || undefined,
           timeWindow: timeWindow || undefined,
-        };
+        });
       }
       if (isOddChartKind(kind)) {
         const odd = buildOddChartRec(kind, columns, xField, yField, colorField, tableName, {
@@ -801,10 +809,23 @@ export function createChartRec(
         });
         if (!odd) return null;
         // Preserve Encoding extras the odd builder doesn't know about (Top N, Direction, tooltips).
-        return {
+        const cloudMode = kind === "wordCloud" && (wordCloudMode === "compare" || wordCloudMode === "grid") ? wordCloudMode : null;
+        return withGroup({
           ...odd,
+          id: cloudMode ? `${odd.id}-${cloudMode}` : odd.id,
+          title: cloudMode === "compare" && colorField
+            ? `${xField} compared by ${colorField}`
+            : cloudMode === "grid" && colorField
+              ? `${xField} for each ${colorField}`
+              : odd.title,
+          subtitle: cloudMode === "compare"
+            ? "one cloud per side — same size means the same total"
+            : cloudMode === "grid"
+              ? "one cloud per group — same size means the same total"
+              : odd.subtitle,
           topN: topN ?? undefined,
           bumpMode: bumpMode || undefined,
+          wordCloudMode: cloudMode || undefined,
           pyramidScaleMode: kind === "pyramid" ? (pyramidScaleMode || "auto") : undefined,
           deltaDisplay:
             kind === "pyramid" || kind === "slope"
@@ -820,7 +841,7 @@ export function createChartRec(
           shapeField: shapeField || undefined,
           emojiField: emojiField || undefined,
           emojiMap,
-        };
+        });
       }
       return null;
     }
@@ -889,7 +910,7 @@ export function createChartRec(
     subtitle = subtitle ? `${subtitle} · ${timeBit}` : timeBit;
   }
 
-  return {
+  return withGroup({
     id,
     kind,
     title,
@@ -932,5 +953,5 @@ export function createChartRec(
     tooltipFields: extra?.tooltipFields,
     tooltipKeyField: extra?.tooltipKeyField,
     layoutDirection: layoutDirection || undefined,
-  };
+  });
 }

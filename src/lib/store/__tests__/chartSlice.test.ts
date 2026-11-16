@@ -145,11 +145,16 @@ describe("chartSlice", () => {
     expect(getState().chartAnnotations["c1"]).toBeUndefined();
   });
 
-  it("addPinnedTooltip caps at 5", () => {
+  it("togglePinnedTooltip caps at 5 per chart and unpins the same mark", () => {
     for (let i = 0; i < 7; i++) {
-      getState().addPinnedTooltip({ chartId: "c", x: i, y: i, rowIndex: i, row: [i], columns: ["x"] });
+      getState().togglePinnedTooltip({ chartId: "c", ref: { fields: [["x", String(i)]] }, rowIndex: i, row: [i], columns: ["x"] });
     }
-    expect(getState().pinnedTooltips.length).toBeLessThanOrEqual(5);
+    getState().togglePinnedTooltip({ chartId: "other", ref: { fields: [["x", "0"]] }, rowIndex: 0, row: [0], columns: ["x"] });
+    const mine = getState().pinnedTooltips.filter((t) => t.chartId === "c");
+    expect(mine.map((t) => t.ref.fields[0]![1])).toEqual(["2", "3", "4", "5", "6"]);
+    getState().togglePinnedTooltip({ chartId: "c", ref: { fields: [["x", "4"]] }, rowIndex: 4, row: [4], columns: ["x"] });
+    expect(getState().pinnedTooltips.filter((t) => t.chartId === "c")).toHaveLength(4);
+    expect(getState().pinnedTooltips.some((t) => t.chartId === "other")).toBe(true);
   });
 
   it("pushChartEditUndo + undoChartEdit restores state", () => {

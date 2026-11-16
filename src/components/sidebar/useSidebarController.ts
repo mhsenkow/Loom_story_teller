@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useSidebarOverlays } from "@/lib/useMediaQuery";
 import { useLoomStore, type FileEntry } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { pickFolder, scanFolder, inspectFile, isDesktop, fetchCsvTextWeb, streamStart, streamSnapshot, sourceStart, sourceSnapshot, type SourceKind } from "@/lib/tauri";
 import { getRecentFiles as getPersistedRecentFiles } from "@/lib/persist";
 import { activateDataset } from "@/lib/datasetPipeline";
@@ -16,26 +17,75 @@ import { webFileDisplayName, webFileStablePathFromFile, WEB_FILE_STABLE_PREFIX }
 import { bumpWebHydrationUserAction } from "@/lib/webHydration";
 import { getWebFileInspect, putWebFileInspect } from "@/lib/webFileStore";
 import { canPickDirectory, pickWebDirectoryFiles } from "@/lib/webFolderPick";
-import { WEB_VAULT_LABEL, WEB_VAULT_PATH, canLinkDeviceFolder, clearLinkedDirectory, ensureLinkedFolderPermission, getLinkedFolderMeta, isWebVaultPath, linkedFolderPermissionState, linkDeviceDataFolder, loadLinkedDirectoryHandle, resyncLinkedDataFolder, webVaultDisplayName, type LinkedFolderMeta, type LinkedFolderScanProgress } from "@/lib/webDataFolder";
+import { WEB_VAULT_LABEL, WEB_VAULT_PATH, canLinkDeviceFolder, clearLinkedDirectory, ensureLinkedFolderPermission, getLinkedFolderMeta, linkedFolderPermissionState, linkDeviceDataFolder, loadLinkedDirectoryHandle, resyncLinkedDataFolder, webVaultDisplayName, type LinkedFolderMeta, type LinkedFolderScanProgress } from "@/lib/webDataFolder";
 import { reconcileLinkedFolder, formatLinkedFolderReconcileToast, type LinkedFileFingerprint } from "@/lib/linkedFolderReconcile";
 import { formatWebBatchImportToast } from "@/lib/webBatchImport";
 import { ipcErrorMessage, leaveSourcesShowChart } from "./shared";
-import {
-  LOOM_LOAD_CSV_EVENT,
-  LOOM_OPEN_RECENT_EVENT,
-  type LoomLoadCsvDetail,
-  type LoomOpenRecentDetail,
-} from "@/lib/loomDatasetEvents";
-
+import { LOOM_LOAD_CSV_EVENT, LOOM_OPEN_RECENT_EVENT, type LoomLoadCsvDetail, type LoomOpenRecentDetail } from "@/lib/loomDatasetEvents";
 export function useSidebarController() {
   const {
-    mountedFolder, files, isScanning, selectedFile, inspectingFilePath, sidebarOpen, dataRegionOpen, dataSourcesExpanded,
-    setMountedFolder, setFiles, setIsScanning, setInspectingFilePath,
+    mountedFolder,
+    files,
+    isScanning,
+    selectedFile,
+    inspectingFilePath,
+    sidebarOpen,
+    dataRegionOpen,
+    dataSourcesExpanded,
+    setMountedFolder,
+    setFiles,
+    setIsScanning,
+    setInspectingFilePath,
     openDataset,
-    setDataRegionOpen, setDataSourcesExpanded, webFileCache, setWebFileCache,
-    addRecentFile, setLastSession, viewMode, recentFiles, lastSession, setViewMode,
-    setToast, toggleSidebar, beginWebImport, isActiveWebImport, removeRecentFile, clearRecentFiles,
-  } = useLoomStore();
+    setDataRegionOpen,
+    setDataSourcesExpanded,
+    webFileCache,
+    setWebFileCache,
+    addRecentFile,
+    setLastSession,
+    viewMode,
+    recentFiles,
+    lastSession,
+    setViewMode,
+    setToast,
+    toggleSidebar,
+    beginWebImport,
+    isActiveWebImport,
+    removeRecentFile,
+    clearRecentFiles
+  } = useLoomStore(
+    useShallow((s) => ({
+      mountedFolder: s.mountedFolder,
+      files: s.files,
+      isScanning: s.isScanning,
+      selectedFile: s.selectedFile,
+      inspectingFilePath: s.inspectingFilePath,
+      sidebarOpen: s.sidebarOpen,
+      dataRegionOpen: s.dataRegionOpen,
+      dataSourcesExpanded: s.dataSourcesExpanded,
+      setMountedFolder: s.setMountedFolder,
+      setFiles: s.setFiles,
+      setIsScanning: s.setIsScanning,
+      setInspectingFilePath: s.setInspectingFilePath,
+      openDataset: s.openDataset,
+      setDataRegionOpen: s.setDataRegionOpen,
+      setDataSourcesExpanded: s.setDataSourcesExpanded,
+      webFileCache: s.webFileCache,
+      setWebFileCache: s.setWebFileCache,
+      addRecentFile: s.addRecentFile,
+      setLastSession: s.setLastSession,
+      viewMode: s.viewMode,
+      recentFiles: s.recentFiles,
+      lastSession: s.lastSession,
+      setViewMode: s.setViewMode,
+      setToast: s.setToast,
+      toggleSidebar: s.toggleSidebar,
+      beginWebImport: s.beginWebImport,
+      isActiveWebImport: s.isActiveWebImport,
+      removeRecentFile: s.removeRecentFile,
+      clearRecentFiles: s.clearRecentFiles,
+    })),
+  );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const webImportAbortRef = useRef<AbortController | null>(null);
   const [fileSearchQuery, setFileSearchQuery] = useState("");
@@ -111,6 +161,8 @@ export function useSidebarController() {
   ) {
     if (opts?.importId != null && !isActiveWebImport(opts.importId)) return;
     const prev = useLoomStore.getState();
+    const bookmarked = entry.sourceUrl ? prev.dataLibrary.assets.find(a => a.url === entry.sourceUrl) : undefined;
+    if (bookmarked) prev.rememberLibraryAsset({ ...bookmarked, file: entry });
     const cache = opts?.replaceCache
       ? { [entry.path]: inspect }
       : { ...prev.webFileCache, [entry.path]: inspect };
@@ -288,6 +340,13 @@ export function useSidebarController() {
     setOpeningRecentPath(file.path);
     setToast(`Opening ${file.name}…`);
     try {
+    if (file.path.startsWith('combination://')) {
+      const recipe = useLoomStore.getState().dataLibrary.combinations.find(c => file.path === `combination://${c.id}`);
+      if (!recipe) { setToast('This combination was removed. Create a new one in the Data library.'); return; }
+      try { await (await import('@/lib/dataLibraryRuntime')).openCombination(recipe); }
+      catch (error) { setToast(error instanceof Error ? error.message : 'Could not refresh the combination.'); }
+      return;
+    }
     // Live stream / poll source — reconnect and snapshot into Chart.
     if (file.path.startsWith("stream://")) {
       const kind = file.path.replace(/^stream:\/\//, "") as SourceKind | "wiki";
@@ -296,7 +355,7 @@ export function useSidebarController() {
           await streamStart();
           const snap = await streamSnapshot(500);
           if (!snap.sample.rows.length) {
-            setToast("Wikipedia stream is warm — tap Explore in Live Streams when events appear");
+            setToast("Wikipedia Live is starting — tap Chart it in the Data library in a few seconds");
             setDataRegionOpen(true);
             setDataSourcesExpanded(true);
             return;
@@ -314,7 +373,7 @@ export function useSidebarController() {
         await sourceStart(kind);
         const snap = await sourceSnapshot(kind, SOURCE_EXPLORE_ROWS);
         if (!snap.sample.rows.length) {
-          setToast(`${file.name} is connecting — tap Explore when rows appear`);
+          setToast(`${file.name} is connecting — tap Chart it when rows appear`);
           setDataRegionOpen(true);
           setDataSourcesExpanded(true);
           return;
@@ -386,14 +445,16 @@ export function useSidebarController() {
         return;
       }
       if (file.path.startsWith("mock://")) {
-        handleUseDemoData();
+        const result = await inspectFile(file.path);
+        activateDataset({ file, stats: result.stats, sample: result.sample });
+        addRecentFile(file);
         leaveSourcesShowChart();
         return;
       }
       // Dead recent (local upload or pre-sourceUrl catalog) — prune so it stops teasing.
       const pruned = state.recentFiles.filter((f) => f.path !== file.path);
       useLoomStore.getState().setRecentFiles(pruned);
-      setToast("That recent file can’t be reopened here — Explore it again from Data & sources.");
+      setToast("That recent file can’t be reopened here — open it again from the Data library.");
       return;
     }
 
@@ -439,22 +500,27 @@ export function useSidebarController() {
       activeChart: null,
       inspectingFilePath: file.path,
     });
-    addRecentFile(file);
     if (sidebarOverlays && sidebarOpen) toggleSidebar();
-    setLastSession({
-      folderPath: mountedFolder,
-      filePath: file.path,
-      viewMode,
-    });
     try {
       const cached = webFileCache[file.path];
       const result = cached ?? await inspectFile(file.path, 500);
       if (useLoomStore.getState().selectedFile?.path !== file.path) return;
       activateDataset({ file, stats: result.stats, sample: result.sample, inspectingFilePath: null });
+      if (useLoomStore.getState().dataRegionOpen) { setDataRegionOpen(false); setDataSourcesExpanded(false); }
+      // Only remember files that actually opened, so a broken file can't
+      // become the session the next launch tries to resume.
+      addRecentFile(file);
+      setLastSession({
+        folderPath: mountedFolder,
+        filePath: file.path,
+        viewMode,
+      });
     } catch (e) {
       console.error("File inspection failed:", e);
       if (useLoomStore.getState().selectedFile?.path === file.path) {
-        setToast("Failed to load file. Try another or check the file.");
+        // Clear the selection so Explorer leaves its loading skeleton for Start.
+        useLoomStore.getState().setSelectedFile(null);
+        setToast(`Couldn’t open ${file.name} — pick another file`);
       }
     } finally {
       if (useLoomStore.getState().inspectingFilePath === file.path) {

@@ -39,6 +39,7 @@ export function WorkspaceBackupControls() {
   const dashboards = useLoomStore((s) => s.dashboards);
   const querySnippets = useLoomStore((s) => s.querySnippets);
   const customChartLooks = useLoomStore((s) => s.customChartLooks);
+  const dataLibrary = useLoomStore(s => s.dataLibrary);
   const sourcePrefs = useLoomStore((s) => s.sourcePrefs);
   const setToast = useLoomStore((s) => s.setToast);
   const [thumbnails, setThumbnails] = useState(false);
@@ -55,9 +56,10 @@ export function WorkspaceBackupControls() {
       snippets: querySnippets,
       tablePrefsByPath: userPrefsByPath(),
       sourcePrefs,
+      dataLibrary,
     }),
     // Prefs live in localStorage; recompute alongside view lists.
-    [tableViews, chartViews, queryViews, dashboards, querySnippets, customChartLooks, sourcePrefs],
+    [tableViews, chartViews, queryViews, dashboards, querySnippets, customChartLooks, sourcePrefs, dataLibrary],
   );
 
   const preview = useMemo(() => {
@@ -67,7 +69,7 @@ export function WorkspaceBackupControls() {
       bundle,
       bytes: estimateBundleBytes(bundle),
       empty: Object.values(c).every((n) => n === 0),
-      summary: `${c.tableViews} table, ${c.chartViews} chart, ${c.queryViews} query views · ${c.dashboards} dashboards · ${c.snippets} snippets · ${c.customChartLooks} looks · ${c.sourcePrefs ?? 0} source picks`,
+      summary: `${c.tableViews} table, ${c.chartViews} chart, ${c.queryViews} query views · ${c.dashboards} dashboards · ${c.snippets} snippets · ${c.customChartLooks} looks · ${c.sourcePrefs ?? 0} source picks · ${c.dataLibrary ?? 0} library items`,
     };
   }, [current, thumbnails]);
 
@@ -97,6 +99,7 @@ export function WorkspaceBackupControls() {
         snippets: st.querySnippets,
         tablePrefsByPath: userPrefsByPath(),
         sourcePrefs: st.sourcePrefs,
+        dataLibrary: st.dataLibrary,
       },
       res.bundle.content,
     );
@@ -106,6 +109,7 @@ export function WorkspaceBackupControls() {
     st.setDashboards(merged.dashboards);
     st.setQuerySnippets(merged.snippets);
     useLoomStore.setState({ customChartLooks: merged.customChartLooks ?? [] });
+    if (merged.dataLibrary) useLoomStore.setState({ dataLibrary: merged.dataLibrary });
     if (merged.sourcePrefs) st.setSourcePrefs(merged.sourcePrefs);
     for (const [path, prefs] of Object.entries(merged.tablePrefsByPath)) setTablePrefsForPath(path, prefs);
     const refs = res.bundle.manifest.datasetRefs;

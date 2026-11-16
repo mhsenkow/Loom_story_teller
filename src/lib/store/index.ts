@@ -1,3 +1,4 @@
+import { createDataLibrarySlice } from "./dataLibrarySlice";
 // =================================================================
 // Loom — Global State (Zustand) — slice composition (LOOM-552)
 // =================================================================
@@ -13,10 +14,12 @@ import { createDashboardSlice } from "./dashboardSlice";
 import { createUiSlice } from "./uiSlice";
 import { createPointerViewsSlice } from "./pointerViewsSlice";
 import { createMonitorSlice } from "./monitorSlice";
+import { createSocialSlice } from "./socialSlice";
 
 export const useLoomStore = create<LoomState>((set, get) => ({
   ...(initialState as unknown as LoomState),
   ...createCoreSlice(set, get, initialState),
+  ...createDataLibrarySlice(set),
   ...createChartSlice(set, get),
   ...createQuerySlice(set),
   ...createTableSlice(set),
@@ -24,6 +27,7 @@ export const useLoomStore = create<LoomState>((set, get) => ({
   ...createPointerViewsSlice(set),
   ...createUiSlice(set, get, initialState),
   ...createMonitorSlice(set, get, undefined as never),
+  ...createSocialSlice(set, get, undefined as never),
 }));
 
 export type {

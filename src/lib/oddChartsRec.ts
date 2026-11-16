@@ -27,6 +27,16 @@ export const ODD_CHART_KINDS = [
   "flower",
   "mosaic",
   "contour",
+  "calendar",
+  "rose",
+  "ecdf",
+  "sparkGrid",
+  "density",
+  "qq",
+  "connectedScatter",
+  "stripes",
+  "wordCloud",
+  "errorBars",
 ] as const;
 
 export type OddChartKind = (typeof ODD_CHART_KINDS)[number];
@@ -52,6 +62,16 @@ export const ODD_CHART_KIND_OPTIONS: { value: OddChartKind; label: string }[] = 
   { value: "flower", label: "Flower petals" },
   { value: "mosaic", label: "Mosaic" },
   { value: "contour", label: "Density contour" },
+  { value: "calendar", label: "Calendar heatmap" },
+  { value: "rose", label: "Nightingale rose" },
+  { value: "ecdf", label: "ECDF (cumulative)" },
+  { value: "sparkGrid", label: "Sparkline grid" },
+  { value: "density", label: "Density curve" },
+  { value: "qq", label: "Q–Q plot" },
+  { value: "connectedScatter", label: "Connected scatter" },
+  { value: "stripes", label: "Warming stripes" },
+  { value: "wordCloud", label: "Word cloud" },
+  { value: "errorBars", label: "Mean ± CI dots" },
 ];
 
 export function isOddChartKind(kind: string): kind is OddChartKind {
@@ -71,9 +91,16 @@ export const ODD_NON_CARTESIAN = new Set<string>([
   "isoBars",
   "isoScatter",
   "mosaic",
+  "calendar",
+  "rose",
+  "sparkGrid",
+  "stripes",
+  "wordCloud",
 ]);
 
 export interface OddRenderOpts {
+  /** Reader-facing names parallel to columns (axes, legends, captions). Never used for lookup. */
+  fieldDisplayNames?: string[];
   lineCap?: CanvasLineCap;
   lineJoin?: CanvasLineJoin;
   colors: string[];
@@ -81,6 +108,8 @@ export interface OddRenderOpts {
   fontFamily?: string;
   axisLabelColor?: string;
   axisFontSize?: number;
+  /** Visual → tick label rotation (degrees) for continuous X ticks. */
+  tickRotation?: number;
   themeText?: string;
   themeMuted?: string;
   themeBorder?: string;
@@ -103,6 +132,17 @@ export interface OddRenderOpts {
   topN?: number | null;
   /** Bump: absolute rank or Δrank over time. */
   bumpMode?: "rank" | "delta" | null;
+  /** Word cloud layout. Null and "cloud" are the single spiral. */
+  wordCloudMode?: "cloud" | "compare" | "grid" | null;
+  /** Face for the words themselves. Empty uses the chart font. */
+  wordCloudFont?: string | null;
+  /** Spiral from the center, horizontal rows, or vertical columns. */
+  wordCloudArrange?: "spiral" | "rows" | "columns" | null;
+  /** Largest-word size, 0.6–1.6. */
+  wordCloudScale?: number | null;
+  wordCloudWeight?: "ranked" | "even" | "heavy" | null;
+  wordCloudGap?: number;
+  wordCloudSizing?: "sqrt" | "linear" | "log";
   /** Pyramid: shared vs independent arm domains (auto picks by magnitude ratio). */
   pyramidScaleMode?: "auto" | "shared" | "independent" | null;
   /** Show signed Δ or % between Left/Right or Start/End. */
@@ -173,11 +213,113 @@ export function groupSum(
   for (const r of rows) {
     const k = String(r[xi] ?? "");
     if (!m.has(k)) m.set(k, []);
-    m.get(k)!.push(yi >= 0 ? toNum(r[yi]) : 1);
+    const value = yi >= 0 && how !== "count" ? toNum(r[yi]) : 1;
+    if (Number.isFinite(value)) m.get(k)!.push(value);
   }
   return [...m.entries()]
-    .map(([k, vs]) => [k, agg(vs.filter((v) => !isNaN(v)), how)] as [string, number])
+    .filter(([, vs]) => vs.length > 0)
+    .map(([k, vs]) => [k, agg(vs, how)] as [string, number])
     .sort((a, b) => b[1] - a[1]);
+}
+
+/** Per-word totals for each Compare-by group, plus each group's overall weight. */
+export function wordTotalsByGroup(
+  rows: unknown[][],
+  xi: number,
+  yi: number,
+  ci: number,
+  how: YAggregateOption = "sum",
+): { byWord: Map<string, Map<string, number>>; groupWeight: Map<string, number> } {
+  const raw = new Map<string, Map<string, number[]>>();
+  for (const r of rows) {
+    const word = String(r[xi] ?? "");
+    const group = String(r[ci] ?? "");
+    if (!word.trim() || word === "null" || !group.trim() || group === "null") continue;
+    const v = yi >= 0 && how !== "count" ? toNum(r[yi]) : 1;
+    if (!Number.isFinite(v)) continue;
+    let groups = raw.get(word);
+    if (!groups) raw.set(word, (groups = new Map()));
+    const bucket = groups.get(group);
+    if (bucket) bucket.push(v);
+    else groups.set(group, [v]);
+  }
+  const byWord = new Map<string, Map<string, number>>();
+  const groupWeight = new Map<string, number>();
+  for (const [word, groups] of raw) {
+    const summed = new Map<string, number>();
+    for (const [group, vs] of groups) {
+      const n = agg(vs, how);
+      if (!(n > 0)) continue;
+      summed.set(group, n);
+      groupWeight.set(group, (groupWeight.get(group) ?? 0) + n);
+    }
+    if (summed.size) byWord.set(word, summed);
+  }
+  return { byWord, groupWeight };
+}
+
+/** Groups with the largest totals, heaviest first. */
+export function topGroupsByWeight(weight: Map<string, number>, cap: number): string[] {
+  return [...weight.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, Math.max(0, cap))
+    .map(([name]) => name);
+}
+
+/** One group's words, heaviest first. A word can belong to more than one group. */
+export function wordsForCloudGroup(
+  byWord: Map<string, Map<string, number>>,
+  group: string,
+): [string, number][] {
+  return [...byWord.entries()]
+    .map(([word, totals]) => [word, totals.get(group) ?? 0] as [string, number])
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}
+
+/**
+ * Two clouds when Compare by is not a small set of groups (a market-cap
+ * column has one value per name). Higher half on the left, lower on the right.
+ * Size stays the group's total; the split uses that total, or the numeric
+ * group label when every label is a number.
+ */
+export function splitWordCloudHalves(
+  byWord: Map<string, Map<string, number>>,
+): { higher: [string, number][]; lower: [string, number][] } {
+  const ranked: { word: string; size: number; stat: number }[] = [];
+  for (const [word, groups] of byWord) {
+    let size = 0;
+    const keyNums: number[] = [];
+    for (const [group, v] of groups) {
+      size += v;
+      const n = Number(String(group).replace(/,/g, ""));
+      if (Number.isFinite(n)) keyNums.push(n);
+    }
+    if (!(size > 0)) continue;
+    const stat = keyNums.length === groups.size && keyNums.length > 0 ? Math.max(...keyNums) : size;
+    ranked.push({ word, size, stat });
+  }
+  ranked.sort((a, b) => b.stat - a.stat || b.size - a.size || a.word.localeCompare(b.word));
+  const mid = Math.ceil(ranked.length / 2);
+  const toPairs = (list: typeof ranked): [string, number][] =>
+    list
+      .map((w) => [w.word, w.size] as [string, number])
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return { higher: toPairs(ranked.slice(0, mid)), lower: toPairs(ranked.slice(mid)) };
+}
+
+/** A low-cardinality column to compare a word cloud against. Two values → Compare; 3–8 → Grid. */
+export function wordCloudCompareColumn(
+  columns: ColumnInfo[],
+  wordField: string,
+): { name: string; mode: "compare" | "grid" } | null {
+  const groups = nomColsOf(columns).filter(
+    (c) => c.name !== wordField && c.distinct_count >= 2 && c.distinct_count <= 8,
+  );
+  const two = groups.find((c) => c.distinct_count === 2);
+  if (two) return { name: two.name, mode: "compare" };
+  const grid = [...groups].sort((a, b) => a.distinct_count - b.distinct_count || a.name.localeCompare(b.name))[0];
+  return grid ? { name: grid.name, mode: "grid" } : null;
 }
 
 /** Strict numeric parse: null / "" / non-numeric strings are NaN (Number(null) would be 0). */
@@ -246,6 +388,40 @@ export function oddChartDataSupport(
       return num.length >= 2
         ? { ok: true, reason: "" }
         : { ok: false, reason: "Need ≥2 numeric columns" };
+    case "calendar":
+      return time.length > 0
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a date column" };
+    case "rose":
+      return nomN(2, 40).length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a category (2–40)" };
+    case "ecdf":
+      return num.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a numeric column" };
+    case "sparkGrid":
+    case "stripes":
+      return (time.length > 0 || nom.length > 0) && num.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a time/order column + numeric" };
+    case "density":
+    case "qq":
+      return num.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a numeric column" };
+    case "connectedScatter":
+      return num.length >= 2
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need ≥2 numeric columns" };
+    case "wordCloud":
+      return nom.filter((c) => c.distinct_count >= 5).length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a text column with at least five distinct values" };
+    case "errorBars":
+      return nomN(2, 40).length >= 1 && num.length >= 1
+        ? { ok: true, reason: "" }
+        : { ok: false, reason: "Need a category (2–40) + numeric" };
     default:
       return { ok: false, reason: "Unknown odd chart" };
   }
@@ -340,6 +516,70 @@ export function getOddRandomEncoding(
       const color = pick(nomN(2, 12)) ?? null;
       return { xField: a.name, yField: b.name, colorField: color?.name ?? null };
     }
+    case "calendar": {
+      const x = pick(time);
+      if (!x) return null;
+      const y = num.length && Math.random() > 0.25 ? pick(num)! : null;
+      return { xField: x.name, yField: y?.name ?? null, colorField: null };
+    }
+    case "rose": {
+      const x = pick(nomN(2, 24)) ?? pick(nomN(2, 40));
+      if (!x) return null;
+      const y = num.length ? pick(num)! : null;
+      const color = Math.random() > 0.5 ? pick(nomN(2, 6).filter((c) => c.name !== x.name)) ?? null : null;
+      return { xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null };
+    }
+    case "ecdf": {
+      const x = pick(num);
+      if (!x) return null;
+      const color = Math.random() > 0.35 ? pick(nomN(2, 6)) ?? null : null;
+      return { xField: x.name, yField: null, colorField: color?.name ?? null };
+    }
+    case "sparkGrid": {
+      const x = pick(time.length ? time : nom);
+      const y = pick(num);
+      if (!x || !y) return null;
+      const color = pick(nomN(2, 24).filter((c) => c.name !== x.name)) ?? null;
+      return { xField: x.name, yField: y.name, colorField: color?.name ?? null };
+    }
+    case "density": {
+      const x = pick(num);
+      if (!x) return null;
+      const color = Math.random() > 0.4 ? pick(nomN(2, 5)) ?? null : null;
+      return { xField: x.name, yField: null, colorField: color?.name ?? null };
+    }
+    case "qq": {
+      const x = pick(num);
+      return x ? { xField: x.name, yField: null, colorField: null } : null;
+    }
+    case "connectedScatter": {
+      if (num.length < 2) return null;
+      const a = pick(num)!;
+      const b = pick(num.filter((c) => c.name !== a.name))!;
+      const order = pick(time) ?? null;
+      return { xField: a.name, yField: b.name, colorField: null, sizeField: order?.name ?? null };
+    }
+    case "stripes": {
+      const x = pick(time.length ? time : nom);
+      const y = pick(num);
+      if (!x || !y) return null;
+      return { xField: x.name, yField: y.name, colorField: null };
+    }
+    case "wordCloud": {
+      const x = pick(nom.filter((c) => c.distinct_count >= 5));
+      if (!x) return null;
+      const y = num.length && Math.random() > 0.5 ? pick(num)! : null;
+      const color = Math.random() > 0.45
+        ? pick(nom.filter((c) => c.name !== x.name && c.distinct_count >= 2 && c.distinct_count <= 8)) ?? null
+        : null;
+      return { xField: x.name, yField: y?.name ?? null, colorField: color?.name ?? null };
+    }
+    case "errorBars": {
+      const x = pick(nomN(2, 40));
+      const y = pick(num);
+      if (!x || !y) return null;
+      return { xField: x.name, yField: y.name, colorField: null };
+    }
     case "isoScatter": {
       if (num.length < 2) return null;
       const shuffled = [...num].sort(() => Math.random() - 0.5);
@@ -380,83 +620,123 @@ export function buildOddChartRec(
   const titles: Record<OddChartKind, { title: string; subtitle: string }> = {
     bucketField: {
       title: yField ? `${yField} scattered in ${xField} fields` : `Dots in ${xField} fields`,
-      subtitle: "bucket field — regions are categories; size & color still talk",
+      subtitle: "one patch per category, one dot per row",
     },
     beeswarm: {
       title: yField ? `${yField} beeswarm by ${xField}` : `Beeswarm by ${xField}`,
-      subtitle: "each row is a dot — no stacking, just swarm",
+      subtitle: "every row is a dot, so you see the whole spread",
     },
     chernoff: {
       title: `Chernoff faces by ${xField}`,
-      subtitle: "features encode numerics — weird but honest",
+      subtitle: "one face per group — its features follow the numbers",
     },
     glyphStar: {
       title: `Star glyphs by ${xField}`,
-      subtitle: "each star is a multivariate snapshot",
+      subtitle: "one star per group — longer points mean higher values",
     },
     waffle: {
       title: yField ? `${yField} waffle by ${xField}` : `Waffle of ${xField}`,
-      subtitle: "100-cell part-to-whole grid",
+      subtitle: "100 squares, one per percent",
     },
     isotype: {
       title: yField ? `${yField} units by ${xField}` : `Unit chart of ${xField}`,
-      subtitle: "one mark ≈ one chunk of value",
+      subtitle: "count the icons — each is a share of the total",
     },
     pyramid: {
       title: sizeField ? `${yField} ↔ ${sizeField} by ${xField}` : `Pyramid by ${xField}`,
-      subtitle: "mirror bars — two sides of the same story",
+      subtitle: "two sides, back to back",
     },
     slope: {
       title: sizeField ? `${yField} → ${sizeField}` : `Slope by ${xField}`,
-      subtitle: "before / after as a lean diagonal",
+      subtitle: "steeper lines changed more",
     },
     bump: {
       title: yField ? `Rank bumps of ${yField}` : `Bump chart`,
-      subtitle: "who rises and who falls across order",
+      subtitle: "who climbs and who slips in the ranking",
     },
     stream: {
       title: yField ? `Stream of ${yField}` : `Streamgraph`,
-      subtitle: "organic stacked flow over time",
+      subtitle: "how the mix swells and thins over time",
     },
     horizon: {
       title: yField ? `Horizon of ${yField}` : `Horizon chart`,
-      subtitle: "folded bands pack a tall range into a short strip",
+      subtitle: "darker bands mean higher values",
     },
     spiral: {
       title: yField ? `Spiral of ${yField}` : `Time spiral`,
-      subtitle: "time wraps outward — seasons hug seasons",
+      subtitle: "time spirals outward, so cycles line up",
     },
     radialBar: {
       title: yField ? `${yField} on a wheel` : `Radial bars of ${xField}`,
-      subtitle: "polar bars — nightingale vibes",
+      subtitle: "bars on a wheel — longer reaches further out",
     },
     chord: {
       title: colorField ? `${xField} ↔ ${colorField}` : `Chord of ${xField}`,
-      subtitle: "ribbons of flow between categories",
+      subtitle: "thicker ribbons link what goes together most",
     },
     voronoi: {
       title: yField ? `${xField} × ${yField} territories` : `Voronoi`,
-      subtitle: "each point claims the land around it",
+      subtitle: "each point owns the area closest to it",
     },
     isoBars: {
       title: yField ? `Isometric ${yField} by ${xField}` : `Isometric bars`,
-      subtitle: "fake-3D blocks on a diamond grid",
+      subtitle: "taller blocks mean more",
     },
     isoScatter: {
       title: yField ? `Isometric ${xField} · ${yField}` : `Isometric scatter`,
-      subtitle: "depth from a third measure (or size)",
+      subtitle: "a third measure adds depth",
     },
     flower: {
       title: `Flower garden by ${xField}`,
-      subtitle: "each bloom is a multivariate petal set",
+      subtitle: "one flower per group — bigger petals mean higher values",
     },
     mosaic: {
       title: colorField ? `${xField} × ${colorField} mosaic` : `Mosaic of ${xField}`,
-      subtitle: "area encodes share — marimekko cousin",
+      subtitle: "wider and taller blocks hold a bigger share",
     },
     contour: {
       title: yField ? `Density of ${xField} × ${yField}` : `Contour`,
-      subtitle: "smooth hills where points pile up",
+      subtitle: "peaks show where points cluster",
+    },
+    calendar: {
+      title: yField ? `${yField} by day` : `Activity by day`,
+      subtitle: "a year of days — weekdays down, weeks across",
+    },
+    rose: {
+      title: yField ? `${yField} rose by ${xField}` : `Rose of ${xField}`,
+      subtitle: "bigger wedges mean more",
+    },
+    ecdf: {
+      title: colorField ? `How ${xField} accumulates by ${colorField}` : `How ${xField} accumulates`,
+      subtitle: "how quickly values add up from low to high",
+    },
+    sparkGrid: {
+      title: colorField ? `${yField} over ${xField} for each ${colorField}` : `${yField} over ${xField}`,
+      subtitle: "one small line per group — compare the shapes",
+    },
+    density: {
+      title: colorField ? `Distribution of ${xField} by ${colorField}` : `Distribution of ${xField}`,
+      subtitle: "peaks show the most common values",
+    },
+    qq: {
+      title: `Is ${xField} normally distributed?`,
+      subtitle: "Q–Q plot — points on the line mean a bell curve",
+    },
+    connectedScatter: {
+      title: yField ? `${xField} and ${yField} over ${sizeField ?? "time"}` : `Connected scatter`,
+      subtitle: "a path through two measures — where it went, step by step",
+    },
+    stripes: {
+      title: yField ? `${yField} stripes over ${xField}` : `Stripes`,
+      subtitle: "one band per period — warm above average, cool below",
+    },
+    wordCloud: {
+      title: yField ? `${xField} sized by ${yField}` : `Most common ${xField}`,
+      subtitle: "bigger words appear more",
+    },
+    errorBars: {
+      title: yField ? `Average ${yField} by ${xField}` : `Averages by ${xField}`,
+      subtitle: "averages with their margin of error — overlapping bars may not differ",
     },
   };
 
@@ -471,7 +751,7 @@ export function buildOddChartRec(
   if ((kind === "chord" || kind === "mosaic") && (!colorField || !nom.some((c) => c.name === colorField))) {
     return null;
   }
-  if ((kind === "voronoi" || kind === "isoScatter" || kind === "contour") && !yField) return null;
+  if ((kind === "voronoi" || kind === "isoScatter" || kind === "contour" || kind === "sparkGrid" || kind === "connectedScatter" || kind === "stripes" || kind === "errorBars") && !yField) return null;
 
   const enc: Record<string, unknown> = {
     x: { field: xField, type: "nominal" },
@@ -506,9 +786,11 @@ export function buildOddChartRec(
           (num.find((c) => c.name !== yField && !/^(year|yr|month|day|week|hour)$/i.test(c.name)) ??
             num.find((c) => c.name !== yField))?.name ?? null
         : undefined),
-    yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid"].includes(kind)
+    yAggregate: ["waffle", "isotype", "radialBar", "isoBars", "chord", "mosaic", "pyramid", "calendar", "rose", "wordCloud"].includes(kind)
       ? (!yField ? "count" : (yAggregate ?? "sum"))
-      : undefined,
+      : kind === "sparkGrid" || kind === "stripes"
+        ? (yAggregate ?? "mean")
+        : undefined,
   };
 }
 
@@ -534,6 +816,16 @@ export function oddRecommendationReason(kind: OddChartKind): string {
     flower: "A garden of multivariate blooms — one flower per group",
     mosaic: "Rectangle areas show joint category shares",
     contour: "Smooth density hills where observations cluster",
+    calendar: "Every day as a cell — weekly rhythms and busy stretches pop",
+    rose: "Polar wedges whose area tracks value — stack a second category inside",
+    ecdf: "Cumulative distribution — compare medians and tails across groups without binning",
+    sparkGrid: "One tiny trend per group — compare shapes, not just totals",
+    density: "A smooth curve of the distribution — no bin-size guessing, compare groups by overlap",
+    qq: "Check normality: sample quantiles vs a bell curve; bends reveal skew and heavy tails",
+    connectedScatter: "Two measures traced through time — loops, reversals and drift jump out",
+    stripes: "Ed Hawkins-style stripes — a long series as one band of warm and cool",
+    wordCloud: "Category labels sized by count or value — compare two groups or lay out one cloud per group",
+    errorBars: "Group means with 95% intervals over the raw dots — honest comparisons",
   };
   return map[kind] ?? "An unconventional view that fits your columns";
 }

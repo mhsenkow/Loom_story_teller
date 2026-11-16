@@ -6,6 +6,7 @@ import { useLoomStore } from "../store";
 import { buildChartSharePageHtml } from "../dashboardMicrosite";
 import { publishStoryToWorker } from "../socialExport";
 import { handOffToNeoSpace } from "../neospaceShare";
+import { downloadBlob } from "../download";
 import { MOMENT_DARK, momentSvg, momentText, type Moment } from "./moments";
 
 /** Rasterise the 1200×627 moment card (PNG blob). */
@@ -74,9 +75,8 @@ export async function postMomentToNeoSpace(mo: Moment): Promise<void> {
 
 export async function downloadMomentPng(mo: Moment): Promise<void> {
   const png = await momentPng(mo);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(png);
-  a.download = `${mo.monitorName.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date(mo.at).toISOString().slice(0, 16).replace(/[:T]/g, "")}.png`;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  const name = `${mo.monitorName.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-${new Date(mo.at).toISOString().slice(0, 16).replace(/[:T]/g, "")}.png`;
+  // Shared helper: iPhone/iPad Tauri drops anchor downloads, so it uses the share sheet there.
+  const outcome = await downloadBlob(png, name);
+  if (outcome === "unsupported") useLoomStore.getState().setToast("Couldn’t save the image on this device");
 }

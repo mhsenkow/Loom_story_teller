@@ -8,7 +8,8 @@
 "use client";
 
 import { ThemeCycleButton } from "./ThemeCycleButton";
-import { useLoomStore, type ViewMode } from "@/lib/store";
+import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import {
   CHART_ASPECTS,
   type ChartAspectId,
@@ -16,14 +17,9 @@ import {
   resolveDevice,
 } from "@/lib/chartViewport";
 import { useViewportWidth } from "@/lib/useMediaQuery";
+import { VIEW_MODES } from "@/lib/viewModes";
+import { toggleChartFocus } from "@/lib/chartFocus";
 
-const VIEW_MODES: { key: ViewMode; label: string; short: string; shortcut: string }[] = [
-  { key: "explorer", label: "Explorer", short: "Data", shortcut: "1" },
-  { key: "chart", label: "Chart", short: "Chart", shortcut: "2" },
-  { key: "query", label: "Query", short: "SQL", shortcut: "3" },
-  { key: "dive", label: "Dive", short: "Dive", shortcut: "4" },
-  { key: "monitor", label: "Monitor", short: "Watch", shortcut: "5" },
-];
 
 const DEVICES: { id: ChartDeviceId; label: string; icon: "phone" | "tablet" | "desktop" | "auto" }[] = [
   { id: "auto", label: "Auto", icon: "auto" },
@@ -68,6 +64,7 @@ function DeviceIcon({ kind }: { kind: (typeof DEVICES)[number]["icon"] }) {
 export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
   const firingCount = useLoomStore((s) => s.monitorAlerts.filter((x) => !x.closedAt && !x.acknowledgedAt).length);
   const {
+    dataSourcesExpanded,
     viewMode,
     setViewMode,
     sidebarOpen,
@@ -84,8 +81,29 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
     activeChart,
     setShareSheetOpen,
     setToast,
-    discoverReturnPath,
-  } = useLoomStore();
+    discoverReturnPath
+  } = useLoomStore(
+    useShallow((s) => ({
+      dataSourcesExpanded: s.dataSourcesExpanded,
+      viewMode: s.viewMode,
+      setViewMode: s.setViewMode,
+      sidebarOpen: s.sidebarOpen,
+      panelOpen: s.panelOpen,
+      togglePanel: s.togglePanel,
+      toggleSidebar: s.toggleSidebar,
+      setPanelTab: s.setPanelTab,
+      selectedFile: s.selectedFile,
+      appSettings: s.appSettings,
+      setAppSettings: s.setAppSettings,
+      columnStats: s.columnStats,
+      sampleRows: s.sampleRows,
+      queryResult: s.queryResult,
+      activeChart: s.activeChart,
+      setShareSheetOpen: s.setShareSheetOpen,
+      setToast: s.setToast,
+      discoverReturnPath: s.discoverReturnPath,
+    })),
+  );
   const viewportW = useViewportWidth();
   const aspect = appSettings.chartAspect ?? "free";
   const devicePreset = appSettings.chartDevice ?? "auto";
@@ -123,7 +141,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
 
   return (
     <header
-      className="flex items-center gap-1 sm:gap-2 flex-shrink-0 border-b border-loom-border bg-loom-surface/95 backdrop-blur-md px-1.5 sm:px-3"
+      className="flex items-center gap-1 sm:gap-2 flex-shrink-0 min-w-0 overflow-hidden border-b border-loom-border bg-loom-surface/95 backdrop-blur-md px-1.5 sm:px-3"
       style={{
         height: "calc(var(--topbar-height) + var(--safe-top))",
         paddingTop: "var(--safe-top)",
@@ -153,20 +171,20 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           <span aria-hidden>←</span><span className="hidden 2xl:inline ml-1 text-xs">Stories</span>
         </button>
       )}
-      <nav className="loom-seg shrink-0" aria-label="View mode">
+      <nav className="loom-seg min-w-0 shrink overflow-x-auto scrollbar-none" aria-label="View mode">
         {VIEW_MODES.map((mode) => (
           <button
             key={mode.key}
             type="button"
-            onClick={() => setViewMode(mode.key)}
+            onClick={() => { setViewMode(mode.key); if (dataSourcesExpanded) useLoomStore.getState().setDataSourcesExpanded(false); }}
             aria-current={viewMode === mode.key ? "page" : undefined}
-            className="loom-seg-item min-h-9 sm:min-h-0 px-2.5 sm:px-3"
+            className="loom-seg-item shrink-0 min-h-9 sm:min-h-0 px-1.5 xl:px-3"
           >
-            <span className="sm:hidden">{mode.short}</span>
-            <span className="hidden sm:inline">{mode.label}</span>
-            <span className="ml-1 text-2xs opacity-50 font-mono hidden md:inline">{mode.shortcut}</span>
+            <span className="xl:hidden">{mode.short}</span>
+            <span className="hidden xl:inline">{mode.label}</span>
+            <span className="ml-1 text-2xs opacity-50 font-mono hidden xl:inline">{mode.shortcut}</span>
             {mode.key === "monitor" && firingCount > 0 && (
-              <span className="ml-1 inline-flex min-w-4 h-4 px-1 items-center justify-center rounded-full bg-loom-error text-2xs font-semibold text-loom-bg" aria-label={`${firingCount} open alerts`}>
+              <span className="ml-1 inline-flex min-w-4 h-4 px-1 items-center justify-center rounded-full bg-loom-error text-2xs font-semibold text-[color:var(--on-error)]" aria-label={`${firingCount} open alerts`}>
                 {firingCount}
               </span>
             )}
@@ -175,7 +193,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
       </nav>
 
       {/* Aspect / device framing — desktop & tablet authoring only (phones always fill) */}
-      {viewMode === "chart" && (
+      {viewMode === "chart" && !(dataSourcesExpanded && sidebarOpen) && (
         <>
           {/* Tablet widths: one native picker instead of a clipped strip of 7 buttons */}
           <label className="hidden md:flex xl:hidden items-center shrink-0">
@@ -217,7 +235,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           </div>
 
           <div
-            className="hidden md:flex loom-seg shrink-0"
+            className="hidden lg:flex loom-seg shrink-0"
             role="group"
             aria-label="Chart width preview"
           >
@@ -269,6 +287,21 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         </div>
       )}
 
+      {viewMode === "chart" && !(dataSourcesExpanded && sidebarOpen) && (
+        <button
+          type="button"
+          onClick={() => { if (!toggleChartFocus()) setToast("Open a chart to go full screen"); }}
+          className="loom-btn-ghost min-h-10 min-w-10 flex items-center justify-center px-2 rounded-md shrink-0"
+          aria-label="Full screen chart"
+          title="Full screen chart (F)"
+          aria-keyshortcuts="f"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+            <path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4" />
+          </svg>
+        </button>
+      )}
+
       {viewMode === "chart" && (
         <button
           type="button"
@@ -283,7 +316,7 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M12 3v12M7 8l5-5 5 5M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6" />
           </svg>
-          <span>Share</span>
+          <span className="hidden sm:inline">Share</span>
         </button>
       )}
 
@@ -291,20 +324,23 @@ export function TopBar({ onOpenShortcuts }: { onOpenShortcuts?: () => void }) {
         <button
           type="button"
           onClick={onOpenShortcuts}
-          className={`loom-btn-ghost ${discoverReturnPath === selectedFile?.path ? "hidden md:flex" : "flex"} min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md`}
+          className={`loom-btn-ghost ${discoverReturnPath === selectedFile?.path ? "hidden md:flex" : "hidden sm:flex"} min-h-10 min-w-10 items-center justify-center text-xs px-2 font-mono rounded-md`}
           title="Keyboard shortcuts (?)"
           aria-label="Keyboard shortcuts"
         >
           ?
         </button>
       )}
-      <ThemeCycleButton />
+      {/* Phones: theme lives in Settings; the wrapper hides it (the button's own display:grid beats `hidden`). */}
+      <div className="hidden sm:flex shrink-0" data-testid="topbar-theme">
+        <ThemeCycleButton />
+      </div>
 
       {viewMode !== "monitor" && <button
         type="button"
         onClick={openPanel}
         className={`loom-btn-ghost min-h-10 min-w-10 sm:min-h-0 sm:min-w-0 items-center justify-center text-xs px-2 rounded-md ${viewMode === "chart" ? "hidden md:flex" : "flex"}`}
-        title={viewMode === "chart" ? "Chart encoding & visual" : "Toggle Detail Panel"}
+        title={viewMode === "chart" ? "Chart fields & look" : "Toggle detail panel"}
         aria-label={viewMode === "chart" ? "Open chart panel" : "Toggle detail panel"}
         aria-expanded={panelOpen}
         aria-controls="loom-detail-panel"

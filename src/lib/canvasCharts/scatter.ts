@@ -70,8 +70,8 @@ export function renderFullScatter(
   }
   const [sizeMin, sizeMax] = sizeIdx >= 0 ? numRange(rows, sizeIdx) : [0, 1];
   const sizeRange = sizeMax - sizeMin || 1;
-  const catMap = new Map<string, number>();
-  let next = 0;
+  const catMap = new Map<string, number>(opts?.seriesIndices);
+  let next = catMap.size;
   const rowSource = opts?.rowSourceIndices;
   const sampleIdxOf = (ri: number) => rowSource?.[ri] ?? ri;
   const anom = opts?.anomalyHighlight ? new Set(anomalyRowIndices(rows, yi)) : null;
@@ -165,9 +165,10 @@ export function renderFullScatter(
     }
     pointIdx++;
 
-    const useCluster = clusterByRow != null && clusterByRow[ri] !== undefined;
+    const sourceIndex = sampleIdxOf(ri);
+    const useCluster = clusterByRow != null && clusterByRow[sourceIndex] !== undefined;
     const fillColor = useCluster
-      ? cols[(clusterByRow[ri] ?? 0) % cols.length]
+      ? cols[(clusterByRow[sourceIndex] ?? 0) % cols.length]
       : cols[cat % cols.length];
 
     let pointOverrides: PointVisualOverrides | undefined;

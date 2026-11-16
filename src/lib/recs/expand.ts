@@ -8,7 +8,7 @@ import { chartTimeWindowLabel, fieldLooksFutureDated, pickDefaultTimeField, sugg
 import { inferType, measureColumns, yFieldSupportsLogScale } from "./columns";
 import { geoMapRecommendationReason, isGeoMapKind } from "../geoMapsRec";
 import { gpuSceneRecommendationReason, isGpuSceneKind } from "../gpuScenesRec";
-import { buildOddChartRec, isOddChartKind, oddChartDataSupport, oddRecommendationReason } from "../oddChartsRec";
+import { buildOddChartRec, isOddChartKind, oddChartDataSupport, oddRecommendationReason, wordCloudCompareColumn } from "../oddChartsRec";
 import { type ColumnInfo } from "../queryTypes";
 import { FACET_RANDOM_KINDS } from "./random";
 import { type ChartRecommendation } from "./types";
@@ -358,6 +358,23 @@ export function expandRecommendationsWithExtras(
       }
     }
 
+    if (rec.kind === "wordCloud" && rec.wordCloudMode !== "compare" && rec.wordCloudMode !== "grid") {
+      const group = wordCloudCompareColumn(columns, rec.xField);
+      if (group) {
+        pushVariant({
+          ...rec,
+          id: `${rec.id}-${group.mode}`,
+          colorField: group.name,
+          wordCloudMode: group.mode,
+          title: group.mode === "compare" ? `${rec.xField} compared by ${group.name}` : `${rec.xField} for each ${group.name}`,
+          subtitle: group.mode === "compare"
+            ? "one cloud per side — same size means the same total"
+            : "one cloud per group — same size means the same total",
+          score: Math.max(50, rec.score - 2),
+        });
+      }
+    }
+
     // Delta-rank bump
     if (rec.kind === "bump" && rec.bumpMode !== "delta") {
       pushVariant({
@@ -530,7 +547,7 @@ export function expandRecommendationsWithExtras(
 
 /** Short, human-readable reason why this chart type fits the data. No LLM required. */
 export function getRecommendationReason(rec: ChartRecommendation): string {
-  const { kind, xField, yField, colorField } = rec;
+  const { kind, yField, colorField } = rec;
   switch (kind) {
     case "scatter":
       return yField ? "Two numeric columns → good for correlation or distribution" : "Numeric pairs for relationship";

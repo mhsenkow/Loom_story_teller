@@ -1,3 +1,4 @@
+import { assetForFile, emptyDataLibrary } from "../dataLibrary";
 // =================================================================
 // uiSlice — settings, toast, recent files, prompt, export, stream
 // =================================================================
@@ -16,7 +17,7 @@ import {
   type SourcePreferences,
   type SourceReaction,
 } from "../sourcePreferences";
-import type { SourceRef } from "../sourceRef";
+import { refForPath, type SourceRef } from "../sourceRef";
 import { resolveDeepScanSource } from "../deepScan";
 import { runDeepScan } from "../deepScanClient";
 import { setPersistedVizPreferences } from "../persist";
@@ -49,6 +50,7 @@ export function uiInitialState() {
     exportSupersample: 1 as 1 | 2,
     socialPresetId: "ig-square" as SocialPresetId,
     shareSheetOpen: false,
+    chartFocus: false,
     whatsNewOpen: false,
     discoverReturnPath: null as string | null,
     // Live stream
@@ -114,21 +116,29 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
     setExportSupersample: (v: 1 | 2) => set({ exportSupersample: v }),
     setSocialPresetId: (id: SocialPresetId) => set({ socialPresetId: id }),
     setShareSheetOpen: (v: boolean) => set({ shareSheetOpen: v }),
+    setChartFocus: (v: boolean) => set({ chartFocus: v }),
     setDiscoverReturnPath: (path: string | null) => set({ discoverReturnPath: path }),
     setWhatsNewOpen: (v: boolean) => set({ whatsNewOpen: v }),
     setStreamStatus: (status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; wikis_seen: number; started_at: number | null }) =>
       set({ streamRunning: status.running, streamTotalEvents: status.total_events, streamEventsPerSec: status.events_per_sec, streamBufferRows: status.buffer_rows, streamWikisSeen: status.wikis_seen, streamStartedAt: status.started_at }),
     setFeedHealth: (health: LoomState["feedHealth"]) => set({ feedHealth: health }),
-    setSourceStatus: (kind: string, status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; last_error?: string | null; last_success_at?: number | null; snapshot_stale?: boolean; snapshot_captured_at?: number | null }) =>
+    setSourceStatus: (kind: string, status: { running: boolean; total_events: number; events_per_sec: number; buffer_rows: number; started_at: number | null; last_error?: string | null; last_ok_at?: number | null; last_success_at?: number | null; snapshot_stale?: boolean; snapshot_captured_at?: number | null }) =>
       set((s) => {
         const prev = s.sourceStatuses[kind];
-        if (prev && prev.running === status.running && prev.total_events === status.total_events && prev.events_per_sec === status.events_per_sec && prev.buffer_rows === status.buffer_rows && prev.started_at === status.started_at && (prev.last_error ?? null) === (status.last_error ?? null)) return s;
+        if (prev && prev.running === status.running && prev.total_events === status.total_events && prev.events_per_sec === status.events_per_sec && prev.buffer_rows === status.buffer_rows && prev.started_at === status.started_at && (prev.last_error ?? null) === (status.last_error ?? null) && (prev.last_ok_at ?? null) === (status.last_ok_at ?? null) && (prev.last_success_at ?? null) === (status.last_success_at ?? null)) return s;
         return { sourceStatuses: { ...s.sourceStatuses, [kind]: { ...status } } };
       }),
     setVizPreferences: (model: VizPreferenceModel) => { setCachedVizPreferences(model); set({ vizPreferences: model }); },
     setSourcePrefs: (prefs: SourcePreferences) => { setCachedSourcePreferences(prefs); set({ sourcePrefs: prefs }); },
     reactToSource: (ref: SourceRef, reaction: SourceReaction | null) => get().setSourcePrefs(setSourceReaction(get().sourcePrefs, ref, reaction)),
-    toggleSavedSource: (ref: SourceRef) => get().setSourcePrefs(toggleSourceSaved(get().sourcePrefs, ref)),
+    toggleSavedSource: (ref: SourceRef) => {
+      const state = get();
+      if (!state.sourcePrefs.entries[ref]?.saved) {
+        const file = [state.selectedFile, ...state.files, ...state.recentFiles].find(f => f && refForPath(f.path, f) === ref);
+        if (file) state.rememberLibraryAsset(assetForFile(file));
+      }
+      state.setSourcePrefs(toggleSourceSaved(state.sourcePrefs, ref));
+    },
     noteSourceOpened: (ref: SourceRef) => {
       const next = recordSourceOpen(get().sourcePrefs, ref);
       if (next !== get().sourcePrefs) get().setSourcePrefs(next);
@@ -204,6 +214,7 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
         tableViews: [], chartViews: [], queryViews: [], dashboards: [], customChartLooks: [],
         activeDashboardId: null, vizPreferences: emptyVizPreferenceModel(),
         sourcePrefs: emptySourcePreferences(),
+        dataLibrary: emptyDataLibrary(),
       });
     },
     clearRetainedLocalData: async () => {

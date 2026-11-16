@@ -7,6 +7,8 @@ export default defineConfig({
     globals: false,
     environment: "node",
     include: ["src/**/*.test.ts", "mcp/src/**/*.test.ts", "workers/**/*.test.ts"],
+    // DOM tests run under vitest.dom.config.ts (jsdom + storage harness).
+    exclude: ["**/node_modules/**", "**/dist/**", "src/**/*.dom.test.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "text-summary"],
@@ -21,6 +23,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // Worker modules import the runtime's DurableObject base; Node tests get a stand-in.
+      "cloudflare:workers": path.resolve(__dirname, "./workers/__tests__/shims/cloudflareWorkers.ts"),
     },
   },
 });

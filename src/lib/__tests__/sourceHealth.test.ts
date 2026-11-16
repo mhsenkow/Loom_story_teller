@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { feedHealthNote, isFeedResting, parseFeedHealth } from "../sourceHealth";
+import { feedHealthFromSourceStatus, feedHealthNote, isFeedResting, parseFeedHealth } from "../sourceHealth";
 import { digestEntries } from "../feedBrowser";
 import { sourceCatalog } from "../sourceCatalog";
 import { emptySourcePreferences, setSourceReaction } from "../sourcePreferences";
@@ -18,12 +18,20 @@ describe("feed health (client)", () => {
     expect(isFeedResting("unknown_kind", h)).toBe(false);
   });
 
+  it("derives desktop health from local status and does not call a feed resting", () => {
+    expect(feedHealthFromSourceStatus(undefined)).toEqual({ state: "unknown" });
+    expect(feedHealthFromSourceStatus({ running: false, buffer_rows: 0 })).toEqual({ state: "unknown" });
+    expect(feedHealthFromSourceStatus({ running: true, buffer_rows: 12, last_ok_at: 1_700_000_000 }).state).toBe("ok");
+    expect(feedHealthFromSourceStatus({ running: true, last_error: "HTTP 503", last_ok_at: 1_700_000_000 }).state).toBe("degraded");
+  });
+
   it("explains resting and patchy feeds, says nothing for healthy ones", () => {
     const now = 10 * 3_600_000;
     expect(feedHealthNote({ state: "ok" }, now)).toBeNull();
     expect(feedHealthNote({ state: "unknown" }, now)).toBeNull();
     expect(feedHealthNote({ state: "resting", lastOk: now - 5 * 3_600_000 }, now)).toMatch(/since 5 h ago/);
-    expect(feedHealthNote({ state: "degraded", lastOk: now - 20 * 60_000 }, now)).toMatch(/last good copy \(20 min ago\)/);
+    expect(feedHealthNote({ state: "degraded", lastOk: now - 20 * 60_000 }, now)).toMatch(/patchy — last answered 20 min ago/);
+    expect(feedHealthNote({ state: "degraded" }, now)).toBe("The upstream service is patchy right now.");
   });
 
   it("keeps a resting feed out of Digest even when it's loved", () => {

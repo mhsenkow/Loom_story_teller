@@ -16,7 +16,7 @@ export const CHART_KIND_VERNACULAR: Partial<Record<string, string>> = {
   bubble: "sized bubbles third dimension magnitude weighted points",
   hexbin: "density aggregate crowded scatter binned hex honeycomb overplotting",
   line: "trend time series temporal over time trajectory trajectory growth decline timeseries line chart",
-  bar: "column compare categories categorical ranking ranking bars grouped bar chart",
+  bar: "rect rectangle column compare categories categorical ranking ranking bars grouped bar chart",
   lollipop: "dot plot stem ranking sparse categories",
   dumbbell: "before after gap pair compare two points range",
   pyramid: "mirror tornado population pyramid opposing bars same scale separate scales age sex cases deaths",
@@ -24,6 +24,16 @@ export const CHART_KIND_VERNACULAR: Partial<Record<string, string>> = {
   pie: "donut share part whole composition percentage breakdown pie chart",
   funnel: "conversion stages dropoff pipeline drop-off",
   histogram: "distribution bins frequency density hist spread shape skew unimodal",
+  density: "density kde kernel smooth distribution curve bell shape spread",
+  qq: "qq quantile quantile normality normal probability plot skew tails",
+  connectedScatter: "connected scatter path trajectory over time loop journey",
+  stripes: "warming stripes climate hawkins barcode bands trend anomaly",
+  wordCloud: "word cloud tag cloud text frequency words",
+  errorBars: "error bars confidence interval mean ci uncertainty dot plot",
+  ecdf: "cumulative distribution cdf percentile quantile median tail share below",
+  calendar: "calendar heatmap github contributions daily activity weekday streak days",
+  rose: "nightingale rose coxcomb polar area wedge petal",
+  sparkGrid: "sparklines small multiples trellis facet trends mini lines grid",
   waterfall: "bridge running total contribution incremental delta breakdown p&l",
   strip: "jitter one dimensional distribution strip plot",
   violin: "distribution density shape multimodal kde violin plot",
@@ -367,8 +377,8 @@ const INTENT_RULES: IntentRule[] = [
 
   // Chrome / analysis surfaces
   {
-    test: (q) => /\b(encoding|encodings|map fields|assign axes|x and y)\b/.test(q),
-    hit: { action: "encoding", label: "Open Encoding", hint: "Chart → field mapping", score: 41 },
+    test: (q) => /\b(fields|encoding|encodings|map fields|assign axes|x and y)\b/.test(q),
+    hit: { action: "encoding", label: "Open Fields", hint: "Chart → what goes on the chart", score: 41 },
   },
   {
     test: (q) => /\b(stats|statistics|summary stats|describe the data)\b/.test(q),

@@ -66,16 +66,24 @@ Privacy: https://loom.ibm.io/privacy
 - Adding a 6th requires leaving READY_FOR_REVIEW first
 
 ## Icon / logo
-Yes — build **8** includes the App Store icon (`iconAssetToken` present). Home screen, TestFlight, and ASC use the woven cube + “loom” wordmark from `ios/store/AppIcon-1024.png` / Capacitor assets.
+Yes — build **22** includes App Icon appearance themes (Any / Dark / Tinted) from `ios/App/.../AppIcon.appiconset` (`AppIcon-1024.png`, `-dark`, `-tinted`). Canonical mark: `brand/loom-icon-1024.png`. Regenerate with `node scripts/prepare-app-icons.mjs` then `npx tauri icon brand/loom-icon-1024.png`.
 
-## Live ASC status (2026-10-13)
-- Version **1.0** · build **8** · **WAITING_FOR_REVIEW**
-- Price **$4.95** equalized across **175** territories · Category Productivity (+ Utilities) · 4+ · IDFA off
-- Content rights: third-party content · Privacy + accessibility URLs → https://loom.ibm.io/privacy
-- TestFlight: beta description, privacy/marketing URLs, review notes filled
-- Accessibility declarations drafted (iPhone + iPad: dark interface, larger text, sufficient contrast) — Apple only lets you **publish** them after the app is live on the Store
-- Build encryption: `usesNonExemptEncryption=false` (HTTPS-only; no extra declaration needed)
-- Portal-only leftover: **App Privacy** nutrition labels (public API JWT cannot set; needs ASC web) — choose **Data Not Collected** in ASC → App Privacy
+## Build uploaded (2026-11-12)
+- Tauri IPA `0.1.2` (`CFBundleVersion` `0.1.2`) via `make tablet-weave` — delivery `a9297ffe-78c9-4a90-8075-681a59347cb4` (themes, public tables on the first look, phone and iPad pass). Signed `Apple Distribution: Michael Senkow (WC44W2QVE4)`.
+- Earlier the same day: delivery `3edb9aa9-fd7e-4bdb-9537-82d87cbc49ec` (`0.1.1`, shell-plugin link fix)
+- Attach `0.1.2` in App Store Connect when processing finishes; Capacitor build **33** remains the prior review binary until swapped
+
+## Live ASC status (2026-10-27)
+- Version **1.0** · build **33** attached · **WAITING_FOR_REVIEW** (submission `dee02292-0cf1-48c0-95ab-3bd8002b91f7`, submitted 2026-10-27T17:56:56Z)
+- Review notes updated for build 33 (chart engine reliability / loom.ibm.io parity)
+- Prior upload delivery `49f1264e-c474-4308-baa8-161d5ee4e2bd` · prior TestFlight **32** still Testing
+- Prior (2026-10-15): build **26** uploaded (UUID `03f4582a-61c7-40b9-a583-455ffc1b112e`)
+- App Icon: traditional `ios-marketing` + Dark/Tinted (`brand/loom-icon-1024.png`)
+- Screenshots: iPhone 6.7" ×6 + iPad 13" ×6 (incl. `06-phone`)
+- App preview videos: `preview-iphone67.mp4`, `preview-ipad13.mp4` (15s+, AAC) — rebuild via `node scripts/build-app-previews.mjs`
+- Upload media: `node scripts/upload-store-media.mjs`
+- ASC admin header may still show a blue placeholder until first App Store release; device/TestFlight/product page use the woven cube
+- Portal-only: confirm **App Privacy** nutrition labels if ASC still flags them
 
 ## One-time portal setup
 1. Xcode → Settings → Accounts → Michael Senkow (team WC44W2QVE4) signed in  

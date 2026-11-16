@@ -116,15 +116,24 @@ export function statsFromData(data: {
     const nonNull = values.filter((v) => v !== null);
     const distinct = new Set(nonNull.map(String)).size;
     const isNum = ["DOUBLE", "INTEGER", "BIGINT", "FLOAT"].includes(type);
-    const nums = isNum ? nonNull.map(Number).filter((n) => !isNaN(n)) : [];
+    // One linear pass: numeric order for number columns, string order otherwise
+    // (ISO dates sort correctly as strings). Avoids spreading 60k args into Math.min.
+    let min: number | string | null = null;
+    let max: number | string | null = null;
+    for (const v of nonNull) {
+      const k = isNum ? Number(v) : String(v);
+      if (isNum && Number.isNaN(k)) continue;
+      if (min === null || k < min) min = k;
+      if (max === null || k > max) max = k;
+    }
 
     return {
       name,
       data_type: type,
       null_count: values.length - nonNull.length,
       distinct_count: distinct,
-      min_value: isNum && nums.length > 0 ? String(Math.min(...nums)) : nonNull.length > 0 ? String(nonNull[0]) : null,
-      max_value: isNum && nums.length > 0 ? String(Math.max(...nums)) : nonNull.length > 0 ? String(nonNull[nonNull.length - 1]) : null,
+      min_value: min === null ? null : String(min),
+      max_value: max === null ? null : String(max),
     };
   });
 }
@@ -528,31 +537,36 @@ export function isNullishCsvToken(raw: string): boolean {
 
 /** Coerce CSV cell → number when it looks numeric (gov data often uses "1,203,514" / " 10.9 "). */
 export function coerceCsvNumber(raw: string): number | null {
-  let s = raw.trim();
+  // U+2212 (typographic minus) shows up in exported finance sheets.
+  let s = raw.trim().replace(/\u2212/g, "-");
   if (!s || isNullishCsvToken(s)) return null;
   let accountingNeg = false;
-  if (/^\([0-9,.\s]+\)$/.test(s)) {
+  if (/^\(\s*[$£€]?[0-9,.\s]+\)$/.test(s)) {
     accountingNeg = true;
     s = s.slice(1, -1).trim();
   }
   if (/^0x[0-9a-f]+$/i.test(s) || /^[+-]?0[0-7]+$/i.test(s)) return null;
-  s = s.replace(/^[$£€]/, "").replace(/%$/, "").replace(/\u00a0/g, "").replace(/ /g, "").trim();
-  // US thousands: 1,234,567.89
-  if (/^-?\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) {
+  // A sign may sit before or after the currency symbol: -$1,234 / $-1,234 / +€5.
+  const signed = /^([+-]?)\s*[$£€]?\s*([+-]?)([\s\S]*)$/.exec(s)!;
+  if (signed[1] && signed[2]) return null;
+  const sign = signed[1] || signed[2];
+  s = signed[3]!.replace(/%$/, "").replace(/\u00a0/g, "").replace(/ /g, "").trim();
+  // US thousands: 1,234,567.89 (a leading "0," group is a decimal comma, e.g. EU 0,125)
+  if (/^(?!0,)\d{1,3}(,\d{3})+(\.\d+)?$/.test(s)) {
     s = s.replace(/,/g, "");
-  } else if (/^-?\d{1,3}(\.\d{3}){2,}(,\d+)?$/.test(s)) {
+  } else if (/^\d{1,3}(\.\d{3}){2,}(,\d+)?$/.test(s)) {
     // EU thousands with ≥2 groups: 1.234.567 or 1.234.567,89
     // (do NOT treat 72.923 / 30.405 as thousands — those are US decimals)
     s = s.replace(/\./g, "").replace(",", ".");
-  } else if (/^-?\d{1,3}(\.\d{3})+,\d+$/.test(s)) {
+  } else if (/^\d{1,3}(\.\d{3})+,\d+$/.test(s)) {
     // EU: 1.234,56
     s = s.replace(/\./g, "").replace(",", ".");
-  } else if (/^-?\d+,\d+$/.test(s)) {
+  } else if (/^\d+,\d+$/.test(s)) {
     // Decimal comma without thousands grouping: 10,9
     s = s.replace(",", ".");
   }
-  if (!/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(s)) return null;
-  const n = Number(s);
+  if (!/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/.test(s)) return null;
+  const n = Number(sign === "-" ? `-${s}` : s);
   if (!Number.isFinite(n)) return null;
   return accountingNeg ? -Math.abs(n) : n;
 }

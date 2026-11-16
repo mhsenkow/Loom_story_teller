@@ -21,20 +21,6 @@ type FooterTab = "preview" | "schema";
 type SortDir = "asc" | "desc";
 type EncodeSlot = "x" | "y" | "color";
 
-function compareCells(
-  a: string | number | boolean | null | undefined,
-  b: string | number | boolean | null | undefined,
-  dir: SortDir,
-): number {
-  const mul = dir === "asc" ? 1 : -1;
-  if (a == null && b == null) return 0;
-  if (a == null) return 1;
-  if (b == null) return -1;
-  if (typeof a === "number" && typeof b === "number") return (a - b) * mul;
-  if (typeof a === "boolean" && typeof b === "boolean") return (Number(a) - Number(b)) * mul;
-  return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" }) * mul;
-}
-
 export function PreviewFooter() {
   const sampleRows = useLoomStore((s) => s.sampleRows);
   const selectedFile = useLoomStore((s) => s.selectedFile);
@@ -151,6 +137,7 @@ export function PreviewFooter() {
       residualOverlay: activeChart.residualOverlay ?? null,
       anomalyHighlight: activeChart.anomalyHighlight ?? null,
       bumpMode: activeChart.bumpMode ?? null,
+      wordCloudMode: activeChart.wordCloudMode ?? null,
       timeWindowField: activeChart.timeWindowField ?? null,
       timeWindow: activeChart.timeWindow ?? null,
       tooltipFields: activeChart.tooltipFields,
@@ -242,7 +229,7 @@ export function PreviewFooter() {
           )}
           {footerTab === "schema" && hasSchema && (
             <span className="text-2xs font-mono text-loom-muted hidden sm:inline">
-              Drag into Chart → Encoding · tap to assign
+              Drag into Chart → Fields · tap to assign
             </span>
           )}
           <button
@@ -309,7 +296,7 @@ export function PreviewFooter() {
                             onDragStart={(e) => handleDragStart(e, col)}
                             onClick={() => toggleSort(col)}
                             onDoubleClick={() => onTokenActivate(col)}
-                            title={`${col} — click sort · drag to Encoding · double-click assign`}
+                            title={`${col} — click sort · drag to Fields · double-click assign`}
                             className={`
                               group inline-flex items-center gap-1 max-w-[11rem] px-1.5 py-1 rounded-md text-2xs font-semibold uppercase tracking-wider
                               cursor-grab active:cursor-grabbing transition-colors border
@@ -413,7 +400,7 @@ export function PreviewFooter() {
                 <p className="w-full text-2xs text-loom-muted px-1 pt-1">
                   {isMobile
                     ? "Tap a field, then pick X / Y / Color — chart updates live."
-                    : "Drag onto Chart → Encoding, or tap to assign. Accent marks columns already on the chart."}
+                    : "Drag onto Chart → Fields, or tap to assign. Accent marks columns already on the chart."}
                 </p>
               )}
             </div>

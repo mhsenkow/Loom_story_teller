@@ -6,8 +6,6 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "shell:default",
-    "shell:allow-open",
     "notification:default"
   ]
 }

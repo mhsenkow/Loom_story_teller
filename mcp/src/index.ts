@@ -2,16 +2,15 @@ import type { ExportedHandler } from "@cloudflare/workers-types";
 import { McpServer } from "@modelcontextprotocol/server";
 import { createMcpHandler } from "agents/mcp/server";
 import { z } from "zod";
+import { CHART_KIND_OPTIONS, chartKindDataSupport } from "../../src/lib/recommendations";
 import {
-  recommend,
-  createChartRec,
-  CHART_KIND_OPTIONS,
-  chartKindDataSupport,
-  getRecommendationReason,
-  type ChartKind,
-} from "../../src/lib/recommendations";
-import type { QueryResult } from "../../src/lib/queryTypes";
-import { profilePayload, profilePayloadSafe } from "./profile";
+  LOOM_URL,
+  CHART_KIND_VALUES,
+  resolveProfile,
+  profileToolError,
+  recommendChartsResult,
+  buildChartResult,
+} from "./tools";
 // @ts-expect-error wrangler Text module rule
 import widgetHtmlRaw from "./widget.html";
 // @ts-expect-error wrangler Text module rule
@@ -23,7 +22,6 @@ import privacyHtml from "./privacy.html";
 // @ts-expect-error wrangler Text module rule
 import termsHtml from "./terms.html";
 
-const LOOM_URL = "https://loom.ibm.io/";
 const WIDGET_URI = "ui://widget/loom-charts-v1.html";
 const WIDGET_MIME = "text/html+skybridge";
 
@@ -81,66 +79,6 @@ function widgetDocument(seed?: Record<string, unknown>) {
   );
 }
 
-function toQueryResult(profile: ReturnType<typeof profilePayload>): QueryResult | null {
-  if (!profile.sampleRows.length) return null;
-  return {
-    columns: profile.columnNames,
-    types: profile.columns.map((c) => c.data_type),
-    rows: profile.sampleRows,
-    total_rows: profile.rowCount,
-  };
-}
-
-function slimRec(r: {
-  id: string;
-  kind: string;
-  title: string;
-  subtitle: string;
-  score: number;
-  xField: string;
-  yField: string | null;
-  colorField: string | null;
-  sizeField?: string | null;
-  spec: object;
-}) {
-  return {
-    id: r.id,
-    kind: r.kind,
-    title: r.title,
-    subtitle: r.subtitle,
-    score: r.score,
-    xField: r.xField,
-    yField: r.yField,
-    colorField: r.colorField,
-    sizeField: r.sizeField ?? null,
-    reason: getRecommendationReason(r as Parameters<typeof getRecommendationReason>[0]),
-    spec: r.spec,
-  };
-}
-
-function resolveProfile(args: {
-  csv?: string;
-  json?: string;
-  columns?: { name: string; data_type?: string; distinct_count?: number }[];
-}) {
-  const r = profilePayloadSafe({
-    csv: args.csv,
-    json: args.json,
-    columns: args.columns,
-  });
-  if (!r.ok) {
-    throw new Error(r.error);
-  }
-  return r.result;
-}
-
-function profileToolError(message: string) {
-  return {
-    isError: true as const,
-    content: [{ type: "text" as const, text: message }],
-  };
-}
-
 const dataInputFields = {
   csv: z
     .string()
@@ -195,7 +133,7 @@ function createServer() {
       description:
         "Infer column names, types, distinct counts, and a small sample from CSV or JSON. " +
         "Use before recommending charts when the user pastes a table.",
-      inputSchema: dataInputFields,
+      inputSchema: z.object(dataInputFields),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async (args) => {
@@ -214,6 +152,7 @@ function createServer() {
             type: "text" as const,
             text:
               `Profiled ${profile.rowCount} rows × ${profile.columns.length} cols` +
+              (profile.sampledRows < profile.rowCount ? ` (sampled ${profile.sampledRows})` : "") +
               (profile.truncated ? " (truncated)" : "") +
               `: ${summary || "(empty)"}`,
           },
@@ -221,6 +160,7 @@ function createServer() {
         structuredContent: {
           columns: profile.columns,
           rowCount: profile.rowCount,
+          sampledRows: profile.sampledRows,
           truncated: profile.truncated,
           samplePreview: profile.sampleRows.slice(0, 5),
         },
@@ -233,60 +173,18 @@ function createServer() {
     {
       title: "Recommend charts",
       description:
-        "Suggest Loom chart types (scatter, bar, line, pie, heatmap, …) with Vega-Lite specs from CSV, JSON, or a column schema. " +
+        "Suggest Loom chart types (classic: scatter, bar, line, pie, heatmap, …; odd charts; geo maps; GPU scenes) from CSV, JSON, or a column schema. " +
+        "Returns kinds and field encodings — call build_chart for a Vega-Lite spec. " +
         "Use when the user asks what to chart, how to visualize a table, or wants data story ideas. Opens an in-chat widget of top suggestions.",
-      inputSchema: {
+      inputSchema: z.object({
         ...dataInputFields,
         fileName: z.string().optional().describe("Optional label for the dataset"),
         limit: z.number().int().min(1).max(12).optional().describe("Max suggestions (default 6)"),
-      },
+      }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
       _meta: widgetToolMeta,
     },
-    async ({ csv, json, columns, fileName, limit }) => {
-      let profile;
-      try {
-        profile = resolveProfile({ csv, json, columns });
-      } catch (e) {
-        return profileToolError(e instanceof Error ? e.message : "Invalid input");
-      }
-      if (profile.columns.length === 0) {
-        return {
-          content: [{ type: "text" as const, text: "No columns found — paste CSV with a header row." }],
-          structuredContent: { recommendations: [], loomUrl: LOOM_URL },
-          _meta: { ui: { resourceUri: WIDGET_URI } },
-        };
-      }
-      const data = toQueryResult(profile);
-      const name = fileName ?? "data.csv";
-      const recs = recommend(profile.columns, data, name)
-        .slice(0, limit ?? 6)
-        .map(slimRec);
-      const lines = recs
-        .map((r, i) => `${i + 1}. [${r.kind}] ${r.title} — ${r.reason}`)
-        .join("\n");
-      const structured = {
-        recommendations: recs,
-        fileName: name,
-        rowCount: profile.rowCount,
-        columnCount: profile.columns.length,
-        truncated: profile.truncated,
-        loomUrl: LOOM_URL,
-      };
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text:
-              `Top ${recs.length} Loom chart ideas for “${name}”` +
-              (profile.truncated ? " (sample truncated)" : "") +
-              `:\n${lines}\n\nOpen full Loom: ${LOOM_URL}`,
-          },
-        ],
-        structuredContent: structured,
-        _meta: { ui: { resourceUri: WIDGET_URI } },
-      };
-    },
+    async (args) => recommendChartsResult(args, WIDGET_URI),
   );
 
   server.registerTool(
@@ -294,9 +192,9 @@ function createServer() {
     {
       title: "List chart kinds",
       description:
-        "List which Loom chart types the current schema can support (and why others are blocked). " +
+        "List which Loom chart kinds (classic, odd charts, geo maps, GPU scenes) the current schema can support (and why others are blocked). " +
         "Use when choosing among pie vs bar vs scatter, etc.",
-      inputSchema: dataInputFields,
+      inputSchema: z.object(dataInputFields),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async (args) => {
@@ -336,74 +234,24 @@ function createServer() {
     {
       title: "Build chart spec",
       description:
-        "Build a Loom/Vega-Lite chart recommendation for a specific kind and encodings (x, y, color, size). " +
-        "Use after recommend_charts when the user picks a type or fields.",
-      inputSchema: {
+        "Build a Loom/Vega-Lite chart for a specific kind and encodings (x, y, color, size), with sample rows inlined as data. " +
+        "Kinds cover classic charts plus odd charts, geo maps and GPU scenes. Use after recommend_charts when the user picks a type or fields.",
+      inputSchema: z.object({
         ...dataInputFields,
-        kind: z
-          .string()
-          .describe("Chart kind: scatter | bar | line | pie | heatmap | …"),
+        kind: z.enum(CHART_KIND_VALUES).describe("Loom chart kind"),
         xField: z.string(),
         yField: z.string().nullable().optional(),
         colorField: z.string().nullable().optional(),
-        sizeField: z.string().nullable().optional(),
+        sizeField: z
+          .string()
+          .nullable()
+          .optional()
+          .describe("Omit to let bubble/dumbbell pick a size column; null to clear"),
         fileName: z.string().optional(),
-      },
+      }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ csv, json, columns, kind, xField, yField, colorField, sizeField, fileName }) => {
-      let profile;
-      try {
-        profile = resolveProfile({ csv, json, columns });
-      } catch (e) {
-        return profileToolError(e instanceof Error ? e.message : "Invalid input");
-      }
-      const kindOk = CHART_KIND_OPTIONS.some((o) => o.value === kind);
-      if (!kindOk) {
-        return {
-          content: [
-            {
-              type: "text" as const,
-              text: `Unknown kind “${kind}”. Valid: ${CHART_KIND_OPTIONS.map((o) => o.value).join(", ")}`,
-            },
-          ],
-          structuredContent: { ok: false },
-        };
-      }
-      const chartKind = kind as ChartKind;
-      const support = chartKindDataSupport(profile.columns, chartKind);
-      if (!support.ok) {
-        return {
-          content: [{ type: "text" as const, text: `Cannot build ${kind}: ${support.reason}` }],
-          structuredContent: { ok: false, reason: support.reason },
-        };
-      }
-      const rec = createChartRec(
-        chartKind,
-        profile.columns,
-        xField,
-        yField ?? null,
-        colorField ?? null,
-        fileName?.replace(/\.\w+$/, "") ?? "data",
-        { sizeField: sizeField ?? null },
-      );
-      if (!rec) {
-        return {
-          content: [{ type: "text" as const, text: `createChartRec failed for ${kind} with those fields.` }],
-          structuredContent: { ok: false },
-        };
-      }
-      const slim = slimRec(rec);
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Built ${slim.kind}: ${slim.title}. ${slim.reason}`,
-          },
-        ],
-        structuredContent: { ok: true, chart: slim },
-      };
-    },
+    async (args) => buildChartResult(args),
   );
 
   server.registerTool(
@@ -413,9 +261,9 @@ function createServer() {
       description:
         "Return a deep link to the Loom data storyteller at loom.ibm.io for full local/web exploration " +
         "(DuckDB, WebGPU charts, live sources). Use when the user wants the full app.",
-      inputSchema: {
+      inputSchema: z.object({
         note: z.string().optional().describe("Optional short note to include in the reply"),
-      },
+      }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     },
     async ({ note }) => {

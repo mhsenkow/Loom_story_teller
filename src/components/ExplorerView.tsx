@@ -10,6 +10,7 @@
 import { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
 import { formatNumber } from "@/lib/format";
 import {
   applyVisibleColumnOrder,
@@ -170,7 +171,89 @@ const DEFAULT_TABLE_ENHANCE = {
 };
 
 export function ExplorerView() {
-  const { selectedFile, sampleRows, columnStats, tablePrefs, setTablePrefs, setViewMode, setPanelTab, panelOpen, togglePanel, smartResults, tableFilterRowIndices, setTableFilterRowIndices, tableColumnFilters, setTableColumnFilter, setTableColumnFilters, tableSortColumn, tableSortDir, setTableSort, selectedRowIndices, setSelectedRowIndices, tableViews, addTableView, removeTableView, applyTableView, tableUndoStack, tableRedoStack, pushTableUndo, undoTable, redoTable, hoveredRowIndex, setHoveredRowIndex, setToast, setPromptDialog, querySql, activeChart, viewTimeField, viewTimeWindow, setStatsFocusColumn, setPanelOpen } = useLoomStore();
+  const {
+    selectedFile,
+    sampleRows,
+    columnStats,
+    tablePrefs,
+    setTablePrefs,
+    setViewMode,
+    setPanelTab,
+    panelOpen,
+    togglePanel,
+    smartResults,
+    tableFilterRowIndices,
+    setTableFilterRowIndices,
+    tableColumnFilters,
+    setTableColumnFilter,
+    setTableColumnFilters,
+    tableSortColumn,
+    tableSortDir,
+    setTableSort,
+    selectedRowIndices,
+    setSelectedRowIndices,
+    tableViews,
+    addTableView,
+    removeTableView,
+    applyTableView,
+    tableUndoStack,
+    tableRedoStack,
+    pushTableUndo,
+    undoTable,
+    redoTable,
+    hoveredRowIndex,
+    setHoveredRowIndex,
+    setToast,
+    setPromptDialog,
+    querySql,
+    activeChart,
+    viewTimeField,
+    viewTimeWindow,
+    setStatsFocusColumn,
+    setPanelOpen
+  } = useLoomStore(
+    useShallow((s) => ({
+      selectedFile: s.selectedFile,
+      sampleRows: s.sampleRows,
+      columnStats: s.columnStats,
+      tablePrefs: s.tablePrefs,
+      setTablePrefs: s.setTablePrefs,
+      setViewMode: s.setViewMode,
+      setPanelTab: s.setPanelTab,
+      panelOpen: s.panelOpen,
+      togglePanel: s.togglePanel,
+      smartResults: s.smartResults,
+      tableFilterRowIndices: s.tableFilterRowIndices,
+      setTableFilterRowIndices: s.setTableFilterRowIndices,
+      tableColumnFilters: s.tableColumnFilters,
+      setTableColumnFilter: s.setTableColumnFilter,
+      setTableColumnFilters: s.setTableColumnFilters,
+      tableSortColumn: s.tableSortColumn,
+      tableSortDir: s.tableSortDir,
+      setTableSort: s.setTableSort,
+      selectedRowIndices: s.selectedRowIndices,
+      setSelectedRowIndices: s.setSelectedRowIndices,
+      tableViews: s.tableViews,
+      addTableView: s.addTableView,
+      removeTableView: s.removeTableView,
+      applyTableView: s.applyTableView,
+      tableUndoStack: s.tableUndoStack,
+      tableRedoStack: s.tableRedoStack,
+      pushTableUndo: s.pushTableUndo,
+      undoTable: s.undoTable,
+      redoTable: s.redoTable,
+      hoveredRowIndex: s.hoveredRowIndex,
+      setHoveredRowIndex: s.setHoveredRowIndex,
+      setToast: s.setToast,
+      setPromptDialog: s.setPromptDialog,
+      querySql: s.querySql,
+      activeChart: s.activeChart,
+      viewTimeField: s.viewTimeField,
+      viewTimeWindow: s.viewTimeWindow,
+      setStatsFocusColumn: s.setStatsFocusColumn,
+      setPanelOpen: s.setPanelOpen,
+    })),
+  );
   const isMobile = useIsMobile();
 
   /** Same accent-as-signal as PreviewFooter: which columns are on the active chart. */
@@ -292,6 +375,14 @@ export function ExplorerView() {
   useEffect(() => {
     setFilterInputValues(tableColumnFilters ?? {});
   }, [selectedFile?.path]);
+
+  /** Undo/redo restore filters in the store; mirror them into the filter boxes. */
+  const syncFilterInputs = useCallback(() => {
+    // Drop pending keystroke debounces so they can't re-apply the undone text.
+    for (const t of Object.values(filterDebounceRef.current)) clearTimeout(t);
+    filterDebounceRef.current = {};
+    setFilterInputValues(useLoomStore.getState().tableColumnFilters ?? {});
+  }, []);
 
   const setFilterInputAndDebounce = useCallback((col: string, value: string) => {
     setFilterInputValues((prev) => ({ ...prev, [col]: value }));
@@ -646,7 +737,7 @@ export function ExplorerView() {
   }
 
   return (
-    <div className="flex flex-col h-full w-full overflow-hidden animate-fade-in">
+    <div className="flex flex-col h-full w-full overflow-hidden animate-enter">
       <Dialog open={!!cellDetail} onClose={() => setCellDetail(null)} ariaLabel="Cell value">
         {cellDetail && (
           <div className="p-4 max-w-lg">
@@ -720,10 +811,10 @@ export function ExplorerView() {
             </>
           ) : (
             <>
-              {formatNumber(totalRowCount)}<span className="hidden sm:inline"> rows</span><span className="sm:hidden">r</span>
+              {formatNumber(totalRowCount)} rows
             </>
           )}
-          {" "}&middot; {columnStats.length}<span className="hidden sm:inline"> cols</span><span className="sm:hidden">c</span>
+          {" "}&middot; {columnStats.length} cols
         </span>
         <div className="flex-1 min-w-0" />
         {selectedRowIndices.length > 0 && (
@@ -957,8 +1048,8 @@ export function ExplorerView() {
             )}
           </div>
           <span className="text-loom-border hidden sm:inline" aria-hidden>|</span>
-          <button type="button" onClick={undoTable} disabled={tableUndoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Undo" aria-label="Undo table change">↶</button>
-          <button type="button" onClick={redoTable} disabled={tableRedoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Redo" aria-label="Redo table change">↷</button>
+          <button type="button" onClick={() => { undoTable(); syncFilterInputs(); }} disabled={tableUndoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Undo" aria-label="Undo table change">↶</button>
+          <button type="button" onClick={() => { redoTable(); syncFilterInputs(); }} disabled={tableRedoStack.length === 0} className="min-h-9 min-w-9 sm:min-h-0 sm:min-w-0 px-1 py-0 rounded text-loom-muted hover:text-loom-text disabled:opacity-30" title="Redo" aria-label="Redo table change">↷</button>
           {!isMobile && (
             <>
               <span className="text-loom-border" aria-hidden>|</span>
@@ -985,7 +1076,7 @@ export function ExplorerView() {
           return Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 5);
         })();
         return (
-          <div className="px-3 py-2 border-b border-loom-border bg-loom-surface/80 text-2xs space-y-1 animate-fade-in">
+          <div className="px-3 py-2 border-b border-loom-border bg-loom-surface/80 text-2xs space-y-1 animate-enter">
             <div className="flex items-center justify-between">
               <span className="font-semibold text-loom-text truncate min-w-0" title={profilingCol}>{profilingCol} <span className="font-normal text-loom-muted">{stat?.data_type ?? ""}</span></span>
               <button type="button" onClick={() => setProfilingCol(null)} className="text-loom-muted hover:text-loom-text min-w-6 min-h-6 shrink-0" aria-label={`Close ${profilingCol} profile`}>×</button>
@@ -1090,7 +1181,7 @@ export function ExplorerView() {
                       } ${
                         chartRole
                           ? "text-loom-text bg-[color-mix(in_srgb,var(--loom-accent)_6%,var(--loom-bg))] border-b border-loom-accent/35 shadow-[inset_0_-2px_0_0_color-mix(in_srgb,var(--loom-accent)_55%,transparent)]"
-                          : "text-loom-muted bg-loom-bg border-b border-loom-border"
+                          : "loom-data-chrome text-loom-muted bg-loom-bg border-b border-loom-border"
                       }`}
                       onKeyDown={(e) => handleSortKey(e, ci)}
                       onClick={() => {
@@ -1181,8 +1272,8 @@ export function ExplorerView() {
               </tr>
               {(!isMobile || showColumnFilters) && (
               <tr className="bg-loom-surface/50 sticky top-7 z-10">
-                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-10 bg-loom-surface w-8 min-w-8 max-w-8" />
-                <th className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-10 bg-loom-surface w-10 min-w-10" />
+                <th aria-hidden className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-0 z-10 bg-loom-surface w-8 min-w-8 max-w-8" />
+                <th aria-hidden className="px-2 py-1 border-b border-loom-border border-r border-loom-border/50 sticky left-8 z-10 bg-loom-surface w-10 min-w-10" />
                 {columns.map((col) => (
                   <th key={col} className="px-1 py-0.5 border-b border-loom-border">
                     <input
@@ -1226,7 +1317,7 @@ export function ExplorerView() {
                   const paddingBottom = items.length > 0 ? rowVirtualizer.getTotalSize() - items[items.length - 1].end : 0;
                   return (
                     <>
-                      {paddingTop > 0 && <tr><td style={{ height: paddingTop, padding: 0 }} colSpan={columns.length + 2} /></tr>}
+                      {paddingTop > 0 && <tr aria-hidden><td style={{ height: paddingTop, padding: 0 }} colSpan={columns.length + 2} /></tr>}
                       {items.map((virtualRow) => {
                         const ri = virtualRow.index;
                         const row = displayRows[ri];
@@ -1237,7 +1328,7 @@ export function ExplorerView() {
                             key={virtualRow.key}
                             data-explorer-focus-row={ri}
                             className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 ${isAnomaly ? "bg-loom-warning/10 border-l-2 border-l-loom-warning" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
-                            title={isAnomaly ? "Marked as anomaly (Smart tab)" : undefined}
+                            title={isAnomaly ? "Flagged as unusual (Chart → Analyze)" : undefined}
                             aria-rowindex={ri + 1}
                             onMouseEnter={() => setHoveredRowIndex(originalIdx)}
                             onMouseLeave={() => setHoveredRowIndex(null)}
@@ -1257,7 +1348,7 @@ export function ExplorerView() {
                           </tr>
                         );
                       })}
-                      {paddingBottom > 0 && <tr><td style={{ height: paddingBottom, padding: 0 }} colSpan={columns.length + 2} /></tr>}
+                      {paddingBottom > 0 && <tr aria-hidden><td style={{ height: paddingBottom, padding: 0 }} colSpan={columns.length + 2} /></tr>}
                     </>
                   );
                 })()
@@ -1269,7 +1360,7 @@ export function ExplorerView() {
                       key={ri}
                       data-explorer-focus-row={ri}
                       className={`border-b border-loom-border/30 hover:bg-loom-elevated/40 transition-colors ${isAnomaly ? "bg-loom-warning/10 border-l-2 border-l-loom-warning" : ""} ${focusedRowIndex === ri ? "ring-1 ring-inset ring-loom-accent bg-loom-elevated/50" : ""} ${hoveredRowIndex === originalIdx ? "bg-loom-accent/10" : ""}`}
-                      title={isAnomaly ? "Marked as anomaly (Smart tab)" : undefined}
+                      title={isAnomaly ? "Flagged as unusual (Chart → Analyze)" : undefined}
                       aria-rowindex={ri + 1}
                       onMouseEnter={() => setHoveredRowIndex(originalIdx)}
                       onMouseLeave={() => setHoveredRowIndex(null)}

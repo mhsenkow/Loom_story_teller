@@ -63,12 +63,12 @@ describe("discovery refinements", () => {
     expect(
       discoverFreshness({ ...base, capturedAt: now - 86_400_000 }, now),
     ).toMatchObject({ label: "Checked 1d ago", shortLabel: "1d" });
-    expect(discoverFreshness({ ...base, capturedAt: undefined }, now).due).toBe(
-      true,
-    );
+    expect(
+      discoverFreshness({ ...base, capturedAt: undefined }, now),
+    ).toMatchObject({ label: "Saved pick", shortLabel: "saved", due: false });
     expect(
       discoverFreshness({ ...base, capturedAt: now + 120_000 }, now),
-    ).toMatchObject({ label: "Check time unknown", shortLabel: "?" });
+    ).toMatchObject({ label: "Saved pick", shortLabel: "saved", due: false });
   });
 
   it("bounds refresh work, removes duplicate feeds and backs off failed checks", () => {

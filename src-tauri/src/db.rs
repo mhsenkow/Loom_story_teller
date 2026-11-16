@@ -3,7 +3,9 @@
 // =================================================================
 // Wraps an in-process DuckDB connection with helpers for:
 //   1. Scanning local folders for .parquet, .csv, .json/.ndjson/.jsonl,
-//      .xlsx, and .db/.sqlite files (SQLite = one entry per table)
+//      .xlsx, and .db/.sqlite files (SQLite = one entry per table once the
+//      sqlite_scanner helper ships; until then one entry per file that
+//      explains why it can't open)
 //   2. Running analytic queries over those files
 //   3. Returning schema + row-count metadata
 //
@@ -20,7 +22,18 @@ pub(crate) fn escape_path_for_sql(path: &str) -> String {
     path.replace('\'', "''")
 }
 
-/// Friendlier copy when Parquet/JSON/Excel fail without network-installed extensions.
+const NEEDS_HELPER_MSG: &str = "This file type needs a signed DuckDB helper Loom doesn’t ship yet (avoids macOS Gatekeeper blocks). Open a CSV for now, or export CSV from your tool.";
+
+/// SQLite database file, or a "file|table" entry from a SQLite scan.
+pub(crate) fn is_sqlite_path(file_path: &str) -> bool {
+    let lower = file_path.to_ascii_lowercase();
+    file_path.contains('|')
+        || lower.ends_with(".db")
+        || lower.ends_with(".sqlite")
+        || lower.ends_with(".sqlite3")
+}
+
+/// Friendlier copy when Parquet/JSON/Excel/SQLite fail without network-installed extensions.
 pub(crate) fn map_duckdb_file_err(err: impl std::fmt::Display, file_path: &str) -> String {
     let msg = err.to_string();
     let lower = msg.to_lowercase();
@@ -28,7 +41,8 @@ pub(crate) fn map_duckdb_file_err(err: impl std::fmt::Display, file_path: &str) 
         || file_path.ends_with(".xlsx")
         || file_path.ends_with(".json")
         || file_path.ends_with(".ndjson")
-        || file_path.ends_with(".jsonl");
+        || file_path.ends_with(".jsonl")
+        || is_sqlite_path(file_path);
     // Match DuckDB "function/extension missing" noise — not every "not found" path miss.
     let missing_helper = lower.contains("extension")
         || lower.contains("autoload")
@@ -39,7 +53,7 @@ pub(crate) fn map_duckdb_file_err(err: impl std::fmt::Display, file_path: &str) 
         || lower.contains("read_json")
         || lower.contains("read_xlsx");
     if needs_helper && missing_helper {
-        return "This file type needs a signed DuckDB helper Loom doesn’t ship yet (avoids macOS Gatekeeper blocks). Open a CSV for now, or export CSV from your tool.".into();
+        return NEEDS_HELPER_MSG.into();
     }
     msg
 }
@@ -170,7 +184,8 @@ impl LoomDb {
     }
 
     /// Discover data files in a folder (recursive): parquet, csv, json/ndjson/jsonl, xlsx, db/sqlite.
-    /// SQLite files yield one entry per table (path stored as "file_path|table_name").
+    /// SQLite files yield one entry per table (path stored as "file_path|table_name"), or one
+    /// entry for the whole file when it can't be read (opening it shows why).
     pub fn scan_folder(&self, folder: &Path) -> Result<Vec<FileEntry>, String> {
         let mut entries = Vec::new();
 
@@ -208,8 +223,11 @@ impl LoomDb {
                     if should_skip_scan_path(&path_result) {
                         continue;
                     }
-                    if let Ok(mut sqlite_entries) = Self::probe_sqlite(&path_result) {
-                        entries.append(&mut sqlite_entries);
+                    match Self::probe_sqlite(&path_result) {
+                        Ok(mut sqlite_entries) => entries.append(&mut sqlite_entries),
+                        // Without sqlite_scanner ATTACH fails; list the file anyway (like
+                        // Parquet) so opening it explains the missing helper.
+                        Err(_) => entries.push(Self::unprobed_sqlite_entry(&path_result)),
                     }
                 }
             }
@@ -249,6 +267,19 @@ impl LoomDb {
             row_count,
             size_bytes,
         })
+    }
+
+    fn unprobed_sqlite_entry(path: &Path) -> FileEntry {
+        FileEntry {
+            path: path.to_string_lossy().to_string(),
+            name: path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default(),
+            extension: "sqlite".to_string(),
+            row_count: 0,
+            size_bytes: std::fs::metadata(path).map(|m| m.len()).unwrap_or(0),
+        }
     }
 
     /// For a SQLite file, attach and list tables; return one FileEntry per table.
@@ -354,6 +385,11 @@ impl LoomDb {
     /// For SQLite (path format "file_path|table_name"), attach the DB so table_expr can reference it.
     fn ensure_sqlite_attached(conn: &Connection, file_path: &str) -> Result<(), String> {
         if !file_path.contains('|') {
+            // A whole-file entry from a failed SQLite probe: don't let it fall
+            // through to read_csv_auto and show binary noise as rows.
+            if is_sqlite_path(file_path) {
+                return Err(NEEDS_HELPER_MSG.into());
+            }
             return Ok(());
         }
         let (db_path, _table) = file_path
@@ -366,7 +402,7 @@ impl LoomDb {
         conn.execute_batch("DETACH IF EXISTS sqlite_src;")
             .map_err(|e| e.to_string())?;
         conn.execute_batch(&format!("ATTACH '{}' AS sqlite_src;", escaped))
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| map_duckdb_file_err(e, file_path))?;
         Ok(())
     }
 
@@ -702,6 +738,36 @@ mod tests {
         let entry = result.iter().find(|e| e.name == "data.csv").unwrap();
         assert_eq!(entry.extension, "csv");
         assert_eq!(entry.row_count, 2);
+    }
+
+    #[test]
+    fn scan_folder_lists_unreadable_sqlite_file() {
+        let db = LoomDb::new().unwrap();
+        let tmp = std::env::temp_dir().join("loom_test_scan_sqlite");
+        let _ = std::fs::create_dir_all(&tmp);
+        let db_path = tmp.join("app.sqlite");
+        std::fs::write(&db_path, b"SQLite format 3\0").unwrap();
+        let probe_failed = LoomDb::probe_sqlite(&db_path).is_err();
+        let result = db.scan_folder(tmp.as_path()).unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+        if probe_failed {
+            let entry = result.iter().find(|e| e.name == "app.sqlite").unwrap();
+            assert_eq!(entry.extension, "sqlite");
+            assert_eq!(entry.path, db_path.to_string_lossy());
+            assert_eq!(entry.row_count, 0);
+        }
+    }
+
+    #[test]
+    fn opening_sqlite_without_helper_explains_why() {
+        let db = LoomDb::new().unwrap();
+        let err = db.inspect_file("/data/app.sqlite", 10).unwrap_err();
+        assert!(err.contains("helper"), "got: {err}");
+        let msg = map_duckdb_file_err(
+            "IO Error: Extension sqlite_scanner not found. Install it first",
+            "/data/app.db|users",
+        );
+        assert!(msg.contains("helper"), "got: {msg}");
     }
 
     #[test]

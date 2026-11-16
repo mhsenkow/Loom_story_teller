@@ -1,7 +1,7 @@
 // Discover must reach trail/arc kinds on moving entities, skip them for fixed
 // stations, and never lead with a plot squashed into one corner by an outlier.
 import { describe, expect, it } from "vitest";
-import { enumerateDiscoverCharts } from "../discoverCandidates";
+import { enumerateDiscoverCharts, galleryKindFit } from "../discoverCandidates";
 import { buildDiscoverStories } from "../discoverStories";
 import { createDiscoverAssessor } from "../discoverSignals";
 import type { ChartRecommendation } from "../recs/types";
@@ -56,5 +56,32 @@ describe("discover coverage", () => {
     // Same squash on a one-axis distribution, and on GPU / dimensional planes.
     expect(assess({ ...chart, kind: "strip", xField: "cap", yField: "coin" } as ChartRecommendation)).toBeNull();
     expect(assess({ ...chart, kind: "firefly" } as ChartRecommendation)).toBeNull();
+  });
+  it("reaches the gallery kinds with encodings their renderers read", () => {
+    const [sample, stats] = meteo;
+    const stories = buildDiscoverStories("meteo", stats, sample, enumerateDiscoverCharts(stats, [], "meteo", sample), 400);
+    const by = (k: string) => stories.filter((s) => s.chartKind === k);
+    for (const k of ["calendar", "rose", "ecdf", "sparkGrid", "density", "qq", "connectedScatter", "stripes", "errorBars"]) {
+      expect(by(k).length, k).toBeGreaterThan(0);
+    }
+    expect(by("qq").every((s) => s.chart.yField == null && s.chart.colorField == null)).toBe(true);
+    expect(by("density").every((s) => s.chart.yField == null)).toBe(true);
+    expect(by("connectedScatter").every((s) => s.chart.sizeField === "ts")).toBe(true);
+    // Population is a level: per-day views average it rather than add up cities.
+    expect(by("stripes").every((s) => s.chart.yField !== "population" || s.chart.yAggregate === "mean")).toBe(true);
+    // One reading per city per hour: equal counts make no word cloud.
+    expect(by("wordCloud").some((s) => s.chart.xField === "city" && !s.chart.yField)).toBe(false);
+  });
+  it("keeps gallery kinds to data that suits them", () => {
+    const [sample, stats] = flights;
+    const fit = galleryKindFit(stats, sample, "opensky");
+    const base = { id: "t", title: "", subtitle: "", score: 70, spec: {} } as const;
+    // Five hours of flights is not a calendar.
+    expect(fit({ ...base, kind: "calendar", xField: "ts", yField: "count", colorField: null })).toBe(false);
+    // An interval needs several rows per group; a word needs to be a label, not an id.
+    expect(fit({ ...base, kind: "errorBars", xField: "airline", yField: "altitude", colorField: null })).toBe(true);
+    expect(fit({ ...base, kind: "wordCloud", xField: "callsign", yField: "velocity", colorField: null })).toBe(false);
+    expect(fit({ ...base, kind: "sparkGrid", xField: "ts", yField: "altitude", colorField: null })).toBe(false);
+    expect(fit({ ...base, kind: "connectedScatter", xField: "altitude", yField: "velocity", colorField: null, sizeField: "ts" })).toBe(true);
   });
 });

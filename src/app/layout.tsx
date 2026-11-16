@@ -6,6 +6,7 @@
 // =================================================================
 
 import type { Metadata, Viewport } from "next";
+import "@/styles/fonts.css";
 import "@/styles/globals.css";
 import { SHELL_BOOTSTRAP_SCRIPT } from "@/lib/shellBootstrap";
 import { THEME_BOOTSTRAP_SCRIPT } from "@/lib/themeBootstrap";
@@ -50,7 +51,7 @@ export const viewport: Viewport = {
   // Keep bottom-sheet inputs above the on-screen keyboard (Chrome / Android; iOS ignores).
   interactiveWidget: "resizes-content",
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f2f2f0" },
+    { media: "(prefers-color-scheme: light)", color: "#f0efeb" },
     { media: "(prefers-color-scheme: dark)", color: "#0a0a0c" },
   ],
 };

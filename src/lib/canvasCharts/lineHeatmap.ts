@@ -12,9 +12,10 @@ import { contrastingInk } from "../chartLayout";
 import { type PlotRect, drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks, drawColorRamp } from "../chartLooks";
 import { sampleContinuous } from "../chartPalettes";
 import { type ChartRenderOpts } from "../chartRenderTypes";
-import { chartTypeRamp } from "../chartType";
+import { CHART_TEXT_FALLBACK, chartFont, chartTypeRamp } from "../chartType";
+import { layoutLineEndLabels } from "../lineEndLabels";
 import { formatTooltipNumber } from "../chartTooltip";
-import { type SeriesNormalize, type YScaleKind, anomalyRowIndices, normalizeSeriesValues, rollingMean, scaleDomain, scaleY } from "../dsTransforms";
+import { type SeriesNormalize, type YScaleKind, anomalyRowIndices, normalizeSeriesValues, rollingMean, rollingStd, scaleDomain, scaleY } from "../dsTransforms";
 import { type YAggregateOption } from "../recommendations";
 import { axisFont, densityStops, drawXModelAxis, drawZeroLine, labelGutter, timeBuckets } from "./axisHelpers";
 import { applyLineDash, drawSmoothLine, numRange } from "./primitives";
@@ -40,7 +41,7 @@ export function renderFullLine(
   const lineW = opts?.lineWidth ?? 2;
   const agg: YAggregateOption = yi < 0 ? "count" : (opts?.yAggregate ?? "mean");
   const rect = plotOf(w, h, pad, opts);
-  const span = rect.right - rect.left;
+  let span = rect.right - rect.left;
   const comparePrev = !!opts?.comparePrevious;
 
   // Series in first-appearance order; cap at the 10 largest so the legend stays readable
@@ -77,7 +78,11 @@ export function renderFullLine(
       const pts = model.keys
         .filter((k) => byX.has(k) && (measureIdx < 0 || byX.get(k)!.length > 0))
         .map((k) => ({ key: k, t: posOf.get(k)!, v: aggregateValues(byX.get(k)!, agg) }));
-      return { name: nameSuffix ? `${name || "series"}${nameSuffix}` : name, pts, compare: !!nameSuffix, colorIndex: seriesIndex + (nameSuffix ? series.length : 0), measureIdx };
+      // Single series + Compare Y: name both lines by their fields, not "series".
+      const field = opts?.fieldNames?.[measureIdx];
+      const label = nameSuffix ? (name ? `${name}${nameSuffix}` : field ?? "Compare Y") : name || (y2Idx >= 0 && field ? field : name);
+      const colorIndex = (opts?.seriesIndices?.get(name) ?? seriesIndex) + (nameSuffix ? opts?.seriesIndices?.size ?? series.length : 0);
+      return { name: label, pts, compare: !!nameSuffix, colorIndex, measureIdx };
     }).filter((s) => s.pts.length > 0);
 
   let data = seriesFrom(yi);
@@ -91,6 +96,14 @@ export function renderFullLine(
   // Rolling mean / rebase on primary series (not compare overlays)
   const rollW = opts?.rollingWindow ?? null;
   const normMode = (opts?.seriesNormalize ?? null) as SeriesNormalize | null;
+  // Bollinger-style ±1σ band around a single rolling mean (raw values, same window).
+  let rollBand: { t: number; lo: number; hi: number }[] | null = null;
+  if (rollW && !normMode && ci < 0 && data.length === 1 && data[0]!.pts.length >= 3) {
+    const raw = data[0]!.pts.map((p) => p.v);
+    const mean = rollingMean(raw, rollW);
+    const sd = rollingStd(raw, rollW);
+    rollBand = data[0]!.pts.map((p, i) => ({ t: p.t, lo: mean[i]! - sd[i]!, hi: mean[i]! + sd[i]! }));
+  }
   if (rollW || normMode) {
     data = data.map((s) => {
       let vals = s.pts.map((p) => p.v);
@@ -141,10 +154,32 @@ export function renderFullLine(
     data = data.map(s => ({ ...s, pts: s.pts.filter(p => p.v > 0) })).filter(s => s.pts.length);
     if (!data.length) return;
   }
+  const labelSize = chartTypeRamp(opts?.axisFontSize).legend;
+  const labelHeight = labelSize * 2 + 5;
+  const labelRight = rect.right;
+  const endLabels = data.map(s => ({ name: s.name || "series", value: formatTooltipNumber(s.pts.at(-1)!.v) }));
+  let endLabelWidth = 0;
+  if (!opts?.mini && opts?.lineEndLabels !== false && (opts?.legendPosition ?? "auto") === "auto"
+    && data.length >= 2 && data.length <= 10 && !opts?.shapeField && !opts?.emojiField
+    && layoutLineEndLabels(data.map(() => rect.top), rect.top, rect.bottom, labelHeight)) {
+    ctx.save();
+    ctx.font = chartFont(labelSize, opts?.fontFamily, 600);
+    const nameWidth = Math.max(...endLabels.map(label => ctx.measureText(label.name).width));
+    ctx.font = chartFont(labelSize, opts?.fontFamily);
+    const valueWidth = Math.max(...endLabels.map(label => ctx.measureText(label.value).width));
+    ctx.restore();
+    const needed = Math.ceil(Math.max(nameWidth, valueWidth)) + 28;
+    if (needed <= span * 0.35 && span - needed >= 240) {
+      endLabelWidth = needed;
+      rect.right -= needed;
+      span = rect.right - rect.left;
+    }
+  }
   let yMin = Infinity;
   let yMax = -Infinity;
   for (const s of data) for (const p of s.pts) { yMin = Math.min(yMin, p.v); yMax = Math.max(yMax, p.v); }
   for (const p of analysis.forecast?.points ?? []) { yMin = Math.min(yMin, p.lower); yMax = Math.max(yMax, p.upper); }
+  if (opts?.yScale !== "log") for (const b of rollBand ?? []) { yMin = Math.min(yMin, b.lo); yMax = Math.max(yMax, b.hi); }
   if (opts?.sharedValueDomain) {
     yMin = opts.sharedValueDomain.min;
     yMax = opts.sharedValueDomain.max;
@@ -184,8 +219,59 @@ export function renderFullLine(
   const symbols = markSymbols(opts, opts?.fieldNames, rows);
   const symbolOf = (s: { name: string; compare: boolean }) => symbols.of(seriesRows.get(s.name)?.[0]);
   const markR = Math.max(3, (opts?.pointSize ?? 10) * 0.45);
+  if (rollBand && rollBand.length >= 2) {
+    // Soft ±1σ envelope behind the rolling mean
+    ctx.beginPath();
+    rollBand.forEach((b, i) => (i ? ctx.lineTo(X(b.t), Y(b.hi)) : ctx.moveTo(X(b.t), Y(b.hi))));
+    for (let i = rollBand.length - 1; i >= 0; i--) ctx.lineTo(X(rollBand[i]!.t), Y(Math.max(ys.min, rollBand[i]!.lo)));
+    ctx.closePath();
+    ctx.globalAlpha = 0.16;
+    ctx.fillStyle = cols[0]!;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  // Difference chart: shade the gap between Y and Compare Y by which one leads.
+  const diffPair = ci < 0 && y2Idx >= 0 && !comparePrev ? [data.find((s) => !s.compare), data.find((s) => s.compare)] : null;
+  if (diffPair?.[0] && diffPair[1]) {
+    const bMap = new Map(diffPair[1].pts.map((p) => [p.key, p.v]));
+    let shared = diffPair[0].pts.filter((p) => bMap.has(p.key)).map((p) => ({ t: p.t, a: p.v, b: bMap.get(p.key)! }));
+    // Only meaningful when both measures live on the same scale (their ranges overlap).
+    const aLo = Math.min(...shared.map((p) => p.a));
+    const aHi = Math.max(...shared.map((p) => p.a));
+    const bLo = Math.min(...shared.map((p) => p.b));
+    const bHi = Math.max(...shared.map((p) => p.b));
+    if (!(Math.min(aHi, bHi) >= Math.max(aLo, bLo))) shared = [];
+    const aboveC = cols[diffPair[0].colorIndex % cols.length]!;
+    const belowC = cols[diffPair[1].colorIndex % cols.length]!;
+    ctx.globalAlpha = 0.22;
+    for (let i = 1; i < shared.length; i++) {
+      const p = shared[i - 1]!;
+      const q = shared[i]!;
+      const d0 = p.a - p.b;
+      const d1 = q.a - q.b;
+      const quad = (t0: number, a0: number, b0: number, t1: number, a1: number, b1: number, up: boolean) => {
+        ctx.beginPath();
+        ctx.moveTo(X(t0), Y(a0));
+        ctx.lineTo(X(t1), Y(a1));
+        ctx.lineTo(X(t1), Y(b1));
+        ctx.lineTo(X(t0), Y(b0));
+        ctx.closePath();
+        ctx.fillStyle = up ? aboveC : belowC;
+        ctx.fill();
+      };
+      if (d0 * d1 < 0) {
+        // Lines cross inside the segment — split at the crossing.
+        const f = d0 / (d0 - d1);
+        const tc = p.t + f * (q.t - p.t);
+        const vc = p.a + f * (q.a - p.a);
+        quad(p.t, p.a, p.b, tc, vc, vc, d0 > 0);
+        quad(tc, vc, vc, q.t, q.a, q.b, d1 > 0);
+      } else quad(p.t, p.a, p.b, q.t, q.a, q.b, d0 + d1 >= 0);
+    }
+    ctx.globalAlpha = 1;
+  }
   applyLineDash(ctx, opts?.lineStrokeStyle);
-  data.forEach((s, si) => {
+  data.forEach((s) => {
     const color = cols[s.colorIndex % cols.length]!;
     const pts = s.pts.map((p) => ({ x: X(p.t), y: Y(p.v) }));
     ctx.strokeStyle = color;
@@ -232,6 +318,7 @@ export function renderFullLine(
         // Bucketed keys aren't raw values — identify the bucket by its first row
         match: tb.unit ? [] : ci >= 0 ? [[xi, p.key], [ci, s.name]] : [[xi, p.key]],
         rowIndex: tb.unit ? tb.firstRow.get(p.key) : undefined,
+        ...(!s.compare ? { reading: { label: p.key, value: p.v, measure: measureTitle, series: s.name, order: p.t } } : {}),
         summary: ci >= 0
           ? { columns: [xName, cName, measureTitle], row: [p.key, s.name, formatTooltipNumber(p.v)] }
           : { columns: [xName, measureTitle], row: [p.key, formatTooltipNumber(p.v)] },
@@ -242,7 +329,7 @@ export function renderFullLine(
   ctx.globalAlpha = 1;
   const legendSrc = data.filter((s) => !s.compare || y2Idx >= 0 || comparePrev);
   if (ci >= 0 || y2Idx >= 0 || comparePrev) {
-    setLegend(opts, legendSrc.map((s, si) => {
+    setLegend(opts, legendSrc.map((s) => {
       const symbol = symbols.categorical && !s.compare ? symbolOf(s) : null;
       const label = s.name || "series";
       return {
@@ -262,6 +349,43 @@ export function renderFullLine(
   if (ys.min < 0 && ys.max > 0) drawZeroLine(ctx, rect.left, Y(0), rect.right, Y(0), opts);
   drawChartTicks(ctx, 0, 1, ys.min, ys.max, w, h, rect, opts, { x: false });
   drawXModelAxis(ctx, model, w, h, rect, opts);
+  if (endLabelWidth) {
+    const centers = layoutLineEndLabels(data.map(s => Y(s.pts.at(-1)!.v)), rect.top, rect.bottom, labelHeight)!;
+    const textX = rect.right + 24;
+    ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    data.forEach((s, i) => {
+      const last = s.pts.at(-1)!;
+      const color = cols[s.colorIndex % cols.length]!;
+      const y = centers[i];
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash(s.compare ? [3, 3] : []);
+      ctx.beginPath();
+      ctx.moveTo(X(last.t), Y(last.v));
+      ctx.lineTo(rect.right + 6, Y(last.v));
+      ctx.lineTo(textX - 6, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = opts?.themeText ?? CHART_TEXT_FALLBACK;
+      ctx.font = chartFont(labelSize, opts?.fontFamily, 600);
+      ctx.fillText(endLabels[i].name, textX, y - (labelSize + 5) / 2);
+      ctx.fillStyle = opts?.themeMuted ?? opts?.themeText ?? CHART_TEXT_FALLBACK;
+      ctx.font = chartFont(labelSize, opts?.fontFamily);
+      ctx.fillText(endLabels[i].value, textX, y + (labelSize + 5) / 2);
+      pushHit(opts, {
+        shape: "rect", x: textX - 3, y: y - labelHeight / 2,
+        w: labelRight - textX + 3, h: labelHeight,
+        match: [],
+        auxiliary: true,
+        summary: { columns: [cName, xName, valueTitle(opts, s.measureIdx, "mean")], row: [endLabels[i].name, last.key, endLabels[i].value] },
+      });
+    });
+    ctx.restore();
+    setLegend(opts, []);
+  }
 }
 
 export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[][], xi: number, yi: number, w: number, h: number, pad: number, opts?: ChartRenderOpts) {

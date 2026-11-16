@@ -26,11 +26,19 @@ import { momentFrom, type Moment } from "../src/lib/monitoring/moments";
 import { metricSeries } from "../src/lib/monitoring/backfill";
 import { sendWebPush, isAllowedPushEndpoint, type PushSubscriptionJSON, type VapidKeys } from "./webPush";
 
+/** Stored on the KV key so the cron can skip bundles that are not due yet. */
+export interface BundleListMeta {
+  /** Earliest enabled monitor `nextRunAt` (ms). */
+  nextDue: number;
+  /** `bundleExpiry` (unix seconds). */
+  exp: number;
+}
+
 export interface MonitorKv {
   get(key: string, type: "json"): Promise<unknown>;
-  put(key: string, value: string, opts?: { expirationTtl?: number; expiration?: number }): Promise<void>;
+  put(key: string, value: string, opts?: { expirationTtl?: number; expiration?: number; metadata?: BundleListMeta }): Promise<void>;
   delete(key: string): Promise<void>;
-  list(opts: { prefix: string; cursor?: string; limit?: number }): Promise<{ keys: { name: string }[]; list_complete: boolean; cursor?: string }>;
+  list(opts: { prefix: string; cursor?: string; limit?: number }): Promise<{ keys: { name: string; metadata?: Partial<BundleListMeta> }[]; list_complete: boolean; cursor?: string }>;
 }
 
 export const CLOUD_MAX_MONITORS = 20;
@@ -67,6 +75,18 @@ export interface CloudBundle {
 /** When a bundle stops existing: 45 days after its device last synced (KV `expiration`, seconds). */
 export function bundleExpiry(b: Pick<CloudBundle, "syncedAt" | "updatedAt">): number {
   return Math.floor(((b.syncedAt ?? b.updatedAt) + BUNDLE_TTL_SECS * 1000) / 1000);
+}
+
+/** List metadata so a cron tick can skip the KV read when nothing is due and the bundle has not expired. */
+export function bundleListMeta(b: CloudBundle): BundleListMeta {
+  let nextDue = Number.POSITIVE_INFINITY;
+  for (const m of b.monitors) {
+    if (!m.enabled) continue;
+    const t = m.nextRunAt ?? 0;
+    if (t < nextDue) nextDue = t;
+  }
+  if (!Number.isFinite(nextDue)) nextDue = Date.now() + 24 * 3_600_000;
+  return { nextDue, exp: bundleExpiry(b) };
 }
 
 export const MOMENT_CAP = 30;
@@ -235,7 +255,10 @@ export async function runMonitorCron(kv: MonitorKv, now: number, fetchSource: So
   };
   do {
     const page = await kv.list({ prefix: PREFIX, cursor, limit: 500 });
-    for (const { name } of page.keys) {
+    for (const { name, metadata } of page.keys) {
+      const dueLater = typeof metadata?.nextDue === "number" && metadata.nextDue > now;
+      const expired = typeof metadata?.exp === "number" && now >= metadata.exp * 1000;
+      if (dueLater && !expired) continue;
       devices++;
       const bundle = (await kv.get(name, "json")) as CloudBundle | null;
       if (!bundle) continue;
@@ -254,7 +277,7 @@ export async function runMonitorCron(kv: MonitorKv, now: number, fetchSource: So
         const fresh = (await kv.get(name, "json")) as CloudBundle | null;
         const out = fresh && (fresh.rev ?? 0) !== (bundle.rev ?? 0) ? foldCronResults(fresh, bundle, pushBefore) : bundle;
         if (!fresh) continue; // deleted by the device mid-run
-        await kv.put(name, JSON.stringify(out), { expiration: bundleExpiry(out) });
+        await kv.put(name, JSON.stringify(out), { expiration: bundleExpiry(out), metadata: bundleListMeta(out) });
       }
     }
     cursor = page.list_complete ? undefined : page.cursor;

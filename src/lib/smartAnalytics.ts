@@ -354,7 +354,7 @@ export function runClustering(
     });
   }
   const rowToCluster: Record<number, number> = {};
-  points.forEach((p, i) => {
+  points.forEach((p) => {
     let best = 0;
     let bestD = Infinity;
     for (let c = 0; c < k; c++) {

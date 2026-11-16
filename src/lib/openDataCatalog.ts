@@ -50,7 +50,10 @@ export const DEFAULT_CATALOG_ORIGIN =
 
 function isNativeShellWindow(w: Record<string, unknown> | undefined): boolean {
   if (!w) return false;
-  if ("__TAURI_INTERNALS__" in w) return true;
+  if ("__TAURI_INTERNALS__" in w || "__TAURI__" in w) return true;
+  // Tauri 2 webview host when internals are briefly missing during early boot.
+  const host = (w.location as { hostname?: string } | undefined)?.hostname ?? "";
+  if (host === "tauri.localhost" || host.endsWith(".tauri.localhost")) return true;
   const cap = w.Capacitor as { isNativePlatform?: () => boolean } | undefined;
   try {
     return !!cap?.isNativePlatform?.();
@@ -66,9 +69,11 @@ function isNativeShellWindow(w: Record<string, unknown> | undefined): boolean {
  */
 export function apiUrl(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
-  const g = typeof globalThis !== "undefined" ? globalThis : undefined;
-  const w = g && "window" in g ? (g as unknown as { window?: Record<string, unknown> }).window : undefined;
-  if (isNativeShellWindow(w)) {
+  const g = typeof globalThis !== "undefined" ? (globalThis as Record<string, unknown>) : undefined;
+  const fromWindow =
+    g && "window" in g ? (g.window as Record<string, unknown> | undefined) : undefined;
+  // Check window first (Vitest stubs / real webview), then globalThis (Tauri injects there too).
+  if (isNativeShellWindow(fromWindow) || isNativeShellWindow(g)) {
     return `${DEFAULT_CATALOG_ORIGIN}${p}`;
   }
   return p;
@@ -433,8 +438,39 @@ export async function fetchUkCatalogWeb(opts?: FetchDataGovOptions): Promise<Dat
   }
 }
 
+/** Read a response body, stopping once `maxBytes` is exceeded. */
+async function readCsvBody(res: Response, maxBytes?: number): Promise<string> {
+  const declared = Number(res.headers.get("content-length"));
+  if (maxBytes && Number.isFinite(declared) && declared > maxBytes) {
+    throw new Error("CSV is too large to scan");
+  }
+  if (maxBytes && res.body && typeof res.body.getReader === "function") {
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let text = "";
+    let total = 0;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new Error("CSV is too large to scan");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  }
+  const text = await res.text();
+  if (maxBytes && text.length > maxBytes) throw new Error("CSV is too large to scan");
+  return text;
+}
+
 /** Fetch CSV text via Worker proxy (avoids CORS on agency hosts). */
-export async function fetchCsvTextWeb(csvUrl: string): Promise<{ text: string; truncated: boolean }> {
+export async function fetchCsvTextWeb(
+  csvUrl: string,
+  opts?: { maxBytes?: number },
+): Promise<{ text: string; truncated: boolean }> {
   const qs = `url=${encodeURIComponent(csvUrl)}`;
   // Native shells (Capacitor iPad / Tauri) have no `/api` routes — `apiUrl` points at
   // the Worker. Hitting relative `/api/fetch-csv` returns SPA `index.html` (~17 KB)
@@ -465,9 +501,9 @@ export async function fetchCsvTextWeb(csvUrl: string): Promise<{ text: string; t
         }
         throw new Error(msg);
       }
-      const text = await res.text();
+      const text = await readCsvBody(res, opts?.maxBytes);
       if (looksLikeHtmlDocument(text)) {
-        const err = new Error("Got an HTML page instead of CSV (API route missing)");
+        const err = new Error("Loom received a web page instead of a table. The link may be a login or error page.");
         if (canFallback && shouldRetryCsvOnCatalogFallback(err)) {
           lastErr = err;
           continue;

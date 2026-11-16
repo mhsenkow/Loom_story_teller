@@ -12,6 +12,7 @@ describe("custom look validation", () => {
       updatedAt: 12,
       overrides: {
         opacity: 0.5,
+        customColors: "#123456,#abcdef",
         sourceFootnote: "full",
         xField: "secret",
         rows: [[1]],
@@ -30,7 +31,7 @@ describe("custom look validation", () => {
         id: "one",
         name: "Calm",
         updatedAt: 12,
-        overrides: { opacity: 0.5, sourceFootnote: "full" },
+        overrides: { opacity: 0.5, customColors: "#123456,#abcdef", sourceFootnote: "full" },
       },
     ]);
     expect(parseCustomChartLooks({ looks: [] })).toEqual([]);

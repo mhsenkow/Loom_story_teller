@@ -134,6 +134,23 @@ tablet-xcode: ## 📦 Open iOS project in Xcode for Archive / TestFlight
 	@echo "$(PURPLE)🧵 Opening Xcode…$(RESET)"
 	npm run tauri ios build -- --open
 
+.PHONY: phone
+phone: ## 🔧 Android Studio / device (Capacitor web-parity shell)
+	@echo "$(PURPLE)🧵 Threading the phone loom...$(RESET)"
+	./scripts/android-play-aab.sh open
+
+.PHONY: phone-weave
+phone-weave: ## 📦 Android Play Store AAB (Internal testing / Production)
+	@echo "$(PURPLE)🧵 Weaving the Android fabric...$(RESET)"
+	./scripts/android-play-aab.sh
+	@echo "$(GREEN)✓ AAB at android/app/build/outputs/bundle/release/app-release.aab$(RESET)"
+	@echo "  Upload: Play Console → Testing → Internal testing (see android/PLAY_STORE.md)"
+
+.PHONY: phone-sync
+phone-sync: ## 🔧 Rebuild web + cap sync android (no AAB)
+	@echo "$(PURPLE)🧵 Syncing Android web assets...$(RESET)"
+	./scripts/android-play-aab.sh sync
+
 .PHONY: weave-web
 weave-web: ## 📦 Static web export only (no Tauri shell)
 	@echo "$(PURPLE)🧵 Weaving web export...$(RESET)"

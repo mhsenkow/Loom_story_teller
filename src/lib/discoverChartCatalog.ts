@@ -25,6 +25,16 @@ export const DISCOVER_CHART_FAMILY: Record<ChartKind, DiscoverFamily> = {
   bubble: "relationship",
   hexbin: "relationship",
   contour: "relationship",
+  ecdf: "distribution",
+  density: "distribution",
+  qq: "distribution",
+  errorBars: "comparison",
+  connectedScatter: "relationship",
+  stripes: "trend",
+  wordCloud: "composition",
+  calendar: "trend",
+  sparkGrid: "trend",
+  rose: "composition",
   voronoi: "relationship",
   corrMatrix: "relationship",
   bar: "comparison",
@@ -128,11 +138,22 @@ export function discoverQuestionKey(
   source: string,
   chart: ChartRecommendation,
 ): string {
+  const family = discoverFamily(chart.kind);
+  // "Magnitude × depth" and "depth × magnitude" ask the same thing, and so do
+  // "status → tsunami" and "tsunami → status" whatever weights the links.
+  const flow = family === "connections" && !!chart.colorField;
+  const pair = flow
+    ? [chart.xField, chart.colorField!].sort()
+    : family === "relationship" && chart.yField
+      ? [chart.xField, chart.yField].sort()
+      : [chart.xField, chart.yField ?? ""];
+  if (flow)
+    return JSON.stringify([source, family, pair[0], pair[1], chart.rowField ?? "", chart.timeWindowField ?? "", chart.timeWindow ?? "all"]);
   return JSON.stringify([
     source,
-    discoverFamily(chart.kind),
-    chart.xField,
-    chart.yField ?? "",
+    family,
+    pair[0],
+    pair[1],
     chart.y2Field ?? "",
     chart.sizeField ?? "",
     chart.colorField ?? "",

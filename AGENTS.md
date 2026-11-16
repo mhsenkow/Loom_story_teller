@@ -21,7 +21,7 @@ Use this file plus [DOCS.md](DOCS.md) (architecture) and [README.md](README.md) 
 | Path | Role |
 |------|------|
 | `src/app/` | Next.js App Router: `layout.tsx`, `page.tsx` (shell + three-panel layout; views: explorer / chart / query / dive) |
-| `src/components/` | One main React component per file (PascalCase) |
+| `src/components/` | One main React component per file (PascalCase); chart stage lives in `chartView/` (thin `ChartView.tsx` composer) |
 | `src/lib/` | TypeScript **without** React: store, IPC, Vega, WebGPU, recommendations, analytics |
 | `src/shaders/` | WGSL for WebGPU scatter |
 | `src/styles/globals.css` | Design tokens (`--loom-*`, `--chart-*`); reskin here only |
@@ -34,7 +34,7 @@ Use this file plus [DOCS.md](DOCS.md) (architecture) and [README.md](README.md) 
 
 - **IPC:** Add Rust `#[tauri::command]` → register in `lib.rs` → add typed wrapper in `tauri.ts`. UI components must not call `invoke()` directly.
 - **State:** Zustand only (`store.ts`). No parallel global state for the same concern.
-- **Charts:** Vega-Lite specs are the portable “brain”; WebGPU is for high-density **scatter** only when rules in `ChartView` allow (see README WebGPU section). Stream/source story recs often use `spec: {}` with `xField`/`yField`; `extractScatterData` falls back to those fields when `spec.encoding` is absent.
+- **Charts:** Vega-Lite specs are the portable “brain”; WebGPU is for high-density **scatter** only when rules in `chartView/` allow (see README WebGPU section). Paint/stage live under `src/components/chartView/` (`paintActiveChart`, `useChartViewCore`, `ChartStage`); `ChartView.tsx` is a thin composer. Stream/source story recs often use `spec: {}` with `xField`/`yField`; `extractScatterData` falls back to those fields when `spec.encoding` is absent.
 - **Theming:** Use CSS variables / Tailwind tokens from `globals.css`; avoid hard-coded hex in new UI.
 - **Static export:** `next.config.mjs` uses `output: "export"` — no runtime Next.js API routes.
 
@@ -44,7 +44,7 @@ Use this file plus [DOCS.md](DOCS.md) (architecture) and [README.md](README.md) 
 
 - **Wikipedia SSE:** `stream_*` commands → DuckDB table `wiki_stream`. Frontend: `Sidebar` live card, `QueryView` `stream://wiki`, `recommendStreamStory`, `STREAM_SQL_SNIPPETS`.
 - **Poll sources (60):** defined once in `src/lib/sourceRegistry.ts` (kind, label, DuckDB/buffer table, columns + types, poll cadence, ORDER BY, sidebar group). Sidebar cards, Query (`stream://<kind>`), Dive, discover, and web buffers all read it. Web fetches `/api/source/<kind>` from the Worker (cached per kind, with upstream fallbacks) and parses in `webStreams.ts`; desktop fetches upstreams in `sources.rs` into the same tables. `src/lib/__tests__/sourceRegistry.test.ts` fails if a default chart or SQL snippet names a column the table doesn't have.
-- **Feed health:** every upstream attempt in `handleSource` records an outcome (`workers/sourceHealth.ts`, KV `srch:<kind>`, written only on ok↔failing flips or every 30 min). `/api/health` reports ok / degraded / resting; the app (`src/lib/sourceHealth.ts`) skips resting feeds in the discover scan and Digest and labels them in Directory. `npm run probe:feeds` (nightly `.github/workflows/feed-health.yml`) checks subrequests ≤ 45 per fetcher (Cloudflare caps at 50), parser drift, discover coverage ≥ 55 kinds, and feeds resting 48 h+.
+- **Feed health:** every upstream attempt in `handleSource` records an outcome (`workers/sourceHealth.ts`, one KV key `srch:_all`, written only on ok↔failing flips, on the second failure in a row, or every 6 hours). `/api/health` reports ok / degraded / resting and is cached 30 minutes per location; the app (`src/lib/sourceHealth.ts`) skips resting feeds in the discover scan and Digest and labels them in Directory. `npm run probe:feeds` (nightly `.github/workflows/feed-health.yml`) checks subrequests ≤ 45 per fetcher (Cloudflare caps at 50), parser drift, discover coverage ≥ 55 kinds, and feeds resting 48 h+.
 - **Adding a source:** registry entry → Worker route in `workers/catalog-proxy.ts` → parser in `webStreams.ts` → Rust fetch/insert + table in `sources.rs` (same columns) → `recommendSourceStory` charts + `SOURCE_SQL_SNIPPETS` (recommendations.ts) → a discover hook in `discoverStories.ts`.
 
 Rust implementation: `src-tauri/src/stream.rs`, `src-tauri/src/sources.rs`.
@@ -65,6 +65,8 @@ make tablet-xcode  # Open Xcode to Archive / Distribute
 ```
 
 **iOS:** Bundle `com.loom.storyteller`, team `WC44W2QVE4`. Mobile Rust is `src-tauri/src/mobile.rs` (no DuckDB). Frontend: `isDesktop()` for DuckDB IPC; iPad/iPhone Tauri uses the web data path. Re-auth Apple ID in Xcode → Settings → Accounts before the first IPA build. Shell strategy: [docs/MOBILE_IOS.md](docs/MOBILE_IOS.md). Release checklist: [docs/MOBILE_ACCEPTANCE.md](docs/MOBILE_ACCEPTANCE.md).
+
+**Android:** Same application id via Capacitor (`android/`). Web-parity only (no DuckDB). Dev: `make phone`. Play AAB: `make phone-weave`. Listing: [android/PLAY_STORE.md](android/PLAY_STORE.md). Strategy: [docs/MOBILE_ANDROID.md](docs/MOBILE_ANDROID.md).
 
 **Clean checkout (LOOM-089):** Tag releases and `make ci` assume a fresh `git clone` + `npm ci` — no reliance on untracked local files. Before tagging, run `make ci` from a clean tree (or CI on the PR) so missing assets or config surface before App Store / Worker deploy.
 

@@ -6,6 +6,8 @@ import {
   parseShareDataSnapshot,
   SHARE_DATA_MAX_ROWS,
   sharedStoryPath,
+  storyIdFromHash,
+  storyIdFromSharedPath,
 } from "../shareLineage";
 import type { QueryResult } from "../store";
 
@@ -125,5 +127,23 @@ describe("shareLineage", () => {
     });
     expect(cleaned).toBeTruthy();
     expect(cleaned!.source.url).toBeUndefined();
+  });
+});
+
+describe("story id parsing", () => {
+  it("accepts the Worker's 32-hex ids in hashes and shared paths", () => {
+    const id = "a".repeat(32);
+    expect(storyIdFromHash(`#story=${id}`)).toBe(id);
+    expect(storyIdFromSharedPath(sharedStoryPath(id))).toBe(id);
+  });
+
+  it("still accepts short ids and ignores trailing params", () => {
+    expect(storyIdFromHash("#story=abc12345")).toBe("abc12345");
+    expect(storyIdFromHash("#story=abc12345&x=1")).toBe("abc12345");
+  });
+
+  it("rejects ids that are too long", () => {
+    expect(storyIdFromHash(`#story=${"b".repeat(33)}`)).toBeNull();
+    expect(storyIdFromSharedPath(sharedStoryPath("b".repeat(33)))).toBeNull();
   });
 });

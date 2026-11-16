@@ -402,6 +402,16 @@ describe("stories", () => {
     expect(res.status).toBe(503);
   });
 
+  it("batches rate-limit writes instead of putting on every publish", async () => {
+    const ip = freshIp();
+    const headers = { "CF-Connecting-IP": ip };
+    expect((await publish({ html: HTML }, { headers })).status).toBe(200);
+    const key = `rl:stories:${ip}`;
+    expect(JSON.parse(kv.data.get(key)!.value as string).count).toBe(1);
+    expect((await publish({ html: HTML }, { headers })).status).toBe(200);
+    expect(JSON.parse(kv.data.get(key)!.value as string).count).toBe(1);
+  });
+
   it("enforces the per-IP publish limit through KV", async () => {
     const ip = "198.51.100.7";
     kv.data.set(`rl:stories:${ip}`, {
@@ -618,6 +628,7 @@ describe("/api/catalog/<portal>", () => {
     const res = await call("/api/catalog/us?q=water&rows=5");
     expect(res.status).toBe(200);
     expect(res.headers.get("X-Loom-Cache")).toBe("HIT");
+    expect(res.headers.get("Access-Control-Allow-Origin")).not.toBeNull();
     expect(await res.text()).toBe('{"datasets":[]}');
     expect(fetchMock).not.toHaveBeenCalled();
   });

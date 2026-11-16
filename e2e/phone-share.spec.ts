@@ -11,6 +11,11 @@ async function dismissReleaseNotes(page: Page) {
   }
 }
 
+async function dismissPhoneEditor(page: Page) {
+  const editor = page.getByRole("dialog", { name: "Detail panel", exact: true });
+  if (await editor.isVisible()) await editor.getByRole("button", { name: "Close", exact: true }).click();
+}
+
 test.skip(!process.env.LOOM_E2E, "Set LOOM_E2E=1 with static out/ + npm run preview");
 
 test("cold load shows chart affordance", async ({ page }) => {
@@ -34,8 +39,8 @@ test("share sheet opens from a sample chart", async ({ page }) => {
   await expect(share).toBeVisible({ timeout: 30_000 });
   await expect(share).not.toHaveAttribute("aria-disabled", "true");
   await dismissReleaseNotes(page);
-  // Shared charts open their editor; dismiss its phone drawer to reach the toolbar.
-  await page.getByRole("dialog", { name: "Detail panel", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
+  // Restore state can leave the editor open or closed; reach the toolbar in either case.
+  await dismissPhoneEditor(page);
   await share.click();
   await expect(page.getByRole("dialog", { name: "Share", exact: true })).toBeVisible();
 });
@@ -44,7 +49,7 @@ test("phone canvas title can be moved and restored with Undo", async ({ page }) 
   const encoded = Buffer.from(JSON.stringify({ v: 1, src: "mock://sales.csv", c: { k: "bar", x: "city", y: "revenue", a: "sum" } })).toString("base64url");
   await page.goto(`/#chart=${encoded}`);
   await dismissReleaseNotes(page);
-  await page.getByRole("dialog", { name: "Detail panel", exact: true }).getByRole("button", { name: "Close", exact: true }).click();
+  await dismissPhoneEditor(page);
   await page.getByRole("button", { name: "Arrange chart layout", exact: true }).click();
   const title = page.getByRole("button", { name: "Move Title & subtitle", exact: true });
   await expect(title).toBeVisible();

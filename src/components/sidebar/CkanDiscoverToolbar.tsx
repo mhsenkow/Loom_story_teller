@@ -32,43 +32,44 @@ export function CkanDiscoverToolbar({
   const maxId = useId();
   const filterId = useId();
   return (
-    <div className="space-y-2 px-1 mb-2">
+    <div className="library-sentence">
       <form
+        className="library-sentence-phrase"
         onSubmit={(e) => {
           e.preventDefault();
           onSearch();
         }}
-        className="space-y-0.5"
       >
-        <label htmlFor={searchId} className="text-2xs text-loom-muted">
-          Search catalog
-        </label>
-        <div className="flex gap-1.5 mt-0.5">
+        <span className="library-sentence-lead">searching</span>
+        <label htmlFor={searchId}>
+          <span className="sr-only">Search catalog</span>
           <input
             id={searchId}
             type="search"
             value={queryDraft}
             onChange={(e) => onQueryDraftChange(e.target.value)}
-            placeholder="Keywords, agency, topic…"
-            className="loom-input flex-1 min-w-0 text-xs py-1.5"
+            placeholder="keywords"
             disabled={loading}
             enterKeyHint="search"
           />
-          <button type="submit" className="loom-btn-primary text-2xs px-2.5 py-1.5 shrink-0" disabled={loading}>
-            Search
-          </button>
-        </div>
+        </label>
+        <button
+          type="submit"
+          className="discover-icon-button"
+          disabled={loading}
+          aria-label="Search catalog"
+        >
+          <SearchIcon />
+        </button>
       </form>
-      <div className="flex flex-wrap gap-2 items-end">
-        <div className="min-w-0 flex-1 sm:flex-initial">
-          <label htmlFor={sortId} className="text-2xs text-loom-muted block mb-0.5">
-            Sort
-          </label>
+      <span className="library-sentence-phrase">
+        <span aria-hidden>by</span>
+        <label htmlFor={sortId}>
+          <span className="sr-only">Sort</span>
           <select
             id={sortId}
             value={sort}
             onChange={(e) => onSortChange(e.target.value as DataGovSortKey)}
-            className="loom-input w-full sm:w-[11rem] text-xs py-1.5"
             disabled={loading}
           >
             {DATA_GOV_SORT_OPTIONS.map((o) => (
@@ -77,16 +78,20 @@ export function CkanDiscoverToolbar({
               </option>
             ))}
           </select>
-        </div>
-        <div>
-          <label htmlFor={maxId} className="text-2xs text-loom-muted block mb-0.5">
-            Max results
-          </label>
+        </label>
+      </span>
+      <span className="library-sentence-phrase">
+        <span aria-hidden>up to</span>
+        <label htmlFor={maxId}>
+          <span className="sr-only">Max results</span>
           <select
             id={maxId}
             value={rowLimit}
-            onChange={(e) => onRowLimitChange(Number(e.target.value) as (typeof DATA_GOV_ROW_OPTIONS)[number])}
-            className="loom-input text-xs py-1.5 w-full sm:w-[5.5rem]"
+            onChange={(e) =>
+              onRowLimitChange(
+                Number(e.target.value) as (typeof DATA_GOV_ROW_OPTIONS)[number],
+              )
+            }
             disabled={loading}
           >
             {DATA_GOV_ROW_OPTIONS.map((n) => (
@@ -95,21 +100,30 @@ export function CkanDiscoverToolbar({
               </option>
             ))}
           </select>
-        </div>
-      </div>
-      <div>
-        <label htmlFor={filterId} className="text-2xs text-loom-muted">
-          Filter this page
         </label>
-        <input
-          id={filterId}
-          type="search"
-          value={localFilter}
-          onChange={(e) => onLocalFilterChange(e.target.value)}
-          placeholder="Match title or publisher (instant)"
-          className="loom-input w-full text-xs py-1.5 mt-0.5"
-        />
-      </div>
+      </span>
+      <span className="library-sentence-phrase">
+        <span aria-hidden>matching</span>
+        <label htmlFor={filterId}>
+          <span className="sr-only">Filter this page</span>
+          <input
+            id={filterId}
+            type="search"
+            value={localFilter}
+            onChange={(e) => onLocalFilterChange(e.target.value)}
+            placeholder="this page"
+          />
+        </label>
+      </span>
     </div>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg aria-hidden width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <circle cx="10.5" cy="10.5" r="6.5" />
+      <path d="m16 16 4 4" />
+    </svg>
   );
 }

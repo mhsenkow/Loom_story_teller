@@ -19,12 +19,12 @@ import { formatTooltipNumber } from "../chartTooltip";
 import { DEFAULT_CORR_DIVERGING, corrCellInk, corrFillT, sampleCorrDiverging } from "../corrMatrixStyle";
 import { buildCorrMatrix, buildPareto } from "../dsTransforms";
 import { type YAggregateOption } from "../recommendations";
+import { fillMaterialPath } from "./material";
 import { axisFont, barPath, densityStops, labelGutter } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
-import { drawAxisTicks, drawGridLines, numRange } from "./primitives";
+import { numRange } from "./primitives";
 import { formatDeltaLabel } from "../deltaCompare";
 import { DEFAULT_COLORS } from "./shared";
-
 export function renderFullPareto(
   ctx: CanvasRenderingContext2D,
   rows: unknown[][],
@@ -42,7 +42,7 @@ export function renderFullPareto(
   for (const r of rows) {
     const k = String(r[xi]);
     if (!byCat.has(k)) byCat.set(k, []);
-    if (yi < 0) byCat.get(k)!.push(1);
+    if (yi < 0 || agg === "count") byCat.get(k)!.push(1);
     else {
       const v = chartNumber(r[yi]);
       if (!isNaN(v)) byCat.get(k)!.push(v);
@@ -88,7 +88,7 @@ export function renderFullPareto(
     ctx.globalAlpha = opts?.opacity ?? 0.85;
     ctx.beginPath();
     barPath(ctx, x, top, barW, bh, Math.min(corner, barW / 2, bh / 2), barDir);
-    ctx.fill();
+    fillMaterialPath(ctx, top, top + bh, opts);
     pushHit(opts, {
       shape: "rect", x, y: top, w: barW, h: bh,
       match: [[xi, b.label]],
@@ -160,7 +160,7 @@ export function renderFullCorrMatrix(
       let hits = 0;
       const probe = Math.min(rows.length, 40);
       for (let r = 0; r < probe; r++) {
-        const v = Number(rows[r]![i]);
+        const v = chartNumber(rows[r]![i]);
         if (Number.isFinite(v)) hits++;
       }
       if (!(probe > 0 && hits / probe >= 0.5 && name.length > 0)) return false;
@@ -275,8 +275,8 @@ export function renderFullDumbbell(
   const groups = new Map<string, { start: number[]; end: number[] }>();
   for (const r of rows) {
     const k = String(r[xi]);
-    const a = chartNumber(r[yi]);
-    const b = chartNumber(r[si]);
+    const a = agg === "count" ? 1 : chartNumber(r[yi]);
+    const b = agg === "count" ? 1 : chartNumber(r[si]);
     if (isNaN(a) || isNaN(b)) continue;
     if (!groups.has(k)) groups.set(k, { start: [], end: [] });
     const g = groups.get(k)!;
@@ -318,13 +318,31 @@ export function renderFullDumbbell(
     centers.push(cy);
     const x0 = X(e.start);
     const x1 = X(e.end);
-    ctx.strokeStyle = opts?.axisLabelColor ?? "#6b6b78";
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.5;
+    // Arrow from start → end: reads direction without a legend lookup (Plot's arrow chart).
+    const dir = Math.sign(x1 - x0);
+    const len = Math.abs(x1 - x0);
+    const grad = ctx.createLinearGradient(x0, cy, x1 || x0 + 1, cy);
+    grad.addColorStop(0, startColor);
+    grad.addColorStop(1, endColor);
+    ctx.strokeStyle = grad;
+    ctx.fillStyle = endColor;
+    ctx.lineWidth = Math.max(1.5, Math.min(3, dotR * 0.55));
+    ctx.lineCap = "round";
+    ctx.globalAlpha = 0.6;
+    const head = Math.min(dotR * 1.6, len * 0.45);
     ctx.beginPath();
-    ctx.moveTo(x0, cy);
-    ctx.lineTo(x1, cy);
+    ctx.moveTo(x0 + dir * dotR, cy);
+    ctx.lineTo(x1 - dir * (dotR + head * 0.6), cy);
     ctx.stroke();
+    if (dir !== 0 && len > dotR * 3) {
+      const tipX = x1 - dir * (dotR + 1);
+      ctx.beginPath();
+      ctx.moveTo(tipX, cy);
+      ctx.lineTo(tipX - dir * head, cy - head * 0.55);
+      ctx.lineTo(tipX - dir * head, cy + head * 0.55);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.globalAlpha = alpha;
     ctx.fillStyle = startColor;
     ctx.beginPath();
@@ -392,9 +410,12 @@ export function renderFullRidgeline(
   if (opts) opts.scales = { x: X, valueAxis: "x", rect };
   const bins = 48;
   const binW = (xs.max - xs.min) / bins;
-  const bandH = (rect.bottom - rect.top) / groups.length;
-  // Ridges overlap the band above by ~40% — the classic joyplot look
-  const ridgeH = Math.min(bandH * 1.4, rect.bottom - rect.top);
+  // Ridges overlap the band above by ~40% — the classic joyplot look. Reserve
+  // that 0.4 band of headroom at the top so the first ridge stays in the plot.
+  const headroom = 0.4;
+  const bandH = (rect.bottom - rect.top) / (groups.length + headroom);
+  const bandTop = rect.top + headroom * bandH;
+  const ridgeH = Math.min(bandH * (1 + headroom), rect.bottom - rect.top);
   drawAxisFrame(ctx, w, h, rect, opts);
   drawChartGrid(ctx, w, h, rect, opts, { x: [xs.min, xs.max], y: null });
   const color = palette[0]!;
@@ -407,7 +428,7 @@ export function renderFullRidgeline(
     for (const v of g.sorted) counts[Math.min(bins - 1, Math.max(0, Math.floor((v - xs.min) / binW)))]! += 1;
     for (let pass = 0; pass < 2; pass++) counts = counts.map((c, i) => ((counts[i - 1] ?? 0) + 2 * c + (counts[i + 1] ?? 0)) / 4);
     const maxC = Math.max(...counts, 1e-9);
-    const baseline = rect.top + (gi + 1) * bandH;
+    const baseline = bandTop + (gi + 1) * bandH;
     centers.push(baseline - bandH * 0.3);
 
     ctx.beginPath();
@@ -427,7 +448,8 @@ export function renderFullRidgeline(
     ctx.lineWidth = 1.25;
     ctx.stroke();
     pushHit(opts, {
-      shape: "rect", x: rect.left, y: rect.top + gi * bandH, w: rect.right - rect.left, h: bandH,
+      // The first band also owns the headroom its ridge peaks into.
+      shape: "rect", x: rect.left, y: gi === 0 ? rect.top : bandTop + gi * bandH, w: rect.right - rect.left, h: gi === 0 ? bandH * (1 + headroom) : bandH,
       match: [[yi, g.label]],
       summary: { columns: [gName, "Rows", `Median ${vName}`], row: [g.label, formatTooltipNumber(g.sorted.length), formatTooltipNumber(g.q2)] },
     });
@@ -560,8 +582,10 @@ export function renderFullFunnel(
   const groups = new Map<string, number[]>();
   for (const r of rows) {
     const k = String(r[xi]);
+    const value = agg === "count" ? 1 : chartNumber(r[yi]);
+    if (!Number.isFinite(value)) continue;
     if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? chartNumber(r[yi]) : 1);
+    groups.get(k)!.push(value);
   }
   const entries = [...groups.entries()]
     .map(([label, vals]) => ({ label, value: aggregateValues(vals.filter(v => !isNaN(v)), agg) }))
@@ -608,9 +632,11 @@ export function renderFullFunnel(
     ctx.textBaseline = "middle";
     ctx.globalAlpha = 1;
     const inner = Math.min(topW, botW) - 12;
-    if (ctx.measureText(text).width <= inner) {
+    if (inner >= ctx.measureText(formatDataValue(e.value)).width + 30) {
       ctx.fillStyle = ink;
-      ctx.fillText(text, cx, (y0 + y1) / 2);
+      const metric = ` · ${formatDataValue(e.value)}`;
+      const fitted = ctx.measureText(text).width <= inner ? text : `${fitTextEllipsis(ctx, e.label, inner - ctx.measureText(metric).width)}${metric}`;
+      ctx.fillText(fitted, cx, (y0 + y1) / 2);
     } else {
       // Too narrow: label beside the stage
       ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
@@ -684,25 +710,32 @@ export function renderFullParallel(
     ctx.globalAlpha = alpha;
     ctx.beginPath();
     let started = false;
+    const vertices: { x: number; y: number }[] = [];
     axes.forEach((ax, i) => {
       const v = chartNumber(r[ax.idx]);
       if (isNaN(v)) return;
       const t = (v - ax.min) / (ax.max - ax.min || 1);
       const y = plotBot - t * (plotBot - plotTop);
+      vertices.push({ x: axisXs[i]!, y });
       if (!started) { ctx.moveTo(axisXs[i]!, y); started = true; }
       else ctx.lineTo(axisXs[i]!, y);
     });
     ctx.stroke();
+    // Hit each line where it crosses an axis — a shared full-plot rect per
+    // row meant the first line drawn always won the hover. No colour `match`:
+    // it would resolve the tooltip/pin to the first row of that category
+    // instead of this line's row.
     if (opts?.hits) {
-      opts.hits.push({
-        shape: "rect",
-        x: Math.min(...axisXs) - 6,
-        y: plotTop - 4,
-        w: Math.max(...axisXs) - Math.min(...axisXs) + 12,
-        h: plotBot - plotTop + 8,
-        match: ci >= 0 ? [[ci, String(r[ci])]] : [],
-        rowIndex: ri,
-      });
+      for (const p of vertices) {
+        opts.hits.push({
+          shape: "circle",
+          cx: p.x,
+          cy: p.y,
+          r: 4,
+          match: [],
+          rowIndex: ri,
+        });
+      }
     }
   }
 

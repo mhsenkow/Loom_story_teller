@@ -25,6 +25,304 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-11-12e",
+    date: "2026-11-12",
+    title: "Fewer snags before you chart",
+    summary: "Settings names what you see, an iPad story opens clear of the file drawer, and a saved file tells you it landed.",
+    items: [
+      {
+        title: "Settings you can hear",
+        detail: "Theme buttons are announced by their names, and the layout section says Layout. Clearing saved uploads on this device asks first.",
+      },
+      {
+        title: "A story opens on the chart",
+        detail: "On iPad, opening a pick closes the file drawer. Phone cards keep the sentence under the headline, and Open stays visible without a hover.",
+      },
+      {
+        title: "Saving and searching",
+        detail: "Saving a public table confirms in a toast. Data.gov search starts empty. The library footer says DuckDB only in the Mac app.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12d",
+    date: "2026-11-12",
+    title: "A wider first look",
+    summary: "What’s interesting now opens with public tables as well as live feeds.",
+    items: [
+      {
+        title: "Public tables on the first screen",
+        detail: "The opening scan charts Gapminder, child mortality, happiness, the Keeling curve, Eurostat population, airline safety, college majors, Brent crude, and the other curated tables that fit a quick download. The global power-plant file stays in the library — it is too large for that first pass. On iPhone and iPad the live feeds stay in that same first look.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12c",
+    date: "2026-11-12",
+    title: "More public data, ready to chart",
+    summary: "Discover connects more open catalogs in the app, including full histories and more city and state portals.",
+    items: [
+      {
+        title: "Catalogs open inside Loom",
+        detail: "More public portals now connects Our World in Data, Eurostat, NASA, OpenFEMA, air quality, OpenSky, the World Bank, and FiveThirtyEight. New tables cover child mortality, happiness, maternal mortality, human development, forests, PM2.5, EU population, FEMA declarations, college majors, airline safety, dangerous driving, and Brent crude.",
+      },
+      {
+        title: "More city and state portals",
+        detail: "City and state open data adds shortcuts for New Orleans, Oakland, Cambridge, Edmonton, Winnipeg, Honolulu, Kansas City, and states including Texas, Colorado, Oregon, Michigan, and Pennsylvania.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12b",
+    date: "2026-11-12",
+    title: "Clearer on a phone",
+    summary: "The view switcher, notes button, and tools stay out of the way of charts, stories, and the data library.",
+    items: [
+      {
+        title: "Room for every space",
+        detail: "On a phone the view tabs are no longer clipped, the data sidebar leaves only a slim strip of the page behind it, and the notes button sits above Preview. Search and tools dock in the footer so they don’t cover a chart, Dive, or a monitor.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12-themes",
+    date: "2026-11-12",
+    title: "Themes with their own corners",
+    summary: "Each look now has its own radii, materials, and chart colors — Glass is round, Paper is ruled, Tank is a bezel.",
+    items: [
+      {
+        title: "A full look, not just a palette",
+        detail: "Light, Dark, Contrast, Paper, Glass, Frost, Brutal, Loom, Tank and NES each set corners, edges and chart finishes. Bars follow the look: Glass glazes and rounds, Paper prints in ink, Tank etches, Brutal stays square.",
+      },
+      {
+        title: "Charts that match the room",
+        detail: "Frost uses ice-cyan series instead of Dark’s candy colors; Loom leans gold and wine; Tank stays phosphor green and amber. Follow theme pairs Glass with generous corners.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-12-community",
+    date: "2026-11-12",
+    title: "Community, and stories that say something",
+    summary: "Vote and comment without an account, and a stories screen that leads with what the data shows.",
+    items: [
+      {
+        title: "3D views you can explore and reset",
+        detail: "Orbit scatter, data cubes and globes now have camera presets, zoom controls and a reset button. Shift + arrows rotates, + and − zoom, and 0 resets. Constant-depth points stay centered, missing depths stay out of the chart, and cube selection follows the visible voxel faces. Accelerated orbit scatter gains matching axes, depth ordering and hover readouts.",
+      },
+      {
+        title: "Vote and talk about charts — no account",
+        detail: "Every story and chart on a live feed has ▲ and ▼ and a comments thread. Votes shape what everyone sees first: loved charts rise, widely disliked ones sink. Sort stories by Community favorites, Most discussed, Divisive, or Least liked, and see the most-loved charts and freshest comments at the top. Remix a chart and it becomes its own entry others can open. Loom remembers this device so your vote counts once; pick a name or keep the friendly one you’re given. Charts from your own files are never shared.",
+      },
+      {
+        title: "Headlines that tell you what was found",
+        detail: "Stories now lead with the finding — “Wind speed and gust rise together”, “United States: 85% of the total” — or with the question a chart answers, instead of a chart recipe. The chart’s description sits underneath in plain words. Mirror-image stories and repeat views of the same rows are folded together, so the page shows more different things.",
+      },
+      {
+        title: "Surprise me",
+        detail: "A new button at the bottom of the stories opens a random pick from the better half of what’s on offer.",
+      },
+      {
+        title: "Charts that speak plainly",
+        detail: "Axes, tooltips and story cards use readable names with units — “temperature anomaly (°C)” instead of anomaly_c — and story numbers read like “−11.4% to 4.9%”. Stories no longer count a feed’s total row as one of its parts, averages are described as averages, and the crypto “Daily moves” story shows all 50 coins. The chart section where you pick what goes on the chart is now called Fields (it was Encoding).",
+      },
+      {
+        title: "Smoother on phones",
+        detail: "Loom no longer opens an empty panel over the start screen on phones, and every button in the stories header fits on narrow screens. On the web, the SQL view says up front that queries run in the desktop app and points you back to the table. Error messages say what to try next instead of showing server codes, and hints point to buttons that really exist.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-27b-android",
+    date: "2026-10-27",
+    title: "Android on the way",
+    items: [
+      {
+        title: "Clearer charts, roomier editing",
+        detail: "Legends, dates, dense labels and 3D axes fit smaller charts more clearly. Tablets leave more room for the plot, and short phones get a taller editor. Count includes rows with missing measures, positive-area charts no longer turn negative totals positive, and empty charts explain what to change.",
+      },
+      {
+        title: "Typefaces that look like themselves",
+        detail: "All 16 fonts are included with Loom, so choosing Lora, Inter, or another named face really changes the lettering. Search font specimens, try Clear, Editorial, or Technical type, and fine-tune readable size and weight controls. Undo or reset just the typography at any time.",
+      },
+      {
+        title: "More thoughtful word clouds",
+        detail: "Give words their own font, spacing, and size contrast. Long words now fit using a shared size adjustment, comparison groups keep the same scale, and the chart tells you how many words are shown. Rows and columns offer a more orderly reading path.",
+      },
+      {
+        title: "A chart that helps you read it",
+        detail: "At a glance explains bars, lines, areas, pies and histograms in plain language. Open it for a reading guide, tap a value to pin it on the chart, or see the numbers in a table that stays up to date. Ties and different line end dates are called out instead of hidden.",
+      },
+      {
+        title: "Follow a line to its answer",
+        detail: "Multi-series line charts now put names and last plotted values at the line ends when there is room. Close finishes get separated labels and leader lines; smaller charts keep a familiar legend. PNG exports carry the same labels.",
+      },
+      {
+        title: "Play Store shell",
+        detail: "Loom on Android uses the same charts and live feeds as loom.ibm.io inside a Capacitor app (com.loom.storyteller). Look for Internal testing first, then the Play listing.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-27-chart-engine",
+    date: "2026-10-27",
+    title: "Chart engine cleanup",
+    items: [
+      {
+        title: "More reliable chart drawing",
+        detail: "The chart stage was split into smaller pieces so paint, export, and interactions stay in sync. Globe and map exports, arrangement layout, and idea-rail toggles no longer trip over missing wiring after a refresh.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-26c-cloud-look",
+    date: "2026-10-26",
+    title: "Word cloud look",
+    items: [
+      {
+        title: "A look of its own",
+        detail: "Word clouds open a Visual section for the word font, a spiral, rows, or columns, how large the words grow, and whether weight follows rank. Bars, lines, points, and maps keep the controls that belong to them.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-26b-library",
+    date: "2026-10-26",
+    title: "Safer saved files",
+    items: [
+      {
+        title: "Safer reopening of saved files",
+        detail: "Older file references keep their storage protection, late saves no longer restore files deleted through an older reference, and damaged saved data is skipped when reopening your library.",
+      },
+      {
+        title: "More reliable saved combinations",
+        detail: "Matching-only combinations now use their result size for the preview limit. Uneven source rows keep values under the right columns, and saved recipe inputs are better protected from routine local storage cleanup.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-26a-wordcloud",
+    date: "2026-10-26",
+    title: "Compare word clouds",
+    items: [
+      {
+        title: "Cloud, Compare, or Grid",
+        detail: "A word cloud can stay one spiral, sit as two clouds side by side, or lay out one cloud per group. Two groups get a cloud each. A statistic such as market cap splits into a higher cloud and a lower cloud. The same size means the same total.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-25a-group",
+    date: "2026-10-25",
+    title: "Group a crowded color",
+    items: [
+      {
+        title: "Group into",
+        detail: "When color or shape has a hundred values, Encoding can chunk them. Numbers become ranges — 10 groups instead of every calorie. Categories keep the largest names and roll the rest into Other. The same control shows up on every chart that uses those channels, and it rides along in the share link.",
+      },
+    ],
+  },
+  {
+    id: "2026-10-24c-share",
+    date: "2026-10-24",
+    title: "Links that show the chart",
+    items: [
+      { title: "Bigger chart in link previews", detail: "When you share a link on LinkedIn, X, Slack, iMessage and the rest, the preview card is now the chart drawn at the card's own wide shape, not a small copy of a tall chart in a big blank frame." },
+      { title: "Readable link titles", detail: "Shared links get a headline-style title with the data source, so “name sized by total” arrives as “Name sized by total · pokemon”." },
+      { title: "Mastodon, SeenU and Bluesky up front", detail: "The share list now leads with Mastodon, SeenU and Bluesky, then LinkedIn, then everywhere else in a compact grid." },
+      { title: "SeenU that works on a computer", detail: "SeenU gets a 4:5 image sized for its feed. On phones it goes through the share sheet to the SeenU app; on a computer the image saves, the caption and link copy, SeenU opens, and a short checklist stays put with copy and save-again buttons." },
+      { title: "More places to share", detail: "X, Reddit, WhatsApp and Telegram join the share list, each opening with your caption and the chart card ready." },
+    ],
+  },
+  {
+    id: "2026-10-24b-gallery",
+    date: "2026-10-24",
+    title: "Six more charts from the classics",
+    items: [
+      { title: "Browse every chart type", detail: "On a computer, the chart type picker opens a gallery: every type grouped by what it shows (compare, over time, spread, relationships…), each with a live preview of your data. Pick one and you get exactly what the preview showed." },
+      { title: "Density curve", detail: "A smooth outline of where values pile up — no bin sizes to pick. Split by a group to compare shapes; small groups get a rug of the raw values." },
+      { title: "Q–Q plot", detail: "Is it a bell curve? Sorted values against a normal curve, with the points that stray furthest highlighted." },
+      { title: "Connected scatter", detail: "Two measures traced through time, with arrows and labeled start and end. Long histories fold into about 40 steps so the path stays readable." },
+      { title: "Warming stripes", detail: "One band per period, colored cool below the average and warm above — a whole series at a glance." },
+      { title: "Word cloud", detail: "Category names sized by count or value, packed together. Bigger words really are bigger values." },
+      { title: "Mean ± CI dots", detail: "Each group's average with a 95% interval over its raw rows, plus the overall average for reference." },
+      { title: "Discover finds them", detail: "Find something fun to chart now reaches all the newer chart types, and only offers each one where the data suits it: calendars for daily data, word clouds for real labels, intervals where groups have enough rows." },
+      { title: "Sharper lines and dumbbells", detail: "A rolling mean now shows a ±1σ band around it, Compare Y shades who's ahead when both lines share a scale, and dumbbells point from start to end." },
+    ],
+  },
+  {
+    id: "2026-10-24a-charts",
+    date: "2026-10-24",
+    title: "Four new charts, tidier controls",
+    items: [
+      { title: "Calendar heatmap", detail: "Every day as a square — weeks across, weekdays down — so busy stretches and weekly rhythms stand out." },
+      { title: "Nightingale rose", detail: "Polar wedges whose area tracks the value. Add a second category to stack it inside each petal." },
+      { title: "ECDF", detail: "See what share of rows falls at or below each value, and compare medians and tails across groups without picking bin sizes." },
+      { title: "Sparkline grid", detail: "One small trend per group, each on its own scale, so you compare shapes at a glance. Top N sets how many panels." },
+      { title: "Slopes show direction", detail: "Slope lines that rise and fall now get their own colors, with a key that counts each. 3D bars, terrain, and firefly glows shade with your theme instead of plain black and white." },
+      { title: "Controls that do something", detail: "The chart panel only shows options the current chart actually uses. Choices sit in compact segmented rows, sliders show their value beside them, and every dropdown is the same height." },
+    ],
+  },
+  {
+    id: "2026-10-23a-library",
+    date: "2026-10-23",
+    title: "A home for your data",
+    items: [
+      { title: "One data library", detail: "Find your uploads and saved combinations in one place. Collections hold datasets and charts together for a reason. Start one even before you name it. Search and filter collections and My data the same way as Discover — by topic, place, and how the data is kept. They leave if you don’t touch them — after 3, 6, or 9 months — or they can keep going. Hearts, marks, and curious notes stay as filters." },
+      { title: "Keep useful datasets", detail: "Bookmark files, feeds and public catalog results. Bookmarked uploads and files used by combinations are protected from routine local cache cleanup." },
+      { title: "Combine two sources", detail: "Match a primary dataset to a lookup table, check matched and unmatched rows, then save the recipe. Reopen it to rebuild from available source rows. Your chart keeps the result from the time you opened it." },
+      { title: "Smoother everywhere", detail: "Buttons give a little when pressed, panels and sheets glide in from where they live, new chart ideas arrive in a short cascade, and switching charts settles the new one onto the stage. Segmented controls slide to the choice you press. Reduce motion in Settings still turns all of it off." },
+      { title: "Just the chart", detail: "Full screen (F, or the corners button beside Share) slides the sidebar, panels, and bars away so the chart has the screen. Esc brings them back. Charts that animate in now grow up from the baseline." },
+    ],
+  },
+  {
+    id: "2026-10-22a",
+    date: "2026-10-22",
+    title: "Share anywhere",
+    items: [
+      { title: "Bluesky, Mastodon and SeenU", detail: "Share now opens Bluesky and Mastodon with your caption and chart link ready, and Mastodon remembers your server after the first time. SeenU gets the image, caption and link ready to post." },
+      { title: "Instagram, sized right", detail: "Pick Post, Story or Message. Posts get a 4:5 image with your caption, Stories get a 9:16 frame that keeps the chart clear of Instagram's top bar and reply field (the link is copied for a link sticker), and Messages send the chart link." },
+      { title: "Clearer choices", detail: "Every share option now says what will happen before you tap it, and Copy caption no longer sits on top of the preview." },
+    ],
+  },
+  {
+    id: "2026-10-21g-polish",
+    date: "2026-10-21",
+    title: "Polish pass",
+    items: [
+      { title: "Make the colors yours", detail: "Keep your favorite presets or edit individual swatches and gradient stops with a color picker or hex code. Fit a palette to your field’s value count, see when colors repeat, and browse presets without changing your chart. Custom colors travel with Undo, saved looks and shared charts; SVG exports now honor the selected palette." },
+      { title: "Shared stories open again", detail: "“Open with shared data in Loom” links and refreshed snapshot pages now load the shared chart instead of an empty app." },
+      { title: "Share fits on phones", detail: "The phone top bar no longer runs off the screen, so Share is always fully visible. Theme stays in Settings." },
+      { title: "Years read as time", detail: "A year column in an uploaded spreadsheet now suggests trend lines over time, and text columns like incident type or created by stay categories instead of turning into empty time charts." },
+      { title: "Catalog search on iPhone and iPad", detail: "Searching the open-data catalog works for popular queries on iPhone and iPad, not just the first time a search is run." },
+      { title: "Clearer charts and readouts", detail: "Horizontal bars with only negative values fill the chart, and their value labels no longer cover the category names. Hovering long bars and wide bands always finds them, globes no longer show the previous chart’s readouts, and firefly charts answer hover." },
+      { title: "Better first stories", detail: "Discover leads with each feed’s headline finding and only calls a leader “concentrated” when it really stands out. It no longer blames extreme values when repeated values are the real cause." },
+      { title: "Pins on phones", detail: "Pinning a mark closes the floating readout so the pinned callout is the only one left, and the pin counter sits above the source note." },
+      { title: "Share images stay current", detail: "After you change colors, theme, notes or pins, or the data refreshes, Share now creates a new image instead of reusing the old one." },
+      { title: "Query keeps your SQL", detail: "Saved query views and Dive’s “Open in Query” now fill the editor, and Copy cell / Copy row copy the row you see after sorting." },
+      { title: "Charts speak to screen readers", detail: "With a screen reader, arrow keys step through marks and each one is read aloud with its values. Pinning and unpinning are announced too." },
+      { title: "Comfortable on phones", detail: "Banners, sheets and full-screen views stay clear of the notch and home indicator, and small buttons and story card text are bigger and easier to tap and read." },
+      { title: "Messages in plain words", detail: "When a feed, file or import can’t load, Loom says what failed and whether you’re offline instead of showing a raw error." },
+      { title: "Saving on iPhone and iPad", detail: "Save Image and Take Photo no longer close the app, saving a file opens the share sheet, and Loom only says something was saved when it really was." },
+      { title: "Links open once", detail: "Links to data portals and other sites open a single time in your browser instead of twice or inside Loom." },
+      { title: "Easier-to-read colors", detail: "Chart series, warnings, badges and focus rings have stronger contrast in every theme, including colorblind mode." },
+      { title: "Steadier desktop app", detail: "Slow queries no longer stall live feeds on Mac, interrupted CSV downloads don’t leave half-written files, and SQLite files that can’t be opened explain why instead of disappearing." },
+      { title: "Feeds ride out outages", detail: "When a data provider goes down, the web and iPhone apps show the last good copy instead of an error." },
+      { title: "Back where you left off", detail: "Reopening Loom resumes your saved live feed again and tells you if it comes back empty." },
+      { title: "Shared charts match", detail: "Chart links keep the sender’s options such as top N, log scale and comparisons, and times line up the same in every time zone." },
+      { title: "Tidier charts", detail: "Sunburst inner rings stay inside their wedges, the top ridgeline fits on the chart, and hovering parallel coordinates picks the line under your pointer." },
+    ],
+  },
+  {
+    id: "2026-10-21f",
+    date: "2026-10-21",
+    title: "Point at what matters",
+    items: [
+      { title: "Every mark lights up", detail: "Hover or arrow-key through any chart and the bar, point, slice, cell or path you're on gets a clear highlight shaped to the chart: rings for points, outlines for bars, edges for slices, a soft wash for bands. Maps, globes, terrain, weaves and trail charts now answer hover too." },
+      { title: "Pin it, share it", detail: "Click a mark (or press Enter, or tap Pin on your phone) to keep its readout on the chart. Up to five pins, numbered. They're drawn into exported images and saved in share links, so whoever opens your chart sees exactly what you were pointing at." },
+    ],
+  },
+  {
     id: "2026-10-21e",
     date: "2026-10-21",
     title: "Feeds that take a rest",
@@ -84,7 +382,7 @@ export const CHANGELOG: ChangelogRelease[] = [
       { title: "Unusual isn't the same as wrong", detail: "Choose a limit, a healthy range, a sudden change, or \"unusual for this hour\". Add expected windows for maintenance or planned events. When you mark an alert as expected, Loom stops alerting at that time." },
       { title: "Was it worth it?", detail: "Each alert asks what happened next. Cards show how often alerts led to action and flag monitors that are mostly noise. Related metrics group into scorecards." },
       { title: "Schedules and notifications", detail: "Check every few minutes, daily, weekly, or on a cron schedule, with quiet hours and reminder cooldowns. Alerts arrive as system notifications on Mac, iPhone, iPad, and in the browser." },
-      { title: "Always on", detail: "Mark a monitor Always on and Loom's server checks it every 5 minutes even when the app is closed. Alerts go to an ntfy topic on your phone, Slack, Discord, or a webhook." },
+      { title: "Always on", detail: "Mark a monitor Always on and Loom's server keeps checking it on its schedule (as often as every 15 minutes), even when the app is closed. Alerts go to an ntfy topic on your phone, Slack, Discord, or a webhook." },
     ],
   },
   {

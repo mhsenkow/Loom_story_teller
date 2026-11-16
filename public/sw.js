@@ -65,7 +65,7 @@ self.addEventListener("fetch", (event) => {
   // LOOM-416: let a cold offline start boot the shell + hashed chunks so
   // durable IndexedDB uploads can reopen. Same-origin GET only; no API/user data.
   if (event.request.method === "GET" && url.origin === self.location.origin) {
-    if (url.pathname.startsWith("/_next/static/")) {
+    if (url.pathname.startsWith("/_next/static/") || /^\/fonts\/.+\.woff2$/.test(url.pathname)) {
       event.respondWith(
         (async () => {
           const cache = await caches.open(STATIC);

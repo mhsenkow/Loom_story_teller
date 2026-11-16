@@ -12,7 +12,7 @@ import { getThemeUiColors } from "./chartPalettes";
 import { ensureContrast } from "./wcagColor";
 import { fitTextEllipsis } from "./chartLayout";
 import { formatAxisValue, formatDataValue, niceTicks } from "./chartAxes";
-import { chartFont, chartTypeRamp } from "./chartType";
+import { chartFont, chartTypeRamp, fitTextWrap } from "./chartType";
 
 export type ChartInk = {
   /** Background used for contrast math (never transparent). */
@@ -124,6 +124,16 @@ export function inkTint(ink: ChartInk, amount: number): string {
   return mixColor(ink.bg, ink.text, amount);
 }
 
+/** Darkest theme ink — what extruded side faces shade toward (bg on dark themes, text on light). */
+export function inkShadow(ink: ChartInk): string {
+  return ink.light ? ink.text : ink.bg;
+}
+
+/** Lightest theme ink — what lit top faces and glow cores lift toward. */
+export function inkHighlight(ink: ChartInk): string {
+  return ink.light ? ink.bg : ink.text;
+}
+
 export function fontOf(size: number, family = "Inter", weight: number | string = 400): string {
   return chartFont(size, family, weight);
 }
@@ -205,7 +215,9 @@ export function drawEmptyMessage(
   ctx.font = fontOf(chartTypeRamp(axisFontSize, { compact: mini }).tick, fontFamily);
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(fitTextEllipsis(ctx, message, Math.max(40, w - 24)), w / 2, h / 2);
+  const lineH = chartTypeRamp(axisFontSize, { compact: mini }).tick + 5;
+  const lines = fitTextWrap(ctx, message, Math.max(1, w - 32), mini ? 1 : 3);
+  lines.forEach((line, i) => ctx.fillText(line, w / 2, h / 2 + (i - (lines.length - 1) / 2) * lineH));
   ctx.restore();
 }
 
@@ -302,9 +314,9 @@ export function drawRampKey(ctx: CanvasRenderingContext2D, a: RampKeyArgs): { x:
   const ly = cy + 3;
   if (a.endLabels) {
     ctx.textAlign = "left";
-    ctx.fillText(a.endLabels[0], bx, ly);
+    ctx.fillText(fitTextEllipsis(ctx, a.endLabels[0], Math.max(1, (barW - 8) / 2)), bx, ly);
     ctx.textAlign = "right";
-    ctx.fillText(a.endLabels[1], bx + barW, ly);
+    ctx.fillText(fitTextEllipsis(ctx, a.endLabels[1], Math.max(1, (barW - 8) / 2)), bx + barW, ly);
   } else if (!(a.max > a.min)) {
     ctx.textAlign = "left";
     ctx.fillText(formatDataValue(a.min), bx, ly);
@@ -468,9 +480,17 @@ export function drawSizeKey(
   let vals = nt.ticks.filter((v) => v > 0 || min <= 0);
   if (vals.length > 3) vals = [vals[0]!, vals[Math.floor(vals.length / 2)]!, vals[vals.length - 1]!];
   if (vals.length < 2) vals = [min, max];
-  const labels = vals.map((v) => (nt.ticks.includes(v) ? formatAxisValue(v, nt.step) : formatDataValue(v)));
   ctx.save();
   ctx.font = fontOf(type.legend, font);
+  const labelOf = (v: number) => nt.ticks.includes(v) ? formatAxisValue(v, nt.step) : formatDataValue(v);
+  const widthOf = (v: number) => Math.max(Math.max(1.5, args.radiusOf(v)) * 2, ctx.measureText(labelOf(v)).width);
+  const available = args.maxWidth ?? Infinity;
+  const requiredWidth = () => vals.reduce((sum, v) => sum + widthOf(v), 12) + (vals.length - 1) * 10;
+  while (vals.length > 1 && requiredWidth() > available) {
+    vals.splice(vals.length > 2 ? 1 : args.radiusOf(vals[0]!) <= args.radiusOf(vals[1]!) ? 0 : 1, 1);
+  }
+  if (requiredWidth() > available) { ctx.restore(); return null; }
+  const labels = vals.map(labelOf);
   const radii = vals.map((v) => Math.max(1.5, args.radiusOf(v)));
   const rMax = Math.max(...radii);
   const titleH = args.title ? type.legendTitle + 5 : 0;
@@ -482,6 +502,7 @@ export function drawSizeKey(
     wSum += cw + 10;
     return cx;
   });
+  ctx.font = fontOf(type.legendTitle, font, 600);
   const boxW = Math.min(args.maxWidth ?? Infinity, Math.max(wSum - 10 + padIn, args.title ? ctx.measureText(args.title).width + padIn * 2 : 0));
   const boxH = padIn + titleH + rMax * 2 + 4 + type.legend + padIn;
   const x = args.anchor === "right" ? args.x - boxW : args.x;
@@ -530,7 +551,26 @@ export function dodgeLabels(ys: number[], gap: number, lo: number, hi: number): 
   return res;
 }
 
-/** Category → palette index in first-appearance row order (matches ChartView's legend). */
+const BIN_RANGE = /^-?\d+(?:\.\d+)?–-?\d+(?:\.\d+)?$/;
+const BIN_POINT = /^-?\d+(?:\.\d+)?$/;
+
+/** Low-to-high order for chunked range labels; everything else stays first-seen. */
+function rankBinnedCategories(m: Map<string, number>): Map<string, number> {
+  const keys = [...m.keys()];
+  if (keys.length < 2 || !keys.some((k) => BIN_RANGE.test(k))) return m;
+  if (!keys.every((k) => k === "Missing" || k === "Other" || BIN_RANGE.test(k) || BIN_POINT.test(k))) return m;
+  const rank = (k: string) => {
+    if (k === "Other" || k === "Missing") return Number.POSITIVE_INFINITY;
+    const n = Number(k.split("–")[0]);
+    return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
+  };
+  const sorted = [...keys].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const out = new Map<string, number>();
+  sorted.forEach((k, i) => out.set(k, i));
+  return out;
+}
+
+/** Category → palette index. First-seen, except chunked numeric ranges which run low to high. */
 export function categoryIndex(rows: unknown[][], ci: number): Map<string, number> {
   const m = new Map<string, number>();
   if (ci < 0) return m;
@@ -538,7 +578,7 @@ export function categoryIndex(rows: unknown[][], ci: number): Map<string, number
     const k = String(r[ci]);
     if (!m.has(k)) m.set(k, m.size);
   }
-  return m;
+  return rankBinnedCategories(m);
 }
 
 /**

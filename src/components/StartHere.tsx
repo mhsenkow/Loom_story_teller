@@ -15,6 +15,7 @@ import { isDesktop } from "@/lib/tauri";
 export function openDataSources(): void {
   const s = useLoomStore.getState();
   if (!s.sidebarOpen) s.toggleSidebar();
+  s.setLibrarySection("discover");
   s.setDataRegionOpen(true);
   s.setDataSourcesExpanded(true);
 }
@@ -35,7 +36,7 @@ export function StartHere({
   useEffect(() => setDesktop(isDesktop()), []);
 
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-5 px-6 py-8 animate-fade-in overflow-y-auto">
+    <div className="flex flex-col items-center justify-center h-full gap-5 px-6 py-8 animate-enter overflow-y-auto">
       <div className="w-14 h-14 rounded-2xl bg-loom-accent/10 border border-loom-accent/30 flex items-center justify-center text-loom-accent">
         {icon ?? (
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>

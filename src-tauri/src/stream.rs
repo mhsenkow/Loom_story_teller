@@ -30,10 +30,10 @@ pub struct WikiEditEvent {
     pub user: String,
     pub bot: bool,
     pub minor: bool,
-    pub namespace: i32,
+    pub namespace: Option<i32>,
     pub edit_type: String,
-    pub old_len: i64,
-    pub new_len: i64,
+    pub old_len: Option<i64>,
+    pub new_len: Option<i64>,
     pub delta: i64,
     pub timestamp: i64,
     pub server_name: String,
@@ -164,17 +164,22 @@ pub fn ensure_stream_table(db: &LoomDb) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+/// Mirrors webStreams.ts parseWikiEvent so desktop and web rows agree.
 pub(crate) fn parse_sse_event(data: &str) -> Option<WikiEditEvent> {
     let v: serde_json::Value = serde_json::from_str(data).ok()?;
     let obj = v.as_object()?;
-    let meta = obj.get("meta")?.as_object()?;
-    let id_str = meta.get("id")?.as_str().unwrap_or("0");
-    let id: i64 = id_str
-        .chars()
-        .filter(|c| c.is_ascii_digit())
-        .collect::<String>()
-        .parse()
-        .unwrap_or(0);
+    obj.get("meta")?.as_object()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    // meta.id is a UUID; the top-level rc `id` is the numeric one the web dedupes on.
+    let id = obj
+        .get("id")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(now.as_millis() as i64);
+    let length = obj.get("length");
+    let old_len = length.and_then(|l| l.get("old")).and_then(|v| v.as_i64());
+    let new_len = length.and_then(|l| l.get("new")).and_then(|v| v.as_i64());
 
     Some(WikiEditEvent {
         id,
@@ -183,27 +188,19 @@ pub(crate) fn parse_sse_event(data: &str) -> Option<WikiEditEvent> {
         user: obj.get("user")?.as_str().unwrap_or("anonymous").to_string(),
         bot: obj.get("bot").and_then(|v| v.as_bool()).unwrap_or(false),
         minor: obj.get("minor").and_then(|v| v.as_bool()).unwrap_or(false),
-        namespace: obj.get("namespace").and_then(|v| v.as_i64()).unwrap_or(0) as i32,
+        namespace: obj
+            .get("namespace")
+            .and_then(|v| v.as_i64())
+            .map(|n| n as i32),
         edit_type: obj.get("type")?.as_str().unwrap_or("edit").to_string(),
-        old_len: obj
-            .get("length")
-            .and_then(|l| l.get("old"))
+        old_len,
+        new_len,
+        // A new page has no old length — its delta is its whole size.
+        delta: new_len.unwrap_or(0) - old_len.unwrap_or(0),
+        timestamp: obj
+            .get("timestamp")
             .and_then(|v| v.as_i64())
-            .unwrap_or(0),
-        new_len: obj
-            .get("length")
-            .and_then(|l| l.get("new"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0),
-        delta: obj
-            .get("length")
-            .and_then(|l| {
-                let n = l.get("new")?.as_i64()?;
-                let o = l.get("old")?.as_i64()?;
-                Some(n - o)
-            })
-            .unwrap_or(0),
-        timestamp: obj.get("timestamp").and_then(|v| v.as_i64()).unwrap_or(0),
+            .unwrap_or(now.as_secs() as i64),
         server_name: obj
             .get("server_name")
             .and_then(|v| v.as_str())
@@ -262,10 +259,10 @@ fn batch_insert(db: &LoomDb, events: &[WikiEditEvent]) -> Result<(), String> {
                     DbValue::Text(ev.user.clone()),
                     DbValue::Boolean(ev.bot),
                     DbValue::Boolean(ev.minor),
-                    DbValue::Int(ev.namespace),
+                    ev.namespace.map_or(DbValue::Null, DbValue::Int),
                     DbValue::Text(ev.edit_type.clone()),
-                    DbValue::BigInt(ev.old_len),
-                    DbValue::BigInt(ev.new_len),
+                    ev.old_len.map_or(DbValue::Null, DbValue::BigInt),
+                    ev.new_len.map_or(DbValue::Null, DbValue::BigInt),
                     DbValue::BigInt(ev.delta),
                     DbValue::Timestamp(
                         TimeUnit::Microsecond,
@@ -303,6 +300,18 @@ fn trim_buffer(db: &LoomDb) -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     }
     Ok(())
+}
+
+/// DuckDB writes block on the shared mutex; keep them off the async worker threads.
+async fn flush_batch(db: &Arc<LoomDb>, events: Vec<WikiEditEvent>, trim: bool) {
+    let db = Arc::clone(db);
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = batch_insert(&db, &events);
+        if trim {
+            let _ = trim_buffer(&db);
+        }
+    })
+    .await;
 }
 
 async fn probe_stream_connect(client: &reqwest::Client) -> Result<(), String> {
@@ -454,13 +463,12 @@ async fn run_stream_worker(
                                         buffer.push(ev);
                                         state.total_events.fetch_add(1, Ordering::Relaxed);
                                         if buffer.len() >= BATCH_INSERT_SIZE {
-                                            let _ = batch_insert(&db, &buffer);
-                                            buffer.clear();
                                             trim_counter += 1;
-                                            if trim_counter == 20 {
+                                            let trim = trim_counter == 20;
+                                            if trim {
                                                 trim_counter = 0;
-                                                let _ = trim_buffer(&db);
                                             }
+                                            flush_batch(&db, std::mem::take(&mut buffer), trim).await;
                                         }
                                     }
                                 }
@@ -482,7 +490,7 @@ async fn run_stream_worker(
     }
 
     if !buffer.is_empty() {
-        let _ = batch_insert(&db, &buffer);
+        flush_batch(&db, buffer, false).await;
     }
     if should_clear_running(my_gen, state.generation.load(Ordering::Acquire)) {
         state.running.store(false, Ordering::Relaxed);
@@ -503,22 +511,31 @@ pub async fn stop_stream(state: Arc<StreamState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Runs on a cloned connection so a slow user query never holds the shared mutex
+/// (loom_active stays a per-connection temp view).
 pub fn query_stream(db: &LoomDb, sql: &str, limit: u32) -> Result<QueryResult, String> {
     crate::sql_policy::validate_user_sql(sql)?;
-    let conn = db.lock_connection();
-    conn.execute_batch("CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM wiki_stream")
-        .map_err(|e| e.to_string())?;
-    query_engine::run_user_query(
-        &conn,
-        sql,
-        limit,
-        "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT {limit}",
-    )
+    db.with_cloned_conn(|conn| {
+        conn.execute_batch("CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM wiki_stream")
+            .map_err(|e| e.to_string())?;
+        query_engine::run_user_query(
+            conn,
+            sql,
+            limit,
+            "SELECT * FROM wiki_stream ORDER BY ts DESC LIMIT {limit}",
+        )
+    })
 }
 
 pub fn stream_column_stats(db: &LoomDb) -> Result<Vec<ColumnInfo>, String> {
-    let conn = db.lock_connection();
-    query_engine::column_stats_for_table(&conn, "wiki_stream")
+    db.with_cloned_conn(|conn| query_engine::column_stats_for_table(conn, "wiki_stream"))
+}
+
+pub fn stream_clear(db: &LoomDb) -> Result<(), String> {
+    db.with_cloned_conn(|conn| {
+        conn.execute_batch("DELETE FROM wiki_stream")
+            .map_err(|e| e.to_string())
+    })
 }
 
 #[cfg(test)]
@@ -527,11 +544,38 @@ mod stream_tests {
 
     #[test]
     fn parse_sse_event_extracts_edit() {
-        let data = r#"{"meta":{"id":"12345"},"wiki":"enwiki","title":"Earth","user":"alice","bot":false,"minor":true,"namespace":0,"type":"edit","length":{"old":100,"new":110},"timestamp":1700000000,"server_name":"mw123","comment":"fix typo"}"#;
+        let data = r#"{"meta":{"id":"4f1c2a8e-9b3d-4e5f-8a7b-1c2d3e4f5a6b"},"id":1873456789,"wiki":"enwiki","title":"Earth","user":"alice","bot":false,"minor":true,"namespace":0,"type":"edit","length":{"old":100,"new":110},"timestamp":1700000000,"server_name":"mw123","comment":"fix typo"}"#;
         let ev = parse_sse_event(data).expect("parsed");
-        assert_eq!(ev.id, 12345);
+        assert_eq!(ev.id, 1873456789);
         assert_eq!(ev.title, "Earth");
         assert_eq!(ev.delta, 10);
+        assert_eq!(ev.namespace, Some(0));
+    }
+
+    #[test]
+    fn parse_sse_event_new_page_delta_is_full_size() {
+        let data = r#"{"meta":{"id":"0b6f7c1e-2d3a-4b5c-9d8e-7f6a5b4c3d2e"},"id":1873456790,"wiki":"enwiki","title":"New page","user":"bob","type":"new","length":{"new":2048},"timestamp":1700000001}"#;
+        let ev = parse_sse_event(data).expect("parsed");
+        assert_eq!(ev.id, 1873456790);
+        assert_eq!(ev.old_len, None);
+        assert_eq!(ev.new_len, Some(2048));
+        assert_eq!(ev.delta, 2048);
+    }
+
+    #[test]
+    fn parse_sse_event_missing_fields_stay_null_not_zero() {
+        let data =
+            r#"{"meta":{"id":"a-uuid"},"wiki":"enwiki","title":"Log","user":"carol","type":"log"}"#;
+        let ev = parse_sse_event(data).expect("parsed");
+        assert!(ev.id > 1_600_000_000_000, "falls back to now in ms");
+        assert_eq!(ev.namespace, None);
+        assert_eq!(ev.old_len, None);
+        assert_eq!(ev.new_len, None);
+        assert_eq!(ev.delta, 0);
+        assert!(
+            ev.timestamp > 1_600_000_000,
+            "missing timestamp defaults to now"
+        );
     }
 
     #[test]

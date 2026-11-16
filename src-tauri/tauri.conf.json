@@ -1,11 +1,11 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
   "productName": "Loom",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "identifier": "com.loom.storyteller",
   "build": {
     "frontendDist": "../out",
-    "devUrl": "http://localhost:1337",
+    "devUrl": "http://localhost:1420",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },

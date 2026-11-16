@@ -98,8 +98,9 @@ export function sourcePayloadCacheable(kind: string, text: string): boolean {
   try {
     data = JSON.parse(trimmed);
   } catch {
-    // Non-JSON sources (GeoJSON text, CSV transforms) — require non-trivial body.
-    return trimmed.length > 32;
+    // Every source fetcher returns JSON (CSV/text upstreams are converted first),
+    // so a non-JSON body is an upstream error page (HTML maintenance / challenge).
+    return false;
   }
   const rows = rowCountFromPayload(data);
   if (kind === "firms" || kind === "gdacs" || kind === "opensky") {

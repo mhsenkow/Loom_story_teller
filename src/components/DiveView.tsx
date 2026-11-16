@@ -149,16 +149,19 @@ export function DiveView() {
 
   const load = useCallback(async (p: string, quiet = false) => {
     if (!quiet) setLoading(true);
+    // A slower load for a dataset the user already left must not land on top.
+    const stale = () => pathRef.current !== p;
     try {
       const ds = await loadDiveDataset(p, sampleRef.current);
+      if (stale()) return;
       setDataset(ds);
       setDatasetPath(p);
       setError(null);
       setRefreshedAt(Date.now());
     } catch (e) {
-      if (!quiet) setError(e instanceof Error ? e.message : String(e));
+      if (!quiet && !stale()) setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (!quiet) setLoading(false);
+      if (!quiet && !stale()) setLoading(false);
     }
   }, []);
 
@@ -167,6 +170,7 @@ export function DiveView() {
     if (!path) {
       setDataset(null);
       setDatasetPath(null);
+      setLoading(false);
       return;
     }
     void load(path);
@@ -432,7 +436,7 @@ export function DiveView() {
         <div className="flex-1 min-h-0">
           <StartHere
             title="Dive into a dataset"
-            detail="Dive slices event data Scuba-style — time window, filters, group-by, p90 vs last week. Live feeds with timestamps work best."
+            detail="Slice your data by time, filter it, and compare groups. Live feeds with dates work best."
           />
         </div>
       </div>
@@ -761,7 +765,7 @@ export function DiveView() {
               })}
               {!query.metrics.some((m) => m.agg === "count") && (
                 <label className="flex items-center gap-1.5 text-2xs text-loom-muted">
-                  <input type="checkbox" checked={query.hits !== false} onChange={(e) => update({ hits: e.target.checked })} className="accent-[var(--loom-accent)]" />
+                  <input aria-label="update(" type="checkbox" checked={query.hits !== false} onChange={(e) => update({ hits: e.target.checked })} className="accent-[var(--loom-accent)]" />
                   Show hits (rows per group) in the table
                 </label>
               )}
@@ -898,7 +902,7 @@ export function DiveView() {
                   Open in Query
                 </button>
               )}
-              {!isDesktop() && <span className="text-2xs text-loom-muted">DuckDB SQL — runs in the desktop app</span>}
+              {!isDesktop() && <span className="text-2xs text-loom-muted">The query behind these results — runs in the desktop app</span>}
             </div>
           </div>
         )}
@@ -1314,7 +1318,7 @@ function DiveSamples({
                 <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
                   {cols.map((c) => (
                     <label key={c} className="flex items-center gap-1 text-2xs text-loom-text font-mono">
-                      <input type="checkbox" checked={!visible || visible.includes(c)} onChange={() => toggle(c)} className="accent-[var(--loom-accent)]" />
+                      <input aria-label="toggle(c)} className=&quot;accent-[var(--loom-accent)]&quot; />" type="checkbox" checked={!visible || visible.includes(c)} onChange={() => toggle(c)} className="accent-[var(--loom-accent)]" />
                       {c}
                     </label>
                   ))}
@@ -1325,7 +1329,7 @@ function DiveSamples({
         </div>
       )}
       <table className="text-2xs font-mono border-collapse">
-        <thead className="sticky top-0 bg-loom-bg">
+        <thead className="loom-data-chrome sticky top-0 bg-loom-bg">
           <tr className="border-b border-loom-border text-loom-muted">
             {shown.map(({ c, i }) => (
               <th key={c} className="text-left font-medium px-2 py-1 whitespace-nowrap">

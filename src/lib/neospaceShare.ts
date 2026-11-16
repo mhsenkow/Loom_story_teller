@@ -5,7 +5,11 @@
 // click (popup blockers), points it at the published story, and posts the
 // PNG over postMessage once NeoSpace says it's ready. NeoSpace falls back to
 // fetching `/s/{id}.img` if the message never lands.
+// Native shells have a single webview and no popups, so there we hand the
+// compose URL to the system browser instead of navigating the app away.
 // =================================================================
+
+import { isNativeShell, openExternalUrl } from "./tauri";
 
 export const NEOSPACE_ORIGIN = "https://neospace.ibm.io";
 
@@ -23,7 +27,8 @@ export async function handOffToNeoSpace(
 ): Promise<void> {
   const url = neoSpaceComposeUrl(input.storyUrl, input.text);
   if (!child) {
-    window.location.assign(url);
+    if (isNativeShell()) await openExternalUrl(url);
+    else window.location.assign(url);
     return;
   }
   child.location.href = url;

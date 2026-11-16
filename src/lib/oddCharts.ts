@@ -6,62 +6,24 @@
 // pixels are always Canvas 2D (same contract as ChartView).
 // =================================================================
 
-import type { ColumnInfo } from "./store";
-import type { ChartKind, ChartRecommendation, YAggregateOption } from "./recommendations";
+import type { YAggregateOption } from "./recommendations";
 import { VIZ_CATEGORICAL } from "./chartPalettes";
 import { fitTextEllipsis } from "./chartLayout";
 import { formatDateCell } from "./dateFormat";
-import {
-  aggregateAxisTitle,
-  classifyKeys,
-  formatAxisValue,
-  formatDataValue,
-  linear,
-  niceTicks,
-  timeTicks,
-} from "./chartAxes";
-import {
-  drawAxisFieldLabels,
-  drawAxisFrame,
-  drawBandAxisX,
-  drawChartGrid,
-  drawChartTicks,
-  drawPositionedLabelsX,
-  type ChartLookOpts,
-  type PlotRect,
-} from "./chartLooks";
-import {
-  categoryIndex,
-  dodgeLabels,
-  drawEmptyMessage,
-  drawKeyPanel,
-  drawRampKey,
-  drawSizeKey,
-  drawSwatchRow,
-  inkOn,
-  inkTint,
-  mixColor,
-  radiusFromPointSize,
-  rampColor,
-  rampKeyHeight,
-  resolveChartInk,
-  sequentialStops,
-  withAlpha,
-  type ChartInk,
-  type SwatchEntry,
-} from "./chartInk";
-
+import { aggregateAxisTitle, classifyKeys, formatAxisValue, formatDataValue, linear, niceTicks, timeTicks } from "./chartAxes";
+import { drawAxisFieldLabels, drawAxisFrame, drawBandAxisX, drawBandAxisY, drawChartGrid, drawChartTicks, drawPositionedLabelsX, type ChartLookOpts, type PlotRect } from "./chartLooks";
+import { categoryIndex, dodgeLabels, drawEmptyMessage, drawKeyPanel, drawRampKey, drawSizeKey, drawSwatchRow, inkHighlight, inkOn, inkShadow, inkTint, mixColor, radiusFromPointSize, rampColor, rampKeyHeight, resolveChartInk, sequentialStops, withAlpha, type ChartInk, type SwatchEntry } from "./chartInk";
 export * from "./oddChartsRec";
 import type { OddChartKind, OddRenderOpts } from "./oddChartsRec";
-import { toNum, groupSum, agg, numColsOf, nomColsOf, timeColsOf, inferType, jitter } from "./oddChartsRec";
+import { ODD_NON_CARTESIAN, toNum, groupSum, agg, jitter, topGroupsByWeight, splitWordCloudHalves, wordTotalsByGroup, wordsForCloudGroup } from "./oddChartsRec";
 import { resolveLayoutDirection } from "./chartSupport";
 import { resolveIsoFloorOrient } from "./isoOrient";
+import { drawProjectedAxis, type AxisLabelBox } from "./projectedAxis";
 import { resolvePyramidScaleMode } from "./pyramidScale";
 import { formatDeltaLabel } from "./deltaCompare";
 import { chartFont, chartTypeRamp } from "./chartType";
 import { type MarkSymbols, drawMarkSymbol, markSymbols } from "./markSymbols";
-
-
+import type { HitTarget } from "./chartTooltip";
 // ---------------------------------------------------------------------------
 // Renderers
 // ---------------------------------------------------------------------------
@@ -87,6 +49,8 @@ interface OddEnv {
   columns: string[];
   opts: OddRenderOpts;
   symbols: MarkSymbols;
+  /** opts.hits length when this render started (per-renderer cap). */
+  hitStart: number;
 }
 
 function oddFont(env: OddEnv, size: number, weight: number | string = 400): string {
@@ -136,6 +100,7 @@ export function renderOddChart(
     columns,
     opts,
     symbols: markSymbols(opts, columns, rows),
+    hitStart: opts.hits?.length ?? 0,
     look: {
       fontFamily: font,
       axisLabelColor: ink.muted,
@@ -144,8 +109,13 @@ export function renderOddChart(
       themeBorder: ink.border,
       axisLineColor: inkTint(ink, 0.38),
       axisFontSize: chartTypeRamp(opts.axisFontSize).tick,
+      tickRotation: opts.tickRotation,
     },
   };
+  if (!mini && (!ODD_NON_CARTESIAN.has(kind) || kind === "mosaic" || kind === "isoBars")) {
+    const labelRoom = chartTypeRamp(opts.axisFontSize).tick * 4 + 24;
+    env.look.plotBounds = { left: Math.min(w * 0.3, Math.max(pad, labelRoom)), top: pad, right: w - pad, bottom: h - pad };
+  }
   ctx.save();
   let message: string | void;
   try {
@@ -154,62 +124,87 @@ export function renderOddChart(
     ctx.restore();
   }
   if (message) drawEmptyMessage(ctx, w, h, message, ink, font, mini, opts.axisFontSize);
-  // Pyramid registers its own bar hits; generic X/Y scatter hits are wrong here.
-  if (opts.hits && xi >= 0 && yi >= 0 && rows.length && kind !== "pyramid") {
-    appendOddChartPointHits(rows, xi, yi, ci, w, h, pad, opts);
-  }
 }
 
-function appendOddChartPointHits(
-  rows: unknown[][],
-  xi: number,
-  yi: number,
-  ci: number,
+/** Per-renderer cap so dense kinds stay cheap to hit-test. */
+const ODD_HIT_CAP = 2000;
+
+type OddSummary = NonNullable<HitTarget["summary"]>;
+
+function canHit(env: OddEnv): HitTarget[] | null {
+  const hits = env.opts.hits;
+  if (!hits || hits.length - env.hitStart >= ODD_HIT_CAP) return null;
+  return hits;
+}
+
+function hitCircle(
+  env: OddEnv,
+  cx: number,
+  cy: number,
+  r: number,
+  match: [number, string][],
+  rowIndex?: number,
+  summary?: OddSummary,
+): void {
+  const hits = canHit(env);
+  if (!hits || !Number.isFinite(cx) || !Number.isFinite(cy)) return;
+  // Keep the focus ring on-canvas for marks hugging the edge (stream ends, mini cards).
+  const fit = Math.min(r, cx, env.w - cx, cy, env.h - cy);
+  hits.push({ shape: "circle", cx, cy, r: Math.max(1, fit), match, rowIndex, summary });
+}
+
+function hitRect(
+  env: OddEnv,
+  x: number,
+  y: number,
   w: number,
   h: number,
-  pad: number,
-  opts: OddRenderOpts,
+  match: [number, string][],
+  rowIndex?: number,
+  summary?: OddSummary,
+  markRect?: { x: number; y: number; w: number; h: number },
 ): void {
-  const hits = opts.hits;
+  const hits = canHit(env);
+  if (!hits || !(w > 0) || !(h > 0)) return;
+  hits.push({ shape: "rect", x, y, w, h, match, rowIndex, summary, mark: markRect });
+}
+
+function hitArc(
+  env: OddEnv,
+  cx: number,
+  cy: number,
+  r0: number,
+  r1: number,
+  a0: number,
+  a1: number,
+  match: [number, string][],
+  rowIndex?: number,
+  summary?: OddSummary,
+): void {
+  const hits = canHit(env);
   if (!hits) return;
-  let xMin = Infinity;
-  let xMax = -Infinity;
-  let yMin = Infinity;
-  let yMax = -Infinity;
-  for (const r of rows) {
-    const x = Number(r[xi]);
-    const y = Number(r[yi]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    xMin = Math.min(xMin, x);
-    xMax = Math.max(xMax, x);
-    yMin = Math.min(yMin, y);
-    yMax = Math.max(yMax, y);
-  }
-  if (!Number.isFinite(xMin)) return;
-  const plotW = w - 2 * pad;
-  const plotH = h - 2 * pad;
-  const stride = Math.max(1, Math.floor(rows.length / 800));
-  for (let ri = 0; ri < rows.length; ri += stride) {
-    const r = rows[ri]!;
-    const x = Number(r[xi]);
-    const y = Number(r[yi]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
-    const sx = pad + ((x - xMin) / (xMax - xMin || 1)) * plotW;
-    const sy = pad + (1 - (y - yMin) / (yMax - yMin || 1)) * plotH;
-    const match: [number, string][] = [
-      [xi, String(r[xi])],
-      [yi, String(r[yi])],
-    ];
-    if (ci >= 0) match.unshift([ci, String(r[ci])]);
-    hits.push({
-      shape: "circle",
-      cx: sx,
-      cy: sy,
-      r: 8,
-      match,
-      rowIndex: ri,
-    });
-  }
+  hits.push({ shape: "arc", cx, cy, r0, r1, a0, a1, match, rowIndex, summary });
+}
+
+/** Row matching for a single drawn point: x, then color when present. */
+function rowMatch(row: readonly unknown[], xi: number, ci: number): [number, string][] {
+  const m: [number, string][] = [];
+  if (xi >= 0) m.push([xi, String(row[xi] ?? "")]);
+  if (ci >= 0 && ci !== xi) m.push([ci, String(row[ci] ?? "")]);
+  return m;
+}
+
+/** Summary for a small-multiple glyph (group label + mean per feature). */
+function groupSummary(env: OddEnv, xi: number, label: string, feats: number[], raw: number[]): OddSummary {
+  return {
+    columns: [fieldName(env, xi, "group"), ...feats.map((fi) => fieldName(env, fi))],
+    row: [label, ...raw.map((v) => (Number.isFinite(v) ? v : null))],
+  };
+}
+
+function firstRowIndex(rows: unknown[][], xi: number, key: string): number | undefined {
+  const i = rows.findIndex((r) => String(r[xi] ?? "") === key);
+  return i >= 0 ? i : undefined;
 }
 
 const RENDERERS: Record<OddChartKind, Renderer> = {
@@ -233,17 +228,27 @@ const RENDERERS: Record<OddChartKind, Renderer> = {
   flower: drawFlower,
   mosaic: drawMosaic,
   contour: drawContour,
+  calendar: drawCalendar,
+  rose: drawRose,
+  ecdf: drawEcdf,
+  sparkGrid: drawSparkGrid,
+  density: drawDensity,
+  qq: drawQq,
+  connectedScatter: drawConnectedScatter,
+  stripes: drawStripes,
+  wordCloud: drawWordCloud,
+  errorBars: drawErrorBars,
 };
 
 // ---- shared helpers --------------------------------------------------------
 
 function fieldName(env: OddEnv, i: number, fallback = ""): string {
-  return i >= 0 ? (env.columns[i] ?? fallback) : fallback;
+  return i >= 0 ? (env.opts.fieldDisplayNames?.[i] ?? env.columns[i] ?? fallback) : fallback;
 }
 
 /** Plot rect inside the pad (thumbnails use the whole card). */
 function basePlot(env: OddEnv): PlotRect {
-  return { left: env.pad, top: env.pad, right: env.w - env.pad, bottom: env.h - env.pad };
+  return env.look.plotBounds ?? { left: env.pad, top: env.pad, right: env.w - env.pad, bottom: env.h - env.pad };
 }
 
 function gridLook(env: OddEnv): ChartLookOpts {
@@ -360,13 +365,17 @@ function drawPanelLegend(
   corner: "top-right" | "top-left" | "bottom-right" | "bottom-left" = "top-right",
 ): { x: number; y: number; w: number; h: number } | null {
   if (env.mini || entries.length === 0 || env.opts.legendPosition === "none") return null;
-  const maxRows = 8;
+  // Visual → Legend corner overrides the renderer's preferred corner.
+  const lp = env.opts.legendPosition;
+  if (lp === "top-right" || lp === "top-left" || lp === "bottom-right" || lp === "bottom-left") corner = lp;
+  const lineH = chartTypeRamp(env.opts.axisFontSize).legend + 6;
+  const availableRows = Math.max(1, Math.floor((plot.bottom - plot.top - 20) / lineH) - (title ? 1 : 0));
+  const maxRows = Math.min(entries.length <= 12 ? entries.length : 8, entries.length <= availableRows ? availableRows : Math.max(1, availableRows - 1));
   const shown = entries.slice(0, maxRows);
   const extra = entries.length - shown.length;
-  const lineH = chartTypeRamp(env.opts.axisFontSize).legend + 6;
   ctx.save();
   ctx.font = oddFont(env, 10);
-  const maxText = Math.min(150, Math.max(60, (plot.right - plot.left) * 0.32));
+  const maxText = Math.min(150, Math.max(12, plot.right - plot.left - 44), Math.max(60, (plot.right - plot.left) * 0.32));
   let textW = Math.max(...shown.map((e) => ctx.measureText(e.label).width), extra > 0 ? ctx.measureText(`+${extra} more`).width : 0);
   if (title) {
     ctx.font = oddFont(env, 10, 600);
@@ -422,6 +431,8 @@ type FooterSpec = {
  */
 function layoutFooter(ctx: CanvasRenderingContext2D, env: OddEnv, spec: FooterSpec): { height: number; draw: (top: number) => void } {
   if (env.mini) return { height: 0, draw: () => {} };
+  // Legend → None hides keys; the caption still explains the encoding.
+  if (env.opts.legendPosition === "none") spec = { caption: spec.caption };
   const left = env.pad * 0.5 + 4;
   const maxW = env.w - 2 * left;
   const sizeH = spec.size ? 6 + (spec.size.title ? 14 : 0) + Math.max(3, spec.size.radiusOf(spec.size.max)) * 2 + 4 + 12 + 4 : 0;
@@ -691,8 +702,12 @@ function drawBucketField(ctx: CanvasRenderingContext2D, rows: unknown[][], env: 
     const inner = { left: x0 + 8, right: x0 + cw - 8, top: y0 + headerH + 6, bottom: y0 + ch - 6 };
     const ih = inner.bottom - inner.top;
     if (ih < 4) return;
-    const pts = rows.filter((r) => String(r[xi]) === b).slice(0, mini ? 40 : 200);
-    pts.forEach((r, i) => {
+    const ptIdx: number[] = [];
+    for (let ri = 0; ri < rows.length && ptIdx.length < (mini ? 40 : 200); ri++) {
+      if (String(rows[ri]![xi]) === b) ptIdx.push(ri);
+    }
+    ptIdx.forEach((ri, i) => {
+      const r = rows[ri]!;
       const px = inner.left + jitter(b, i) * (inner.right - inner.left);
       const yv = ys ? toNum(r[yi]) : NaN;
       const py = ys && Number.isFinite(yv)
@@ -701,6 +716,7 @@ function drawBucketField(ctx: CanvasRenderingContext2D, rows: unknown[][], env: 
       const rDot = sScale ? sScale.radiusOf(toNum(r[si])) : base;
       const color = ci >= 0 ? env.colors[(catIdx.get(String(r[ci])) ?? 0) % env.colors.length]! : env.single;
       dot(ctx, px, py, rDot, color, env.alpha, total <= 800 ? ink.bg : null);
+      hitCircle(env, px, py, rDot, rowMatch(r, xi, ci), ri);
     });
     // Shared value scale: round min / max ticks beside the first column of regions.
     if (ys && !mini && col === 0 && env.pad >= 28 && ih >= 36) {
@@ -722,7 +738,12 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
   if (xi < 0 || yi < 0) return "Beeswarm needs a category and a numeric column";
   const model = orderedKeys(rows, xi, 12);
   const cats = model.keys;
-  const vals = rows.map((r) => toNum(r[yi])).filter(Number.isFinite);
+  // Scale to the bands actually drawn; hidden categories shouldn't stretch the axis.
+  const shown = new Set(cats.map(String));
+  const vals = rows
+    .filter((r) => shown.has(String(r[xi])))
+    .map((r) => toNum(r[yi]))
+    .filter(Number.isFinite);
   if (!cats.length || !vals.length) return `No numeric values in ${fieldName(env, yi, "y")}`;
   const { mini, ink } = env;
   const ys = niceTicks(Math.min(...vals), Math.max(...vals), 5, true);
@@ -739,13 +760,15 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
   }
   const catIdx = categoryIndex(rows, ci);
   const byCat = new Map<string, unknown[][]>();
-  for (const r of rows) {
+  const rowIdx = new Map<unknown[], number>();
+  rows.forEach((r, ri) => {
     const k = String(r[xi]);
-    if (!Number.isFinite(toNum(r[yi]))) continue;
+    if (!Number.isFinite(toNum(r[yi]))) return;
     const l = byCat.get(k) ?? [];
     l.push(r);
     byCat.set(k, l);
-  }
+    rowIdx.set(r, ri);
+  });
   const maxN = Math.max(1, ...cats.map((c) => Math.min(mini ? 60 : 250, byCat.get(c)?.length ?? 0)));
   // Shrink dots when a band is crowded so the swarm still fits its column.
   const fit = Math.sqrt((bandW * 0.8 * ph) / (maxN * Math.PI * 1.6));
@@ -773,6 +796,7 @@ function drawBeeswarm(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
       placed.push({ x: px, y: py, r: rr });
       const color = ci >= 0 ? env.colors[(catIdx.get(String(row[ci])) ?? 0) % env.colors.length]! : env.single;
       mark(ctx, env, row, px, py, rr, color, env.alpha, total <= 800 ? ink.bg : null);
+      hitCircle(env, px, py, rr, [...rowMatch(row, xi, ci), [yi, String(row[yi])]], rowIdx.get(row));
     }
   });
   const swarmKey = markLegendEntries(rows, env, ci !== xi ? ci : -1);
@@ -837,6 +861,7 @@ function drawChernoff(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Odd
     ctx.moveTo(cx - mouthW, cy + R * 0.38);
     ctx.quadraticCurveTo(cx, cy + R * 0.38 + smile, cx + mouthW, cy + R * 0.38);
     ctx.stroke();
+    hitCircle(env, cx, cy, R * Math.max(0.8 + f[0]! * 0.3, 0.85 + f[1]! * 0.25), [[xi, label]], firstRowIndex(rows, xi, label), groupSummary(env, xi, label, feats, m.raw[bi]!));
     if (!mini) {
       ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
@@ -900,6 +925,7 @@ function drawGlyphStar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     ctx.strokeStyle = env.single;
     ctx.lineWidth = 1.5;
     ctx.stroke();
+    hitCircle(env, cx, cy, R, [[xi, label]], firstRowIndex(rows, xi, label), groupSummary(env, xi, label, feats, m.raw[bi]!));
     if (!mini) {
       ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
@@ -957,6 +983,7 @@ function drawFlower(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.beginPath();
     ctx.arc(cx, cy, Math.max(1.5, R * 0.1), 0, Math.PI * 2);
     ctx.fill();
+    hitCircle(env, cx, cy, R, [[xi, label]], firstRowIndex(rows, xi, label), groupSummary(env, xi, label, feats, m.raw[gi]!));
     if (!mini) {
       ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
@@ -1030,6 +1057,7 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   const cell = size / 10;
   const inset = Math.max(0.5, cell * 0.07);
   let filled = 0;
+  const entryRow = env.opts.hits ? entries.map(([label]) => firstRowIndex(rows, xi, label)) : [];
   cells.forEach((n, ei) => {
     ctx.fillStyle = colorOf(ei);
     ctx.globalAlpha = Math.max(0.75, env.alpha);
@@ -1037,6 +1065,18 @@ function drawWaffle(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
       const cx = filled % 10;
       const cy = Math.floor(filled / 10);
       ctx.fillRect(gx + cx * cell + inset, gy + cy * cell + inset, cell - 2 * inset, cell - 2 * inset);
+      const [label, v] = entries[ei]!;
+      const isOther = hasOther && ei === entries.length - 1;
+      hitRect(
+        env,
+        gx + cx * cell + inset,
+        gy + cy * cell + inset,
+        cell - 2 * inset,
+        cell - 2 * inset,
+        isOther ? [] : [[xi, label]],
+        isOther ? undefined : entryRow[ei],
+        { columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null), "share"], row: [label, v, percentLabel(v / total)] },
+      );
     }
   });
   ctx.globalAlpha = 1;
@@ -1088,10 +1128,12 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     const x0 = plot.left + labelW;
     ctx.fillStyle = env.single;
     ctx.globalAlpha = Math.max(0.75, env.alpha);
+    let iconsW = 0;
     for (let i = 0; i <= full && i < maxIcons + 1; i++) {
       const part = i < full ? 1 : frac;
       if (part <= 0.02) break;
       const px = x0 + i * step;
+      iconsW = px + s * part - x0;
       ctx.save();
       ctx.beginPath();
       ctx.rect(px, cy - s / 2 - 1, s * part, s + 2);
@@ -1102,6 +1144,13 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       ctx.restore();
     }
     ctx.globalAlpha = 1;
+    if (iconsW > 0) {
+      const measure = aggregateAxisTitle(how, fieldName(env, yi) || null);
+      hitRect(env, x0, cy - s / 2, iconsW, s, [[xi, label]], firstRowIndex(rows, xi, label), {
+        columns: [fieldName(env, xi), measure],
+        row: [label, v],
+      });
+    }
     if (!mini) {
       ctx.font = oddFont(env, 10);
       ctx.fillStyle = ink.muted;
@@ -1132,8 +1181,7 @@ function drawIsotype(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 
 function drawPyramid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, _ci: number, si: number) {
   if (xi < 0 || yi < 0 || si < 0) return "Pyramid needs a category and two numeric columns";
-  const howRaw = env.opts.yAggregate ?? "sum";
-  const how = howRaw === "count" ? "sum" : howRaw;
+  const how = env.opts.yAggregate ?? "sum";
   const byCat = new Map<string, { left: number[]; right: number[]; rowIndex: number }>();
   for (let ri = 0; ri < rows.length; ri++) {
     const r = rows[ri]!;
@@ -1144,8 +1192,8 @@ function drawPyramid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       cur = { left: [], right: [], rowIndex: ri };
       byCat.set(c, cur);
     }
-    const lv = toNum(r[yi]);
-    const rv = toNum(r[si]);
+    const lv = how === "count" ? 1 : toNum(r[yi]);
+    const rv = how === "count" ? 1 : toNum(r[si]);
     if (Number.isFinite(lv)) cur.left.push(lv);
     if (Number.isFinite(rv)) cur.right.push(rv);
   }
@@ -1411,8 +1459,15 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
   }
 
   ctx.lineCap = env.opts.lineCap ?? "round";
+  // Direction is the story: rises and falls get the first two palette colors, flat stays muted.
+  const riseColor = env.colors[0]!;
+  const fallColor = env.colors[1 % env.colors.length]!;
+  const flatColor = inkTint(ink, 0.45);
+  const tol = (ys.max - ys.min) * 1e-6;
+  const dirColor = (p: { a: number; b: number }) => (p.b - p.a > tol ? riseColor : p.a - p.b > tol ? fallColor : flatColor);
   for (const p of pairs) {
-    ctx.strokeStyle = env.single;
+    const lineColor = dirColor(p);
+    ctx.strokeStyle = lineColor;
     ctx.globalAlpha = Math.max(0.6, env.alpha);
     ctx.lineWidth = mini ? 1.2 : 2;
     ctx.beginPath();
@@ -1420,8 +1475,15 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     ctx.lineTo(x1, sy(p.b));
     ctx.stroke();
     ctx.globalAlpha = 1;
-    mark(ctx, env, p.row, x0, sy(p.a), mini ? 2.2 : 3.5, env.single, 1, mini ? null : ink.bg);
-    mark(ctx, env, p.row, x1, sy(p.b), mini ? 2.2 : 3.5, env.single, 1, mini ? null : ink.bg);
+    mark(ctx, env, p.row, x0, sy(p.a), mini ? 2.2 : 3.5, lineColor, 1, mini ? null : ink.bg);
+    mark(ctx, env, p.row, x1, sy(p.b), mini ? 2.2 : 3.5, lineColor, 1, mini ? null : ink.bg);
+    const ri = firstRowIndex(rows, xi, p.c);
+    const summary: OddSummary = {
+      columns: [fieldName(env, xi), `${fieldName(env, yi)} (mean)`, `${fieldName(env, si)} (mean)`],
+      row: [p.c, p.a, p.b],
+    };
+    hitCircle(env, x0, sy(p.a), mini ? 2.2 : 3.5, [[xi, p.c], [yi, String(p.a)]], ri, summary);
+    hitCircle(env, x1, sy(p.b), mini ? 2.2 : 3.5, [[xi, p.c], [si, String(p.b)]], ri, summary);
   }
   if (mini) return;
   const targets = pairs.map((p) => sy(p.b));
@@ -1443,6 +1505,14 @@ function drawSlope(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     ctx.fillText(fitTextEllipsis(ctx, labelOf(p), labelW), x1 + 12, y);
   });
   drawAxisFieldLabels(ctx, env.w, env.h, env.pad, `${fieldName(env, xi)} · average per group`, null, env.look);
+  const ups = pairs.filter((p) => dirColor(p) === riseColor).length;
+  const downs = pairs.filter((p) => dirColor(p) === fallColor).length;
+  const flats = pairs.length - ups - downs;
+  const key: SwatchEntry[] = [];
+  if (ups) key.push({ label: `Rises (${ups})`, color: riseColor, shape: "line" });
+  if (downs) key.push({ label: `Falls (${downs})`, color: fallColor, shape: "line" });
+  if (flats) key.push({ label: `Flat (${flats})`, color: flatColor, shape: "line" });
+  drawPanelLegend(ctx, env, key, `${fieldName(env, yi)} → ${fieldName(env, si)}`, { left: x0 + 6, top, right: x1 - 6, bottom: base.bottom }, "top-left");
 }
 
 // ---- bump / stream / horizon / spiral --------------------------------------
@@ -1457,11 +1527,16 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
   const cell = new Map<string, number[]>();
   const totals = new Map<string, number>();
   const seriesRow = new Map<string, unknown[]>();
-  for (const r of rows) {
+  const rowIndexOf = new Map<unknown[], number>();
+  for (let ri = 0; ri < rows.length; ri++) {
+    const r = rows[ri]!;
     const v = toNum(r[yi]);
     if (!Number.isFinite(v)) continue;
     const s = String(r[ci]);
-    if (!seriesRow.has(s)) seriesRow.set(s, r);
+    if (!seriesRow.has(s)) {
+      seriesRow.set(s, r);
+      rowIndexOf.set(r, ri);
+    }
     const key = `${model.keyOf(r)}||${s}`;
     const l = cell.get(key) ?? [];
     l.push(v);
@@ -1573,6 +1648,17 @@ function drawBump(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv,
         if (v != null) mark(ctx, env, seriesRow.get(s), xAt(i), deltaMode ? yAtDelta(v) : yAt(v), 3.2, color, 1, ink.bg);
       });
     }
+    const sRow = seriesRow.get(s);
+    const sRi = sRow ? rowIndexOf.get(sRow) : undefined;
+    model.keys.forEach((key, i) => {
+      const v = values[i]!.get(s);
+      if (v == null) return;
+      const rank = ranks[i]!.get(s);
+      hitCircle(env, xAt(i), deltaMode ? yAtDelta(v) : yAt(v), mini ? 2 : 3.2, [[xi, key], [ci, s]], sRi, {
+        columns: [fieldName(env, xi), fieldName(env, ci), deltaMode ? "Δ rank" : "rank"],
+        row: [key, s, deltaMode ? v : (rank ?? null)],
+      });
+    });
     if (last) ends.push({ s, y: (last as { y: number }).y, color });
   });
   if (mini) return;
@@ -1650,6 +1736,16 @@ function drawStream(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.strokeStyle = withAlpha(ink.bg, 0.6);
     ctx.lineWidth = 0.75;
     ctx.stroke();
+    model.keys.forEach((key, i) => {
+      const thick = L.bot[i]! - L.top[i]!;
+      if (!(thick > 0.5)) return;
+      const match: [number, string][] = [[xi, key]];
+      if (ci >= 0 && s !== "__other") match.push([ci, s]);
+      hitCircle(env, xAt(i), (L.top[i]! + L.bot[i]!) / 2, Math.max(3, Math.min(thick / 2, 10)), match, undefined, {
+        columns: [fieldName(env, xi), ...(ci >= 0 ? [fieldName(env, ci)] : []), `${fieldName(env, yi)} (sum)`],
+        row: [key, ...(ci >= 0 ? [nameOf(s)] : []), grid[si0]![i]!],
+      });
+    });
   });
   if (mini) return;
   drawOrderedXAxis(ctx, env, model, plot);
@@ -1718,7 +1814,7 @@ function drawHorizon(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     sums.set(k, cur);
   }
   const pts = model.keys
-    .map((k, i) => ({ pos: model.pos[i]!, v: sums.has(k) ? sums.get(k)!.s / sums.get(k)!.n : NaN }))
+    .map((k, i) => ({ k, pos: model.pos[i]!, v: sums.has(k) ? sums.get(k)!.s / sums.get(k)!.n : NaN }))
     .filter((p) => Number.isFinite(p.v));
   if (pts.length < 2) return "Horizon needs at least two numeric points";
   const { mini, ink } = env;
@@ -1759,6 +1855,14 @@ function drawHorizon(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       ctx.fill();
     }
   }
+  // One point per drawn sample, on the top edge of its first (lightest) fold.
+  for (const p of pts) {
+    const fillT = Math.max(0, Math.min(1, Math.abs(p.v - baseline) / step));
+    hitCircle(env, xAt(p.pos), plot.bottom - fillT * ph, 4, [[xi, p.k]], undefined, {
+      columns: [fieldName(env, xi), `${fieldName(env, yi)} (mean)`],
+      row: [p.k, p.v],
+    });
+  }
   if (mini) return;
   drawAxisFrame(ctx, env.w, env.h, plot, env.look);
   drawOrderedXAxis(ctx, env, model, plot);
@@ -1773,9 +1877,9 @@ function drawHorizon(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 
 function drawSpiral(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
   if (yi < 0) return "Time spiral needs a numeric column";
-  type P = { y: number; c: string; x: string };
+  type P = { y: number; c: string; x: string; ri: number };
   let pts: P[] = rows
-    .map((r, i) => ({ y: toNum(r[yi]), c: ci >= 0 ? String(r[ci]) : "", x: xi >= 0 ? String(r[xi]) : String(i + 1) }))
+    .map((r, i) => ({ y: toNum(r[yi]), c: ci >= 0 ? String(r[ci]) : "", x: xi >= 0 ? String(r[xi]) : String(i + 1), ri: i }))
     .filter((p) => Number.isFinite(p.y));
   if (xi >= 0) {
     const model = orderedKeys(rows, xi, 100000);
@@ -1828,6 +1932,15 @@ function drawSpiral(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
     ctx.stroke();
   }
   ctx.globalAlpha = 1;
+  pts.forEach((p, i) => {
+    const at = posOf(i);
+    const t = (p.y - lo) / span;
+    const match: [number, string][] = [];
+    if (xi >= 0) match.push([xi, p.x]);
+    if (ci >= 0) match.push([ci, p.c]);
+    match.push([yi, String(rows[p.ri]![yi])]);
+    hitCircle(env, at.x, at.y, Math.max(3, ((mini ? 1 : 1.5) + t * (mini ? 4 : 8)) / 2), match, p.ri);
+  });
   if (!mini && xi >= 0) {
     ctx.font = oddFont(env, 10);
     ctx.fillStyle = ink.muted;
@@ -1890,6 +2003,10 @@ function drawRadialBar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: Od
     ctx.fillStyle = env.single;
     ctx.fill();
     ctx.globalAlpha = 1;
+    hitArc(env, cx, cy, inner, r, a0, a1, [[xi, label]], firstRowIndex(rows, xi, label), {
+      columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null)],
+      row: [label, v],
+    });
     if (mini) return;
     const am = (a0 + a1) / 2;
     const lx = cx + Math.cos(am) * (r + 6);
@@ -1978,7 +2095,14 @@ function drawChord(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv
     const ang = angOf(i);
     const x = cx + Math.cos(ang) * R;
     const y = cy + Math.sin(ang) * R;
-    dot(ctx, x, y, (mini ? 2.5 : 3.5) + (mini ? 2 : 4) * Math.sqrt(nodeTotal.get(n)! / maxNode), nodeColor(n), 1, ink.bg);
+    const dotR = (mini ? 2.5 : 3.5) + (mini ? 2 : 4) * Math.sqrt(nodeTotal.get(n)! / maxNode);
+    dot(ctx, x, y, dotR, nodeColor(n), 1, ink.bg);
+    const col = sourceSet.has(n) ? xi : ci;
+    const half = Math.min(Math.PI / nodes.length, Math.max(dotR, 6) / R);
+    hitArc(env, cx, cy, Math.max(0, R - dotR), R + dotR, ang - half, ang + half, [[col, n]], firstRowIndex(rows, col, n), {
+      columns: [fieldName(env, col), aggregateAxisTitle(how, fieldName(env, yi) || null)],
+      row: [n, nodeTotal.get(n)!],
+    });
     if (mini) return;
     const right = Math.cos(ang) >= 0;
     const lx = cx + Math.cos(ang) * (R + 12);
@@ -2021,7 +2145,7 @@ function clipCloser(poly: Pt2[], a: Pt2, b: Pt2): Pt2[] {
 function drawVoronoi(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
   if (xi < 0 || yi < 0) return "Voronoi needs two numeric columns";
   let pts = rows
-    .map((r) => ({ x: toNum(r[xi]), y: toNum(r[yi]), c: ci >= 0 ? String(r[ci]) : "" }))
+    .map((r, ri) => ({ x: toNum(r[xi]), y: toNum(r[yi]), c: ci >= 0 ? String(r[ci]) : "", ri }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (!pts.length) return `No rows have numeric ${fieldName(env, xi, "x")} and ${fieldName(env, yi, "y")}`;
   const cap = env.mini ? 40 : 150;
@@ -2032,7 +2156,7 @@ function drawVoronoi(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   const plot = basePlot(env);
   const sx = linear(xs.min, xs.max, plot.left, plot.right);
   const sy = linear(ys.min, ys.max, plot.bottom, plot.top);
-  const mapped = pts.map((p) => ({ x: sx(p.x), y: sy(p.y), c: p.c }));
+  const mapped = pts.map((p) => ({ x: sx(p.x), y: sy(p.y), c: p.c, ri: p.ri }));
   const catIdx = categoryIndex(rows, ci);
   const colorOf = (c: string) => (ci >= 0 ? env.colors[(catIdx.get(c) ?? 0) % env.colors.length]! : env.single);
   const rect: Pt2[] = [
@@ -2059,7 +2183,13 @@ function drawVoronoi(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     ctx.lineWidth = 1;
     ctx.stroke();
   });
-  for (const p of mapped) dot(ctx, p.x, p.y, mini ? 1.8 : 3, colorOf(p.c), 1, ink.bg);
+  for (const p of mapped) {
+    dot(ctx, p.x, p.y, mini ? 1.8 : 3, colorOf(p.c), 1, ink.bg);
+    const row = rows[p.ri]!;
+    const match: [number, string][] = [[xi, String(row[xi])], [yi, String(row[yi])]];
+    if (ci >= 0) match.push([ci, p.c]);
+    hitCircle(env, p.x, p.y, mini ? 1.8 : 3, match, p.ri);
+  }
   if (mini) return;
   drawAxisFrame(ctx, env.w, env.h, plot, env.look);
   drawChartTicks(ctx, xs.min, xs.max, ys.min, ys.max, env.w, env.h, plot, env.look);
@@ -2095,8 +2225,8 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
   const step = (plot.right - plot.left) / n;
   const centers = entries.map((_, i) => plot.left + (i + 0.5) * step);
   const front = env.single;
-  const sideC = mixColor(front, "#000000", 0.3);
-  const topC = mixColor(front, "#ffffff", 0.25);
+  const sideC = mixColor(front, inkShadow(env.ink), 0.3);
+  const topC = mixColor(front, inkHighlight(env.ink), 0.25);
   const dx = layout.horizontal && layout.reverse ? -depth : depth;
   const dy = -depth * 0.6;
   const baseline = layout.reverse ? plot.top : plot.bottom;
@@ -2125,6 +2255,16 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     ctx.fillStyle = front;
     ctx.fillRect(x0, yT, bw, yB - yT);
     ctx.globalAlpha = 1;
+    const label = entries[i]![0];
+    // Hover anywhere on the block (incl. extrusion); focus hugs the front face.
+    const hx0 = Math.min(x0, x0 + dx);
+    const hx1 = Math.max(x1, x1 + dx);
+    const hy0 = Math.min(yT, yT + dy);
+    const hy1 = Math.max(yB, yB + dy);
+    hitRect(env, hx0, hy0, hx1 - hx0, hy1 - hy0, [[xi, label]], firstRowIndex(rows, xi, label), {
+      columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null)],
+      row: [label, v],
+    }, { x: x0, y: yT, w: bw, h: Math.max(1, yB - yT) });
   });
   if (mini) return;
   // Floor edge follows the extrusion (fake-3D), not a flat cartesian L-frame.
@@ -2171,7 +2311,7 @@ function drawIsoBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
 function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number, si: number) {
   if (xi < 0 || yi < 0) return "Isometric scatter needs two numeric columns";
   let pts = rows
-    .map((r) => ({ x: toNum(r[xi]), y: toNum(r[yi]), z: si >= 0 ? toNum(r[si]) : NaN, c: ci >= 0 ? String(r[ci]) : "", row: r }))
+    .map((r, ri) => ({ x: toNum(r[xi]), y: toNum(r[yi]), z: si >= 0 ? toNum(r[si]) : NaN, c: ci >= 0 ? String(r[ci]) : "", row: r, ri }))
     .filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y));
   if (!pts.length) return `No rows have numeric ${fieldName(env, xi, "x")} and ${fieldName(env, yi, "y")}`;
   const cap = env.mini ? 80 : 400;
@@ -2273,50 +2413,22 @@ function drawIsoScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: O
     }
     const color = ci >= 0 ? env.colors[(catIdx.get(d.p.c) ?? 0) % env.colors.length]! : env.single;
     mark(ctx, env, d.p.row, top.sx, top.sy, r, color, env.alpha, ink.bg);
+    const match: [number, string][] = [[xi, String(d.p.row[xi])], [yi, String(d.p.row[yi])]];
+    if (ci >= 0) match.push([ci, d.p.c]);
+    hitCircle(env, top.sx, top.sy, r, match, d.p.ri);
   }
   if (mini) return;
-  // Tick labels on the two floor edges from the origin — stay on the diamond after Direction.
-  const o = proj(0, 0, 0);
-  ctx.strokeStyle = inkTint(ink, 0.4);
-  ctx.lineWidth = 1.25;
-  ctx.beginPath();
-  ctx.moveTo(o.sx, o.sy);
-  ctx.lineTo(proj(1, 0, 0).sx, proj(1, 0, 0).sy);
-  ctx.moveTo(o.sx, o.sy);
-  ctx.lineTo(proj(0, 1, 0).sx, proj(0, 1, 0).sy);
-  ctx.stroke();
-
-  ctx.font = oddFont(env, 10);
-  ctx.fillStyle = ink.muted;
-  ctx.textBaseline = "top";
-  for (const v of xs.ticks) {
-    const p = proj(nX(v), 0, 0);
-    ctx.strokeStyle = inkTint(ink, 0.22);
-    ctx.beginPath();
-    ctx.moveTo(p.sx, p.sy);
-    ctx.lineTo(p.sx - 4, p.sy + 7);
-    ctx.stroke();
-    ctx.textAlign = "center";
-    ctx.fillText(formatAxisValue(v, xs.step), p.sx - 2, p.sy + 8);
-  }
-  for (const v of ys.ticks) {
-    const p = proj(0, nY(v), 0);
-    ctx.strokeStyle = inkTint(ink, 0.22);
-    ctx.beginPath();
-    ctx.moveTo(p.sx, p.sy);
-    ctx.lineTo(p.sx + 4, p.sy + 7);
-    ctx.stroke();
-    ctx.textAlign = "left";
-    ctx.fillText(formatAxisValue(v, ys.step), p.sx + 6, p.sy + 6);
-  }
-  ctx.font = oddFont(env, 10, 600);
-  ctx.fillStyle = ink.text;
-  const xm = proj(0.55, 0, 0);
-  const ym = proj(0, 0.55, 0);
-  ctx.textAlign = "center";
-  ctx.fillText(fitTextEllipsis(ctx, `${fieldName(env, xi)} →`, env.w / 2 - 20), xm.sx, xm.sy + 22);
-  ctx.textAlign = "left";
-  ctx.fillText(fitTextEllipsis(ctx, `← ${fieldName(env, yi)}`, env.w / 2 - 20), ym.sx + 10, ym.sy + 18);
+  // Use the front floor edges, outside the marks, in every Direction.
+  const floorPoint = (x: number, y: number) => { const p = proj(x, y, 0); return { x: p.sx, y: p.sy }; };
+  const xEdge = proj(0.5, 1, 0).sy > proj(0.5, 0, 0).sy ? 1 : 0;
+  const yEdge = proj(1, 0.5, 0).sy > proj(0, 0.5, 0).sy ? 1 : 0;
+  const occupied: AxisLabelBox[] = [];
+  const axis = { center: floorPoint(0.5, 0.5), width: env.w, height: env.h,
+    text: ink.text, muted: ink.muted, rule: inkTint(ink, 0.4), fontFamily: env.font, axisFontSize: env.opts.axisFontSize, occupied };
+  drawProjectedAxis(ctx, { ...axis, start: floorPoint(0, xEdge), end: floorPoint(1, xEdge),
+    ticks: xs.ticks, pointOf: v => floorPoint(nX(v), xEdge), format: v => formatAxisValue(v, xs.step), title: fieldName(env, xi) });
+  drawProjectedAxis(ctx, { ...axis, start: floorPoint(yEdge, 0), end: floorPoint(yEdge, 1),
+    ticks: ys.ticks, pointOf: v => floorPoint(yEdge, nY(v)), format: v => formatAxisValue(v, ys.step), title: fieldName(env, yi) });
   if (zs) {
     const p0 = proj(0, 0, 0);
     const p1 = proj(0, 0, 1);
@@ -2388,6 +2500,10 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
       ctx.globalAlpha = Math.max(0.8, env.alpha);
       ctx.fillRect(xCursor, yCursor, Math.max(0, colW - gap), Math.max(0, segH - gap));
       ctx.globalAlpha = 1;
+      hitRect(env, xCursor, yCursor, Math.max(1, colW - gap), Math.max(1, segH - gap), [[xi, a], [ci, b]], undefined, {
+        columns: [fieldName(env, xi), fieldName(env, ci), aggregateAxisTitle(how, fieldName(env, yi) || null), "share"],
+        row: [a, b, v, percentLabel(v / colTotal)],
+      });
       if (!mini && colW - gap >= 30 && segH - gap >= 14) {
         ctx.font = oddFont(env, 10);
         ctx.fillStyle = inkOn(color);
@@ -2413,7 +2529,7 @@ function drawMosaic(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEn
   ctx.textBaseline = "middle";
   for (const p of [0, 0.25, 0.5, 0.75, 1]) ctx.fillText(`${Math.round(p * 100)}%`, plot.left - 6, plot.bottom - p * ph);
   ctx.save();
-  ctx.translate(Math.max(10, plot.left - 40), (plot.top + plot.bottom) / 2);
+  ctx.translate(Math.max(chartTypeRamp(env.opts.axisFontSize).tick, plot.left - ctx.measureText("100%").width - chartTypeRamp(env.opts.axisFontSize).tick - 12), (plot.top + plot.bottom) / 2);
   ctx.rotate(-Math.PI / 2);
   ctx.textAlign = "center";
   ctx.fillText(fitTextEllipsis(ctx, `Share within ${fieldName(env, xi)} · width = ${aggregateAxisTitle(how, fieldName(env, yi) || null).toLowerCase()}`, ph), 0, 0);
@@ -2502,6 +2618,27 @@ function drawContour(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
       ctx.fillRect(plot.left + i * cellW, plot.top + j * cellH, cellW + 0.6, cellH + 0.6);
     }
   }
+  // No points are drawn: register coarse density blocks (4×4 cells) as summary rects.
+  const blk = 4;
+  for (let j = 0; j < gh; j += blk) {
+    for (let i = 0; i < gw; i += blk) {
+      const j1 = Math.min(gh, j + blk);
+      const i1 = Math.min(gw, i + blk);
+      let sum = 0;
+      let n = 0;
+      for (let jj = j; jj <= j1; jj++) for (let ii = i; ii <= i1; ii++) { sum += grid[jj]![ii]!; n++; }
+      const t = sum / (n * gmax);
+      if (t < 0.04) continue;
+      const x0v = xs.min + (i / gw) * (xs.max - xs.min);
+      const x1v = xs.min + (i1 / gw) * (xs.max - xs.min);
+      const y1v = ys.max - (j / gh) * (ys.max - ys.min);
+      const y0v = ys.max - (j1 / gh) * (ys.max - ys.min);
+      hitRect(env, plot.left + i * cellW, plot.top + j * cellH, (i1 - i) * cellW, (j1 - j) * cellH, [], undefined, {
+        columns: [fieldName(env, xi), fieldName(env, yi), "density"],
+        row: [`${formatDataValue(x0v)}–${formatDataValue(x1v)}`, `${formatDataValue(y0v)}–${formatDataValue(y1v)}`, percentLabel(t)],
+      });
+    }
+  }
   const levels = [0.2, 0.4, 0.6, 0.8];
   for (const th of levels) {
     const segs = isoSegments(grid.map((r) => r.map((v) => v / gmax)), th);
@@ -2535,3 +2672,1294 @@ function drawContour(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddE
     panel: true,
   });
 }
+
+// ---- calendar heatmap ------------------------------------------------------
+
+const DAY_MS = 86_400_000;
+
+/** Epoch ms for a date-ish cell (Date, ISO / date string, epoch s or ms); NaN otherwise. */
+function toTime(v: unknown): number {
+  if (v instanceof Date) return v.getTime();
+  if (typeof v === "bigint") v = Number(v);
+  if (typeof v === "number") {
+    if (!Number.isFinite(v)) return NaN;
+    // Bare years (1990) and small counts aren't instants.
+    if (Math.abs(v) < 1e9) return NaN;
+    return Math.abs(v) < 1e11 ? v * 1000 : v;
+  }
+  if (typeof v === "string" && v.trim() !== "") {
+    const t = Date.parse(v.trim().replace(" ", "T"));
+    return Number.isFinite(t) ? t : NaN;
+  }
+  return NaN;
+}
+
+const WEEKDAY_SHORT = ["Mon", "", "Wed", "", "Fri", "", ""];
+const MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function drawCalendar(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number) {
+  if (xi < 0) return "Calendar needs a date column";
+  const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
+  const byDay = new Map<number, { vals: number[]; ri: number }>();
+  for (let i = 0; i < rows.length; i++) {
+    const t = toTime(rows[i]![xi]);
+    if (!Number.isFinite(t)) continue;
+    const day = Math.floor(t / DAY_MS);
+    let d = byDay.get(day);
+    if (!d) {
+      d = { vals: [], ri: i };
+      byDay.set(day, d);
+    }
+    const v = yi >= 0 && how !== "count" ? toNum(rows[i]![yi]) : 1;
+    if (Number.isFinite(v)) d.vals.push(v);
+  }
+  if (byDay.size < 2) return "Calendar needs dates spread over at least two days";
+  const days = [...byDay.keys()].sort((a, b) => a - b);
+  let last = days[days.length - 1]!;
+  let first = days[0]!;
+  // At most a year of weeks — keep the most recent stretch.
+  const maxDays = 7 * 53 - 1;
+  const clipped = last - first > maxDays;
+  if (clipped) first = last - maxDays;
+  // Week columns start on Monday (1970-01-01 was a Thursday → +3).
+  const dow = (d: number) => (((d + 3) % 7) + 7) % 7;
+  const start = first - dow(first);
+  last = Math.max(last, first);
+  const weeks = Math.floor((last - start) / 7) + 1;
+  const values = new Map<number, number>();
+  for (const [d, g] of byDay) if (d >= first && g.vals.length) values.set(d, agg(g.vals, how));
+  const vs = [...values.values()];
+  if (!vs.length) return "No numeric values on those dates";
+  const lo = Math.min(0, ...vs);
+  const hi = Math.max(...vs);
+  const { mini, ink } = env;
+  const stops = sequentialStops(ink, env.opts.continuousStops);
+  const colorAt = (t: number) => rampColor(stops, 0.12 + 0.88 * t);
+  const measure = aggregateAxisTitle(how, fieldName(env, yi) || null);
+  const footer = layoutFooter(ctx, env, {
+    ramp: { min: lo, max: hi, colorAt, title: `${measure} per day` },
+    caption: clipped ? `Showing the latest 53 weeks of ${days.length} dated days` : undefined,
+  });
+  const { plot, footerTop } = plotAboveFooter(env, footer.height);
+  const leftGutter = mini ? 0 : 30;
+  const topGutter = mini ? 0 : 18;
+  const pw = plot.right - plot.left - leftGutter;
+  const ph = plot.bottom - plot.top - topGutter;
+  const cell = Math.max(2, Math.min(pw / weeks, ph / 7, mini ? 14 : 26));
+  const gridW = cell * weeks;
+  const ox = plot.left + leftGutter + Math.max(0, (pw - gridW) / 2);
+  const oy = plot.top + topGutter + Math.max(0, (ph - cell * 7) / 2);
+  const gap = cell > 8 ? 1.5 : cell > 4 ? 0.75 : 0;
+  const empty = inkTint(ink, ink.light ? 0.07 : 0.1);
+  const span = hi - lo || 1;
+  for (let d = first; d <= last; d++) {
+    const col = Math.floor((d - start) / 7);
+    const row = dow(d);
+    const x = ox + col * cell + gap / 2;
+    const y = oy + row * cell + gap / 2;
+    const v = values.get(d);
+    ctx.fillStyle = v == null ? empty : colorAt((v - lo) / span);
+    ctx.fillRect(x, y, cell - gap, cell - gap);
+    if (v == null) continue;
+    const iso = new Date(d * DAY_MS).toISOString().slice(0, 10);
+    const ri = byDay.get(d)?.ri;
+    hitRect(env, x, y, cell - gap, cell - gap, ri != null ? [[xi, String(rows[ri]![xi] ?? "")]] : [], ri, {
+      columns: ["date", measure],
+      row: [iso, v],
+    });
+  }
+  if (mini) {
+    footer.draw(footerTop);
+    return;
+  }
+  ctx.font = oddFont(env, 10);
+  ctx.fillStyle = ink.muted;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "right";
+  if (cell >= 9) WEEKDAY_SHORT.forEach((lbl, r) => lbl && ctx.fillText(lbl, ox - 5, oy + (r + 0.5) * cell));
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  let lastLabelEnd = -Infinity;
+  for (let col = 0; col < weeks; col++) {
+    const weekStart = start + col * 7;
+    const date = new Date(Math.max(weekStart, first) * DAY_MS);
+    const prev = new Date((Math.max(weekStart, first) - 7) * DAY_MS);
+    if (col > 0 && date.getUTCMonth() === prev.getUTCMonth()) continue;
+    const x = ox + col * cell;
+    const label = date.getUTCMonth() === 0 || col === 0 ? `${MONTH_SHORT[date.getUTCMonth()]} ${date.getUTCFullYear()}` : MONTH_SHORT[date.getUTCMonth()]!;
+    if (x < lastLabelEnd + 6) continue;
+    ctx.fillText(label, x, oy - 4);
+    lastLabelEnd = x + ctx.measureText(label).width;
+  }
+  footer.draw(footerTop);
+}
+
+// ---- nightingale rose -----------------------------------------------------
+
+function drawRose(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
+  if (xi < 0) return "Choose a category for the rose";
+  const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
+  const cap = env.opts.topN != null ? Math.max(3, Math.min(24, Math.round(env.opts.topN))) : 12;
+  const totals = groupSum(rows, xi, yi, how).filter(([, v]) => v > 0).slice(0, cap);
+  if (!totals.length) return "Nothing positive to draw petals for";
+  const stacked = ci >= 0 && ci !== xi && (how === "sum" || how === "count");
+  const catIdx = categoryIndex(rows, ci);
+  // Per wedge: stacked segments by Color (sum / count only — means don't stack).
+  const segs = new Map<string, Map<string, number[]>>();
+  if (stacked) {
+    const keep = new Set(totals.map(([k]) => k));
+    for (const r of rows) {
+      const k = String(r[xi] ?? "");
+      if (!keep.has(k)) continue;
+      const c = String(r[ci]);
+      const v = yi >= 0 && how !== "count" ? toNum(r[yi]) : 1;
+      if (!Number.isFinite(v)) continue;
+      let m = segs.get(k);
+      if (!m) segs.set(k, (m = new Map()));
+      let arr = m.get(c);
+      if (!arr) m.set(c, (arr = []));
+      arr.push(v);
+    }
+  }
+  const { mini, ink } = env;
+  const plot = basePlot(env);
+  const cx = (plot.left + plot.right) / 2;
+  const cy = (plot.top + plot.bottom) / 2;
+  ctx.font = oddFont(env, 10);
+  const labelRoom = mini ? 0 : Math.min(64, Math.max(28, Math.max(...totals.map(([l]) => ctx.measureText(l).width)) * 0.55 + 12));
+  const maxR = Math.max(16, Math.min(plot.right - plot.left, plot.bottom - plot.top) / 2 - labelRoom + (mini ? 0 : env.pad * 0.4));
+  const vmax = Math.max(...totals.map(([, v]) => v));
+  // Area-true: radius ∝ √value, so a wedge's area reads as its share.
+  const rOf = (v: number) => maxR * Math.sqrt(Math.max(0, v) / (vmax || 1));
+  const slice = (Math.PI * 2) / totals.length;
+  const startA = -Math.PI / 2;
+  if (!mini) {
+    const scale = niceTicks(0, vmax, 3, false);
+    ctx.strokeStyle = inkTint(ink, ink.light ? 0.12 : 0.14);
+    ctx.lineWidth = 1;
+    for (const v of scale.ticks) {
+      if (v <= 0 || v > vmax) continue;
+      ctx.beginPath();
+      ctx.arc(cx, cy, rOf(v), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+  totals.forEach(([label, total], i) => {
+    const a0 = startA + i * slice + (mini ? 0.01 : 0.02);
+    const a1 = startA + (i + 1) * slice - (mini ? 0.01 : 0.02);
+    const ri = firstRowIndex(rows, xi, label);
+    const wedge = (r0: number, r1: number, fill: string) => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r1, a0, a1);
+      ctx.arc(cx, cy, r0, a1, a0, true);
+      ctx.closePath();
+      ctx.globalAlpha = Math.max(0.78, env.alpha);
+      ctx.fillStyle = fill;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = ink.bg;
+      ctx.lineWidth = mini ? 0.5 : 1;
+      ctx.stroke();
+    };
+    if (stacked) {
+      const parts = [...(segs.get(label) ?? new Map()).entries()]
+        .map(([c, vs]) => [c, agg(vs, how)] as [string, number])
+        .filter(([, v]) => v > 0)
+        .sort((a, b) => (catIdx.get(a[0]) ?? 0) - (catIdx.get(b[0]) ?? 0));
+      let acc = 0;
+      for (const [c, v] of parts) {
+        const r0 = rOf(acc);
+        acc += v;
+        const r1 = rOf(acc);
+        wedge(r0, r1, env.colors[(catIdx.get(c) ?? 0) % env.colors.length]!);
+        hitArc(env, cx, cy, r0, r1, a0, a1, [[xi, label], [ci, c]], ri, {
+          columns: [fieldName(env, xi), fieldName(env, ci), aggregateAxisTitle(how, fieldName(env, yi) || null)],
+          row: [label, c, v],
+        });
+      }
+    } else {
+      wedge(0, rOf(total), env.colors[i % env.colors.length]!);
+      hitArc(env, cx, cy, 0, rOf(total), a0, a1, [[xi, label]], ri, {
+        columns: [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null)],
+        row: [label, total],
+      });
+    }
+    if (mini) return;
+    const am = (a0 + a1) / 2;
+    const r = Math.max(rOf(total), maxR * 0.25);
+    const lx = cx + Math.cos(am) * (r + 6);
+    const ly = cy + Math.sin(am) * (r + 6);
+    const right = Math.cos(am) >= 0;
+    ctx.font = oddFont(env, 10);
+    ctx.fillStyle = ink.text;
+    ctx.textAlign = Math.abs(Math.cos(am)) < 0.2 ? "center" : right ? "left" : "right";
+    ctx.textBaseline = Math.sin(am) > 0.6 ? "top" : Math.sin(am) < -0.6 ? "bottom" : "middle";
+    const room = right ? env.w - 4 - lx : lx - 4;
+    const text = env.opts.showDataLabels ? `${label} · ${formatDataValue(total)}` : label;
+    ctx.fillText(fitTextEllipsis(ctx, text, Math.max(24, Math.min(room, 140))), lx, ly);
+  });
+  if (stacked) drawPanelLegend(ctx, env, legendEntriesFor(rows, ci, env.colors), fieldName(env, ci), plot, "top-right");
+}
+
+// ---- ECDF ------------------------------------------------------------------
+
+function drawEcdf(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, _yi: number, ci: number) {
+  if (xi < 0) return "ECDF needs a numeric column";
+  const series = new Map<string, number[]>();
+  const catIdx = categoryIndex(rows, ci);
+  for (const r of rows) {
+    const v = toNum(r[xi]);
+    if (!Number.isFinite(v)) continue;
+    const k = ci >= 0 ? String(r[ci]) : "";
+    if (ci >= 0 && !series.has(k) && series.size >= 8) continue;
+    let arr = series.get(k);
+    if (!arr) series.set(k, (arr = []));
+    arr.push(v);
+  }
+  const all = [...series.values()].flat();
+  if (all.length < 3) return "ECDF needs at least three numeric values";
+  const { mini, ink } = env;
+  const xs = niceTicks(Math.min(...all), Math.max(...all), 5, true);
+  const plot = basePlot(env);
+  const pw = plot.right - plot.left;
+  const ph = plot.bottom - plot.top;
+  const sx = (v: number) => plot.left + ((v - xs.min) / (xs.max - xs.min || 1)) * pw;
+  const sy = (p: number) => plot.bottom - p * ph;
+  if (!mini) {
+    drawChartGrid(ctx, env.w, env.h, plot, gridLook(env));
+    // Median guide
+    ctx.save();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = inkTint(ink, 0.35);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(plot.left, Math.round(sy(0.5)) + 0.5);
+    ctx.lineTo(plot.right, Math.round(sy(0.5)) + 0.5);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const entries: SwatchEntry[] = [];
+  ctx.lineCap = env.opts.lineCap ?? "round";
+  ctx.lineJoin = env.opts.lineJoin ?? "round";
+  for (const [k, vals] of series) {
+    vals.sort((a, b) => a - b);
+    const color = ci >= 0 ? env.colors[(catIdx.get(k) ?? 0) % env.colors.length]! : env.single;
+    const n = vals.length;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = mini ? 1.2 : 2;
+    ctx.globalAlpha = Math.max(0.75, env.alpha);
+    ctx.beginPath();
+    ctx.moveTo(plot.left, sy(0));
+    ctx.lineTo(sx(vals[0]!), sy(0));
+    for (let i = 0; i < n; i++) {
+      const x = sx(vals[i]!);
+      ctx.lineTo(x, sy(i / n));
+      ctx.lineTo(x, sy((i + 1) / n));
+    }
+    ctx.lineTo(plot.right, sy(1));
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    // Hover: ~40 evenly spaced quantiles per series.
+    const step = Math.max(1, Math.floor(n / 40));
+    for (let i = 0; i < n; i += step) {
+      const p = (i + 1) / n;
+      const match: [number, string][] = [[xi, String(vals[i])]];
+      if (ci >= 0) match.push([ci, k]);
+      hitCircle(env, sx(vals[i]!), sy(p), 4, match, undefined, {
+        columns: [...(ci >= 0 ? [fieldName(env, ci)] : []), fieldName(env, xi), "share at or below"],
+        row: [...(ci >= 0 ? [k] : []), vals[i]!, percentLabel(p)],
+      });
+    }
+    if (ci >= 0) entries.push({ label: `${k} (n=${n})`, color, shape: "line" });
+  }
+  if (mini) return;
+  drawAxisFrame(ctx, env.w, env.h, plot, env.look);
+  drawChartTicks(ctx, xs.min, xs.max, 0, 1, env.w, env.h, plot, env.look, { yFormat: (v) => `${Math.round(v * 100)}%` });
+  drawAxisFieldLabels(ctx, env.w, env.h, env.pad, fieldName(env, xi), "share of rows ≤ value", env.look);
+  if (entries.length) drawPanelLegend(ctx, env, entries, fieldName(env, ci), plot, "bottom-right");
+}
+
+// ---- sparkline grid --------------------------------------------------------
+
+function drawSparkGrid(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
+  if (xi < 0 || yi < 0) return "Sparkline grid needs an order column and a numeric column";
+  const how = env.opts.yAggregate ?? "mean";
+  const model = orderedKeys(rows, xi, env.mini ? 30 : 60, true);
+  if (model.keys.length < 2) return "Need at least two points along the order column";
+  const keyPos = new Map(model.keys.map((k, i) => [k, i]));
+  const cap = env.opts.topN != null ? Math.max(2, Math.min(36, Math.round(env.opts.topN))) : env.mini ? 9 : 24;
+  const panels = new Map<string, number[][]>();
+  const volume = new Map<string, number>();
+  for (const r of rows) {
+    const v = env.opts.yAggregate === "count" ? 1 : toNum(r[yi]);
+    if (!Number.isFinite(v)) continue;
+    const p = keyPos.get(model.keyOf(r));
+    if (p == null) continue;
+    const name = ci >= 0 ? String(r[ci]) : fieldName(env, yi);
+    let buckets = panels.get(name);
+    if (!buckets) panels.set(name, (buckets = model.keys.map(() => [])));
+    buckets[p]!.push(v);
+    volume.set(name, (volume.get(name) ?? 0) + Math.abs(v));
+  }
+  const names = [...panels.keys()].sort((a, b) => volume.get(b)! - volume.get(a)!).slice(0, cap);
+  if (!names.length) return "No numeric values to draw";
+  const { mini, ink } = env;
+  const series = names.map((name) =>
+    panels.get(name)!.map((vs, i) => ({ i, v: vs.length ? agg(vs, how) : NaN })).filter((p) => Number.isFinite(p.v)),
+  );
+  const hidden = panels.size - names.length;
+  const footer = layoutFooter(ctx, env, {
+    caption: `${aggregateAxisTitle(how, fieldName(env, yi))} along ${fieldName(env, xi)} · each panel on its own scale${hidden > 0 ? ` · ${hidden} smaller panel${hidden === 1 ? "" : "s"} hidden` : ""}`,
+  });
+  const { plot, footerTop } = plotAboveFooter(env, footer.height);
+  const grid = multiplesGrid(names.length, plot);
+  const headH = mini ? 0 : chartTypeRamp(env.opts.axisFontSize).mark + 6;
+  const n = model.keys.length;
+  names.forEach((name, idx) => {
+    const pts = series[idx]!;
+    const gx = plot.left + (idx % grid.cols) * grid.cw;
+    const gy = plot.top + Math.floor(idx / grid.cols) * grid.ch;
+    const inner = { l: gx + 6, r: gx + grid.cw - 6, t: gy + headH + 4, b: gy + grid.ch - 6 };
+    if (!mini) {
+      ctx.strokeStyle = inkTint(ink, ink.light ? 0.1 : 0.12);
+      ctx.lineWidth = 1;
+      ctx.strokeRect(Math.round(gx + 2) + 0.5, Math.round(gy + 2) + 0.5, grid.cw - 4, grid.ch - 4);
+    }
+    if (pts.length < 1 || inner.b - inner.t < 6) return;
+    const lo = Math.min(...pts.map((p) => p.v));
+    const hi = Math.max(...pts.map((p) => p.v));
+    const span = hi - lo || 1;
+    const sx = (i: number) => inner.l + (n === 1 ? 0.5 : model.pos[i]!) * (inner.r - inner.l);
+    const sy = (v: number) => inner.b - ((v - lo) / span) * (inner.b - inner.t);
+    const color = env.colors[idx % env.colors.length]!;
+    // Soft area under the line, then the line.
+    ctx.beginPath();
+    ctx.moveTo(sx(pts[0]!.i), inner.b);
+    for (const p of pts) ctx.lineTo(sx(p.i), sy(p.v));
+    ctx.lineTo(sx(pts[pts.length - 1]!.i), inner.b);
+    ctx.closePath();
+    ctx.fillStyle = withAlpha(color, 0.14);
+    ctx.fill();
+    ctx.beginPath();
+    pts.forEach((p, k) => (k ? ctx.lineTo(sx(p.i), sy(p.v)) : ctx.moveTo(sx(p.i), sy(p.v))));
+    ctx.strokeStyle = color;
+    ctx.lineWidth = mini ? 1 : 1.6;
+    ctx.lineJoin = env.opts.lineJoin ?? "round";
+    ctx.lineCap = env.opts.lineCap ?? "round";
+    ctx.stroke();
+    const lastP = pts[pts.length - 1]!;
+    dot(ctx, sx(lastP.i), sy(lastP.v), mini ? 1.6 : 2.6, color, 1, mini ? null : ink.bg);
+    for (const p of pts) {
+      const match: [number, string][] = [];
+      if (ci >= 0) match.push([ci, name]);
+      hitCircle(env, sx(p.i), sy(p.v), 4, match, undefined, {
+        columns: [...(ci >= 0 ? [fieldName(env, ci)] : []), fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi))],
+        row: [...(ci >= 0 ? [name] : []), model.kind === "time" ? formatDateCell(model.keys[p.i]!) : model.keys[p.i]!, p.v],
+      });
+    }
+    if (mini) return;
+    ctx.font = oddFont(env, 10, 600);
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.fillStyle = ink.text;
+    const valueText = formatDataValue(lastP.v);
+    ctx.font = oddFont(env, 10);
+    const valueW = ctx.measureText(valueText).width;
+    ctx.font = oddFont(env, 10, 600);
+    ctx.fillText(fitTextEllipsis(ctx, name, Math.max(20, grid.cw - 18 - valueW)), gx + 7, gy + 5);
+    ctx.font = oddFont(env, 10);
+    ctx.textAlign = "right";
+    ctx.fillStyle = ink.muted;
+    ctx.fillText(valueText, gx + grid.cw - 7, gy + 5);
+  });
+  footer.draw(footerTop);
+}
+
+// ---- density curve ---------------------------------------------------------
+
+/** Gaussian KDE on an even grid; Silverman bandwidth. */
+function kde(vals: number[], lo: number, hi: number, n: number): number[] {
+  const m = vals.length;
+  const mean = vals.reduce((a, b) => a + b, 0) / m;
+  const sd = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / Math.max(1, m - 1));
+  const sorted = [...vals].sort((a, b) => a - b);
+  const iqr = (sorted[Math.floor(m * 0.75)] ?? 0) - (sorted[Math.floor(m * 0.25)] ?? 0);
+  const spread = Math.min(sd || Infinity, iqr > 0 ? iqr / 1.34 : Infinity);
+  const bw = Math.max(1e-9, 0.9 * (Number.isFinite(spread) ? spread : (hi - lo) / 10 || 1) * m ** -0.2);
+  const out = new Array<number>(n).fill(0);
+  const k = 1 / (m * bw * Math.sqrt(2 * Math.PI));
+  for (let i = 0; i < n; i++) {
+    const x = lo + ((hi - lo) * i) / (n - 1);
+    let s = 0;
+    for (const v of vals) {
+      const z = (x - v) / bw;
+      if (z > -5 && z < 5) s += Math.exp(-0.5 * z * z);
+    }
+    out[i] = s * k;
+  }
+  return out;
+}
+
+function seriesBy(rows: unknown[][], vi: number, ci: number, max = 8): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  for (const r of rows) {
+    const v = toNum(r[vi]);
+    if (!Number.isFinite(v)) continue;
+    const k = ci >= 0 ? String(r[ci]) : "";
+    if (ci >= 0 && !out.has(k) && out.size >= max) continue;
+    let arr = out.get(k);
+    if (!arr) out.set(k, (arr = []));
+    arr.push(v);
+  }
+  return out;
+}
+
+function drawDensity(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, _yi: number, ci: number) {
+  if (xi < 0) return "Density needs a numeric column";
+  const series = [...seriesBy(rows, xi, ci).entries()].filter(([, v]) => v.length >= 3);
+  if (!series.length) return "Density needs at least three numeric values";
+  const all = series.flatMap(([, v]) => v);
+  const { mini } = env;
+  const xs = niceTicks(Math.min(...all), Math.max(...all), 5, true);
+  const N = mini ? 60 : 160;
+  const curves = series.map(([k, v]) => ({ k, n: v.length, vals: v, d: kde(v, xs.min, xs.max, N) }));
+  const peak = Math.max(...curves.flatMap((c) => c.d));
+  if (!(peak > 0)) return "Values are identical — no spread to draw";
+  const ys = niceTicks(0, peak, 4, true);
+  const plot = basePlot(env);
+  const pw = plot.right - plot.left;
+  const ph = plot.bottom - plot.top;
+  const sx = (v: number) => plot.left + ((v - xs.min) / (xs.max - xs.min || 1)) * pw;
+  const sy = (d: number) => plot.bottom - (d / (ys.max || 1)) * ph;
+  const catIdx = categoryIndex(rows, ci);
+  if (!mini) drawChartGrid(ctx, env.w, env.h, plot, gridLook(env), { x: [xs.min, xs.max], y: [ys.min, ys.max] });
+  const entries: SwatchEntry[] = [];
+  ctx.lineJoin = env.opts.lineJoin ?? "round";
+  for (const c of curves) {
+    const color = ci >= 0 ? env.colors[(catIdx.get(c.k) ?? 0) % env.colors.length]! : env.single;
+    const xAt = (i: number) => sx(xs.min + ((xs.max - xs.min) * i) / (N - 1));
+    // Soft fill fading to the baseline, then the curve.
+    const grad = ctx.createLinearGradient(0, plot.top, 0, plot.bottom);
+    // Many overlapping groups: lines only (fills would stack into a wash).
+    grad.addColorStop(0, withAlpha(color, curves.length > 1 ? 0.24 : 0.42));
+    grad.addColorStop(1, withAlpha(color, 0.03));
+    if (curves.length <= 3) {
+      ctx.beginPath();
+      ctx.moveTo(xAt(0), plot.bottom);
+      c.d.forEach((d, i) => ctx.lineTo(xAt(i), sy(d)));
+      ctx.lineTo(xAt(N - 1), plot.bottom);
+      ctx.closePath();
+      ctx.fillStyle = grad;
+      ctx.fill();
+    }
+    ctx.beginPath();
+    c.d.forEach((d, i) => (i ? ctx.lineTo(xAt(i), sy(d)) : ctx.moveTo(xAt(i), sy(d))));
+    ctx.strokeStyle = color;
+    ctx.lineWidth = mini ? 1.2 : 2;
+    ctx.stroke();
+    // Rug of raw values along the floor.
+    if (!mini && curves.length <= 3 && c.vals.length <= 600) {
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const v of c.vals) {
+        ctx.moveTo(Math.round(sx(v)) + 0.5, plot.bottom);
+        ctx.lineTo(Math.round(sx(v)) + 0.5, plot.bottom - 5);
+      }
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    const sorted = [...c.vals].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)]!;
+    for (let i = 0; i < N; i += Math.max(1, Math.floor(N / 40))) {
+      const xv = xs.min + ((xs.max - xs.min) * i) / (N - 1);
+      hitCircle(env, xAt(i), sy(c.d[i]!), 4, ci >= 0 ? [[ci, c.k]] : [], undefined, {
+        columns: [...(ci >= 0 ? [fieldName(env, ci)] : []), fieldName(env, xi), "density", "rows", "median"],
+        row: [...(ci >= 0 ? [c.k] : []), formatDataValue(xv), formatDataValue(c.d[i]!), c.n, median],
+      });
+    }
+    if (ci >= 0) entries.push({ label: `${c.k} (n=${c.n})`, color, shape: "line" });
+  }
+  if (mini) return;
+  drawAxisFrame(ctx, env.w, env.h, plot, env.look);
+  drawChartTicks(ctx, xs.min, xs.max, ys.min, ys.max, env.w, env.h, plot, env.look);
+  drawAxisFieldLabels(ctx, env.w, env.h, env.pad, fieldName(env, xi), "density", env.look);
+  if (entries.length) drawPanelLegend(ctx, env, entries, fieldName(env, ci), plot, "top-right");
+}
+
+// ---- Q–Q plot --------------------------------------------------------------
+
+/** Inverse standard normal CDF (Acklam's rational approximation). */
+function normalQuantile(p: number): number {
+  const a = [-39.6968302866538, 220.946098424521, -275.928510446969, 138.357751867269, -30.6647980661472, 2.50662827745924];
+  const b = [-54.4760987982241, 161.585836858041, -155.698979859887, 66.8013118877197, -13.2806815528857];
+  const c = [-0.00778489400243029, -0.322396458041136, -2.40075827716184, -2.54973253934373, 4.37466414146497, 2.93816398269878];
+  const d = [0.00778469570904146, 0.32246712907004, 2.445134137143, 3.75440866190742];
+  const lo = 0.02425;
+  if (p < lo) {
+    const q = Math.sqrt(-2 * Math.log(p));
+    return (((((c[0]! * q + c[1]!) * q + c[2]!) * q + c[3]!) * q + c[4]!) * q + c[5]!) / ((((d[0]! * q + d[1]!) * q + d[2]!) * q + d[3]!) * q + 1);
+  }
+  if (p > 1 - lo) return -normalQuantile(1 - p);
+  const q = p - 0.5;
+  const r = q * q;
+  return ((((((a[0]! * r + a[1]!) * r + a[2]!) * r + a[3]!) * r + a[4]!) * r + a[5]!) * q) / (((((b[0]! * r + b[1]!) * r + b[2]!) * r + b[3]!) * r + b[4]!) * r + 1);
+}
+
+function drawQq(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number) {
+  if (xi < 0) return "Q–Q plot needs a numeric column";
+  let vals = rows.map((r) => toNum(r[xi])).filter(Number.isFinite).sort((a, b) => a - b);
+  if (vals.length < 5) return "Q–Q plot needs at least five numeric values";
+  const cap = env.mini ? 200 : 1500;
+  if (vals.length > cap) vals = Array.from({ length: cap }, (_, i) => vals[Math.round((i * (vals.length - 1)) / (cap - 1))]!);
+  const n = vals.length;
+  const pts = vals.map((v, i) => ({ z: normalQuantile((i + 0.5) / n), v }));
+  const { mini, ink } = env;
+  const xs = niceTicks(pts[0]!.z, pts[n - 1]!.z, 5, true);
+  const ys = niceTicks(vals[0]!, vals[n - 1]!, 5, true);
+  const plot = basePlot(env);
+  const sx = (z: number) => plot.left + ((z - xs.min) / (xs.max - xs.min || 1)) * (plot.right - plot.left);
+  const sy = (v: number) => plot.bottom - ((v - ys.min) / (ys.max - ys.min || 1)) * (plot.bottom - plot.top);
+  if (!mini) drawChartGrid(ctx, env.w, env.h, plot, gridLook(env), { x: [xs.min, xs.max], y: [ys.min, ys.max] });
+  // Reference line through the quartiles (robust to tails).
+  const q1 = vals[Math.floor(n * 0.25)]!;
+  const q3 = vals[Math.floor(n * 0.75)]!;
+  const z1 = normalQuantile(0.25);
+  const slope = (q3 - q1) / (2 * -z1 || 1);
+  const icpt = q1 - slope * z1;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top);
+  ctx.clip();
+  ctx.setLineDash([5, 4]);
+  ctx.strokeStyle = inkTint(ink, 0.55);
+  ctx.lineWidth = 1.25;
+  ctx.beginPath();
+  ctx.moveTo(sx(xs.min), sy(icpt + slope * xs.min));
+  ctx.lineTo(sx(xs.max), sy(icpt + slope * xs.max));
+  ctx.stroke();
+  ctx.restore();
+  const r = mini ? 1.6 : Math.max(2, Math.min(4, 180 / Math.sqrt(n)));
+  // Points far from the line glow in the second palette color.
+  const resid = pts.map((p) => Math.abs(p.v - (icpt + slope * p.z)));
+  const rs = [...resid].sort((a, b) => a - b);
+  const cut = rs[Math.floor(rs.length * 0.9)] ?? Infinity;
+  const off = env.colors[1 % env.colors.length]!;
+  pts.forEach((p, i) => {
+    const far = resid[i]! > cut && resid[i]! > (q3 - q1) * 0.25;
+    dot(ctx, sx(p.z), sy(p.v), r, far ? off : env.single, env.alpha, mini ? null : ink.bg);
+    if (i % Math.max(1, Math.floor(n / 300)) === 0 || far) {
+      hitCircle(env, sx(p.z), sy(p.v), Math.max(r, 4), [[xi, String(p.v)]], undefined, {
+        columns: [fieldName(env, xi), "normal quantile", "percentile", "vs normal line"],
+        row: [p.v, formatDataValue(p.z), percentLabel((i + 0.5) / n), formatDataValue(p.v - (icpt + slope * p.z))],
+      });
+    }
+  });
+  if (mini) return;
+  drawAxisFrame(ctx, env.w, env.h, plot, env.look);
+  drawChartTicks(ctx, xs.min, xs.max, ys.min, ys.max, env.w, env.h, plot, env.look, { xFormat: (v) => `${v > 0 ? "+" : ""}${formatAxisValue(v, xs.step)}σ` });
+  drawAxisFieldLabels(ctx, env.w, env.h, env.pad, "Normal quantile", fieldName(env, xi), env.look);
+  drawPanelLegend(ctx, env, [
+    { label: "Normal line", color: inkTint(ink, 0.55), shape: "line" },
+    { label: "Farthest 10%", color: off },
+  ], undefined, plot, "top-left");
+}
+
+// ---- connected scatter -----------------------------------------------------
+
+function drawConnectedScatter(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, _ci: number, si: number) {
+  if (xi < 0 || yi < 0) return "Connected scatter needs two numeric columns";
+  type P = { x: number; y: number; o: number; label: string; ri: number };
+  // No Order chosen: follow a date column when the table has one, else row order.
+  if (si < 0) {
+    for (let c = 0; c < env.columns.length && si < 0; c++) {
+      if (c === xi || c === yi) continue;
+      const sample = rows.slice(0, 30).map((r) => r[c]);
+      if (sample.length && sample.filter((v) => typeof v !== "number" && Number.isFinite(toTime(v))).length >= sample.length * 0.8) si = c;
+    }
+  }
+  let pts: P[] = [];
+  rows.forEach((r, i) => {
+    const x = toNum(r[xi]);
+    const y = toNum(r[yi]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    const raw = si >= 0 ? r[si] : i;
+    const t = si >= 0 ? (Number.isFinite(toTime(raw)) ? toTime(raw) : toNum(raw)) : i;
+    if (!Number.isFinite(t)) return;
+    pts.push({ x, y, o: t, label: si >= 0 ? String(raw) : String(i + 1), ri: i });
+  });
+  if (pts.length < 3) return "Need at least three points to connect";
+  pts.sort((a, b) => a.o - b.o);
+  // Many rows per step: average each order value into one point.
+  const byO = new Map<number, P[]>();
+  for (const p of pts) {
+    let g = byO.get(p.o);
+    if (!g) byO.set(p.o, (g = []));
+    g.push(p);
+  }
+  pts = [...byO.values()].map((g) => ({ ...g[0]!, x: g.reduce((s, p) => s + p.x, 0) / g.length, y: g.reduce((s, p) => s + p.y, 0) / g.length }));
+  // A long order reads as noise: fold it into ~40 equal steps, averaging each.
+  const steps = env.mini ? 24 : 40;
+  if (pts.length > steps * 1.5) {
+    const lo = pts[0]!.o;
+    const width = (pts[pts.length - 1]!.o - lo) / steps || 1;
+    const bins = new Map<number, P[]>();
+    for (const p of pts) {
+      const b = Math.min(steps - 1, Math.floor((p.o - lo) / width));
+      let g = bins.get(b);
+      if (!g) bins.set(b, (g = []));
+      g.push(p);
+    }
+    pts = [...bins.entries()].sort((a, b) => a[0] - b[0]).map(([, g]) => ({
+      ...g[0]!,
+      x: g.reduce((s, p) => s + p.x, 0) / g.length,
+      y: g.reduce((s, p) => s + p.y, 0) / g.length,
+    }));
+  }
+  const { mini, ink } = env;
+  const xs = niceTicks(Math.min(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.x)), 5, true);
+  const ys = niceTicks(Math.min(...pts.map((p) => p.y)), Math.max(...pts.map((p) => p.y)), 5, true);
+  const plot = basePlot(env);
+  const sx = (v: number) => plot.left + ((v - xs.min) / (xs.max - xs.min || 1)) * (plot.right - plot.left);
+  const sy = (v: number) => plot.bottom - ((v - ys.min) / (ys.max - ys.min || 1)) * (plot.bottom - plot.top);
+  if (!mini) drawChartGrid(ctx, env.w, env.h, plot, gridLook(env), { x: [xs.min, xs.max], y: [ys.min, ys.max] });
+  const stops = sequentialStops(ink, env.opts.continuousStops);
+  const colorAt = (i: number) => rampColor(stops, 0.25 + 0.75 * (i / Math.max(1, pts.length - 1)));
+  ctx.lineCap = env.opts.lineCap ?? "round";
+  ctx.lineJoin = env.opts.lineJoin ?? "round";
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1]!;
+    const b = pts[i]!;
+    ctx.strokeStyle = colorAt(i);
+    ctx.globalAlpha = Math.max(0.6, env.alpha);
+    ctx.lineWidth = mini ? 1 : 1.8;
+    ctx.beginPath();
+    ctx.moveTo(sx(a.x), sy(a.y));
+    ctx.lineTo(sx(b.x), sy(b.y));
+    ctx.stroke();
+    // Small chevron mid-segment shows travel direction.
+    const len = Math.hypot(sx(b.x) - sx(a.x), sy(b.y) - sy(a.y));
+    if (!mini && len > 22 && pts.length <= 120) {
+      const ang = Math.atan2(sy(b.y) - sy(a.y), sx(b.x) - sx(a.x));
+      const mx = (sx(a.x) + sx(b.x)) / 2;
+      const my = (sy(a.y) + sy(b.y)) / 2;
+      ctx.beginPath();
+      ctx.moveTo(mx + Math.cos(ang) * 4, my + Math.sin(ang) * 4);
+      ctx.lineTo(mx + Math.cos(ang + 2.5) * 4, my + Math.sin(ang + 2.5) * 4);
+      ctx.lineTo(mx + Math.cos(ang - 2.5) * 4, my + Math.sin(ang - 2.5) * 4);
+      ctx.closePath();
+      ctx.fillStyle = colorAt(i);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+  const r = mini ? 1.6 : pts.length > 150 ? 2.2 : 3.4;
+  pts.forEach((p, i) => {
+    mark(ctx, env, rows[p.ri], sx(p.x), sy(p.y), i === 0 || i === pts.length - 1 ? r * 1.5 : r, colorAt(i), 1, mini ? null : ink.bg);
+    hitCircle(env, sx(p.x), sy(p.y), Math.max(r, 4), [[xi, String(rows[p.ri]![xi])], [yi, String(rows[p.ri]![yi])]], p.ri, {
+      columns: [si >= 0 ? `${fieldName(env, si)} (from)` : "step", `${fieldName(env, xi)} (mean)`, `${fieldName(env, yi)} (mean)`],
+      row: [/^\d{4}-\d{2}-\d{2}/.test(p.label) ? formatDateCell(p.label) : p.label, p.x, p.y],
+    });
+  });
+  if (mini) return;
+  drawAxisFrame(ctx, env.w, env.h, plot, env.look);
+  drawChartTicks(ctx, xs.min, xs.max, ys.min, ys.max, env.w, env.h, plot, env.look);
+  drawAxisFieldLabels(ctx, env.w, env.h, env.pad, fieldName(env, xi), fieldName(env, yi), env.look);
+  // Label the journey's ends.
+  const when = (v: string) => (/^\d{4}-\d{2}-\d{2}/.test(v) ? formatDateCell(v) : v);
+  ctx.font = oddFont(env, 10, 600);
+  ctx.textBaseline = "bottom";
+  const s0 = pts[0]!;
+  const s1 = pts[pts.length - 1]!;
+  const crowded = Math.abs(sy(s0.y) - sy(s1.y)) < 18 && Math.abs(sx(s0.x) - sx(s1.x)) < 170;
+  for (const [p, tag] of [[s0, "start"], [s1, "end"]] as const) {
+    const x = sx(p.x);
+    const below = crowded && tag === "end";
+    ctx.textBaseline = below ? "top" : "bottom";
+    const y = below ? sy(p.y) + r * 1.5 + 3 : sy(p.y) - r * 1.5 - 3;
+    const text = fitTextEllipsis(ctx, `${tag} · ${when(p.label)}`, 160);
+    ctx.textAlign = x > (plot.left + plot.right) / 2 ? "right" : "left";
+    ctx.strokeStyle = ink.bg;
+    ctx.lineWidth = 3;
+    ctx.lineJoin = "round";
+    ctx.strokeText(text, x, y);
+    ctx.fillStyle = ink.text;
+    ctx.fillText(text, x, y);
+  }
+}
+
+// ---- warming stripes -------------------------------------------------------
+
+function drawStripes(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number) {
+  if (xi < 0 || yi < 0) return "Stripes need an order column and a numeric column";
+  const model = orderedKeys(rows, xi, env.mini ? 40 : 90, true);
+  const sums = new Map<string, number[]>();
+  for (const r of rows) {
+    const v = env.opts.yAggregate === "count" ? 1 : toNum(r[yi]);
+    if (!Number.isFinite(v)) continue;
+    const k = model.keyOf(r);
+    let arr = sums.get(k);
+    if (!arr) sums.set(k, (arr = []));
+    arr.push(v);
+  }
+  const how = env.opts.yAggregate ?? "mean";
+  const pts = model.keys.map((k) => ({ k, v: sums.has(k) ? agg(sums.get(k)!, how) : NaN })).filter((p) => Number.isFinite(p.v));
+  if (pts.length < 3) return "Stripes need at least three ordered values";
+  const { mini, ink } = env;
+  const mean = pts.reduce((a, p) => a + p.v, 0) / pts.length;
+  // Scale to ±2.5σ (capped at the extreme) so typical swings show real color.
+  const sd = Math.sqrt(pts.reduce((a, p) => a + (p.v - mean) ** 2, 0) / pts.length);
+  const dev = Math.min(Math.max(...pts.map((p) => Math.abs(p.v - mean))), 2.5 * sd) || 1;
+  // Diverging around the series mean: the palette's first color below, its last above,
+  // through a neutral middle — any palette (auto is Cool–Warm) reads as cooler vs warmer.
+  const cs = env.opts.continuousStops?.length ? env.opts.continuousStops : env.colors;
+  const stops = [cs[0]!, inkTint(ink, 0.78), cs[cs.length - 1]!];
+  const colorAt = (v: number) => rampColor(stops, 0.5 + (0.5 * (v - mean)) / dev);
+  const measure = aggregateAxisTitle(how, fieldName(env, yi));
+  const footer = layoutFooter(ctx, env, {
+    ramp: { min: mean - dev, max: mean + dev, colorAt, title: `${measure} vs its average (${formatDataValue(mean)})`, endLabels: ["below", "above"] },
+  });
+  const { plot, footerTop } = plotAboveFooter(env, footer.height);
+  const bottom = mini ? plot.bottom : plot.bottom - 16;
+  const sw = (plot.right - plot.left) / pts.length;
+  pts.forEach((p, i) => {
+    const x = plot.left + i * sw;
+    ctx.fillStyle = colorAt(p.v);
+    ctx.fillRect(Math.floor(x), plot.top, Math.ceil(sw) + 0.5, bottom - plot.top);
+    hitRect(env, x, plot.top, sw, bottom - plot.top, [], undefined, {
+      columns: [fieldName(env, xi), measure, "vs average"],
+      row: [model.kind === "time" ? formatDateCell(p.k) : p.k, p.v, `${p.v >= mean ? "+" : ""}${formatDataValue(p.v - mean)}`],
+    }, { x, y: plot.top, w: sw, h: bottom - plot.top });
+  });
+  if (!mini) {
+    const when = (v: string) => (model.kind === "time" ? formatDateCell(v).slice(0, 10) : v);
+    ctx.font = oddFont(env, 10);
+    ctx.fillStyle = ink.muted;
+    ctx.textBaseline = "top";
+    ctx.textAlign = "left";
+    ctx.fillText(fitTextEllipsis(ctx, when(pts[0]!.k), 140), plot.left, bottom + 4);
+    ctx.textAlign = "right";
+    ctx.fillText(fitTextEllipsis(ctx, when(pts[pts.length - 1]!.k), 140), plot.right, bottom + 4);
+  }
+  footer.draw(footerTop);
+}
+
+// ---- word cloud ------------------------------------------------------------
+
+type WordBox = { x: number; y: number; w: number; h: number };
+type CloudWord = { word: string; v: number; color: string; group: string; rank: number };
+type PlacedCloudWord = CloudWord & { f: number; x: number; y: number; box: WordBox };
+
+function cloudScale(env: OddEnv): number {
+  const s = env.opts.wordCloudScale;
+  return typeof s === "number" && s >= 0.6 && s <= 1.6 ? s : 1;
+}
+
+function cloudFontLimits(env: OddEnv, plot: PlotRect): { minF: number; maxF: number } {
+  const ph = Math.max(1, plot.bottom - plot.top);
+  const { mini } = env;
+  const mark = chartTypeRamp(env.opts.axisFontSize).mark;
+  const minF = Math.min(mini ? 6 : Math.max(11, mark), Math.max(8, ph / 5));
+  const cap = Math.min(mini ? 22 : 64, ph / 4) * cloudScale(env);
+  const maxF = Math.max(minF + 4, Math.min(mini ? 28 : 96, cap));
+  return { minF, maxF };
+}
+
+/** Room for a group name or “groups left out” line. Matches the font `oddFont` actually paints. */
+function cloudChrome(env: OddEnv): number {
+  if (env.mini) return 0;
+  return chartTypeRamp(env.opts.axisFontSize).mark + 6;
+}
+
+function cloudWeightMode(env: OddEnv): "ranked" | "even" | "heavy" {
+  const mode = env.opts.wordCloudWeight;
+  return mode === "even" || mode === "heavy" ? mode : "ranked";
+}
+
+function cloudWeight(rank: number, mode: "ranked" | "even" | "heavy" = "ranked"): number {
+  if (mode === "heavy") return 700;
+  if (mode === "even") return 500;
+  return rank < 3 ? 700 : rank < 12 ? 600 : 400;
+}
+
+function wordFace(env: OddEnv): string {
+  const custom = env.opts.wordCloudFont?.trim();
+  return custom && custom !== "inherit" ? custom : env.font;
+}
+
+/** Words only. Titles, side labels, and footnotes stay on the chart font. */
+function wordFont(env: OddEnv, size: number, weight: number | string = 400): string {
+  return chartFont(Math.max(size, chartTypeRamp(env.opts.axisFontSize).mark), wordFace(env), weight);
+}
+
+function measureCloudWord(
+  ctx: CanvasRenderingContext2D,
+  env: OddEnv,
+  word: CloudWord,
+  vmax: number,
+  minF: number,
+  maxF: number,
+): { f: number; w: number; h: number } {
+  const ratio = Math.max(0, Math.min(1, word.v / vmax));
+  const sizing = env.opts.wordCloudSizing;
+  const prominence = sizing === "linear" ? ratio : sizing === "log" ? Math.log1p(9 * ratio) / Math.log(10) : Math.sqrt(ratio);
+  const f = Math.max(chartTypeRamp(env.opts.axisFontSize).mark, Math.round(Math.max(minF, maxF * prominence)));
+  ctx.font = wordFont(env, f, cloudWeight(word.rank, cloudWeightMode(env)));
+  const metrics = ctx.measureText(word.word);
+  const gap = Math.max(0, Math.min(16, env.opts.wordCloudGap ?? 4));
+  // Measure actual glyph ink, including accents/descenders. Never shrink just one
+  // word: comparisons must keep the same value-to-font-size mapping in each group.
+  const inkWidth = Math.max(metrics.width, (metrics.actualBoundingBoxLeft || 0) + (metrics.actualBoundingBoxRight || 0));
+  const inkHeight = (metrics.actualBoundingBoxAscent || 0) + (metrics.actualBoundingBoxDescent || 0);
+  return { f, w: inkWidth + gap + 2, h: Math.max(f * 1.2, inkHeight) + gap };
+}
+
+/** Fit long labels by reducing the shared ramp, never an individual word or group. */
+function fitCloudMax(
+  ctx: CanvasRenderingContext2D, env: OddEnv,
+  panels: { words: [string, number][]; plot: PlotRect }[],
+  vmax: number, minF: number, maxF: number,
+): number {
+  let fitted = maxF;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let factor = 1;
+    for (const panel of panels) {
+      const width = panel.plot.right - panel.plot.left;
+      panel.words.forEach(([word, v], rank) => {
+        const measured = measureCloudWord(ctx, env, { word, v, rank, color: "", group: "" }, vmax, minF, fitted);
+        if (measured.w > width && measured.f > minF) factor = Math.min(factor, width * .97 / measured.w);
+      });
+    }
+    if (factor === 1) break;
+    fitted = Math.max(minF, fitted * factor);
+  }
+  return fitted;
+}
+
+/** How many words a region can hold before the spiral is mostly misses. */
+function cloudWordCap(env: OddEnv, plot: PlotRect): number {
+  const base = env.opts.topN != null ? Math.max(5, Math.min(150, Math.round(env.opts.topN))) : env.mini ? 30 : 80;
+  const area = Math.max(1, (plot.right - plot.left) * (plot.bottom - plot.top));
+  return Math.min(base, Math.max(5, Math.round(area / 1800)));
+}
+
+/** Spiral-pack words inside `plot`. Font size uses the shared `vmax` and `maxF`. */
+function packWordCloud(
+  ctx: CanvasRenderingContext2D,
+  env: OddEnv,
+  words: CloudWord[],
+  plot: PlotRect,
+  vmax: number,
+  minF: number,
+  maxF: number,
+): PlacedCloudWord[] {
+  const pw = plot.right - plot.left;
+  const ph = plot.bottom - plot.top;
+  if (pw < 8 || ph < 8 || !(vmax > 0)) return [];
+  const arrange = env.opts.wordCloudArrange === "rows" || env.opts.wordCloudArrange === "columns"
+    ? env.opts.wordCloudArrange
+    : "spiral";
+  if (arrange !== "spiral") return packWordFlow(ctx, env, words, plot, vmax, minF, maxF, arrange);
+  const cx = (plot.left + plot.right) / 2;
+  const cy = (plot.top + plot.bottom) / 2;
+  const ax = pw / Math.max(1, ph);
+  const placed: PlacedCloudWord[] = [];
+  const boxes: WordBox[] = [];
+  words.forEach((word) => {
+    const sized = measureCloudWord(ctx, env, word, vmax, minF, maxF);
+    if (sized.w > pw || sized.h > ph) return;
+    const { f } = sized;
+    const box = { w: sized.w, h: sized.h };
+    for (let s = 0; s < 900; s++) {
+      const ang = s * 0.32;
+      const rad = 1.6 * Math.sqrt(s) * Math.max(2, f * 0.18);
+      const x = cx + Math.cos(ang) * rad * Math.sqrt(ax) - box.w / 2;
+      const y = cy + Math.sin(ang) * rad / Math.sqrt(ax) - box.h / 2;
+      if (x < plot.left || y < plot.top || x + box.w > plot.right || y + box.h > plot.bottom) continue;
+      const b = { x, y, ...box };
+      if (boxes.some((o) => b.x < o.x + o.w && b.x + b.w > o.x && b.y < o.y + o.h && b.y + b.h > o.y)) continue;
+      boxes.push(b);
+      placed.push({ ...word, f, x: x + box.w / 2, y: y + box.h / 2, box: b });
+      return;
+    }
+  });
+  return placed;
+}
+
+/** Left-to-right rows, or top-to-bottom columns. Largest words go first. */
+function packWordFlow(
+  ctx: CanvasRenderingContext2D,
+  env: OddEnv,
+  words: CloudWord[],
+  plot: PlotRect,
+  vmax: number,
+  minF: number,
+  maxF: number,
+  direction: "rows" | "columns",
+): PlacedCloudWord[] {
+  const pw = plot.right - plot.left;
+  const ph = plot.bottom - plot.top;
+  const gap = Math.max(4, Math.round(Math.min(pw, ph) * 0.012));
+  const measured = words.map((word) => ({ word, ...measureCloudWord(ctx, env, word, vmax, minF, maxF) }));
+  type Line = { items: typeof measured; span: number; cross: number };
+  const lines: Line[] = [];
+  let line: typeof measured = [];
+  let span = 0;
+  let cross = 0;
+  const limit = direction === "rows" ? pw : ph;
+  const flush = () => {
+    if (!line.length) return;
+    lines.push({ items: line, span, cross });
+    line = [];
+    span = 0;
+    cross = 0;
+  };
+  for (const item of measured) {
+    if (item.w > pw || item.h > ph) continue;
+    const main = direction === "rows" ? item.w : item.h;
+    const side = direction === "rows" ? item.h : item.w;
+    if (line.length && span + gap + main > limit) flush();
+    line.push(item);
+    span += (line.length > 1 ? gap : 0) + main;
+    cross = Math.max(cross, side);
+  }
+  flush();
+  const crossLimit = direction === "rows" ? ph : pw;
+  const used: Line[] = [];
+  let usedCross = 0;
+  for (const entry of lines) {
+    const next = usedCross + (used.length ? gap : 0) + entry.cross;
+    if (next > crossLimit) break;
+    used.push(entry);
+    usedCross = next;
+  }
+  const slack = crossLimit - usedCross;
+  let cursor = (direction === "rows" ? plot.top : plot.left) + (slack > 0 ? slack / 2 : 0);
+  const placed: PlacedCloudWord[] = [];
+  for (const entry of used) {
+    const mainLimit = direction === "rows" ? pw : ph;
+    const mainSlack = mainLimit - entry.span;
+    let main = (direction === "rows" ? plot.left : plot.top) + (mainSlack > 0 ? mainSlack / 2 : 0);
+    for (const item of entry.items) {
+      const x = direction === "rows" ? main : cursor + (entry.cross - item.w) / 2;
+      const y = direction === "rows" ? cursor + (entry.cross - item.h) / 2 : main;
+      placed.push({
+        ...item.word,
+        f: item.f,
+        x: x + item.w / 2,
+        y: y + item.h / 2,
+        box: { x, y, w: item.w, h: item.h },
+      });
+      main += (direction === "rows" ? item.w : item.h) + gap;
+    }
+    cursor += entry.cross + gap;
+  }
+  return placed;
+}
+
+function paintPackedWords(
+  ctx: CanvasRenderingContext2D,
+  env: OddEnv,
+  rows: unknown[][],
+  placed: PlacedCloudWord[],
+  xi: number,
+  yi: number,
+  ci: number,
+  how: YAggregateOption,
+): void {
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const groupValues = ci >= 0 ? new Set(rows.map((r) => String(r[ci] ?? ""))) : null;
+  for (const p of placed) {
+    ctx.font = wordFont(env, p.f, cloudWeight(p.rank, cloudWeightMode(env)));
+    ctx.fillStyle = p.color;
+    ctx.globalAlpha = p.rank < 12 ? 1 : Math.max(0.7, env.alpha);
+    ctx.fillText(p.word, p.x, p.y);
+    const match: [number, string][] = [[xi, p.word]];
+    // "Higher market_cap" is a side title, not a cell. Only a real group value
+    // belongs in the match, or hover cannot find the row.
+    if (groupValues && p.group && p.group !== "tie" && groupValues.has(p.group)) match.push([ci, p.group]);
+    const matchesGroup = (r: unknown[]) =>
+      ci < 0 || !p.group || p.group === "tie" || String(r[ci] ?? "") === p.group;
+    let rowIndex = rows.findIndex((r) => String(r[xi] ?? "") === p.word && matchesGroup(r));
+    if (rowIndex < 0) rowIndex = rows.findIndex((r) => String(r[xi] ?? "") === p.word);
+    const columns = [fieldName(env, xi), aggregateAxisTitle(how, fieldName(env, yi) || null)];
+    const readout: (string | number)[] = [p.word, formatDataValue(p.v)];
+    if (p.group) {
+      columns.push("group");
+      readout.push(p.group);
+    }
+    columns.push("rank");
+    readout.push(`#${p.rank + 1}`);
+    hitRect(env, p.box.x, p.box.y, p.box.w, p.box.h, match, rowIndex >= 0 ? rowIndex : undefined, {
+      columns,
+      row: readout,
+    });
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawWordCloud(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
+  if (xi < 0) return "Word cloud needs a text or category column";
+  const how = env.opts.yAggregate ?? (yi >= 0 ? "sum" : "count");
+  const mode = env.opts.wordCloudMode === "compare" || env.opts.wordCloudMode === "grid" ? env.opts.wordCloudMode : "cloud";
+  const { mini, ink } = env;
+  const fullPlot = basePlot(env);
+  const plot = { ...fullPlot, bottom: fullPlot.bottom - cloudChrome(env) };
+  const coverage = (shown: number, total: number, note = "") => {
+    if (mini) return;
+    ctx.font = oddFont(env, 10);
+    ctx.fillStyle = ink.muted;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(fitTextEllipsis(ctx, `${shown} of ${total} words shown${note ? ` · ${note}` : ""}`, fullPlot.right - fullPlot.left), fullPlot.left, fullPlot.bottom);
+  };
+
+  if (mode === "cloud") {
+    const allWords = groupSum(rows, xi, yi, how)
+      .filter(([k, v]) => v > 0 && k.trim() !== "" && k !== "null");
+    const words = allWords.slice(0, cloudWordCap(env, plot));
+    if (!words.length) return "No positive values to size words by";
+    const limits = cloudFontLimits(env, plot);
+    const vmax = words[0]![1];
+
+    const cloudWords: CloudWord[] = words.map(([word, v], rank) => ({
+      word,
+      v,
+      color: env.colors[rank % env.colors.length]!,
+      group: "",
+      rank,
+    }));
+    const maxF = fitCloudMax(ctx, env, [{ words, plot }], vmax, limits.minF, limits.maxF);
+    const placed = packWordCloud(ctx, env, cloudWords, plot, vmax, limits.minF, maxF);
+    paintPackedWords(ctx, env, rows, placed, xi, yi, -1, how);
+    coverage(placed.length, allWords.length);
+    return;
+  }
+
+  if (ci < 0) return "Pick a Compare by column to compare word clouds";
+  const { byWord, groupWeight } = wordTotalsByGroup(rows, xi, yi, ci, how);
+  const groups = topGroupsByWeight(groupWeight, mode === "compare" ? 2 : 8);
+  if (groups.length < 2) return "Compare by needs at least two groups";
+
+  if (mode === "compare") {
+    const leftName = groups[0]!;
+    const rightName = groups[1]!;
+    const hidden = groupWeight.size - 2;
+    const chrome = cloudChrome(env);
+    const footer = hidden > 0 ? chrome : 0;
+    const header = chrome;
+    const stage: PlotRect = { ...plot, top: plot.top + header, bottom: plot.bottom - footer };
+    const gap = Math.min(28, Math.max(12, (stage.right - stage.left) * 0.04));
+    const mid = (stage.left + stage.right) / 2;
+    const leftPlot: PlotRect = { ...stage, right: mid - gap / 2 };
+    const rightPlot: PlotRect = { ...stage, left: mid + gap / 2 };
+    const leftGroupWords = wordsForCloudGroup(byWord, leftName);
+    const rightGroupWords = wordsForCloudGroup(byWord, rightName);
+    // A numeric column such as market cap is one group per word. Split the
+    // names into a higher cloud and a lower cloud instead of two single labels.
+    const grouped =
+      groupWeight.size <= 8 &&
+      leftGroupWords.length > 0 &&
+      rightGroupWords.length > 0 &&
+      (groupWeight.size <= 2 || (leftGroupWords.length >= 2 && rightGroupWords.length >= 2));
+    const halves = grouped ? null : splitWordCloudHalves(byWord);
+    const statName = fieldName(env, ci) || "value";
+    const leftLabel = halves ? `Higher ${statName}` : leftName;
+    const rightLabel = halves ? `Lower ${statName}` : rightName;
+    const leftWords = (halves ? halves.higher : leftGroupWords).slice(0, cloudWordCap(env, leftPlot));
+    const rightWords = (halves ? halves.lower : rightGroupWords).slice(0, cloudWordCap(env, rightPlot));
+    if (!leftWords.length && !rightWords.length) return "No positive values to size words by";
+    const vmax = Math.max(1, ...leftWords.map(([, v]) => v), ...rightWords.map(([, v]) => v));
+    const limits = cloudFontLimits(env, leftPlot);
+    const maxF = fitCloudMax(ctx, env, [{ words: leftWords, plot: leftPlot }, { words: rightWords, plot: rightPlot }], vmax, limits.minF, limits.maxF);
+    const packSide = (list: [string, number][], region: PlotRect, color: string, group: string) =>
+      packWordCloud(
+        ctx,
+        env,
+        list.map(([word, v], rank) => ({ word, v, color, group, rank })),
+        region,
+        vmax,
+        limits.minF,
+        maxF,
+      );
+    const placed = [
+      ...packSide(leftWords, leftPlot, env.colors[0]!, leftLabel),
+      ...packSide(rightWords, rightPlot, env.colors[1 % env.colors.length]!, rightLabel),
+    ];
+    if (!placed.length) return "No words fit. Reduce word size or widen the chart.";
+    paintPackedWords(ctx, env, rows, placed, xi, yi, ci, how);
+    if (!mini) {
+      ctx.font = oddFont(env, 11, 600);
+      ctx.textBaseline = "top";
+      ctx.textAlign = "left";
+      ctx.fillStyle = env.colors[0]!;
+      ctx.fillText(fitTextEllipsis(ctx, leftLabel, leftPlot.right - leftPlot.left), leftPlot.left, plot.top);
+      ctx.textAlign = "right";
+      ctx.fillStyle = env.colors[1 % env.colors.length]!;
+      ctx.fillText(fitTextEllipsis(ctx, rightLabel, rightPlot.right - rightPlot.left), rightPlot.right, plot.top);
+      const note = halves
+        ? `Split at the middle of ${statName}`
+        : hidden > 0
+          ? `Comparing ${leftName} and ${rightName} · ${hidden} other group${hidden === 1 ? "" : "s"} left out`
+          : null;
+      if (note) {
+        ctx.font = oddFont(env, 10);
+        ctx.fillStyle = ink.muted;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(fitTextEllipsis(ctx, note, plot.right - plot.left), plot.left, plot.bottom);
+      }
+    }
+    coverage(placed.length, (halves ? halves.higher.length + halves.lower.length : leftGroupWords.length + rightGroupWords.length), "shared size scale");
+    return;
+  }
+
+  const hidden = groupWeight.size - groups.length;
+  const chrome = cloudChrome(env);
+  const headH = chrome;
+  const gridPlot: PlotRect = { ...plot, bottom: plot.bottom - (hidden > 0 ? chrome : 0) };
+  const grid = multiplesGrid(groups.length, gridPlot);
+  const panels = groups.map((name) => ({ name, words: wordsForCloudGroup(byWord, name) }));
+  const cellPlot = (idx: number): PlotRect => {
+    const gx = gridPlot.left + (idx % grid.cols) * grid.cw;
+    const gy = gridPlot.top + Math.floor(idx / grid.cols) * grid.ch;
+    return { left: gx + 4, right: gx + grid.cw - 4, top: gy + headH + 2, bottom: gy + grid.ch - 4 };
+  };
+  const capped = panels.map((panel, idx) => ({
+    ...panel,
+    words: panel.words.slice(0, cloudWordCap(env, cellPlot(idx))),
+  }));
+  const vmax = Math.max(1, ...capped.flatMap((p) => p.words.map(([, v]) => v)));
+  const limits = cloudFontLimits(env, cellPlot(0));
+  const maxF = fitCloudMax(ctx, env, capped.map((panel, idx) => ({ words: panel.words, plot: cellPlot(idx) })), vmax, limits.minF, limits.maxF);
+  const placed: PlacedCloudWord[] = [];
+  capped.forEach((panel, idx) => {
+    const region = cellPlot(idx);
+    const color = env.colors[idx % env.colors.length]!;
+    const cloudWords: CloudWord[] = panel.words.map(([word, v], rank) => ({ word, v, color, group: panel.name, rank }));
+    placed.push(...packWordCloud(ctx, env, cloudWords, region, vmax, limits.minF, maxF));
+    if (!mini) {
+      ctx.font = oddFont(env, 11, 600);
+      ctx.fillStyle = color;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "top";
+      const gx = gridPlot.left + (idx % grid.cols) * grid.cw;
+      const gy = gridPlot.top + Math.floor(idx / grid.cols) * grid.ch;
+      ctx.fillText(fitTextEllipsis(ctx, panel.name, grid.cw - 10), gx + 4, gy + 2);
+    }
+  });
+  if (!placed.length) return "No words fit. Reduce word size or widen the chart.";
+  paintPackedWords(ctx, env, rows, placed, xi, yi, ci, how);
+  if (!mini && hidden > 0) {
+    ctx.font = oddFont(env, 10);
+    ctx.fillStyle = ink.muted;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "bottom";
+    ctx.fillText(
+      fitTextEllipsis(ctx, `${hidden} smaller group${hidden === 1 ? "" : "s"} hidden`, plot.right - plot.left),
+      plot.right,
+      plot.bottom,
+    );
+  }
+  coverage(placed.length, panels.reduce((sum, panel) => sum + panel.words.length, 0), "shared size scale");
+}
+
+// ---- mean ± CI dot plot ----------------------------------------------------
+
+function drawErrorBars(ctx: CanvasRenderingContext2D, rows: unknown[][], env: OddEnv, xi: number, yi: number, ci: number) {
+  if (xi < 0 || yi < 0) return "Needs a category and a numeric column";
+  const groups = new Map<string, { vals: number[]; ris: number[]; ri: number }>();
+  rows.forEach((r, i) => {
+    const v = toNum(r[yi]);
+    if (!Number.isFinite(v)) return;
+    const k = String(r[xi] ?? "");
+    let g = groups.get(k);
+    if (!g) groups.set(k, (g = { vals: [], ris: [], ri: i }));
+    g.vals.push(v);
+    g.ris.push(i);
+  });
+  const cap = env.opts.topN != null ? Math.max(2, Math.min(40, Math.round(env.opts.topN))) : 20;
+  const stats = [...groups.entries()]
+    .map(([k, g]) => {
+      const n = g.vals.length;
+      const mean = g.vals.reduce((a, b) => a + b, 0) / n;
+      const sd = n > 1 ? Math.sqrt(g.vals.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1)) : 0;
+      const half = n > 1 ? 1.96 * (sd / Math.sqrt(n)) : 0;
+      return { k, n, mean, lo: mean - half, hi: mean + half, vals: g.vals, ris: g.ris, ri: g.ri };
+    })
+    .sort((a, b) => b.n - a.n)
+    .slice(0, cap)
+    .sort((a, b) => b.mean - a.mean);
+  if (!stats.length) return "No numeric values per group";
+  const { mini, ink } = env;
+  const all = stats.flatMap((s) => [s.lo, s.hi, ...(mini ? [] : s.vals)]);
+  const xs = niceTicks(Math.min(...all), Math.max(...all), 5, true);
+  const base = basePlot(env);
+  ctx.font = oddFont(env, 10);
+  const gutter = mini ? 0 : Math.min((base.right - base.left) * 0.3, Math.max(...stats.map((s) => ctx.measureText(s.k).width)) + 12);
+  const plot: PlotRect = { ...base, left: base.left + gutter };
+  const sx = (v: number) => plot.left + ((v - xs.min) / (xs.max - xs.min || 1)) * (plot.right - plot.left);
+  const band = (plot.bottom - plot.top) / stats.length;
+  const catIdx = categoryIndex(rows, ci);
+  if (!mini) drawChartGrid(ctx, env.w, env.h, plot, gridLook(env), { x: [xs.min, xs.max], y: null });
+  const grand = stats.reduce((a, s) => a + s.mean * s.n, 0) / stats.reduce((a, s) => a + s.n, 0);
+  if (!mini) {
+    ctx.save();
+    ctx.setLineDash([3, 4]);
+    ctx.strokeStyle = inkTint(ink, 0.4);
+    ctx.beginPath();
+    ctx.moveTo(Math.round(sx(grand)) + 0.5, plot.top);
+    ctx.lineTo(Math.round(sx(grand)) + 0.5, plot.bottom);
+    ctx.stroke();
+    ctx.restore();
+  }
+  const r = Math.max(2.5, Math.min(6, band * 0.22));
+  stats.forEach((s, i) => {
+    const cy = plot.top + (i + 0.5) * band;
+    // Color splits the raw dots; the estimate stays in ink so it reads over them.
+    const color = ci >= 0 ? ink.text : env.single;
+    const dotColor = (j: number) => (ci >= 0 ? env.colors[(catIdx.get(String(rows[s.ris[j]!]![ci])) ?? 0) % env.colors.length]! : color);
+    // Raw values as a faint jittered strip behind the estimate.
+    if (!mini && s.vals.length <= 300) {
+      s.vals.forEach((v, j) => {
+        const jy = cy + (jitter(s.k, j) - 0.5) * band * 0.55;
+        ctx.fillStyle = withAlpha(dotColor(j), ci >= 0 ? 0.5 : 0.22);
+        ctx.beginPath();
+        ctx.arc(sx(v), jy, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = mini ? 1.2 : 2;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(sx(s.lo), cy);
+    ctx.lineTo(sx(s.hi), cy);
+    ctx.moveTo(sx(s.lo), cy - r * 0.8);
+    ctx.lineTo(sx(s.lo), cy + r * 0.8);
+    ctx.moveTo(sx(s.hi), cy - r * 0.8);
+    ctx.lineTo(sx(s.hi), cy + r * 0.8);
+    ctx.stroke();
+    mark(ctx, env, rows[s.ri], sx(s.mean), cy, r, color, 1, mini ? null : ink.bg);
+    hitRect(env, plot.left, cy - band / 2, plot.right - plot.left, band, [[xi, s.k]], s.ri, {
+      columns: [fieldName(env, xi), `${fieldName(env, yi)} (mean)`, "95% CI", "rows"],
+      row: [s.k, s.mean, `${formatDataValue(s.lo)} – ${formatDataValue(s.hi)}`, s.n],
+    }, { x: sx(s.lo) - r, y: cy - r, w: sx(s.hi) - sx(s.lo) + 2 * r, h: 2 * r });
+    if (!mini && env.opts.showDataLabels) {
+      ctx.font = oddFont(env, 10);
+      ctx.fillStyle = ink.muted;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      const lx = sx(s.hi) + r + 4;
+      if (lx < plot.right - 24) ctx.fillText(formatDataValue(s.mean), lx, cy);
+    }
+  });
+  if (mini) return;
+  drawAxisFrame(ctx, env.w, env.h, plot, env.look);
+  drawChartTicks(ctx, xs.min, xs.max, 0, 1, env.w, env.h, plot, env.look, { y: false });
+  drawBandAxisY(ctx, stats.map((s) => s.k), stats.map((_, i) => plot.top + (i + 0.5) * band), band, plot.left - 6, gutter - 8, env.look);
+  drawAxisFieldLabels(ctx, env.w, env.h, env.pad, `${fieldName(env, yi)} · mean with 95% interval`, null, env.look);
+  if (ci >= 0 && stats.some((st) => st.vals.length <= 300)) drawPanelLegend(ctx, env, legendEntriesFor(rows, ci, env.colors), fieldName(env, ci), plot, "bottom-right");
+}
+

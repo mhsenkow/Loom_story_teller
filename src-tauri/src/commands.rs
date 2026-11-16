@@ -11,13 +11,16 @@
 
 use crate::db::{ColumnInfo, FileEntry, LoomDb, QueryResult};
 use crate::http_client::LoomHttp;
-use crate::path_gate::{normalize_path_key, unique_csv_path, MountedFolder, WritePathGate};
+use crate::path_gate::{
+    normalize_path_key, unique_csv_path, MountedFolder, PartFileGuard, WritePathGate,
+};
 use crate::sources::SourcesState;
 use crate::stream::StreamState;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Duration;
 use tauri::State;
 use tauri_plugin_dialog::{DialogExt, FilePath};
 
@@ -48,7 +51,8 @@ pub struct DataGovDataset {
     pub portal_id: String,
 }
 
-/// Scan a local folder for data files: .parquet, .csv, .json/.ndjson/.jsonl, .xlsx, and .db/.sqlite (one entry per table).
+/// Scan a local folder for data files: .parquet, .csv, .json/.ndjson/.jsonl, .xlsx, and .db/.sqlite
+/// (one entry per table, or one per file while the SQLite helper isn't bundled).
 /// Returns a list of files with names, paths, and row counts.
 #[tauri::command]
 pub async fn scan_folder(
@@ -189,15 +193,17 @@ pub async fn save_csv_to_folder(
     } else {
         format!("{}.csv", sanitized)
     };
-    let file_path = unique_csv_path(path, &filename_owned);
-
     use futures_util::StreamExt;
 
     const MAX_DOWNLOAD_BYTES: u64 = 500 * 1024 * 1024;
+    // The shared client's 120 s total timeout would cut off big files mid-body;
+    // its 10 s connect timeout still applies.
+    const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
     let client = http.client();
     let response = client
         .get(&url)
+        .timeout(DOWNLOAD_TIMEOUT)
         .send()
         .await
         .map_err(|e| format!("Download failed: {}", e))?;
@@ -205,11 +211,31 @@ pub async fn save_csv_to_folder(
         return Err(format!("Download failed: HTTP {}", response.status()));
     }
 
-    let mut f = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&file_path)
-        .map_err(|e| format!("Write failed: {}", e))?;
+    // Stream into `<name>.csv.part` (not matched by the *.csv scan) and rename on
+    // success, so a failed download never leaves a truncated dataset behind.
+    // A crash or force-quit skips the drop guard, so a stale `.part` may already
+    // exist; pick a fresh name instead of failing every later download of this file.
+    let target = unique_csv_path(path, &filename_owned);
+    let mut attempt = 0u32;
+    let (mut f, part_path) = loop {
+        let candidate = if attempt == 0 {
+            target.with_extension("csv.part")
+        } else {
+            target.with_extension(format!("csv.{}.part", attempt))
+        };
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(f) => break (f, candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 100 => {
+                attempt += 1;
+            }
+            Err(e) => return Err(format!("Write failed: {}", e)),
+        }
+    };
+    let mut part = PartFileGuard::new(part_path);
 
     let mut stream = response.bytes_stream();
     let mut downloaded: u64 = 0;
@@ -217,12 +243,17 @@ pub async fn save_csv_to_folder(
         let chunk = chunk.map_err(|e| format!("Download failed: {}", e))?;
         downloaded += chunk.len() as u64;
         if downloaded > MAX_DOWNLOAD_BYTES {
-            let _ = std::fs::remove_file(&file_path);
             return Err("Download exceeds 500 MB limit".to_string());
         }
         f.write_all(&chunk)
             .map_err(|e| format!("Write failed: {}", e))?;
     }
+    f.sync_all().map_err(|e| format!("Write failed: {}", e))?;
+    drop(f);
+
+    let file_path = unique_csv_path(path, &filename_owned);
+    std::fs::rename(part.path(), &file_path).map_err(|e| format!("Write failed: {}", e))?;
+    part.disarm();
 
     file_path
         .to_str()
@@ -1078,7 +1109,11 @@ pub async fn stream_query(
     sql: String,
     limit: Option<u32>,
 ) -> Result<QueryResult, String> {
-    crate::stream::query_stream(&db, &sql, limit.unwrap_or(5000))
+    let db = Arc::clone(&*db);
+    let limit = limit.unwrap_or(5000);
+    tokio::task::spawn_blocking(move || crate::stream::query_stream(&db, &sql, limit))
+        .await
+        .map_err(|e| format!("Query task: {}", e))?
 }
 
 /// Get a snapshot: column stats + recent rows from wiki_stream.
@@ -1087,21 +1122,25 @@ pub async fn stream_snapshot(
     db: State<'_, Arc<LoomDb>>,
     limit: Option<u32>,
 ) -> Result<InspectResult, String> {
-    let stats = crate::stream::stream_column_stats(&db)?;
-    let sample = crate::stream::query_stream(
-        &db,
-        "SELECT * FROM wiki_stream ORDER BY ts DESC",
-        limit.unwrap_or(500),
-    )?;
-    Ok(InspectResult { stats, sample })
+    let db = Arc::clone(&*db);
+    let limit = limit.unwrap_or(500);
+    tokio::task::spawn_blocking(move || {
+        let stats = crate::stream::stream_column_stats(&db)?;
+        let sample =
+            crate::stream::query_stream(&db, "SELECT * FROM wiki_stream ORDER BY ts DESC", limit)?;
+        Ok(InspectResult { stats, sample })
+    })
+    .await
+    .map_err(|e| format!("Snapshot task: {}", e))?
 }
 
 /// Clear the stream buffer table.
 #[tauri::command]
 pub async fn stream_clear(db: State<'_, Arc<LoomDb>>) -> Result<(), String> {
-    let conn = db.lock_connection();
-    conn.execute_batch("DELETE FROM wiki_stream")
-        .map_err(|e| e.to_string())
+    let db = Arc::clone(&*db);
+    tokio::task::spawn_blocking(move || crate::stream::stream_clear(&db))
+        .await
+        .map_err(|e| format!("Clear task: {}", e))?
 }
 
 // =================================================================
@@ -1143,7 +1182,11 @@ pub async fn source_query(
     limit: Option<u32>,
     db: State<'_, Arc<LoomDb>>,
 ) -> Result<QueryResult, String> {
-    crate::sources::source_query(&db, &kind, &sql, limit.unwrap_or(5000))
+    let db = Arc::clone(&*db);
+    let limit = limit.unwrap_or(5000);
+    tokio::task::spawn_blocking(move || crate::sources::source_query(&db, &kind, &sql, limit))
+        .await
+        .map_err(|e| format!("Query task: {}", e))?
 }
 
 #[tauri::command]
@@ -1152,17 +1195,26 @@ pub async fn source_snapshot(
     limit: Option<u32>,
     db: State<'_, Arc<LoomDb>>,
 ) -> Result<InspectResult, String> {
-    let stats = crate::sources::source_stats(&db, &kind)?;
-    // Table + ORDER BY come from the registry mirror in sources.rs.
-    let limit = limit.unwrap_or(500);
-    let sql = crate::sources::snapshot_sql_limited(&kind, limit).ok_or("Unknown source kind")?;
-    let sample = crate::sources::source_query(&db, &kind, &sql, limit)?;
-    Ok(InspectResult { stats, sample })
+    let db = Arc::clone(&*db);
+    tokio::task::spawn_blocking(move || {
+        let stats = crate::sources::source_stats(&db, &kind)?;
+        // Table + ORDER BY come from the registry mirror in sources.rs.
+        let limit = limit.unwrap_or(500);
+        let sql =
+            crate::sources::snapshot_sql_limited(&kind, limit).ok_or("Unknown source kind")?;
+        let sample = crate::sources::source_query(&db, &kind, &sql, limit)?;
+        Ok(InspectResult { stats, sample })
+    })
+    .await
+    .map_err(|e| format!("Snapshot task: {}", e))?
 }
 
 #[tauri::command]
 pub async fn source_clear(kind: String, db: State<'_, Arc<LoomDb>>) -> Result<(), String> {
-    crate::sources::source_clear(&db, &kind)
+    let db = Arc::clone(&*db);
+    tokio::task::spawn_blocking(move || crate::sources::source_clear(&db, &kind))
+        .await
+        .map_err(|e| format!("Clear task: {}", e))?
 }
 
 #[cfg(test)]

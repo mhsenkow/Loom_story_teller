@@ -12,6 +12,16 @@ export function ipcErrorMessage(e: unknown): string {
   return String(e);
 }
 
+/** User-facing error text: network failures read as "offline", others fall back to the IPC message. */
+export function friendlyError(e: unknown): string {
+  // fetch() rejects with TypeError ("Failed to fetch" / "Load failed" / "NetworkError …") when offline or the
+  // host never answers. Other TypeErrors are bugs or bad data, not connectivity, so keep their message.
+  if (e instanceof TypeError && /failed to fetch|load failed|networkerror|network request failed|fetch failed/i.test(e.message)) {
+    return "you're offline or the server didn't answer";
+  }
+  return ipcErrorMessage(e);
+}
+
 /** Save-to-folder writes .csv bytes — only safe for real CSV URLs. */
 export function dataGovResourceSaveable(res: { format: string; url: string }): boolean {
   return res.format === "CSV" || /\.csv(\?|$)/i.test(res.url);

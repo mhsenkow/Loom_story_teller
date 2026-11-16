@@ -43,6 +43,31 @@ export function temporalColumnNames(columns: ColumnInfo[]): string[] {
   return columns.filter((c) => columnLooksTemporal(c.data_type, c.name)).map((c) => c.name);
 }
 
+const NAIVE_DATETIME = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)$/;
+const US_DATE = /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/;
+
+/**
+ * `Date.parse`, except zoneless date-times (`2024-03-15 10:00`) and M/D/YYYY
+ * dates read as UTC instead of the viewer's local zone. Axis ticks are placed
+ * and labeled in UTC, and feed parsers already treat these shapes as UTC.
+ */
+export function parseNaiveUtc(value: string): number {
+  const s = value.trim();
+  const dt = NAIVE_DATETIME.exec(s);
+  if (dt) return Date.parse(`${dt[1]}T${dt[2]}Z`);
+  const us = US_DATE.exec(s);
+  if (us) {
+    const m = Number(us[1]);
+    const d = Number(us[2]);
+    let y = Number(us[3]);
+    // Same two-digit-year pivot as Date.parse: 00–49 → 20xx, 50–99 → 19xx.
+    if (us[3].length === 2) y += y < 50 ? 2000 : 1900;
+    if (m < 1 || m > 12 || d < 1 || d > 31) return NaN;
+    return Date.UTC(y, m - 1, d);
+  }
+  return Date.parse(s);
+}
+
 /** Parse a cell into epoch ms. Four-digit years become Jan 1 UTC of that year. */
 export function parseChartTime(value: unknown): number | null {
   if (value == null || value === "") return null;
@@ -66,7 +91,7 @@ export function parseChartTime(value: unknown): number | null {
   if (Number.isFinite(n) && s !== "" && !/[^\d.eE+-]/.test(s)) {
     return parseChartTime(n);
   }
-  const t = Date.parse(s);
+  const t = parseNaiveUtc(s);
   return Number.isFinite(t) ? t : null;
 }
 

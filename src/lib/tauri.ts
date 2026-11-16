@@ -113,7 +113,7 @@ export async function scanFolder(folderPath: string): Promise<FileEntry[]> {
 }
 
 export const WEB_FILE_SQL_ERROR =
-  "SQL on uploaded files needs the desktop app (DuckDB). Use Explore on web.";
+  "SQL runs in the Loom desktop app. On the web, use the table, charts or Dive for this file.";
 
 export async function queryFile(
   filePath: string,
@@ -129,6 +129,7 @@ export async function queryFile(
   throw new Error(WEB_FILE_SQL_ERROR);
 }
 
+/** Desktop IPC for column stats alone. UI paths use `inspectFile` (stats + sample); keep for ad-hoc tools. */
 export async function getColumnStats(filePath: string): Promise<ColumnInfo[]> {
   if (isDesktop()) {
     return invoke<ColumnInfo[]>("get_column_stats", { filePath });
@@ -241,7 +242,7 @@ export async function streamStatus(): Promise<StreamStatus> {
 
 export async function streamQuery(sql: string, limit?: number): Promise<QueryResult> {
   if (!isDesktop()) {
-    throw new Error("SQL on live streams needs the desktop app (DuckDB). Use Explore snapshot on web.");
+    throw new Error("SQL runs in the Loom desktop app. On the web, use the table, charts or Dive for this feed.");
   }
   return invoke<QueryResult>("stream_query", { sql, limit });
 }
@@ -299,7 +300,7 @@ export async function sourceStatus(kind: SourceKind): Promise<SourceStatus> {
 
 export async function sourceQuery(kind: SourceKind, sql: string, limit?: number): Promise<QueryResult> {
   if (!isDesktop()) {
-    throw new Error("SQL on live sources needs the desktop app (DuckDB). Use Explore snapshot on web.");
+    throw new Error("SQL runs in the Loom desktop app. On the web, use the table, charts or Dive for this feed.");
   }
   return invoke<QueryResult>("source_query", { kind, sql, limit });
 }

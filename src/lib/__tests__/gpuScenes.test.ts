@@ -139,9 +139,12 @@ describe("firefly field", () => {
   it("maps into a flat plot rect on nice domains", () => {
     const packed = extractGpuScenePoints(rows, ["x", "y", "s"], { xField: "x", yField: "y" })!;
     const lay = fireflyLayout(packed, 400, 300, 40);
-    expect(lay.sx(lay.xs.min)).toBe(40);
+    expect(lay.sx(lay.xs.min)).toBe(lay.left);
+    expect(lay.left).toBeGreaterThanOrEqual(72);
     expect(lay.sx(lay.xs.max)).toBe(360);
     expect(lay.sy(lay.ys.min)).toBe(260);
     expect(lay.sy(lay.ys.max)).toBe(40);
+    expect(fireflyLayout(packed, 400, 300, 40, false, 16).left).toBeGreaterThan(lay.left);
+    expect(fireflyLayout(packed, 180, 120, 24, true).left).toBe(6);
   });
 });

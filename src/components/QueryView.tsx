@@ -8,10 +8,12 @@
 "use client";
 
 import { useLoomStore } from "@/lib/store";
+import { useShallow } from "zustand/react/shallow";
+import { viewModeName } from "@/lib/viewModes";
 import { applyQueryResult } from "@/lib/datasetPipeline";
-import { queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
+import { isDesktop, queryFile, streamQuery, sourceQuery } from "@/lib/tauri";
 import { STREAM_SQL_SNIPPETS, SOURCE_SQL_SNIPPETS } from "@/lib/recommendations";
-import { useState, useCallback, useEffect, useMemo } from "react";
+import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { SqlEditor } from "@/components/SqlEditor";
 import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
 import { QueryResultsSkeleton } from "@/components/Skeleton";
@@ -24,20 +26,61 @@ import { sourceKindFromPath, sourceTable as sourceTableName } from "@/lib/source
 
 export function QueryView() {
   const {
-    selectedFile, querySql, setQuerySql,
-    queryResult, setQueryResult, queryError, setQueryError,
-    isQuerying, setIsQuerying,
-    queryHistory, appendQueryHistory,
-    querySnippets, addQuerySnippet, setPromptDialog,
+    selectedFile,
+    querySql,
+    setQuerySql,
+    queryResult,
+    setQueryResult,
+    queryError,
+    setQueryError,
+    isQuerying,
+    setIsQuerying,
+    queryHistory,
+    appendQueryHistory,
+    querySnippets,
+    addQuerySnippet,
+    setPromptDialog,
     columnStats,
     setToast,
-    queryResultPage, queryResultPageSize, setQueryResultPage, setQueryResultPageSize,
-    querySnapshots, addQuerySnapshot, removeQuerySnapshot,
-    nlQueryInput, setNlQueryInput,
-    addQueryView,
-  } = useLoomStore();
+    queryResultPage,
+    queryResultPageSize,
+    setQueryResultPage,
+    querySnapshots,
+    addQuerySnapshot,
+    nlQueryInput,
+    setNlQueryInput,
+    addQueryView
+  } = useLoomStore(
+    useShallow((s) => ({
+      selectedFile: s.selectedFile,
+      querySql: s.querySql,
+      setQuerySql: s.setQuerySql,
+      queryResult: s.queryResult,
+      setQueryResult: s.setQueryResult,
+      queryError: s.queryError,
+      setQueryError: s.setQueryError,
+      isQuerying: s.isQuerying,
+      setIsQuerying: s.setIsQuerying,
+      queryHistory: s.queryHistory,
+      appendQueryHistory: s.appendQueryHistory,
+      querySnippets: s.querySnippets,
+      addQuerySnippet: s.addQuerySnippet,
+      setPromptDialog: s.setPromptDialog,
+      columnStats: s.columnStats,
+      setToast: s.setToast,
+      queryResultPage: s.queryResultPage,
+      queryResultPageSize: s.queryResultPageSize,
+      setQueryResultPage: s.setQueryResultPage,
+      querySnapshots: s.querySnapshots,
+      addQuerySnapshot: s.addQuerySnapshot,
+      nlQueryInput: s.nlQueryInput,
+      setNlQueryInput: s.setNlQueryInput,
+      addQueryView: s.addQueryView,
+    })),
+  );
 
   const isStream = selectedFile?.path === "stream://wiki";
+  const desktop = isDesktop();
   const pathSourceKind = sourceKindFromPath(selectedFile?.path);
   const sourceTable = pathSourceKind ? sourceTableName(pathSourceKind) : undefined;
   const activeTable = isStream ? "wiki_stream" : sourceTable ?? "loom_active";
@@ -49,13 +92,22 @@ export function QueryView() {
   const [localSql, setLocalSql] = useState(querySql || defaultSql);
   const filePath = selectedFile?.path ?? null;
 
+  // Reset only on a real dataset switch: on mount, querySql may carry a saved view /
+  // Dive handoff, and openDataset already clears query state for the new file.
+  const lastPathRef = useRef(filePath);
   useEffect(() => {
+    if (lastPathRef.current === filePath) return;
+    lastPathRef.current = filePath;
     setLocalSql(defaultSql);
     setQueryResult(null);
     setQueryError(null);
     setResultSort(null);
     setQuerySql("");
   }, [filePath, defaultSql, setQueryResult, setQueryError, setQuerySql]);
+  // Handoffs (saved query views, Dive "Open in Query") reach an already-mounted editor.
+  useEffect(() => {
+    if (querySql) setLocalSql((cur) => (cur === querySql ? cur : querySql));
+  }, [querySql]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; rowIndex: number; colIndex: number } | null>(null);
   const [schemaOpen, setSchemaOpen] = useState(true);
   const [diffSnapshotId, setDiffSnapshotId] = useState<string | null>(null);
@@ -89,24 +141,23 @@ export function QueryView() {
     };
   }, [contextMenu]);
 
+  // Context-menu indices are positions in the displayed (sorted) rows.
   const copyCell = useCallback((rowIndex: number, colIndex: number) => {
-    if (!queryResult) return;
-    const row = queryResult.rows[rowIndex];
+    const row = sortedResultRows[rowIndex];
     if (!row || colIndex < 0 || colIndex >= row.length) return;
     const val = row[colIndex];
     const text = val === null || val === undefined ? "" : String(val);
     void navigator.clipboard.writeText(text);
     setContextMenu(null);
-  }, [queryResult]);
+  }, [sortedResultRows]);
 
   const copyRow = useCallback((rowIndex: number) => {
-    if (!queryResult) return;
-    const row = queryResult.rows[rowIndex];
+    const row = sortedResultRows[rowIndex];
     if (!row) return;
     const text = row.map((c) => (c === null || c === undefined ? "" : String(c))).join("\t");
     void navigator.clipboard.writeText(text);
     setContextMenu(null);
-  }, [queryResult]);
+  }, [sortedResultRows]);
 
   const validation = useMemo(() => validateQuery(localSql), [localSql]);
 
@@ -147,6 +198,10 @@ export function QueryView() {
     }
   }, [selectedFile, localSql, validation.valid, validation.error, setIsQuerying, setQueryError, setQuerySql, setQueryResult, appendQueryHistory, setToast]);
 
+  if (selectedFile?.path.startsWith('combination://')) {
+    return <div className="flex flex-col items-center justify-center h-full p-6 gap-4 text-center"><h2 className="text-lg font-semibold">Explore your combined result</h2><p className="text-sm text-loom-muted max-w-md">Combinations currently support tables, charts, and Dive. To query this result with SQL, export it as CSV and open the file in the desktop app.</p><button type="button" className="loom-btn-primary min-h-11" onClick={() => useLoomStore.getState().setViewMode('explorer')}>Back to the table</button></div>;
+  }
+
   if (!selectedFile) {
     return (
       <StartHere
@@ -156,10 +211,28 @@ export function QueryView() {
   }
 
   return (
-    <div className="flex flex-col h-full animate-fade-in">
+    <div className="flex flex-col h-full animate-enter">
       <p className="sr-only" aria-live="polite" aria-atomic="true">
         {queryStatusMessage}
       </p>
+      {!desktop && (
+        <div
+          role="note"
+          className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-loom-border bg-loom-elevated/60 px-3 py-2 text-xs text-loom-muted"
+        >
+          <span className="min-w-0 flex-1">
+            SQL runs in the Loom desktop app. Here you can read and copy these queries — the
+            table, charts and Dive already work with this data.
+          </span>
+          <button
+            type="button"
+            className="loom-btn-ghost min-h-9 px-2 text-xs"
+            onClick={() => useLoomStore.getState().setViewMode("explorer")}
+          >
+            Back to the table
+          </button>
+        </div>
+      )}
       {/* Editor */}
       <div className="border-b border-loom-border bg-loom-surface/50 p-2.5 sm:p-3 space-y-2">
         <div className="flex items-center gap-1.5 sm:gap-2 mb-1 sm:mb-2 flex-wrap">
@@ -171,7 +244,7 @@ export function QueryView() {
           <div className="flex-1 min-w-0" />
           {queryHistory.length > 0 && (
             <select
-              className="loom-input text-2xs font-mono max-w-[140px] py-1"
+              className="loom-input text-2xs font-mono max-w-[13rem] sm:max-w-[140px] py-1"
               value=""
               onChange={(e) => {
                 const sql = e.target.value;
@@ -190,7 +263,7 @@ export function QueryView() {
           )}
           {querySnippets.length > 0 && (
             <select
-              className="loom-input text-2xs font-mono max-w-[140px] py-1"
+              className="loom-input text-2xs font-mono max-w-[13rem] sm:max-w-[140px] py-1"
               value=""
               onChange={(e) => {
                 const name = e.target.value;
@@ -210,7 +283,7 @@ export function QueryView() {
           )}
           {selectedFile?.path === "stream://wiki" && (
             <select
-              className="loom-input text-2xs font-mono max-w-[140px] py-1"
+              className="loom-input text-2xs font-mono max-w-[13rem] sm:max-w-[140px] py-1"
               value=""
               onChange={(e) => {
                 const idx = parseInt(e.target.value, 10);
@@ -231,7 +304,7 @@ export function QueryView() {
             if (!snippets?.length) return null;
             return (
               <select
-                className="loom-input text-2xs font-mono max-w-[140px] py-1"
+                className="loom-input text-2xs font-mono max-w-[13rem] sm:max-w-[140px] py-1"
                 value=""
                 onChange={(e) => {
                   const idx = parseInt(e.target.value, 10);
@@ -351,7 +424,7 @@ export function QueryView() {
               describedBy={!validation.valid && validation.error ? validationId : undefined}
             />
             {!validation.valid && validation.error && (
-              <p id={validationId} className="text-2xs text-loom-warning mt-1 font-mono" role="status">
+              <p id={validationId} className="text-2xs text-loom-warning-text mt-1 font-mono" role="status">
                 {validation.error}
               </p>
             )}
@@ -433,7 +506,7 @@ export function QueryView() {
           <QueryResultsSkeleton rows={8} cols={queryResult?.columns.length ?? 4} />
         ) : queryResult && queryResult.rows.length > 0 ? (
           <>
-            <div className="sticky max-md:static top-0 z-20 bg-loom-bg border-b border-loom-border">
+            <div className="loom-data-chrome sticky max-md:static top-0 z-20 bg-loom-bg border-b border-loom-border">
             <div className="flex items-center gap-2 px-3 py-1 flex-wrap">
               <span className="text-2xs text-loom-muted font-mono">
                 {queryResult.rows.length < queryResult.total_rows
@@ -464,7 +537,7 @@ export function QueryView() {
                 onClick={() => {
                   if (!queryResult) return;
                   applyQueryResult(queryResult, selectedFile.name);
-                  setToast("Using query results for Chart and Explorer");
+                  setToast(`Using query results for ${viewModeName("chart")} and ${viewModeName("explorer")}`);
                   useLoomStore.getState().setViewMode("chart");
                 }}
                 className="text-2xs px-2 py-0.5 max-md:min-h-9 max-md:px-3 rounded border border-loom-accent/50 bg-loom-accent/10 text-loom-accent font-medium"
@@ -482,7 +555,7 @@ export function QueryView() {
                     <span className={added > 0 ? "text-loom-success ml-1" : added < 0 ? "text-loom-error ml-1" : "text-loom-muted ml-1"}>
                       {added > 0 ? `+${added}` : added} rows
                     </span>
-                    {colsDiff && <span className="text-loom-warning ml-1">cols changed</span>}
+                    {colsDiff && <span className="text-loom-warning-text ml-1">cols changed</span>}
                   </span>
                 );
               })()}
@@ -493,7 +566,7 @@ export function QueryView() {
                   {queryResult.columns.map((col, ci) => (
                     <th
                       key={`${col}-${ci}`}
-                      className="px-3 py-2 text-left text-2xs font-semibold text-loom-muted uppercase tracking-wider whitespace-nowrap bg-loom-bg border-b border-loom-border"
+                      className="loom-data-chrome px-3 py-2 text-left text-2xs font-semibold text-loom-muted uppercase tracking-wider whitespace-nowrap bg-loom-bg border-b border-loom-border"
                     >
                       <button
                         type="button"

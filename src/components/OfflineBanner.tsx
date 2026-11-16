@@ -73,7 +73,7 @@ export function OfflineBanner() {
     <div
       role="status"
       data-testid="offline-banner"
-      className="fixed top-2 left-2 right-2 md:left-auto md:right-4 md:max-w-md z-[200] p-3 rounded-lg border border-loom-warning/40 bg-loom-surface shadow-lg text-xs text-loom-text space-y-1"
+      className="fixed top-[calc(var(--topbar-height)+var(--safe-top)+0.5rem)] md:top-[calc(0.5rem+var(--safe-top))] left-[max(0.5rem,var(--safe-left))] right-[max(0.5rem,var(--safe-right))] md:left-auto md:right-4 md:max-w-md z-[200] p-3 rounded-lg border border-loom-warning/40 bg-loom-surface shadow-lg text-xs text-loom-text space-y-1"
     >
       <p className="font-semibold">{impact.headline}</p>
       <p className="text-loom-muted">{impact.detail}</p>

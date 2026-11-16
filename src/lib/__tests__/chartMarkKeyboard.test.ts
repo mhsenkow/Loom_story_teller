@@ -8,7 +8,7 @@ describe("chartMarkKeyboard", () => {
     expect(nextMarkIndex(0, 3, -1)).toBe(2);
   });
 
-  it("filters hits with summaries", () => {
+  it("skips marks with no data identity", () => {
     const hits: HitTarget[] = [
       { shape: "rect", x: 0, y: 0, w: 1, h: 1, match: [] },
       {

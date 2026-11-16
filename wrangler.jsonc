@@ -18,6 +18,12 @@
       "preview_id": "cd3cf9384ec54444ace1549f2b9dd399"
     }
   ],
+  // Community votes + comments (workers/socialHub.ts). SQLite-backed; no account
+  // or database to create — the first deploy with this migration provisions it.
+  "durable_objects": {
+    "bindings": [{ "name": "SOCIAL", "class_name": "SocialHub" }]
+  },
+  "migrations": [{ "tag": "social-v1", "new_sqlite_classes": ["SocialHub"] }],
   // Always-on monitors (workers/monitorCron.ts): evaluate due cloud monitors every 5 minutes.
   "triggers": { "crons": ["*/5 * * * *"] },
   "routes": [

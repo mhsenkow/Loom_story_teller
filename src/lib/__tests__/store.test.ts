@@ -214,10 +214,9 @@ describe("store", () => {
       getState().setTableColumnFilters({ x: "1" });
       getState().setLassoPoints([{ x: 1, y: 2 }]);
       getState().setCrosshairPos({ dataX: 1, dataY: 2, screenX: 3, screenY: 4 });
-      getState().addPinnedTooltip({
+      getState().togglePinnedTooltip({
         chartId: "c1",
-        x: 0,
-        y: 0,
+        ref: { fields: [["x", "1"]] },
         rowIndex: 0,
         row: [1],
         columns: ["x"],
@@ -370,6 +369,22 @@ describe("store", () => {
       ]);
       getState().removeChartView("cv1");
       expect(getState().dashboards[0]!.slots).toEqual([]);
+    });
+  });
+
+  describe("hovered row", () => {
+    it("does not notify subscribers when the hovered index is unchanged", () => {
+      let calls = 0;
+      const unsub = useLoomStore.subscribe(() => {
+        calls += 1;
+      });
+      getState().setHoveredRowIndex(3);
+      getState().setHoveredRowIndex(3);
+      getState().setHoveredRowIndex(null);
+      getState().setHoveredRowIndex(null);
+      unsub();
+      expect(calls).toBe(2);
+      expect(getState().hoveredRowIndex).toBeNull();
     });
   });
 });

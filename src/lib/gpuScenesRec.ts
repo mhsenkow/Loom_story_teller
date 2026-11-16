@@ -274,7 +274,7 @@ export function extractGpuScenePoints(
   const si = encoding.sizeField ? columns.indexOf(encoding.sizeField) : -1;
   const ti = encoding.timeField ? columns.indexOf(encoding.timeField) : -1;
   const trailI = encoding.trailId ? columns.indexOf(encoding.trailId) : -1;
-  if (xi < 0 || yi < 0) return null;
+  if (xi < 0 || yi < 0 || (encoding.zField && zi < 0)) return null;
 
   const catMap = new Map<string, number>();
   const trailMap = new Map<string, number>();
@@ -330,13 +330,14 @@ export function extractGpuScenePoints(
     const y = num(row[yi]);
     if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
     const z = zi >= 0 ? num(row[zi]) : 0;
-    const zz = Number.isFinite(z) ? z : 0;
+    // An encoded coordinate must exist; a missing measurement is not a zero.
+    if (!Number.isFinite(z)) continue;
     const sizeRaw = si >= 0 ? num(row[si]) : 1;
     const tRaw = ti >= 0 ? num(row[ti]) : r;
     const category = ci >= 0 ? nextCat(str(row[ci])) : xCategorical ? nextCat(str(row[xi])) : 0;
     const trail = trailI >= 0 ? nextTrail(str(row[trailI])) : 0;
     raw.push({
-      x, y, z: zz,
+      x, y, z,
       category,
       size: Number.isFinite(sizeRaw) ? sizeRaw : 1,
       trail,
@@ -345,7 +346,7 @@ export function extractGpuScenePoints(
     });
     xMin = Math.min(xMin, x); xMax = Math.max(xMax, x);
     yMin = Math.min(yMin, y); yMax = Math.max(yMax, y);
-    zMin = Math.min(zMin, zz); zMax = Math.max(zMax, zz);
+    zMin = Math.min(zMin, z); zMax = Math.max(zMax, z);
     if (Number.isFinite(tRaw)) {
       tMin = Math.min(tMin, tRaw);
       tMax = Math.max(tMax, tRaw);
@@ -361,14 +362,20 @@ export function extractGpuScenePoints(
   const points: GpuScenePoint[] = raw.map((p) => ({
     ...p,
     z: encoding.invertZ ? zMin + zMax - p.z : p.z,
-    size: encoding.invertSize ? 1 - (p.size - sizeMin) / sizeSpan : (p.size - sizeMin) / sizeSpan,
+    size: sizeMin === sizeMax ? 0.5 : encoding.invertSize ? 1 - (p.size - sizeMin) / sizeSpan : (p.size - sizeMin) / sizeSpan,
     t: Number.isFinite(p.t) ? (p.t - tMin) / tSpan : -1,
   }));
 
-  if (zMax - zMin < 1e-9) {
-    zMin = 0;
-    zMax = 1;
-  }
+  // Keep constant coordinates at the center of their real domain. Resetting Z
+  // to 0…1 sent a constant depth of e.g. 700 far outside the scene.
+  const extent = (lo: number, hi: number): [number, number] => {
+    if (lo !== hi) return [lo, hi];
+    const pad = Math.max(0.5, Math.abs(lo) * 0.05);
+    return [lo - pad, hi + pad];
+  };
+  [xMin, xMax] = extent(xMin, xMax);
+  [yMin, yMax] = extent(yMin, yMax);
+  [zMin, zMax] = extent(zMin, zMax);
 
   return {
     points,
@@ -451,7 +458,7 @@ export function buildGpuSceneRec(
     },
     loomWeave: {
       title: timeField ? `Weave · ${xField} × ${timeField}` : `Weave · ${xField}`,
-      subtitle: "warp categories · weft time · thickness = value",
+      subtitle: "one thread per category — thicker means more",
     },
     dataCube: { title: "", subtitle: "" },
   };

@@ -1,3 +1,4 @@
+import { dataLibraryInitialState } from "./dataLibrarySlice";
 // =================================================================
 // store/helpers — composed initialState (LOOM-552)
 // =================================================================
@@ -10,11 +11,13 @@ import { uiInitialState } from "./uiSlice";
 import { chartInitialState } from "./chartSlice";
 import { pointerViewsInitialState } from "./pointerViewsSlice";
 import { monitorInitialState } from "./monitorSlice";
+import { socialInitialState } from "./socialSlice";
 
 export { datasetScopedResetSlice };
 
 export const initialState = {
   ...coreInitialState(),
+  ...dataLibraryInitialState,
   ...tableInitialState(),
   ...queryInitialState(),
   ...dashboardInitialState(),
@@ -22,4 +25,5 @@ export const initialState = {
   ...chartInitialState(),
   ...pointerViewsInitialState(),
   ...monitorInitialState,
+  ...socialInitialState,
 };

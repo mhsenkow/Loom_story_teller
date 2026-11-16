@@ -136,17 +136,111 @@ export interface CaptionInput {
 
 /** Threads rejects posts longer than 500 characters. */
 export const THREADS_TEXT_MAX = 500;
+/** Bluesky posts are capped at 300 characters (graphemes). */
+export const BLUESKY_TEXT_MAX = 300;
+/** Mastodon's default instance limit. */
+export const MASTODON_TEXT_MAX = 500;
+
+/**
+ * Caption plus the public URL, clipped to `max` characters. The link always
+ * survives; the caption is shortened with an ellipsis to make room.
+ */
+export function clipPostText(caption: string, pageUrl: string, max: number): string {
+  const link = pageUrl.trim();
+  const body = caption.trim();
+  if (!link) return [...body].slice(0, max).join("");
+  const joiner = body ? "\n\n" : "";
+  const room = max - link.length - joiner.length;
+  if (room < 1) return link.slice(0, max);
+  const chars = [...body];
+  const clipped = chars.length <= room ? body : `${chars.slice(0, room - 1).join("").trimEnd()}…`;
+  return clipped ? `${clipped}${joiner}${link}` : link;
+}
 
 /** Caption plus the public URL, clipped so a Threads intent stays valid. */
 export function threadsPostText(caption: string, pageUrl: string): string {
-  const link = pageUrl.trim();
-  const body = caption.trim();
-  if (!link) return body.slice(0, THREADS_TEXT_MAX);
-  const joiner = body ? "\n\n" : "";
-  const room = THREADS_TEXT_MAX - link.length - joiner.length;
-  if (room < 1) return link.slice(0, THREADS_TEXT_MAX);
-  const clipped = body.length <= room ? body : `${body.slice(0, room - 1).trimEnd()}…`;
-  return clipped ? `${clipped}${joiner}${link}` : link;
+  return clipPostText(caption, pageUrl, THREADS_TEXT_MAX);
+}
+
+/** Bluesky web intent: opens the composer (app or web) with text prefilled. */
+export function blueskyShareHref(caption: string, pageUrl: string): string {
+  return `https://bsky.app/intent/compose?text=${encodeURIComponent(clipPostText(caption, pageUrl, BLUESKY_TEXT_MAX))}`;
+}
+
+/**
+ * Normalize what someone types as their Mastodon server: "mastodon.social",
+ * "https://hachyderm.io/home", "@me@fosstodon.org" → bare host, or null.
+ */
+export function normalizeMastodonServer(input: string): string | null {
+  let v = input.trim().toLowerCase();
+  if (!v) return null;
+  const handle = v.match(/^@?[^@\s]+@([^@\s/]+)$/);
+  if (handle) v = handle[1]!;
+  v = v.replace(/^[a-z]+:\/\//, "").split(/[/?#]/)[0]!.replace(/:\d+$/, "");
+  return /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(v) ? v : null;
+}
+
+/** Mastodon's built-in share endpoint on the person's own server. */
+export function mastodonShareHref(server: string, caption: string, pageUrl: string): string {
+  return `https://${server}/share?text=${encodeURIComponent(clipPostText(caption, pageUrl, MASTODON_TEXT_MAX))}`;
+}
+
+/** SeenU has no share intent; the post starts from its home page. */
+export const SEENU_URL = "https://seenu.io/";
+
+/** Instagram's web inbox — messages there accept a pasted link. */
+export const INSTAGRAM_DIRECT_URL = "https://www.instagram.com/direct/inbox/";
+
+/**
+ * Instagram Stories cover roughly the top 250px (profile, progress bar) and the
+ * bottom 340px (reply bar, stickers) of a 1080×1920 frame.
+ */
+export const STORY_SIZE = { width: 1080, height: 1920 } as const;
+export const STORY_SAFE = { top: 250, bottom: 340, side: 48 } as const;
+
+/** Where a w×h chart image lands inside the story's safe band (scaled to fit, centered). */
+export function storySafeRect(w: number, h: number): { x: number; y: number; width: number; height: number } {
+  const availW = STORY_SIZE.width - 2 * STORY_SAFE.side;
+  const availH = STORY_SIZE.height - STORY_SAFE.top - STORY_SAFE.bottom;
+  const scale = Math.min(availW / w, availH / h);
+  const width = Math.round(w * scale);
+  const height = Math.round(h * scale);
+  return {
+    x: Math.round((STORY_SIZE.width - width) / 2),
+    y: STORY_SAFE.top + Math.round((availH - height) / 2),
+    width,
+    height,
+  };
+}
+
+/**
+ * Place a chart PNG (best: the 4:5 post render) inside a 1080×1920 story frame,
+ * clear of Instagram's overlays, on the chart's own background color.
+ */
+export async function composeStoryImage(chart: Blob): Promise<Blob | null> {
+  try {
+    const bitmap = await createImageBitmap(chart);
+    const canvas = document.createElement("canvas");
+    canvas.width = STORY_SIZE.width;
+    canvas.height = STORY_SIZE.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    // Sample the chart's corner so the frame reads as one surface.
+    const probe = document.createElement("canvas");
+    probe.width = probe.height = 1;
+    const pctx = probe.getContext("2d");
+    pctx?.drawImage(bitmap, 2, 2, 1, 1, 0, 0, 1, 1);
+    const [r, g, b] = pctx ? pctx.getImageData(0, 0, 1, 1).data : [16, 16, 18];
+    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const rect = storySafeRect(bitmap.width, bitmap.height);
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(bitmap, rect.x, rect.y, rect.width, rect.height);
+    bitmap.close?.();
+    return await new Promise((resolve) => canvas.toBlob((out) => resolve(out), "image/png"));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -160,6 +254,40 @@ export function linkedInShareHref(pageUrl: string): string {
 /** Threads web intent. Text carries the caption and the reopen link. */
 export function threadsShareHref(caption: string, pageUrl: string): string {
   return `https://www.threads.net/intent/post?text=${encodeURIComponent(threadsPostText(caption, pageUrl))}`;
+}
+
+/** X counts every link as 23 characters; the card comes from twitter:image. */
+export const X_TEXT_MAX = 280;
+export const X_LINK_WEIGHT = 23;
+
+/** X web intent: caption (clipped for the 280 limit) plus the link, which unfurls into the chart card. */
+export function xShareHref(caption: string, pageUrl: string): string {
+  const link = pageUrl.trim();
+  // Clip against X's fixed link weight, not the URL's real length.
+  const text = clipPostText(caption, "x".repeat(X_LINK_WEIGHT), X_TEXT_MAX).replace(/\n*x{23}$/, "").trim();
+  const params = new URLSearchParams();
+  if (text) params.set("text", text);
+  if (link) params.set("url", link);
+  return `https://x.com/intent/post?${params.toString()}`;
+}
+
+/** Reddit link submit: title + URL; the post thumbnail comes from og:image. */
+export function redditShareHref(title: string, pageUrl: string): string {
+  const params = new URLSearchParams({ url: pageUrl.trim(), title: title.trim().slice(0, 300) });
+  return `https://www.reddit.com/submit?${params.toString()}`;
+}
+
+/** WhatsApp: one text body; the link's preview card comes from og:image (keep it < ~300 KB). */
+export function whatsappShareHref(caption: string, pageUrl: string): string {
+  const text = [caption.trim(), pageUrl.trim()].filter(Boolean).join("\n\n");
+  return `https://wa.me/?text=${encodeURIComponent(text)}`;
+}
+
+/** Telegram share: URL plus caption; Telegram renders the Open Graph card. */
+export function telegramShareHref(caption: string, pageUrl: string): string {
+  const params = new URLSearchParams({ url: pageUrl.trim() });
+  if (caption.trim()) params.set("text", caption.trim());
+  return `https://t.me/share/url?${params.toString()}`;
 }
 
 /** Facebook's sharer only takes the page URL; the card comes from Open Graph. */
@@ -176,6 +304,25 @@ export function emailShareHref(subject: string, body: string): string {
   if (text) params.set("body", text);
   const q = params.toString();
   return q ? `mailto:?${q}` : "mailto:";
+}
+
+/**
+ * Headline for link cards (og:title, tab title): auto titles are built from raw
+ * column names ("name sized by total"), so read snake_case as words, lead with a
+ * capital, and name the source when there is one.
+ */
+export function shareHeadline(title: string, source?: string | null): string {
+  let t = (title || "").trim().replace(/([a-z0-9])_([a-z0-9])/gi, "$1 $2").replace(/\s+/g, " ");
+  if (!t) t = "Loom chart";
+  t = t.charAt(0).toUpperCase() + t.slice(1);
+  const src = (source || "")
+    .trim()
+    .replace(/^.*[\\/]/, "")
+    .replace(/\.(csv|tsv|json|parquet|xlsx?)$/i, "")
+    .replace(/[_-]+/g, " ")
+    .trim();
+  if (!src || t.toLowerCase().includes(src.toLowerCase())) return t.slice(0, 110);
+  return `${t} · ${src}`.slice(0, 110);
 }
 
 /** Short post caption ready to paste under a social image. */
@@ -291,8 +438,11 @@ export async function shareOrDownloadFile(
       if (e instanceof Error && e.name === "AbortError") throw e;
     }
   }
-  downloadBlob(blob, filename);
-  return "downloaded";
+  const saved = await downloadBlob(blob, filename);
+  if (saved === "cancelled") throw new DOMException("Share cancelled", "AbortError");
+  // Callers toast success on return — don't claim a save that never happened.
+  if (saved === "unsupported") throw new Error("Couldn’t save the file on this device");
+  return saved === "shared" ? "shared" : "downloaded";
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -450,7 +600,7 @@ export async function toLinkPreviewJpeg(
   blob: Blob,
   opts?: { quality?: number; fill?: string; title?: string; source?: string },
 ): Promise<string> {
-  const quality = opts?.quality ?? 0.92;
+  const quality = opts?.quality ?? 0.86;
   const fill = opts?.fill ?? "#0a0a0c";
   const { width: W, height: H } = LINK_PREVIEW_SIZE;
   try {
@@ -613,10 +763,10 @@ export async function publishStoryToWorker(input: {
       error?: string;
     };
     if (!res.ok) {
-      return { url: "", id: "", error: data.error || `Publish failed (${res.status})` };
+      return { url: "", id: "", error: data.error || "Couldn’t make a share link — try again, or use Save image instead." };
     }
     if (!data.url || !data.id) {
-      return { url: "", id: "", error: data.error || "Publish returned no URL" };
+      return { url: "", id: "", error: data.error || "Couldn’t make a share link — try again, or use Save image instead." };
     }
     const { toPublicLoomUrl } = await import("./publicOrigin");
     // Never hand recipients a workers.dev / localhost URL (Cap API host).

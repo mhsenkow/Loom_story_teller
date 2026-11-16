@@ -39,6 +39,8 @@ export interface SceneConfig {
   time?: number;
   /** Flat plot rect in CSS px (firefly) — matches the Canvas axes overlay. */
   plotRect?: { left: number; top: number; right: number; bottom: number };
+  /** CSS-pixel camera frame shared with the orbit axes and hit targets. */
+  orbitFrame?: { cx: number; cy: number; scale: number };
 }
 
 const MODE_INDEX: Record<string, number> = {
@@ -230,6 +232,17 @@ export class LoomSceneRenderer {
   }
 
   render(width: number, height: number) {
+    if (this.device && this.context && this.pointCount === 0) {
+      const encoder = this.device.createCommandEncoder();
+      const clear = this.config.clearColor ?? [0.04, 0.04, 0.05];
+      const pass = encoder.beginRenderPass({ colorAttachments: [{
+        view: this.context.getCurrentTexture().createView(),
+        clearValue: { r: clear[0], g: clear[1], b: clear[2], a: 1 }, loadOp: "clear", storeOp: "store",
+      }] });
+      pass.end();
+      this.device.queue.submit([encoder.finish()]);
+      return;
+    }
     if (
       !this.device ||
       !this.context ||
@@ -266,6 +279,10 @@ export class LoomSceneRenderer {
     u[18] = rect.right;
     u[19] = rect.bottom;
     u[20] = this.config.glowDensity ?? 1;
+    const orbit = this.config.orbitFrame ?? { cx: width / 2, cy: height / 2, scale: Math.min(width, height) / 4.2 * (this.config.zoom ?? 1) };
+    u[21] = orbit.cx;
+    u[22] = orbit.cy;
+    u[23] = orbit.scale;
     this.device.queue.writeBuffer(this.uniformBuffer, 0, u);
 
     const encoder = this.device.createCommandEncoder();

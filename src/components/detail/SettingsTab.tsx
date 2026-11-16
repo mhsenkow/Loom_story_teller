@@ -1,124 +1,23 @@
 "use client";
 
 import { THEME_PAIRINGS } from "@/lib/themePairing";
-import { useState, useCallback, useMemo, useEffect, useRef, useId, type ReactNode, type DragEvent } from "react";
-import { formatVegaSpecJson } from "@/lib/vegaSpecDisplay";
-import { defaultAppLookSettings, emptyChartVisualOverrides } from "@/lib/lookSettingsDefaults";
-import { clampSmartFloat, clampSmartInt, SMART_TOP_N, SMART_Z } from "@/lib/smartInputClamp";
-import { useIsMobile, useMobileLiveEdit, MOBILE_LIVE_EDIT_SHEET } from "@/lib/useMediaQuery";
-import { useFocusTrap } from "@/lib/useFocusTrap";
+
+import { defaultAppLookSettings } from "@/lib/lookSettingsDefaults";
+
 import { clearPersistedPreferences } from "@/lib/persist";
 import { Button } from "@/components/ui/Button";
 import { WorkspaceBackupControls } from "@/components/WorkspaceBackupControls";
 import { YourSourcesSettings } from "@/components/YourSourcesSettings";
-import { useShallow } from "zustand/react/shallow";
-import { useLoomStore, type PanelTab, type ChartVisualOverrides, type AppTheme, type FontScale } from "@/lib/store";
-import { formatNumber } from "@/lib/format";
-import { ChartKindPicker } from "@/components/ChartKindPicker";
-import {
-  THEME_CHART,
-  THEME_UI,
-  AXIS_LABEL_COLOR_SWATCHES,
-  AXIS_LINE_COLOR_SWATCHES,
-  COLOR_PALETTES,
-  palettesGrouped,
-  resolveChartColors,
-  type PaletteKind,
-} from "@/lib/chartPalettes";
-import {
-  THEMES,
-  THEME_LABEL,
-  UI_CHROMES,
-  UI_CHROME_LABEL,
-  VISUAL_PRESETS,
-  VISUAL_PRESET_BLURB,
-  shuffleVisualOverrides,
-  VISUAL_SHUFFLE_SECTIONS,
-  type VisualPresetId,
-  type VisualShuffleLocks,
-  type VisualShuffleSection,
-  normalizeTheme,
-  type LookTheme,
-  type UiChrome,
-  type AppFont,
-  type FacesSource,
-} from "@/lib/lookSystem";
-import { FONT_CHOICES, FONT_GROUPS, chartFontStack, resolveChartFontFamily } from "@/lib/fontCatalog";
+import { CommunitySettings } from "./CommunitySettings";
+
+import { useLoomStore, type AppTheme, type FontScale } from "@/lib/store";
+
+import { THEME_CHART, THEME_UI } from "@/lib/chartPalettes";
+import { THEMES, THEME_LABEL, UI_CHROMES, UI_CHROME_LABEL, normalizeTheme, type UiChrome, type AppFont } from "@/lib/lookSystem";
+import { FONT_CHOICES, chartFontStack, resolveChartFontFamily } from "@/lib/fontCatalog";
+import { FontPicker } from "@/components/FontPicker";
 import { requestDiscoverScan } from "@/lib/discoverStories";
 import { CHANGELOG, requestHelp, requestWhatsNew } from "@/lib/changelog";
-import {
-  createChartRec,
-  fitEncodingToKind,
-  Y_AGGREGATE_OPTIONS,
-  getRecommendationReason,
-  getRandomEncoding,
-  applyEncodingLocks,
-  chartKindDataSupport,
-  tryBuildRandomChartRec,
-  randomEncodingToExtra,
-  recommendStorySequence,
-  recommendStreamStory,
-  type ChartKind,
-  type YAggregateOption,
-  type EncodingShuffleLocks,
-} from "@/lib/recommendations";
-import {
-  computeDataQualityHints,
-  formatChartAggregationSummary,
-  chartCapabilities,
-  encodingChannelLabels,
-  CHART_LAYOUT_DIRECTIONS,
-  CHART_Y_SCALE_OPTIONS,
-  type ChartLayoutDirection,
-  type ChartYScaleOption,
-} from "@/lib/chartSupport";
-import {
-  chromeDomId,
-  chromeSectionFor,
-  type ChartChromeTarget,
-} from "@/lib/chartChromeLink";
-import { CHART_TOOLTIP_MODES, type ChartTooltipMode } from "@/lib/chartTooltipMode";
-import {
-  resolveDataProvenance,
-  provenanceKindLabel,
-  type DataProvenance,
-} from "@/lib/dataProvenance";
-import { TOP_N_OPTIONS, clampTopN, DEFAULT_TOP_N } from "@/lib/chartFacets";
-import {
-  CHART_TIME_RANGES,
-  applyChartTimeWindow,
-  chartTimeRangeOptions,
-  pickDefaultTimeField,
-  temporalColumnNames,
-  timeColumnSpanMs,
-  type ChartTimeRange,
-} from "@/lib/chartTime";
-import {
-  runAnomaly,
-  runForecast,
-  runTrend,
-  runReferenceLines,
-  runClustering,
-  runCorrelationMatrix,
-  type AnomalyMethod,
-} from "@/lib/smartAnalytics";
-import { corrCellInk, corrFillT, sampleCorrDiverging, DEFAULT_CORR_DIVERGING } from "@/lib/corrMatrixStyle";
-import { queryResultToCsv, downloadCsv } from "@/lib/csvExport";
-import { buildDashboardMicrositeHtml } from "@/lib/dashboardMicrosite";
-import { exportDashboardMicrosite, streamSnapshot, isDesktop, isTauri, openExternalUrl } from "@/lib/tauri";
-import { isNumericColumnType } from "@/lib/dataCubeSchema";
-import { captureStoryDashboardPreviews } from "@/lib/captureStoryPreviews";
-import {
-  SOCIAL_PRESETS,
-  getSocialPreset,
-  buildSocialCaption,
-  shareOrDownloadFile,
-  copyTextToClipboard,
-  slugifyFilename,
-  publishStoryToWorker,
-  recordCanvasVideo,
-} from "@/lib/socialExport";
-import { downloadBlob } from "@/lib/zipStore";
 
 export default function SettingsTab() {
   const appSettings = useLoomStore((s) => s.appSettings);
@@ -135,11 +34,6 @@ export default function SettingsTab() {
     { value: 1.15, label: "115%" },
   ];
   const themePref = appSettings.theme;
-  const currentTheme =
-    themePref === "system"
-      ? "system"
-      : ((themePref === "high-contrast" ? "contrast" : themePref === "colorblind" ? "dark" : themePref) as LookTheme);
-
   return (
     <div className="p-4 space-y-6">
       <div>
@@ -159,6 +53,7 @@ export default function SettingsTab() {
         </button>
       </div>
       <YourSourcesSettings />
+      <CommunitySettings />
       <div>
         <h3 className="text-sm font-semibold text-loom-text mb-1">What’s new</h3>
         <p className="text-2xs text-loom-muted mb-2">Recent features and fixes{CHANGELOG[0] ? ` · latest ${CHANGELOG[0].date}` : ""}.</p>
@@ -190,7 +85,7 @@ export default function SettingsTab() {
             System
           </button>
           {THEMES.map((t) => (
-            <button
+            <button aria-label={THEME_LABEL[t]}
               key={t}
               type="button"
               aria-pressed={themePref === t}
@@ -221,9 +116,9 @@ export default function SettingsTab() {
       </div>
 
       <div className="loom-pairing-card">
-        <label className="flex items-center justify-between gap-3 cursor-pointer">
+        <label htmlFor="loom-follow-theme" className="flex items-center justify-between gap-3 cursor-pointer">
           <span className="text-sm font-semibold">Follow theme</span>
-          <input type="checkbox" checked={!!appSettings.themePairing}
+          <input id="loom-follow-theme" type="checkbox" aria-label="Follow theme" checked={!!appSettings.themePairing}
             onChange={(event) => setAppSettings((prev) => ({ ...prev, themePairing: event.target.checked }))} />
         </label>
         <p className="text-2xs text-loom-label mt-2">{themePref === "system" ? "System follows your device’s light/dark appearance with neutral type and chrome." : THEME_PAIRINGS[normalizeTheme(themePref)].description}</p>
@@ -231,7 +126,7 @@ export default function SettingsTab() {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-loom-text mb-1">Chrome</h3>
+        <h3 className="text-sm font-semibold text-loom-text mb-1">Layout</h3>
         <p className="text-2xs text-loom-label mb-2">Spacing, corners, and borders. Typeface below takes priority.</p>
         <div className="grid grid-cols-2 gap-1.5">
           {UI_CHROMES.map((u) => (
@@ -253,39 +148,16 @@ export default function SettingsTab() {
       </div>
 
       <div>
-        <h3 className="text-sm font-semibold text-loom-text mb-1"><label htmlFor="app-typeface">Typeface</label></h3>
-        <select id="app-typeface" aria-label="App typeface"
-          value={appSettings.font}
-          onChange={(e) => setAppSettings((prev) => ({ ...prev, font: e.target.value as AppFont }))}
-          className="loom-input w-full text-xs py-1.5"
-        >
-          {FONT_GROUPS.map((group) => (
-            <optgroup key={group.label} label={group.label}>
-              {group.fonts.map((id) => <option key={id} value={id}>{FONT_CHOICES[id].family}{appSettings.faces !== "web" ? " · device fallback" : ""}</option>)}
-            </optgroup>
-          ))}
-        </select>
-        <div className="flex gap-1.5 mt-2">
-          {(["local", "web"] as const).map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => setAppSettings((prev) => ({ ...prev, faces: f as FacesSource }))}
-              aria-pressed={(appSettings.faces === "web" ? "web" : "local") === f}
-              className={`px-2 py-1 text-2xs rounded border ${
-                (appSettings.faces === "web" ? "web" : "local") === f ? "border-loom-accent text-loom-text" : "border-loom-border text-loom-muted"
-              }`}
-            >
-              {f === "web" ? "Download fonts" : "Device fonts"}
-            </button>
-          ))}
-        </div>
-        <p className="text-2xs text-loom-muted mt-2">{FONT_CHOICES[appSettings.font].description}</p>
-        <div className="loom-type-preview" style={{ fontFamily: chartFontStack(resolveChartFontFamily(undefined, appSettings.font, appSettings.faces)) }}>
+        <FontPicker label="App typeface" value={FONT_CHOICES[appSettings.font].family}
+          onChange={(family) => {
+            const font = (Object.keys(FONT_CHOICES) as AppFont[]).find((id) => FONT_CHOICES[id].family === family);
+            if (font) setAppSettings((prev) => ({ ...prev, font }));
+          }} />
+        <div className="loom-type-preview" style={{ fontFamily: chartFontStack(FONT_CHOICES[appSettings.font].family) }}>
           <span>Clear stories. Readable details.</span>
           <span className="tabular-nums">Aa Bb 0123456789 · −8.2%</span>
         </div>
-        <p className="text-2xs text-loom-muted mt-1">{appSettings.faces === "web" ? "Downloads the selected face from Google Fonts. Device fonts appear while it loads or when offline." : "No font downloads. Uses system sans, Georgia, or system mono to match your selection."} Charts set to App typeface follow this choice.</p>
+        <p className="text-2xs text-loom-muted mt-2">All 16 typefaces are included with Loom. No third-party font service. Charts set to App typeface follow this choice.</p>
       </div>
 
       <div>
@@ -347,7 +219,8 @@ export default function SettingsTab() {
             Reset preferences
           </Button>
           <WorkspaceBackupControls />
-          <Button variant="danger" size="sm" className="w-full justify-center" onClick={() => {
+          <Button variant="danger" size="sm" className="w-full justify-center min-h-11" onClick={() => {
+            if (typeof window !== "undefined" && !window.confirm("Clear saved uploads and linked folder access on this device?")) return;
             void clearRetainedLocalData().then(() => setToast("Cleared retained uploads & linked folder access"));
           }}>
             Clear retained browser data
@@ -357,8 +230,7 @@ export default function SettingsTab() {
 
       <div className="pt-2 border-t border-loom-border">
         <p className="text-2xs text-loom-muted">
-          Chart → Visual uses Theme palette colors from the active theme. Looks sync to{" "}
-          <span className="font-mono">ibm.tools.shared</span> when available.
+          Chart colors follow the theme you pick. Saved looks stay on this device.
         </p>
       </div>
     </div>

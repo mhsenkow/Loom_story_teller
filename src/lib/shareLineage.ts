@@ -264,8 +264,17 @@ export function sharedStoryPath(storyId: string): string {
   return `web://shared/${storyId}`;
 }
 
+/** Story ids: the Worker mints 32 hex chars; older/short ids are 8+. */
+export const STORY_ID_PATTERN = "[a-z0-9]{8,32}";
+
 /** `web://shared/abcdefghijkl` → id, or null. */
 export function storyIdFromSharedPath(path: string | null | undefined): string | null {
-  const m = path?.match(/^web:\/\/shared\/([a-z0-9]{8,32})$/i);
+  const m = path?.match(new RegExp(`^web://shared/(${STORY_ID_PATTERN})$`, "i"));
+  return m?.[1] ?? null;
+}
+
+/** `#story=<id>` (possibly followed by `&…`) → id, or null. */
+export function storyIdFromHash(hash: string): string | null {
+  const m = hash.match(new RegExp(`#story=(${STORY_ID_PATTERN})(?![a-z0-9])`, "i"));
   return m?.[1] ?? null;
 }

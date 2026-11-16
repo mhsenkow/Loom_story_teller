@@ -3,8 +3,10 @@
  * recording fake 2D context (module wiring + no throw + hit targets / paint).
  */
 import { describe, expect, it } from "vitest";
+import { buildChartReading } from "../chartReading";
+import type { ChartRecommendation } from "../recommendations";
 import type { ChartRenderOpts } from "../chartRenderTypes";
-import { buildBarFacetGrid, type HitTarget } from "../chartTooltip";
+import { buildBarFacetGrid, pickHitTarget, rowForHitTarget, type HitTarget } from "../chartTooltip";
 import { renderFullBar, renderFullHistogram } from "../canvasCharts/bar";
 import { renderFullScatter } from "../canvasCharts/scatter";
 import { renderFullLine, renderFullHeatmap } from "../canvasCharts/lineHeatmap";
@@ -30,7 +32,7 @@ import {
 import { renderFullSunburst } from "../canvasCharts/sunburst";
 
 function fakeCtx() {
-  const calls = { paint: 0, strokes: [] as { cap: unknown; join: unknown }[], labels: [] as { text: string; font: string }[] };
+  const calls = { paint: 0, strokes: [] as { cap: unknown; join: unknown }[], labels: [] as { text: string; font: string }[], points: [] as { x: number; y: number }[] };
   const paintOps = new Set(["fill", "stroke", "fillRect", "strokeRect", "fillText", "strokeText", "drawImage"]);
   const target: Record<string, unknown> = {
     measureText: (s: string) => ({ width: String(s).length * 6 }),
@@ -46,6 +48,7 @@ function fakeCtx() {
         calls.paint += 1;
         calls.labels.push({ text, font: String(t.font) });
       };
+      if (prop === "lineTo") return (x: number, y: number) => void calls.points.push({ x, y });
       if (prop === "stroke") return () => { calls.paint += 1; calls.strokes.push({ cap: t.lineCap, join: t.lineJoin }); };
       if (paintOps.has(prop)) return () => void (calls.paint += 1);
       return () => {};
@@ -116,6 +119,36 @@ describe("chart refinement regressions", () => {
     }
   });
 
+  it("keeps zero at the end of all-negative horizontal bars", () => {
+    const { ctx } = fakeCtx();
+    const o: ChartRenderOpts = { ...opts(), fieldNames: ["country", "change"] };
+    renderFullBar(ctx, [["a", -0.05], ["b", -0.02], ["c", -0.01]], 0, 1, -1, W, H, PAD, o, null, true);
+    const right = o.scales!.rect!.right;
+    expect(Math.abs(o.scales!.x!(0) - right)).toBeLessThanOrEqual(2);
+    expect(o.scales!.x!(-0.05)).toBeLessThan(right - 100);
+  });
+
+  it("keeps negative value labels clear of the category names", () => {
+    const { ctx } = fakeCtx();
+    const texts: { text: string; x: number; align: unknown }[] = [];
+    const rec = new Proxy(ctx as unknown as Record<string, unknown>, {
+      get(t, prop: string) {
+        if (prop === "fillText") return (text: string, x: number) => void texts.push({ text, x, align: t.textAlign });
+        return t[prop];
+      },
+      set(t, prop: string, v) {
+        t[prop] = v;
+        return true;
+      },
+    }) as unknown as CanvasRenderingContext2D;
+    const o: ChartRenderOpts = { ...opts(), fieldNames: ["country", "change"] };
+    renderFullBar(rec, [["neg", -50], ["pos", 30]], 0, 1, -1, W, H, PAD, o, null, true);
+    const catX = Math.max(...texts.filter((t) => t.text === "neg" || t.text === "pos").map((t) => t.x));
+    const neg = texts.find((t) => t.text === "-50")!;
+    expect(neg.align).toBe("right");
+    expect(neg.x - neg.text.length * 6).toBeGreaterThanOrEqual(catX);
+  });
+
   it("positions bubble marks inside authored plot bounds", () => {
     const { ctx } = fakeCtx();
     const o: ChartRenderOpts = { ...opts(), plotBounds: { left: 180, top: 90, right: 480, bottom: 280 }, legendPosition: "none" };
@@ -179,6 +212,14 @@ const renderers: [string, Draw][] = [
 ];
 
 describe("extracted canvas renderers", () => {
+  it.each(renderers)("%s supports a single custom color", (_name, render) => {
+    const { ctx, calls } = fakeCtx();
+    const o = { ...opts(), colors: ["#123456"], continuousStops: ["#123456"] };
+    expect(() => render(ctx, rows, o)).not.toThrow();
+    expect(calls.paint).toBeGreaterThan(0);
+    expect(o.legend?.every((entry) => typeof entry.color === "string") ?? true).toBe(true);
+  });
+
   it.each(renderers)("%s paints without throwing", (_name, render) => {
     const { ctx, calls } = fakeCtx();
     expect(() => render(ctx, rows, opts())).not.toThrow();
@@ -269,4 +310,95 @@ it("fits forecast bands inside the plot and keeps date events on the extended ax
   o.hits = [];
   renderFullLine(ctx, data, 0, 1, -1, W, H, PAD, o);
   expect(o.hits.some(hit => hit.summary?.columns[0] === "Forecast")).toBe(false);
+});
+
+describe("stat chart geometry", () => {
+  it("keeps the first ridgeline ridge inside the plot", () => {
+    const { ctx, calls } = fakeCtx();
+    const o = opts();
+    renderFullRidgeline(ctx, rows, 1, 0, W, H, PAD, o);
+    const rect = o.scales!.rect;
+    expect(calls.points.length).toBeGreaterThan(0);
+    for (const p of calls.points) {
+      expect(p.y).toBeGreaterThanOrEqual(rect.top - 0.001);
+    }
+    const rects = o.hits!.filter((hit) => hit.shape === "rect");
+    for (const hit of rects) {
+      if (hit.shape !== "rect") continue;
+      expect(hit.y).toBeGreaterThanOrEqual(rect.top);
+      expect(hit.y + hit.h).toBeLessThanOrEqual(rect.bottom + 0.001);
+    }
+    // The first band owns the headroom its peak reaches into.
+    expect(Math.min(...rects.map((hit) => (hit.shape === "rect" ? hit.y : Infinity)))).toBe(rect.top);
+  });
+
+  it("hits the parallel-coordinates line under the pointer, not the first one drawn", () => {
+    const { ctx } = fakeCtx();
+    const o = opts();
+    // Coloured by region, so a shared category match would hide the row.
+    renderFullParallel(ctx, rows, cols, 0, W, H, PAD, o);
+    expect(o.hits!.length).toBeGreaterThan(0);
+    expect(o.hits!.every((hit) => hit.shape === "circle")).toBe(true);
+    const circles = o.hits!.flatMap((hit) => (hit.shape === "circle" ? [hit] : []));
+    // A vertex no other line lands near, on a row that isn't its category's first.
+    const target = circles.find(
+      (hit) =>
+        rows.findIndex((r) => r[0] === rows[hit.rowIndex!]![0]) < hit.rowIndex! &&
+        !circles.some((c) => c.rowIndex !== hit.rowIndex && Math.hypot(c.cx - hit.cx, c.cy - hit.cy) <= c.r),
+    )!;
+    expect(target).toBeDefined();
+    const picked = pickHitTarget(o.hits, target.cx, target.cy)!;
+    expect(picked.rowIndex).toBe(target.rowIndex);
+    // The tooltip resolves to that line's row, not the category's first row.
+    expect(rowForHitTarget(picked, rows as (string | number | boolean | null)[][])).toBe(target.rowIndex);
+  });
+});
+
+
+describe("line endpoint keys", () => {
+  const seriesRows = [[1, 10, "East"], [2, 20, "East"], [1, 12, "West"], [2, 21, "West"]];
+  it("replaces automatic legends with names, actual endpoint values, and readouts", () => {
+    const { ctx, calls } = fakeCtx();
+    const config = opts();
+    renderFullLine(ctx, seriesRows, 0, 1, 2, 800, 450, 48, config);
+    expect(config.legend).toEqual([]);
+    expect(calls.labels.map(l => l.text)).toEqual(expect.arrayContaining(["East", "West", "20", "21"]));
+    expect(config.scales!.rect.right).toBeLessThan(752);
+    expect(config.hits!.filter(h => h.shape === "rect").map(h => h.summary?.row)).toEqual([
+      ["East", "2", "20"], ["West", "2", "21"],
+    ]);
+  });
+  it.each([
+    { legendPosition: "right" }, { legendPosition: "none" }, { mini: true }, { lineEndLabels: false },
+  ])("preserves explicit layout and thumbnail behavior: %j", (overrides) => {
+    const { ctx } = fakeCtx();
+    const config = { ...opts(), ...overrides };
+    renderFullLine(ctx, seriesRows, 0, 1, 2, 800, 450, 48, config);
+    expect(config.scales!.rect.right).toBe(752);
+    expect(config.legend).toHaveLength(2);
+  });
+  it("uses the legend on narrow charts and when full names cannot fit", () => {
+    for (const [width, source] of [[320, seriesRows], [800, seriesRows.map(r => [r[0], r[1], `${r[2]} ${"long name ".repeat(30)}`])]] as const) {
+      const { ctx } = fakeCtx();
+      const config = opts();
+      renderFullLine(ctx, source, 0, 1, 2, width, 450, 48, config);
+      expect(config.legend).toHaveLength(2);
+      expect(config.scales!.rect.right).toBe(width - 48);
+    }
+  });
+  it("labels the transformed endpoint and skips missing or log-invalid observations", () => {
+    const { ctx } = fakeCtx();
+    const config = { ...opts(), seriesNormalize: "index100" as const };
+    renderFullLine(ctx, [...seriesRows, [3, null, "East"]], 0, 1, 2, 800, 450, 48, config);
+    expect(config.hits!.filter(h => h.shape === "rect")[0].summary?.row).toEqual(["East", "2", "200"]);
+    const recipe = { kind: "line", xField: "day", yField: "value" } as ChartRecommendation;
+    const reading = buildChartReading(recipe, config.hits)!;
+    expect(reading.headline).toContain("East finishes highest at 200");
+    expect(reading.context).toContain("4 plotted values");
+    expect(reading.context).toContain("Index");
+    const log = { ...opts(), yScale: "log" as const };
+    renderFullLine(ctx, [...seriesRows, [3, -2, "East"]], 0, 1, 2, 800, 450, 48, log);
+    expect(log.hits!.filter(h => h.shape === "rect")[0].summary?.row).toEqual(["East", "2", "20"]);
+    expect(buildChartReading(recipe, log.hits)!.headline).toContain("West finishes highest at 21");
+  });
 });

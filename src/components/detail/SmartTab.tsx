@@ -113,7 +113,7 @@ export default function SmartTab() {
         {(anomalyMethod === "z-score" || anomalyMethod === "mad") && (
           <div>
             <label htmlFor={anomalyThresholdId} className="block text-2xs text-loom-muted mb-0.5">Threshold</label>
-            <input
+            <input aria-label="Value"
               id={anomalyThresholdId}
               type="number"
               min={1}
@@ -212,7 +212,7 @@ export default function SmartTab() {
         <p className="text-2xs text-loom-muted">Group points by position (k-means style). Colors by cluster on scatter.</p>
         <div>
           <label className="block text-2xs text-loom-muted mb-0.5">Clusters (k)</label>
-          <input
+          <input aria-label="Value"
             type="number"
             min={2}
             max={8}
@@ -258,7 +258,7 @@ export default function SmartTab() {
               <table className="text-2xs font-mono border-collapse">
                 <thead>
                   <tr>
-                    <th className="px-1 py-0.5" />
+                    <th aria-hidden className="px-1 py-0.5" />
                     {corr.columns.map((c) => <th key={c} scope="col" title={c} className="px-2 py-1 text-loom-label whitespace-normal break-words min-w-[6rem] max-w-[10rem]">{c}</th>)}
                   </tr>
                 </thead>

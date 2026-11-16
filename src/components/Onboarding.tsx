@@ -68,19 +68,29 @@ import {
   streamStart,
   streamStatus,
 } from "@/lib/tauri";
-import { SOURCE_BY_KIND } from "@/lib/sourceRegistry";
+import { SOURCE_BY_KIND, type SourceKind } from "@/lib/sourceRegistry";
 import {
   discoverAffinityMap,
   HIDDEN_RANK_PENALTY,
 } from "@/lib/sourcePreferences";
 import { isGeoFamilyKind } from "@/lib/geoMaps";
 import { DISCOVER_FAMILIES, discoverFamily } from "@/lib/discoverChartCatalog";
-import { discoverSpotlights } from "@/lib/discoverRanking";
+import { discoverSpotlights, surfaceDiscoverPacks } from "@/lib/discoverRanking";
+import { discoverPacksForScan, isDiscoverPackKind } from "@/lib/discoverPacks";
 import {
   resolveStartupIntent,
   shouldOpenOnboarding,
 } from "@/lib/startupIntent";
 import { getLastSession } from "@/lib/persist";
+import { socialKey } from "@/lib/socialKey";
+import {
+  COMMUNITY_SORTS,
+  COMMUNITY_SORT_LABELS,
+  communityBoost,
+  sortByCommunity,
+  type CommunitySort,
+} from "@/lib/socialRank";
+import { CommunityStrip } from "@/components/CommunityStrip";
 import { editorialDiscoverStory } from "@/lib/discoverEditorial";
 import {
   planDiscoverRefresh,
@@ -160,6 +170,7 @@ const SIZE_OPTIONS: {
 ];
 const SORT_LABELS: Record<SortMode, string> = {
   score: "Recommended",
+  ...COMMUNITY_SORT_LABELS,
   category: "Category",
   source: "Source",
   chart: "Chart type",
@@ -214,6 +225,16 @@ export function Onboarding() {
   const setDataRegionOpen = useLoomStore((s) => s.setDataRegionOpen);
   const setDataSourcesExpanded = useLoomStore((s) => s.setDataSourcesExpanded);
   const setToast = useLoomStore((s) => s.setToast);
+  const socialEnabled = useLoomStore((s) => s.socialEnabled);
+  const liveSocial = useLoomStore((s) => (s.socialEnabled ? s.socialSummary : null));
+  // Order by the votes as they stood when the page was arranged. Cards keep showing live
+  // counts, but a tap on ▲ never makes the card you're looking at jump away.
+  const [rankSocial, setRankSocial] = useState(liveSocial);
+  const liveSocialRef = useRef(liveSocial);
+  liveSocialRef.current = liveSocial;
+  const socialCounts = rankSocial?.counts;
+  const socialLatest = rankSocial?.latest;
+  const loadSocialSummary = useLoomStore((s) => s.loadSocialSummary);
   const scanAbortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const galleryRef = useRef<HTMLUListElement>(null);
@@ -223,6 +244,20 @@ export function Onboarding() {
   useEffect(() => {
     showRef.current = show;
   }, [show]);
+
+  // Re-arrange with fresh votes when stories are accepted, the sort changes, the page
+  // opens, or community first loads (or is switched off).
+  useEffect(() => {
+    setRankSocial(liveSocialRef.current);
+  }, [rankedAt, sortMode, show, !liveSocial]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Community votes + fresh comments ride alongside the scan (never block it).
+  useEffect(() => {
+    if (!show || !socialEnabled) return;
+    void loadSocialSummary();
+    const id = window.setInterval(() => void loadSocialSummary(), 60_000);
+    return () => window.clearInterval(id);
+  }, [show, socialEnabled, loadSocialSummary]);
 
   useEffect(() => {
     browseRef.current = {
@@ -345,6 +380,8 @@ export function Onboarding() {
                 .map((story) => ({ ...story, snapshotCached: true })),
             ]),
             discoverStoryLimit(),
+            // Same feed affinity (♥ / Less / Hide) the scan itself cuts with.
+            discoverAffinityMap([...ALL_SOURCE_KINDS, "wiki"]),
           );
           setDiscoverStoryCache(merged);
           void writeDiscoverDailyCache(
@@ -530,8 +567,19 @@ export function Onboarding() {
           return b.score - a.score;
       }
     });
+    if ((COMMUNITY_SORTS as readonly string[]).includes(sortMode)) {
+      const keyOf = (s: DiscoverStory) => socialKey(s.kind, s.chart);
+      return sortByCommunity(
+        sorted,
+        sortMode as CommunitySort,
+        (s) => socialCounts?.[keyOf(s)],
+        (s) => socialLatest?.[keyOf(s)]?.at ?? 0,
+      );
+    }
     return sorted;
   }, [
+    socialCounts,
+    socialLatest,
     stories,
     sourceAffinity,
     hiddenSourceCount,
@@ -551,7 +599,7 @@ export function Onboarding() {
     const byStory = new Map(
       questions.map((group) => [group.stories[0]!, group]),
     );
-    return rankDiscoverStories([...byStory.keys()], (story) => {
+    const ranked = rankDiscoverStories([...byStory.keys()], (story) => {
       const affinity = sourceAffinity[story.kind] ?? 0;
       const fresh = story.dataChangedAt
         ? Math.max(
@@ -559,11 +607,17 @@ export function Onboarding() {
             Math.min(1, 1 - (rankedAt - story.dataChangedAt) / 900_000),
           ) * 4
         : 0;
-      return (
-        story.score + (affinity === HIDDEN_RANK_PENALTY ? 0 : affinity) + fresh
-      );
+      // Rank the question by its best variant, not whichever story leads the card.
+      const variants = byStory.get(story)!.stories;
+      const best = Math.max(...variants.map((s) => s.score));
+      // Community: the best-received variant nudges the card up; a buried one sinks it.
+      const community = socialCounts
+        ? Math.max(...variants.map((s) => communityBoost(socialCounts[socialKey(s.kind, s.chart)])))
+        : 0;
+      return best + (affinity === HIDDEN_RANK_PENALTY ? 0 : affinity) + fresh + community;
     }).map((story) => byStory.get(story)!);
-  }, [visible, sortMode, sourceAffinity, rankedAt]);
+    return surfaceDiscoverPacks(ranked);
+  }, [visible, sortMode, sourceAffinity, rankedAt, socialCounts]);
   const spotlights = useMemo(
     () => discoverSpotlights(groups.map((g) => g.stories[0]!)),
     [groups],
@@ -612,24 +666,31 @@ export function Onboarding() {
       try {
         // Keep the evidence people selected stable while its feed reconnects.
         const { stats, sample } = story;
+        const pack = isDiscoverPackKind(story.kind);
         const file = {
           path: story.streamPath,
           name: story.fileName,
-          extension: "stream",
+          extension: pack ? "csv" : "stream",
           row_count: sample.total_rows,
           size_bytes: 0,
           ...(story.capturedAt
             ? { capturedAt: new Date(story.capturedAt).toISOString() }
             : {}),
-          ...(story.kind === "wiki"
+          ...(story.sourceUrl ? { sourceUrl: story.sourceUrl } : {}),
+          ...(pack
             ? {
-                sourceHome: "https://www.wikimedia.org/",
-                sourceCredit: "Wikimedia recent changes · CC BY-SA",
+                sourceHome: story.sourceHome,
+                sourceCredit: story.sourceCredit,
               }
-            : {
-                sourceHome: SOURCE_BY_KIND[story.kind]?.homepage,
-                sourceCredit: SOURCE_BY_KIND[story.kind]?.attribution,
-              }),
+            : story.kind === "wiki"
+              ? {
+                  sourceHome: "https://www.wikimedia.org/",
+                  sourceCredit: "Wikimedia recent changes · CC BY-SA",
+                }
+              : {
+                  sourceHome: SOURCE_BY_KIND[story.kind as SourceKind]?.homepage,
+                  sourceCredit: SOURCE_BY_KIND[story.kind as SourceKind]?.attribution,
+                }),
         };
         const charts = stories
           .filter((candidate) => candidate.kind === story.kind)
@@ -663,14 +724,12 @@ export function Onboarding() {
         }
         setDataRegionOpen(false);
         setDataSourcesExpanded(false);
-        if (
-          typeof window !== "undefined" &&
-          window.matchMedia("(max-width: 767px)").matches
-        ) {
+        if (typeof window !== "undefined") {
           const st = useLoomStore.getState();
-          if (st.sidebarOpen) st.toggleSidebar();
-          // Inspect needs the panel; chart-open still collapses chrome on phones.
-          if (dest !== "inspect" && st.panelOpen) st.togglePanel();
+          const phone = window.matchMedia("(max-width: 767px)").matches;
+          // The library drawer stays a fixed overlay through iPad widths.
+          if (window.matchMedia("(max-width: 1099px)").matches && st.sidebarOpen) st.toggleSidebar();
+          if (phone && dest !== "inspect" && st.panelOpen) st.togglePanel();
         }
         dismiss();
         // Cached charts open immediately. Reconnect without holding the tap hostage to a poll.
@@ -681,7 +740,7 @@ export function Onboarding() {
               if (!s0.running) await streamStart();
               const s = await streamStatus();
               useLoomStore.getState().setStreamStatus(s);
-            } else {
+            } else if (!isDiscoverPackKind(story.kind)) {
               const s0 = await sourceStatus(story.kind);
               if (!s0.running) await sourceStart(story.kind);
               const s = await sourceStatus(story.kind);
@@ -692,7 +751,8 @@ export function Onboarding() {
           }
         })();
       } catch (e) {
-        setToast(`Couldn’t open: ${e instanceof Error ? e.message : e}`);
+        console.warn("Open story failed:", e);
+        setToast("Couldn’t open this story — try again, or pick another");
       } finally {
         openingRef.current = false;
         setOpeningId(null);
@@ -735,6 +795,15 @@ export function Onboarding() {
     settingFilter !== "all" ||
     search.trim() !== "" ||
     sortMode !== "score";
+  /** Nothing to clear: every story left comes from a source the user hid (sort order doesn't narrow). */
+  const onlyHiddenSourcesLeft =
+    categoryFilter === "all" &&
+    chartFilter === "all" &&
+    sourceFilter === "all" &&
+    settingFilter === "all" &&
+    search.trim() === "" &&
+    !showHiddenSources &&
+    hiddenSourceCount > 0;
   const closeRef = useRef<HTMLButtonElement>(null);
   const moreRef = useRef<HTMLButtonElement>(null);
   const displayed = groups.slice(0, shownCount);
@@ -1184,7 +1253,9 @@ export function Onboarding() {
                     setSortMode(event.target.value as SortMode)
                   }
                 >
-                  {(Object.keys(SORT_LABELS) as SortMode[]).map((mode) => (
+                  {(Object.keys(SORT_LABELS) as SortMode[])
+                    .filter((mode) => socialEnabled || !(COMMUNITY_SORTS as readonly string[]).includes(mode))
+                    .map((mode) => (
                     <option key={mode} value={mode}>
                       {SORT_LABELS[mode]}
                     </option>
@@ -1218,8 +1289,9 @@ export function Onboarding() {
             <p className="discover-kicker">Finding your next story</p>
             <h3>A world of data. A fresh perspective.</h3>
             <p>
-              Checking {ALL_SOURCE_KINDS.length + 1} sources for chart ideas.
-              Stories appear as each source responds.
+              Checking {ALL_SOURCE_KINDS.length + 1} live feeds and{" "}
+              {discoverPacksForScan().length} public tables. Stories appear as
+              each one responds.
             </p>
             <div className="discover-skeletons" aria-hidden="true">
               {[0, 1, 2].map((key) => (
@@ -1254,21 +1326,45 @@ export function Onboarding() {
         )}
         {showFilters && !visible.length && (
           <div className="discover-empty">
-            <h3>No stories match yet.</h3>
-            <p>
-              Try a broader search or clear a filter to see more perspectives.
-            </p>
-            <button
-              type="button"
-              onClick={clearFilters}
-              className="loom-btn-primary mt-4 px-4 min-h-11 rounded-lg"
-            >
-              Clear filters
-            </button>
+            {onlyHiddenSourcesLeft ? (
+              <>
+                <h3>All current stories come from sources you hid.</h3>
+                <p>Show them for now, or browse other datasets.</p>
+                <button
+                  type="button"
+                  onClick={() => setShowHiddenSources(true)}
+                  className="loom-btn-primary mt-4 px-4 min-h-11 rounded-lg"
+                >
+                  Show hidden sources
+                </button>
+              </>
+            ) : (
+              <>
+                <h3>No stories match yet.</h3>
+                <p>
+                  Try a broader search or clear a filter to see more perspectives.
+                </p>
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="loom-btn-primary mt-4 px-4 min-h-11 rounded-lg"
+                >
+                  Clear filters
+                </button>
+              </>
+            )}
           </div>
         )}
         {displayed.length > 0 && (
           <>
+            {!filtersActive && (
+              <CommunityStrip
+                stories={stories}
+                onOpenStory={(story) => openStory(story)}
+                onBrowse={(mode) => setSortMode(mode)}
+                onDismissDiscover={dismiss}
+              />
+            )}
             <ul
               ref={galleryRef}
               id="onboarding-stories"
@@ -1366,8 +1462,25 @@ export function Onboarding() {
                 data-testid="discover-hidden-toggle"
               >
                 {showHiddenSources
-                  ? "Hide hidden"
+                  ? "Showing hidden sources"
                   : `${hiddenSourceCount} hidden · Show`}
+              </button>
+            )}
+            {groups.length > 3 && (
+              <button
+                type="button"
+                className="discover-header-link"
+                disabled={!!openingId}
+                title="Open a random story from the better half of today’s picks"
+                onClick={() => {
+                  // The better half of what's on offer, never the card already leading the page.
+                  const pool = groups.slice(1, Math.max(4, Math.ceil(groups.length / 2)));
+                  const pick = pool[Math.floor(Math.random() * pool.length)];
+                  const story = pick && (pick.stories.find((s) => s.id === chosenVariants[pick.id]) ?? pick.stories[0]);
+                  if (story) openStory(story);
+                }}
+              >
+                <span aria-hidden>⚄</span> Surprise me
               </button>
             )}
             <button
@@ -1375,7 +1488,7 @@ export function Onboarding() {
               onClick={browseSources}
               className="discover-header-link"
             >
-              Your data <span aria-hidden>↗</span>
+              Browse datasets <span aria-hidden>↗</span>
             </button>
             <details className="discover-method">
               <summary>How picks work</summary>

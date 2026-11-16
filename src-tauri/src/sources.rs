@@ -2803,19 +2803,17 @@ pub(crate) fn spacex_rows(body: &Value) -> Result<Vec<Row>, String> {
 const KP_URL: &str = "https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json";
 
 /// NOAA G-scale from Kp: G0 < 5, G1 5, G2 6, G3 7, G4 8, G5 ≥ 9.
+/// Kp comes in thirds and rounds first (4.67 = "5-" counts as Kp 5), matching
+/// sourceParsers.ts stormLevel; tests/fixtures/sources/storm_levels.json pins both.
 pub(crate) fn storm_level(kp: f64) -> &'static str {
-    if kp < 5.0 {
-        "G0"
-    } else if kp < 6.0 {
-        "G1"
-    } else if kp < 7.0 {
-        "G2"
-    } else if kp < 8.0 {
-        "G3"
-    } else if kp < 9.0 {
-        "G4"
-    } else {
+    const LEVELS: [&str; 4] = ["G1", "G2", "G3", "G4"];
+    let k = kp.round() as i64;
+    if k >= 9 {
         "G5"
+    } else if k >= 5 {
+        LEVELS[(k - 5) as usize]
+    } else {
+        "G0"
     }
 }
 
@@ -5077,7 +5075,11 @@ pub async fn source_start(
                     if poll_generation.load(Ordering::Acquire) != my_gen {
                         break;
                     }
-                    write_rows(&db, spec, &rows)
+                    // DuckDB writes block; keep them off the async worker threads.
+                    let db = Arc::clone(&db);
+                    tokio::task::spawn_blocking(move || write_rows(&db, spec, &rows))
+                        .await
+                        .unwrap_or_else(|e| Err(format!("Write task: {}", e)))
                 }
                 Err(e) => Err(e),
             };
@@ -5090,7 +5092,9 @@ pub async fn source_start(
                         total.store(n, Ordering::Relaxed);
                     } else {
                         total.fetch_add(n, Ordering::Relaxed);
-                        let _ = trim_table(&db, spec.table);
+                        let db = Arc::clone(&db);
+                        let _ =
+                            tokio::task::spawn_blocking(move || trim_table(&db, spec.table)).await;
                     }
                     consecutive_failures.store(0, Ordering::Relaxed);
                     *last_ok.lock().await = Some(now_secs());
@@ -5151,27 +5155,29 @@ pub async fn source_stop(kind: &str, state: Arc<SourcesState>) -> Result<(), Str
 pub fn source_query(db: &LoomDb, kind: &str, sql: &str, limit: u32) -> Result<QueryResult, String> {
     crate::sql_policy::validate_user_sql(sql)?;
     let table = table_for_kind(kind).ok_or("Unknown source kind")?;
-    let conn = db.lock_connection();
-    conn.execute_batch(&format!(
-        "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
-        table
-    ))
-    .map_err(|e| e.to_string())?;
-    let default = format!("SELECT * FROM {} LIMIT {{limit}}", table);
-    crate::query_engine::run_user_query(&conn, sql, limit, &default)
+    // Cloned connection: a slow user query must not hold the mutex pollers write through.
+    db.with_cloned_conn(|conn| {
+        conn.execute_batch(&format!(
+            "CREATE OR REPLACE TEMP VIEW loom_active AS SELECT * FROM {}",
+            table
+        ))
+        .map_err(|e| e.to_string())?;
+        let default = format!("SELECT * FROM {} LIMIT {{limit}}", table);
+        crate::query_engine::run_user_query(conn, sql, limit, &default)
+    })
 }
 
 pub fn source_stats(db: &LoomDb, kind: &str) -> Result<Vec<ColumnInfo>, String> {
     let table = table_for_kind(kind).ok_or("Unknown source kind")?;
-    let conn = db.lock_connection();
-    crate::query_engine::column_stats_for_table(&conn, table)
+    db.with_cloned_conn(|conn| crate::query_engine::column_stats_for_table(conn, table))
 }
 
 pub fn source_clear(db: &LoomDb, kind: &str) -> Result<(), String> {
     let table = table_for_kind(kind).ok_or("Unknown source kind")?;
-    let conn = db.lock_connection();
-    conn.execute_batch(&format!("DELETE FROM {}", table))
-        .map_err(|e| e.to_string())
+    db.with_cloned_conn(|conn| {
+        conn.execute_batch(&format!("DELETE FROM {}", table))
+            .map_err(|e| e.to_string())
+    })
 }
 
 #[cfg(test)]

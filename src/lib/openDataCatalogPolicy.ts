@@ -14,6 +14,6 @@ export function shouldRetryCsvOnCatalogFallback(err: unknown): boolean {
   if (msg.includes("Excel workbook") || /\bxlsx\b/i.test(msg)) return false;
   if (/Fetch CSV failed \([45]\d\d\)/.test(msg)) return false;
   // Relative `/api/fetch-csv` served the app shell — try the Worker origin.
-  if (/HTML page instead of CSV/i.test(msg)) return true;
+  if (/HTML page instead of CSV|web page instead of a table/i.test(msg)) return true;
   return true;
 }

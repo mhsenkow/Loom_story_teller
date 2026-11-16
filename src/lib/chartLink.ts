@@ -22,6 +22,7 @@ import type { AppSettings, ChartVisualOverrides, ColumnInfo, FileEntry } from ".
 import { sanitizeChartVisualOverrides } from "./chartVisualSanitize";
 import { packChannelInvert, unpackChannelInvert } from "./channelInvert";
 import { parseChartEmojiMap, type ChartEmojiMap } from "./chartEmoji";
+import { clampGroupInto } from "./channelGroups";
 
 export const CHART_LINK_VERSION = 1;
 
@@ -47,6 +48,8 @@ export interface ChartLinkChart {
   emojiMap?: ChartEmojiMap;
   yAggregate?: YAggregateOption;
   topN?: number;
+  /** Chunk color / shape into this many groups. */
+  groupInto?: number;
   y2Field?: string;
   comparePrevious?: boolean;
   rollingWindow?: 7 | 30;
@@ -55,6 +58,7 @@ export interface ChartLinkChart {
   residualOverlay?: boolean;
   anomalyHighlight?: boolean;
   bumpMode?: "rank" | "delta";
+  wordCloudMode?: "cloud" | "compare" | "grid";
   pyramidScaleMode?: "auto" | "shared" | "independent";
   deltaDisplay?: "diff" | "pct";
   timeWindowField?: string;
@@ -88,7 +92,19 @@ export interface ChartLink {
   showMarginals?: boolean;
   chartAspect?: ChartAspectId;
   chartDevice?: ChartDeviceId;
+  /** Pinned mark readouts (markFocus.ts): identity + readout snapshot. */
+  pins?: ChartLinkPin[];
 }
+
+export interface ChartLinkPin {
+  /** MarkRef fields: column → value. */
+  f: [string, string][];
+  /** Readout columns / values as pinned. */
+  c: string[];
+  r: (string | number | boolean | null)[];
+}
+
+const MAX_LINK_PINS = 5;
 
 // ---------------------------------------------------------------------------
 // Build from app state
@@ -103,6 +119,7 @@ export interface ChartLinkState {
   connectScatterTrail?: boolean;
   showMarginals?: boolean;
   appSettings?: Pick<AppSettings, "chartAspect" | "chartDevice">;
+  pinnedTooltips?: { chartId: string; ref: { fields: [string, string][] }; columns: string[]; row: (string | number | boolean | null)[] }[];
 }
 
 const str = (v: unknown): string | undefined => (typeof v === "string" && v !== "" ? v : undefined);
@@ -143,6 +160,47 @@ function cleanVisual(v: ChartVisualOverrides | undefined): Record<string, Primit
   return Object.keys(out).length ? out : undefined;
 }
 
+const LINK_OPTION_FIELDS = [
+  "topN",
+  "groupInto",
+  "comparePrevious",
+  "rollingWindow",
+  "yScale",
+  "seriesNormalize",
+  "residualOverlay",
+  "anomalyHighlight",
+  "bumpMode",
+  "wordCloudMode",
+  "pyramidScaleMode",
+  "deltaDisplay",
+] as const;
+type LinkOptionField = (typeof LINK_OPTION_FIELDS)[number];
+
+/** Scalar chart options a link carries; defaults collapse to undefined so links stay short. */
+function linkChartOptions(
+  rec: Pick<ChartRecommendation, LinkOptionField> | Pick<ChartLinkChart, LinkOptionField>,
+): Pick<ChartLinkChart, LinkOptionField> {
+  return {
+    topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
+    groupInto: clampGroupInto(rec.groupInto) ?? undefined,
+    comparePrevious: rec.comparePrevious || undefined,
+    rollingWindow: rec.rollingWindow === 7 || rec.rollingWindow === 30 ? rec.rollingWindow : undefined,
+    yScale: rec.yScale && rec.yScale !== "linear" ? rec.yScale : undefined,
+    seriesNormalize: rec.seriesNormalize === "index100" || rec.seriesNormalize === "zscore" ? rec.seriesNormalize : undefined,
+    residualOverlay: rec.residualOverlay || undefined,
+    anomalyHighlight: rec.anomalyHighlight || undefined,
+    bumpMode: rec.bumpMode === "delta" || rec.bumpMode === "rank" ? rec.bumpMode : undefined,
+    wordCloudMode: rec.wordCloudMode === "compare" || rec.wordCloudMode === "grid" ? rec.wordCloudMode : undefined,
+    pyramidScaleMode:
+      rec.pyramidScaleMode === "shared" ||
+      rec.pyramidScaleMode === "independent" ||
+      rec.pyramidScaleMode === "auto"
+        ? rec.pyramidScaleMode
+        : undefined,
+    deltaDisplay: rec.deltaDisplay === "diff" || rec.deltaDisplay === "pct" ? rec.deltaDisplay : undefined,
+  };
+}
+
 /** Snapshot the current chart setup as a link (null when there is no chart or dataset). */
 export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
   const rec = s.activeChart;
@@ -166,22 +224,8 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     emojiField: str(rec.emojiField),
     emojiMap: parseChartEmojiMap(rec.emojiMap),
     yAggregate: rec.yAggregate ?? undefined,
-    topN: typeof rec.topN === "number" && Number.isFinite(rec.topN) ? rec.topN : undefined,
     y2Field: str(rec.y2Field),
-    comparePrevious: rec.comparePrevious || undefined,
-    rollingWindow: rec.rollingWindow === 7 || rec.rollingWindow === 30 ? rec.rollingWindow : undefined,
-    yScale: rec.yScale && rec.yScale !== "linear" ? rec.yScale : undefined,
-    seriesNormalize: rec.seriesNormalize === "index100" || rec.seriesNormalize === "zscore" ? rec.seriesNormalize : undefined,
-    residualOverlay: rec.residualOverlay || undefined,
-    anomalyHighlight: rec.anomalyHighlight || undefined,
-    bumpMode: rec.bumpMode === "delta" || rec.bumpMode === "rank" ? rec.bumpMode : undefined,
-    pyramidScaleMode:
-      rec.pyramidScaleMode === "shared" ||
-      rec.pyramidScaleMode === "independent" ||
-      rec.pyramidScaleMode === "auto"
-        ? rec.pyramidScaleMode
-        : undefined,
-    deltaDisplay: rec.deltaDisplay === "diff" || rec.deltaDisplay === "pct" ? rec.deltaDisplay : undefined,
+    ...linkChartOptions(rec),
     timeWindowField: str(rec.timeWindowField),
     timeWindow: rec.timeWindow && rec.timeWindow !== "all" ? rec.timeWindow : undefined,
     tooltipFields: rec.tooltipFields?.length ? [...rec.tooltipFields] : undefined,
@@ -209,7 +253,37 @@ export function chartLinkFromState(s: ChartLinkState): ChartLink | null {
     showMarginals: s.showMarginals || undefined,
     chartAspect: s.appSettings?.chartAspect && s.appSettings.chartAspect !== "free" ? s.appSettings.chartAspect : undefined,
     chartDevice: s.appSettings?.chartDevice && s.appSettings.chartDevice !== "auto" ? s.appSettings.chartDevice : undefined,
+    pins: linkPins(s.pinnedTooltips, rec.id),
   };
+}
+
+const clip = (v: string, n = 120) => (v.length > n ? v.slice(0, n) : v);
+
+function linkPins(pins: ChartLinkState["pinnedTooltips"], chartId: string): ChartLinkPin[] | undefined {
+  const mine = (pins ?? []).filter((p) => p.chartId === chartId).slice(-MAX_LINK_PINS);
+  if (!mine.length) return undefined;
+  return mine.map((p) => ({
+    f: p.ref.fields.slice(0, 6).map(([k, v]) => [clip(k, 80), clip(v)] as [string, string]),
+    c: p.columns.slice(0, 6).map((c) => clip(c, 80)),
+    r: p.row.slice(0, 6).map((v) => (typeof v === "string" ? clip(v) : v)),
+  }));
+}
+
+function parseLinkPins(raw: unknown): ChartLinkPin[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const cell = (v: unknown) => (v === null || typeof v === "number" || typeof v === "boolean" ? v : typeof v === "string" ? clip(v) : undefined);
+  const out: ChartLinkPin[] = [];
+  for (const p of raw.slice(0, MAX_LINK_PINS)) {
+    if (!p || typeof p !== "object") continue;
+    const { f, c, r } = p as Record<string, unknown>;
+    if (!Array.isArray(f) || !Array.isArray(c) || !Array.isArray(r)) continue;
+    const fields = f.filter((e): e is [string, string] => Array.isArray(e) && e.length === 2 && typeof e[0] === "string" && typeof e[1] === "string").slice(0, 6);
+    const cols = c.filter((x): x is string => typeof x === "string").slice(0, 6);
+    const row = r.slice(0, cols.length).map(cell);
+    if (!fields.length || !cols.length || row.some((v) => v === undefined)) continue;
+    out.push({ f: fields, c: cols, r: row as ChartLinkPin["r"] });
+  }
+  return out.length ? out : undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +309,7 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["emojiMap", "emv"],
   ["yAggregate", "a"],
   ["topN", "tn"],
+  ["groupInto", "gi"],
   ["y2Field", "y2"],
   ["comparePrevious", "cp"],
   ["rollingWindow", "rw"],
@@ -243,6 +318,7 @@ const CHART_KEYS: [keyof ChartLinkChart, string][] = [
   ["residualOverlay", "ro"],
   ["anomalyHighlight", "ah"],
   ["bumpMode", "bm"],
+  ["wordCloudMode", "wm"],
   ["pyramidScaleMode", "ps"],
   ["deltaDisplay", "dd"],
   ["timeWindowField", "twf"],
@@ -265,6 +341,7 @@ const TOP_KEYS: [Exclude<keyof ChartLink, "chart">, string][] = [
   ["showMarginals", "mg"],
   ["chartAspect", "ar"],
   ["chartDevice", "dv"],
+  ["pins", "pn"],
 ];
 
 function compact(entries: [string, unknown][]): Record<string, unknown> {
@@ -324,6 +401,7 @@ export function decodeChartLink(hash: string): ChartLink | null {
       f === "tooltipFields" ||
       f === "emojiMap" ||
       f === "topN" ||
+      f === "groupInto" ||
       f === "comparePrevious" ||
       f === "rollingWindow" ||
       f === "yScale" ||
@@ -331,6 +409,7 @@ export function decodeChartLink(hash: string): ChartLink | null {
       f === "residualOverlay" ||
       f === "anomalyHighlight" ||
       f === "bumpMode" ||
+      f === "wordCloudMode" ||
       f === "pyramidScaleMode" ||
       f === "deltaDisplay" ||
       f === "timeWindow" ||
@@ -345,6 +424,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
   const emojiMap = parseChartEmojiMap(cr.emv);
   if (emojiMap?.field === chart.emojiField) chart.emojiMap = emojiMap;
   if (typeof cr.tn === "number" && Number.isFinite(cr.tn)) chart.topN = Math.max(3, Math.min(50, Math.round(cr.tn)));
+  const grouped = clampGroupInto(typeof cr.gi === "number" ? cr.gi : null);
+  if (grouped) chart.groupInto = grouped;
   if (cr.cp === true) chart.comparePrevious = true;
   if (cr.rw === 7 || cr.rw === 30) chart.rollingWindow = cr.rw;
   if (cr.ys === "log" || cr.ys === "symlog" || cr.ys === "linear") chart.yScale = cr.ys;
@@ -352,6 +433,7 @@ export function decodeChartLink(hash: string): ChartLink | null {
   if (cr.ro === true) chart.residualOverlay = true;
   if (cr.ah === true) chart.anomalyHighlight = true;
   if (cr.bm === "delta" || cr.bm === "rank") chart.bumpMode = cr.bm;
+  if (cr.wm === "cloud" || cr.wm === "compare" || cr.wm === "grid") chart.wordCloudMode = cr.wm;
   if (cr.ps === "shared" || cr.ps === "independent" || cr.ps === "auto") chart.pyramidScaleMode = cr.ps;
   if (cr.dd === "diff" || cr.dd === "pct") chart.deltaDisplay = cr.dd;
   if (typeof cr.tw === "string" && TIME_WINDOWS.has(cr.tw) && cr.tw !== "all") {
@@ -379,6 +461,8 @@ export function decodeChartLink(hash: string): ChartLink | null {
   if (obj.mg === true) link.showMarginals = true;
   if (typeof obj.ar === "string" && ASPECTS.has(obj.ar)) link.chartAspect = obj.ar as ChartAspectId;
   if (typeof obj.dv === "string" && DEVICES.has(obj.dv)) link.chartDevice = obj.dv as ChartDeviceId;
+  const pins = parseLinkPins(obj.pn);
+  if (pins) link.pins = pins;
   return link;
 }
 
@@ -423,12 +507,16 @@ export function restoreChartRec(
   const used = [...ENCODING_FIELDS.map((f) => c[f]), c.tooltipKeyField].filter((f): f is string => !!f);
   if (!names.size || used.some((f) => !names.has(f))) return null;
 
-  const same = recs.find(
-    (r) =>
-      r.kind === c.kind &&
-      ENCODING_FIELDS.every((f) => norm(r[f]) === norm(c[f])) &&
-      (!c.yAggregate || norm(r.yAggregate) === c.yAggregate),
-  );
+  // Options (top N, log Y, rolling, …) must match too, or the rail rec would
+  // silently drop the sender's tweaks; a mismatch falls through to createChartRec.
+  const wantOpts = linkChartOptions(c);
+  const same = recs.find((r) => {
+    if (r.kind !== c.kind) return false;
+    if (!ENCODING_FIELDS.every((f) => norm(r[f]) === norm(c[f]))) return false;
+    if (c.yAggregate && norm(r.yAggregate) !== c.yAggregate) return false;
+    const opts = linkChartOptions(r);
+    return LINK_OPTION_FIELDS.every((f) => opts[f] === wantOpts[f]);
+  });
   let rec: ChartRecommendation | null = same ?? null;
   if (!rec) {
     rec = createChartRec(c.kind, columns, c.xField, c.yField ?? null, c.colorField ?? null, tableName, {
@@ -445,6 +533,7 @@ export function restoreChartRec(
       emojiMap: c.emojiMap,
       yAggregate: c.yAggregate ?? null,
       topN: c.topN ?? null,
+      groupInto: c.groupInto ?? null,
       y2Field: c.y2Field ?? null,
       comparePrevious: c.comparePrevious ?? null,
       rollingWindow: c.rollingWindow ?? null,
@@ -453,6 +542,7 @@ export function restoreChartRec(
       residualOverlay: c.residualOverlay ?? null,
       anomalyHighlight: c.anomalyHighlight ?? null,
       bumpMode: c.bumpMode ?? null,
+      wordCloudMode: c.wordCloudMode ?? null,
       pyramidScaleMode: c.pyramidScaleMode ?? null,
       deltaDisplay: c.deltaDisplay ?? null,
       timeWindowField: c.timeWindowField ?? null,
@@ -486,6 +576,7 @@ export function restoreChartRec(
     if (v !== undefined) (out as unknown as Record<string, unknown>)[f] = v;
   }
   if (c.yAggregate) out.yAggregate = c.yAggregate;
+  if (c.groupInto) out.groupInto = c.groupInto;
   if (c.tooltipFields) out.tooltipFields = c.tooltipFields;
   if (c.tooltipKeyField) out.tooltipKeyField = c.tooltipKeyField;
   if (c.layoutDirection) out.layoutDirection = c.layoutDirection;
@@ -494,5 +585,6 @@ export function restoreChartRec(
   if (c.title) out.title = c.title;
   if (c.subtitle !== undefined) out.subtitle = c.subtitle;
   if (c.timeWindow) out.timeWindow = c.timeWindow;
+  if (c.wordCloudMode) out.wordCloudMode = c.wordCloudMode;
   return out;
 }

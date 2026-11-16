@@ -20,6 +20,7 @@ import {
   type CommandPaletteCatalogHit,
   type CommandPaletteMatch,
 } from "@/lib/commandPalette";
+import { toggleChartFocus } from "@/lib/chartFocus";
 import {
   createChartRec,
   fitEncodingToKind,
@@ -209,6 +210,11 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         onClose();
         return;
       }
+      if (id === "chrome:focus") {
+        if (!toggleChartFocus()) store.setToast("Open a chart to go full screen");
+        onClose();
+        return;
+      }
       if (id === "preview:schema" || id === "preview:preview") {
         requestPreviewFooter({ tab: id === "preview:schema" ? "schema" : "preview", expand: true });
         onClose();
@@ -227,7 +233,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
         store.setViewMode("chart");
         store.setPanelTab("chart");
         store.setPanelOpen(true);
-        store.setToast("Encoding");
+        store.setToast("Fields");
         onClose();
         return;
       }
@@ -494,7 +500,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             <circle cx="11" cy="11" r="6.5" stroke="currentColor" strokeWidth="1.6" />
             <path d="M16 16l4.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
           </svg>
-          <input
+          <input aria-label="Value"
             ref={inputRef}
             type="search"
             value={query}
@@ -509,7 +515,9 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
             spellCheck={false}
             disabled={busy}
           />
-          <button
+          <button aria-label="<button
+            type=&quot;button&quot;
+            title={listening ? &quot;Stop listening"
             type="button"
             title={listening ? "Stop listening" : "Speak a command"}
             aria-pressed={listening}

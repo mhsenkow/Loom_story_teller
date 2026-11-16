@@ -78,7 +78,7 @@ function PromptDialogForm({
           <label htmlFor={`${titleId}-input`} className="sr-only">
             {dialog.title}
           </label>
-          <input
+          <input aria-label="Value"
             ref={inputRef}
             id={`${titleId}-input`}
             type="text"

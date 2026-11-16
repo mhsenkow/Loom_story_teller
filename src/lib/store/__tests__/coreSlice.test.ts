@@ -4,8 +4,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { useLoomStore } from "../../store";
-import type { FileEntry, ColumnInfo, QueryResult } from "../../store";
-
+import type { FileEntry } from "../../store";
 function getState() { return useLoomStore.getState(); }
 
 beforeEach(() => { getState().reset(); });

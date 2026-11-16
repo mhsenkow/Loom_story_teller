@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   discoverChartSettings,
   discoverEvidence,
+  groupDiscoverStories,
   matchesDiscoverSearch,
   matchesDiscoverSetting,
   rankDiscoverStories,
@@ -53,6 +54,13 @@ const story: DiscoverStory = {
 };
 
 describe("discover presentation", () => {
+  it("leads a question group with the headline story even when a sibling scores higher", () => {
+    const sibling = { ...story, id: "weather-alt", hook: chart.title, score: 95 };
+    const headline = { ...story, id: "weather-head", hook: "Hottest city today", score: 70, headline: true };
+    const [group] = groupDiscoverStories([sibling, headline]);
+    expect(group!.stories.map((s) => s.id)).toEqual(["weather-head", "weather-alt"]);
+  });
+
   it("finds sources, fields, chart types and settings using all search terms", () => {
     const variant = {
       ...story,

@@ -47,7 +47,7 @@ const full: ChartLink = {
     subtitle: "stacked by product",
   },
   titleOverride: "Where the money is — café ☕",
-  visual: { colorPalette: "seq-blue", axisStyle: "ladder", showGrid: false, pointSize: 6, markerMode: "emoji", markEmoji: "📍" },
+  visual: { customColors: "#123456,#abcdef", colorPalette: "seq-blue", axisStyle: "ladder", showGrid: false, pointSize: 6, markerMode: "emoji", markEmoji: "📍" },
   barStackMode: "stacked",
   connectScatterTrail: true,
   showMarginals: true,
@@ -261,6 +261,42 @@ describe("chart links", () => {
     expect(restoreChartRec(link, columns, [story], "usgs")).toEqual(story);
   });
 
+  it("keeps group into across a share link", () => {
+    const tweaked = createChartRec("scatter", columns, "units", "revenue", "region", "sales", { groupInto: 10 })!;
+    expect(tweaked.groupInto).toBe(10);
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: tweaked,
+    })!;
+    const rec = restoreChartRec(decodeChartLink(encodeChartLink(link))!, columns, [], "sales")!;
+    expect(rec.groupInto).toBe(10);
+  });
+
+  it("keeps the sender's log Y and top N when the rail holds the untweaked rec", () => {
+    const original = createChartRec("bar", columns, "region", "revenue", null, "sales")!;
+    const tweaked = createChartRec("bar", columns, "region", "revenue", null, "sales", { yScale: "log", topN: 10 })!;
+    expect(tweaked.yScale).toBe("log");
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: tweaked,
+    })!;
+    const decoded = decodeChartLink(encodeChartLink(link))!;
+    const rec = restoreChartRec(decoded, columns, [original], "sales")!;
+    expect(rec.yScale).toBe("log");
+    expect(rec.topN).toBe(10);
+  });
+
+  it("still reuses the rail rec when its options match the link", () => {
+    const original = createChartRec("bar", columns, "region", "revenue", null, "sales")!;
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: original,
+    })!;
+    const decoded = decodeChartLink(encodeChartLink(link))!;
+    const railRec = { ...original, spec: { ...original.spec, description: "rail copy" } };
+    expect(restoreChartRec(decoded, columns, [railRec], "sales")!.spec).toBe(railRec.spec);
+  });
+
   it("returns null when the dataset lacks a column the chart uses", () => {
     const link: ChartLink = { src: "mock://a.csv", chart: { kind: "bar", xField: "region", yField: "profit" } };
     expect(restoreChartRec(link, columns, [], "a")).toBeNull();
@@ -276,5 +312,24 @@ describe("chart links", () => {
     expect(decoded!.visual?.pointSize).toBe(24);
     expect(decoded!.visual?.chartPadding).toBe(16);
     expect(decoded!.visual).not.toHaveProperty("notARealKey");
+  });
+
+  it("carries pinned readouts for the active chart only, capped and validated", () => {
+    const rec = { id: "r1", kind: "bar", title: "t", subtitle: "", score: 1, spec: {}, xField: "city", yField: "units", colorField: null } as ChartRecommendation;
+    const pin = (chartId: string, v: string) => ({ chartId, ref: { fields: [["city", v]] as [string, string][] }, columns: ["city", "Sum of units"], row: [v, 12] });
+    const link = chartLinkFromState({
+      selectedFile: { path: "mock://sales.csv", name: "sales.csv" },
+      activeChart: rec,
+      pinnedTooltips: [pin("r1", "Rome"), pin("other", "Oslo"), ...["a", "b", "c", "d", "e"].map((v) => pin("r1", v))],
+    })!;
+    expect(link.pins).toHaveLength(5);
+    expect(link.pins!.every((p) => p.f[0]![1] !== "Oslo")).toBe(true);
+    const decoded = decodeChartLink(encodeChartLink(link))!;
+    expect(decoded.pins).toEqual(link.pins);
+    // Garbage in the pin list is dropped, not trusted.
+    const raw = JSON.parse(b64urlDecode(encodeChartLink(link).slice("chart=".length)));
+    raw.pn = [{ f: [["city", 1]], c: ["x"], r: [{}] }, "nope", ...raw.pn.slice(0, 1)];
+    const tampered = decodeChartLink(`chart=${b64urlEncode(JSON.stringify(raw))}`)!;
+    expect(tampered.pins).toHaveLength(1);
   });
 });

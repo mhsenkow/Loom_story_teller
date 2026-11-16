@@ -49,7 +49,6 @@ export function Dialog({
   stage = false,
 }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const restoreFocusRef = useRef<HTMLElement | null>(null);
   const keyboardInset = useKeyboardBottomInset();
   const fallbackLabelId = useId();
   const labelProps = labelledBy
@@ -60,7 +59,7 @@ export function Dialog({
 
   useEffect(() => {
     if (!open) return;
-    restoreFocusRef.current = document.activeElement as HTMLElement | null;
+    const restoreTo = document.activeElement as HTMLElement | null;
     const t = window.requestAnimationFrame(() => {
       const target =
         initialFocusRef?.current ??
@@ -68,7 +67,14 @@ export function Dialog({
         panelRef.current;
       target?.focus();
     });
-    return () => window.cancelAnimationFrame(t);
+    // Restore in cleanup so focus returns both when `open` flips false and when
+    // the parent unmounts us while still open.
+    return () => {
+      window.cancelAnimationFrame(t);
+      if (restoreTo && typeof restoreTo.focus === "function" && document.contains(restoreTo)) {
+        restoreTo.focus();
+      }
+    };
   }, [open, initialFocusRef]);
 
   useEffect(() => {
@@ -86,14 +92,6 @@ export function Dialog({
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [open, onClose]);
-
-  useEffect(() => {
-    if (open) return;
-    const prev = restoreFocusRef.current;
-    if (prev && typeof prev.focus === "function" && document.contains(prev)) {
-      prev.focus();
-    }
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -117,10 +115,10 @@ export function Dialog({
       ? "items-end sm:items-center p-0 sm:p-4"
       : "items-center p-4";
   const panelShape = stage
-    ? "rounded-[var(--radius-lg)]"
+    ? "rounded-[var(--radius-lg)] animate-pop"
     : useSheet
-      ? "rounded-t-[var(--radius-lg)] sm:rounded-[var(--radius-lg)] mb-[var(--safe-bottom)] sm:mb-0 animate-slide-up"
-      : "rounded-[var(--radius-lg)]";
+      ? "rounded-t-[var(--radius-lg)] sm:rounded-[var(--radius-lg)] mb-[var(--safe-bottom)] sm:mb-0 animate-sheet sm:animate-pop"
+      : "rounded-[var(--radius-lg)] animate-pop";
   const frameMax = stage
     ? "max-w-[calc(100vw-0.75rem)] sm:max-w-[calc(100vw-1.25rem)] h-[min(96dvh,calc(100dvh-0.75rem))] sm:h-[min(94dvh,calc(100dvh-1.25rem))]"
     : "max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-2rem)]";

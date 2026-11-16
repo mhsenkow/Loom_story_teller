@@ -87,8 +87,15 @@ xcrun altool --upload-app --type macos \
 
 Signing: **Apple Distribution** (app) + **3rd Party Mac Developer Installer** (pkg). Identity overrides: `APPLE_DISTRIBUTION_IDENTITY`, `APPLE_INSTALLER_IDENTITY`.
 
-## Build attached (2026-10-20)
-- **Build:** CFBundleVersion `10` (upload UUID `aee538a5-44c1-4a78-b94b-23fe051a8a4f`) — Monitor: Quick Watch, moments, phone / browser push, public page + RSS, 18 new feeds
+## Build uploaded (2026-11-12)
+- **Version:** CFBundleShortVersionString `0.1.2` · CFBundleVersion `13` (`tauri.appstore.conf.json`)
+- ChartView split / health cleanup + community stories wave; site parity at loom.ibm.io
+
+## Build attached (2026-10-27)
+- **Build:** CFBundleVersion `12` attached · **WAITING_FOR_REVIEW** (submission `f382ec2e-0526-4432-b0af-cd7be6b211d8`, submitted 2026-10-27T17:57:06Z)
+- Delivery `69cbd01e-d0f8-4158-b2ac-0883cf4b2d2a` — ChartView LOOM-141 + draw wiring; listing copy says CSV/SQLite (no unsigned DuckDB extensions)
+- Review notes updated for build 12
+- Prior (2026-10-20): CFBundleVersion `10` (upload UUID `aee538a5-44c1-4a78-b94b-23fe051a8a4f`) — Monitor: Quick Watch, moments, phone / browser push, public page + RSS, 18 new feeds
 - Prior: CFBundleVersion `9` (upload UUID `9077327a-bcd4-4dfc-968b-dd844e90803d`) — forecast methods in a focus curtain
 - Prior: CFBundleVersion `8` (upload UUID `602f6059-faac-470d-9fd1-ad2aa5f0ab48`) — forecast, anomaly, and event overlays
 - Prior: CFBundleVersion `7` (upload UUID `078c8561-4e4a-4fc5-9fbf-45f4a46c76c6`) — theme release

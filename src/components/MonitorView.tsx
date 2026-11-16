@@ -18,6 +18,7 @@ import { notificationPermission, requestNotificationPermission, type NotifyPermi
 import { runMonitorNow } from "@/lib/monitoring/runner";
 import { openMonitorChart } from "@/lib/monitoring/openChart";
 import { exportMonitorsJson, parseMonitorsJson } from "@/lib/monitoring/storage";
+import { downloadBlob } from "@/lib/download";
 import { ALERT_OUTCOME_LABELS, type AlertOutcome, type CheckRecord, type CheckStatus, type Monitor, type MonitorAlert } from "@/lib/monitoring/types";
 import { MonitorEditor } from "./monitor/MonitorEditor";
 import { ConnectPanel } from "./monitor/ConnectPanel";
@@ -32,6 +33,7 @@ import { sourceKindFromPath, type SourceKind } from "@/lib/sourceRegistry";
 import { draftForFeed, type MonitorDraft } from "@/lib/monitoring/templates";
 import type { QueryResult } from "@/lib/queryTypes";
 import { MonitorSparkline } from "./monitor/MonitorSparkline";
+import { friendlyError } from "./sidebar/shared";
 
 const STATUS_STYLE: Record<CheckStatus | "idle" | "paused", { dot: string; label: string }> = {
   ok: { dot: "bg-loom-success", label: "OK" },
@@ -102,7 +104,7 @@ function AlertReview({ alert, monitor }: { alert: MonitorAlert; monitor?: Monito
         <div className="flex flex-wrap items-center gap-2">
           <input className="loom-input flex-1 min-w-40 text-xs" placeholder="Note (optional): what you did or why it's normal" value={note} onChange={(e) => setNote(e.target.value)} aria-label="Review note" />
           <label className="flex items-center gap-1 text-2xs text-loom-muted" title="Expected / on purpose → don't alert again at this weekday and hour">
-            <input type="checkbox" checked={learn} onChange={(e) => setLearn(e.target.checked)} /> Remember expected times
+            <input type="checkbox" checked={learn} onChange={(e) => setLearn(e.target.checked)} aria-label="Remember expected times" /> Remember expected times
           </label>
         </div>
       </div>
@@ -162,7 +164,7 @@ function ForYourData() {
   if (!kind) {
     return (
       <p className="text-xs text-loom-muted border border-dashed border-loom-border rounded-md p-3">
-        You&apos;re looking at <strong className="text-loom-text">{fileName}</strong>, which is a file. Monitors watch live feeds that update on their own. Open one from Data &amp; sources to get suggestions here.
+        You&apos;re looking at <strong className="text-loom-text">{fileName}</strong>, which is a file. Monitors watch live feeds that update on their own. Open one from the Data library to get suggestions here.
       </p>
     );
   }
@@ -284,13 +286,10 @@ export function MonitorView() {
     return [...g.entries()].sort(([a], [b]) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
   }, [monitors]);
 
-  const exportAll = () => {
+  const exportAll = async () => {
     const blob = new Blob([exportMonitorsJson(monitors)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "loom-monitors.json";
-    a.click();
-    URL.revokeObjectURL(a.href);
+    const outcome = await downloadBlob(blob, "loom-monitors.json");
+    if (outcome === "unsupported") setToast("Couldn’t save the file on this device");
   };
   const importFile = async (f: File) => {
     try {
@@ -298,7 +297,8 @@ export function MonitorView() {
       for (const { id: _i, createdAt: _c, nextRunAt: _n, ...draft } of list) addMonitor(draft);
       setToast(`Imported ${list.length} monitor${list.length === 1 ? "" : "s"}`);
     } catch (e) {
-      setToast(`Import failed: ${e instanceof Error ? e.message : e}`);
+      const notExport = e instanceof SyntaxError || e instanceof TypeError || (e instanceof Error && e.message === "Not a Loom monitors file");
+      setToast(notExport ? "That file isn’t a Loom monitors export" : `Couldn’t import monitors — ${friendlyError(e)}`);
     }
   };
 
@@ -321,7 +321,7 @@ export function MonitorView() {
             )}
             {monitors.length > 0 && <button type="button" className="loom-btn-ghost text-xs px-2 py-1.5 rounded-md" onClick={exportAll}>Export</button>}
             <button type="button" className="loom-btn-ghost text-xs px-2 py-1.5 rounded-md" onClick={() => fileRef.current?.click()}>Import</button>
-            <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ""; }} />
+            <input aria-label="Choose file" ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void importFile(f); e.target.value = ""; }} />
             <button type="button" className="loom-btn-primary text-sm px-3 py-1.5 rounded-md" onClick={() => {
               const kind = sourceKindFromPath(useLoomStore.getState().selectedFile?.path) ?? "usgs";
               openMonitorEditor("new", draftForFeed(kind), "quick");

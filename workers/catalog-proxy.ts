@@ -16,11 +16,27 @@ import {
   webhookRequest,
   makeNotifier,
   bundleExpiry,
+  bundleListMeta,
   validatePushSubscription,
   vapidFromEnv,
   type CloudBundle,
 } from "./monitorCron";
 import { isPublicId, publicFeedXml, publicMomentSvg, publicPageHtml } from "./monitorPublic";
+import { handleSocial, type SocialBackend } from "./socialRoutes";
+import type { SocialHub } from "./socialHub";
+import { SOURCE_BY_KIND, isSourceKind } from "../src/lib/sourceRegistry";
+
+/** Columns of the Wikipedia live stream (not a registry feed; see webStreams.ts). */
+const WIKI_STREAM_COLUMNS = ["id", "wiki", "title", "user", "bot", "minor", "namespace", "edit_type", "old_len", "new_len", "delta", "ts", "server_name", "comment"] as const;
+
+/** Community charts may only name real columns of a feed Loom serves. */
+function socialColumnsFor(kind: string): readonly string[] | null {
+  if (kind === "wiki") return WIKI_STREAM_COLUMNS;
+  return isSourceKind(kind) ? SOURCE_BY_KIND[kind].columns : null;
+}
+
+// Durable Object classes must be exported from the entry module.
+export { SocialHub } from "./socialHub";
 import type { CheckRecord } from "../src/lib/monitoring/types";
 import { parseSourceRows } from "../src/lib/sourceParsers";
 import {
@@ -150,6 +166,10 @@ export interface Env {
   VAPID_PUBLIC_KEY?: string;
   VAPID_PRIVATE_JWK?: string;
   VAPID_SUBJECT?: string;
+  /** Community votes + comments (SocialHub Durable Object). Absent → /api/social answers 503. */
+  SOCIAL?: DurableObjectNamespace<SocialHub>;
+  /** Optional: seeds the hash secret the first time SocialHub runs. It is fixed after that. */
+  SOCIAL_PEPPER?: string;
 }
 
 /** Product host for share links — never mint mhsenkow.workers.dev URLs for recipients. */
@@ -300,6 +320,18 @@ function allowRequest(key: string, limit: number, windowMs: number): boolean {
   return true;
 }
 
+/**
+ * How many allows to fold into one KV write. Tight caps stay close to exact;
+ * the busy monitor caps (60–300/hour) otherwise write once per request and
+ * burn the free plan's 1,000 writes/day.
+ */
+function rateLimitFlushEvery(limit: number): number {
+  return Math.max(1, Math.min(10, Math.floor(limit / 5)));
+}
+
+type RateBucketKv = { count: number; resetAt: number };
+const rlMemo = new Map<string, RateBucketKv>();
+
 /** KV-backed limiter (LOOM_STORIES) so story/feedback caps hold across colos. */
 async function rateLimitAllow(
   env: Env,
@@ -310,26 +342,37 @@ async function rateLimitAllow(
 ): Promise<boolean> {
   const composite = `${bucket}:${key}`;
   const kv = env.LOOM_STORIES;
-  if (kv) {
-    const rlKey = `rl:${composite}`;
-    const now = Date.now();
-    type Bucket = { count: number; resetAt: number };
-    const raw = (await kv.get(rlKey, "json")) as Bucket | null;
-    if (!raw || now > raw.resetAt) {
-      await kv.put(rlKey, JSON.stringify({ count: 1, resetAt: now + windowMs }), {
-        expirationTtl: Math.ceil(windowMs / 1000) + 120,
-      });
-      return true;
-    }
-    if (raw.count >= limit) return false;
-    await kv.put(
-      rlKey,
-      JSON.stringify({ count: raw.count + 1, resetAt: raw.resetAt }),
-      { expirationTtl: Math.max(120, Math.ceil((raw.resetAt - now) / 1000) + 120) },
-    );
-    return true;
+  if (!kv) return allowRequest(composite, limit, windowMs);
+
+  const rlKey = `rl:${composite}`;
+  const now = Date.now();
+  const every = rateLimitFlushEvery(limit);
+  let b = rlMemo.get(rlKey);
+  if (!b || now > b.resetAt) {
+    const raw = (await kv.get(rlKey, "json")) as RateBucketKv | null;
+    b = raw && now <= raw.resetAt ? { count: raw.count, resetAt: raw.resetAt } : { count: 0, resetAt: now + windowMs };
+  } else if (b.count + every >= limit) {
+    // Near the cap, take the higher count another location may have flushed.
+    const raw = (await kv.get(rlKey, "json")) as RateBucketKv | null;
+    if (raw && now <= raw.resetAt && raw.count > b.count) b = { count: raw.count, resetAt: raw.resetAt };
   }
-  return allowRequest(composite, limit, windowMs);
+  if (b.count >= limit) {
+    rlMemo.set(rlKey, b);
+    return false;
+  }
+  b = { count: b.count + 1, resetAt: b.resetAt };
+  rlMemo.set(rlKey, b);
+  if (rlMemo.size > 800) {
+    for (const [k, bucket] of rlMemo) {
+      if (now > bucket.resetAt) rlMemo.delete(k);
+    }
+  }
+  if (b.count === 1 || b.count >= limit || b.count % every === 0) {
+    await kv.put(rlKey, JSON.stringify(b), {
+      expirationTtl: Math.max(120, Math.ceil((b.resetAt - now) / 1000) + 120),
+    });
+  }
+  return true;
 }
 
 /** CORS reflecting an approved Origin (never `*`) for sensitive proxy routes. */
@@ -582,8 +625,17 @@ async function cachedUpstreamJson<T = unknown>(
   const key = SUBCACHE_ORIGIN + encodeURIComponent(url);
   const cache = caches.default;
   const hit = await cache.match(key).catch(() => undefined);
-  if (hit) return (await hit.json()) as T;
+  if (hit) {
+    try {
+      return (await hit.json()) as T;
+    } catch {
+      // A bad body slipped into the cache — drop it and refetch.
+      ctx.waitUntil(cache.delete(key).catch(() => {}));
+    }
+  }
   const text = await upstreamText(label, url, timeoutMs);
+  // Parse before caching so an error page never sticks for ttlSecs.
+  const data = JSON.parse(text) as T;
   ctx.waitUntil(
     cache
       .put(key, new Response(text, {
@@ -591,7 +643,7 @@ async function cachedUpstreamJson<T = unknown>(
       }))
       .catch(() => {}),
   );
-  return JSON.parse(text) as T;
+  return data;
 }
 
 /** One USAFacts Data gateway tool call (keyless JSON-RPC POST) → the agency payload. */
@@ -1465,6 +1517,19 @@ function staleSecs(ttl: number): number {
   return Math.min(2 * 86_400, Math.max(600, ttl * 4));
 }
 
+/** Upper bound on how long the edge keeps any source copy. */
+const SOURCE_CACHE_HARD_SECS = 7 * 86_400;
+
+/**
+ * Oldest copy served as STALE while the upstream is failing, and so how long the edge keeps
+ * a copy at all (X-Loom-Fetched-Ms stays the freshness clock). Scales with the feed's cadence
+ * (24 polls, at least 3 h) instead of a flat week: clients treat any 200 as a live poll, so a
+ * week-old ISS fix or per-minute count must not come back as current data.
+ */
+function sourceCacheMaxAge(ttl: number, stale: number): number {
+  return Math.min(SOURCE_CACHE_HARD_SECS, Math.max(ttl + stale, 3 * 3600, ttl * 24));
+}
+
 function sourceResponse(
   body: BodyInit | null,
   cacheState: string,
@@ -1521,7 +1586,7 @@ async function refreshSourceCache(
       new Response(text, {
         headers: {
           "Content-Type": "application/json",
-          "Cache-Control": `public, max-age=${ttl + stale}`,
+          "Cache-Control": `public, max-age=${sourceCacheMaxAge(ttl, stale)}`,
           "X-Loom-Fetched-Ms": String(now),
         },
       }),
@@ -1563,6 +1628,7 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
   const cached = await cache.match(key).catch(() => undefined);
   const cachedAt = cached ? Number(cached.headers.get("X-Loom-Fetched-Ms") || "0") : 0;
   const ageMs = cachedAt > 0 ? now - cachedAt : 0;
+  const fallback = cached && ageMs <= sourceCacheMaxAge(ttl, stale) * 1000 ? cached : undefined;
 
   if (cached && ageMs <= ttl * 1000) {
     logSourceRequest({ kind, cache: "HIT", ms: Date.now() - started });
@@ -1575,41 +1641,56 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
     return sourceResponse(cached.body, "STALE-REVALIDATING", cachedAt, request, ttl, stale);
   }
 
+  // The browser gives up after ~12s, and a disconnect cancels work not under waitUntil —
+  // so register the fetch, cache write and outcome before awaiting, letting slow feeds
+  // (trivia, arxiv) finish and warm the cache even when this visitor has left.
+  const job = Promise.resolve().then(() => fetcher(ctx)).then((text) => ({ text, ok: sourcePayloadCacheable(kind, text), fetchedAt: Date.now() }));
+  ctx.waitUntil(
+    job.then(
+      async ({ text, ok, fetchedAt }) => {
+        if (!ok) {
+          await noteSourceOutcome(kv, kind, { ok: false, error: "Upstream returned empty payload" });
+          return;
+        }
+        await Promise.all([
+          cache
+            .put(key, new Response(text, {
+              headers: {
+                "Content-Type": "application/json",
+                "Cache-Control": `public, max-age=${sourceCacheMaxAge(ttl, stale)}`,
+                "X-Loom-Fetched-Ms": String(fetchedAt),
+              },
+            }))
+            .catch(() => {}),
+          noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) }),
+        ]);
+      },
+      (e: unknown) => noteSourceOutcome(kv, kind, { ok: false, error: e instanceof Error ? e.message : String(e) }),
+    ),
+  );
   try {
-    const text = await fetcher(ctx);
-    if (!sourcePayloadCacheable(kind, text)) {
-      if (cached && ageMs <= (ttl + stale) * 1000) {
+    const { text, ok, fetchedAt } = await job;
+    if (!ok) {
+      // A recent-enough copy beats an error; X-Loom-Fetched-At tells the client its age.
+      if (fallback) {
         logSourceRequest({ kind, cache: "STALE", ms: Date.now() - started, fallback: true });
-        return sourceResponse(cached.body, "STALE", cachedAt, request, ttl, stale);
+        return sourceResponse(fallback.body, "STALE", cachedAt, request, ttl, stale);
       }
       throw new UpstreamError("Upstream returned empty payload");
     }
-    const fetchedAt = Date.now();
-    ctx.waitUntil(
-      cache
-        .put(key, new Response(text, {
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": `public, max-age=${ttl + stale}`,
-            "X-Loom-Fetched-Ms": String(fetchedAt),
-          },
-        }))
-        .catch(() => {}),
-    );
     cached?.body?.cancel().catch(() => {});
     logSourceRequest({ kind, cache: "MISS", ms: Date.now() - started, status: 200 });
-    ctx.waitUntil(noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) }));
     return sourceResponse(text, "MISS", fetchedAt, request, ttl, stale);
   } catch (e) {
-    ctx.waitUntil(noteSourceOutcome(kv, kind, { ok: false, error: e instanceof Error ? e.message : String(e) }));
-    if (cached && ageMs <= (ttl + stale) * 1000) {
+    // Outcome (ok or failed) is recorded by the waitUntil job above.
+    if (fallback) {
       logSourceRequest({
         kind,
         cache: "STALE",
         ms: Date.now() - started,
         error: e instanceof Error ? e.message : String(e),
       });
-      return sourceResponse(cached.body, "STALE", cachedAt, request, ttl, stale);
+      return sourceResponse(fallback.body, "STALE", cachedAt, request, ttl, stale);
     }
     cached?.body?.cancel().catch(() => {});
     logSourceRequest({
@@ -1633,6 +1714,8 @@ async function handleCatalogSearch(
   const hit = await cache.match(cacheReq).catch(() => undefined);
   if (hit) {
     const headers = new Headers(hit.headers);
+    // Cached entries carry no CORS; native shells (tauri/capacitor localhost) need it on every hit.
+    for (const [k, v] of Object.entries(CORS)) headers.set(k, v);
     headers.set("X-Loom-Cache", "HIT");
     applyBaselineSecurityHeaders(headers);
     return new Response(hit.body, { status: hit.status, headers });
@@ -1929,6 +2012,10 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
   const [baseId, ext] = id.includes(".") ? (id.split(".") as [string, string]) : [id, "html"];
   const imageExt = ext === "img" || ext === "jpg" || ext === "jpeg" || ext === "png";
   const key = `s:${baseId}:${imageExt ? "img" : ext === "data" ? "data" : "html"}`;
+  const edge = caches.default;
+  const edgeReq = new Request(`https://loom-story.internal/${key}`);
+  const cached = await edge.match(edgeReq).catch(() => undefined);
+  if (cached) return cached;
   type StoryKvHit = KVNamespaceGetWithMetadataResult<
     string | ArrayBuffer,
     { contentType?: string; title?: string; hasData?: string }
@@ -1963,11 +2050,11 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
     headers.set("X-Robots-Tag", "index, follow, max-image-preview:large");
     headers.set("Cross-Origin-Resource-Policy", "cross-origin");
     headers.set("Cache-Control", "public, max-age=86400, s-maxage=604800");
-    return new Response(hit.value as unknown as ArrayBuffer, { status: 200, headers });
+    return rememberStory(edge, edgeReq, new Response(hit.value as unknown as ArrayBuffer, { status: 200, headers }));
   }
   if (ext === "data") {
     headers.set("Content-Type", "application/json; charset=utf-8");
-    return new Response(hit.value as string, { status: 200, headers });
+    return rememberStory(edge, edgeReq, new Response(hit.value as string, { status: 200, headers }));
   }
 
   headers.set("Content-Type", meta.contentType || "text/html; charset=utf-8");
@@ -1975,7 +2062,12 @@ async function handleGetStory(id: string, env: Env): Promise<Response> {
   headers.set("X-Robots-Tag", "index, follow, max-image-preview:large");
   if (meta.title) headers.set("X-Loom-Story-Title", meta.title);
   if (meta.hasData === "1") headers.set("X-Loom-Story-Data", "1");
-  return new Response(hit.value as string, { status: 200, headers });
+  return rememberStory(edge, edgeReq, new Response(hit.value as string, { status: 200, headers }));
+}
+
+async function rememberStory(edge: Cache, edgeReq: Request, res: Response): Promise<Response> {
+  await edge.put(edgeReq, res.clone()).catch(() => {});
+  return res;
 }
 
 async function handleDeleteStory(id: string, request: Request, env: Env): Promise<Response> {
@@ -1990,10 +2082,14 @@ async function handleDeleteStory(id: string, request: Request, env: Env): Promis
   if (!kv) {
     return json({ error: "Story storage not configured (LOOM_STORIES KV)" }, 503);
   }
+  const edge = caches.default;
   await Promise.all([
     kv.delete(`s:${id}:html`),
     kv.delete(`s:${id}:img`),
     kv.delete(`s:${id}:data`),
+    edge.delete(new Request(`https://loom-story.internal/s:${id}:html`)).catch(() => false),
+    edge.delete(new Request(`https://loom-story.internal/s:${id}:img`)).catch(() => false),
+    edge.delete(new Request(`https://loom-story.internal/s:${id}:data`)).catch(() => false),
   ]);
   return json({ ok: true, id, deleted: true });
 }
@@ -2123,7 +2219,7 @@ async function handleMonitors(request: Request, url: URL, env: Env): Promise<Res
       seedChecks: body.seedChecks && typeof body.seedChecks === "object" ? (body.seedChecks as Record<string, CheckRecord[]>) : undefined,
       dropMoments: Array.isArray(body.dropMoments) ? body.dropMoments.filter((x): x is string => typeof x === "string").slice(0, 300) : undefined,
     });
-    await kv.put(key, JSON.stringify(next), { expiration: bundleExpiry(next) });
+    await kv.put(key, JSON.stringify(next), { expiration: bundleExpiry(next), metadata: bundleListMeta(next) });
     if (prev?.public && prev.public.id !== next.public?.id) await kv.delete(`monpub:${prev.public.id}`);
     if (next.public) await kv.put(`monpub:${next.public.id}`, key, { expirationTtl: BUNDLE_TTL_SECS });
     return reply({ ok: true, monitors: monitors.length, accepted: monitors.map((m) => m.id), max: CLOUD_MAX_MONITORS, public: next.public ?? null, pushDevices: next.push?.length ?? 0 });
@@ -2136,26 +2232,36 @@ async function handlePublicMonitors(url: URL, env: Env): Promise<Response> {
   const m = url.pathname.match(/^\/w\/([a-f0-9]{16})(?:\/(feed\.xml|m\/([A-Za-z0-9_-]{1,80})\.svg))?\/?$/);
   const notFound = () => new Response("Not found", { status: 404, headers: { "Content-Type": "text/plain" } });
   if (!m || !isPublicId(m[1]!) || !env.LOOM_STORIES) return notFound();
+  const edge = caches.default;
+  const cacheReq = new Request(`https://loom-public.internal${url.pathname}`);
+  const hit = await edge.match(cacheReq).catch(() => undefined);
+  if (hit) return hit;
+  const remember = async (res: Response) => {
+    if (res.ok) await edge.put(cacheReq, res.clone()).catch(() => {});
+    return res;
+  };
   const id = m[1]!;
   const deviceKeyName = await env.LOOM_STORIES.get(`monpub:${id}`);
   const bundle = deviceKeyName ? ((await env.LOOM_STORIES.get(deviceKeyName, "json")) as CloudBundle | null) : null;
   if (!bundle?.public || bundle.public.id !== id) return notFound();
   const origin = publicWebOrigin(env);
   const cache = { "Cache-Control": "public, max-age=60", "X-Content-Type-Options": "nosniff" };
-  if (m[2] === "feed.xml") return new Response(publicFeedXml(bundle, id, origin), { headers: { "Content-Type": "application/rss+xml; charset=utf-8", ...cache } });
+  if (m[2] === "feed.xml") return remember(new Response(publicFeedXml(bundle, id, origin), { headers: { "Content-Type": "application/rss+xml; charset=utf-8", ...cache } }));
   if (m[3]) {
     const svg = publicMomentSvg(bundle, m[3]);
     return svg
-      ? new Response(svg, { headers: { "Content-Type": "image/svg+xml", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'", ...cache, "Cache-Control": "public, max-age=86400" } })
+      ? remember(new Response(svg, { headers: { "Content-Type": "image/svg+xml", "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'", ...cache, "Cache-Control": "public, max-age=86400" } }))
       : notFound();
   }
   const headers = new Headers({ "Content-Type": "text/html; charset=utf-8", ...cache });
   applyBaselineSecurityHeaders(headers);
   headers.set("Content-Security-Policy", "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'");
-  return new Response(publicPageHtml(bundle, id, origin), { headers });
+  return remember(new Response(publicPageHtml(bundle, id, origin), { headers }));
 }
 
-/** Feed health for the app (hide resting feeds) and the nightly probe. Cached briefly. */
+/** Feed health for the app (hide resting feeds) and the nightly probe. One colo shares one KV read for this long — resting takes hours, so a half-hour view is enough. */
+const HEALTH_CACHE_SECS = 30 * 60;
+
 async function handleHealth(request: Request, env: Env, ctx: WaitUntil): Promise<Response> {
   const cache = caches.default;
   const key = "https://loom-source.internal/health/v1";
@@ -2164,7 +2270,7 @@ async function handleHealth(request: Request, env: Env, ctx: WaitUntil): Promise
   const body = { generatedAt: Date.now(), sources: await readSourceHealth(env.LOOM_STORIES, Object.keys(SOURCE_FETCHERS)) };
   ctx.waitUntil(
     cache
-      .put(key, new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json", "Cache-Control": "public, max-age=120" } }))
+      .put(key, new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${HEALTH_CACHE_SECS}` } }))
       .catch(() => {}),
   );
   return jsonFor(request, body);
@@ -2181,7 +2287,7 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === "OPTIONS" && (url.pathname.startsWith("/api/") || url.pathname.startsWith("/s/") || url.pathname.startsWith("/p/") || url.pathname.startsWith("/plot/"))) {
-      if (url.pathname === "/api/fetch-csv" || url.pathname.startsWith("/api/source/") || url.pathname.startsWith("/api/monitors")) {
+      if (url.pathname === "/api/fetch-csv" || url.pathname.startsWith("/api/source/") || url.pathname.startsWith("/api/monitors") || url.pathname.startsWith("/api/social/")) {
         if (
           url.pathname === "/api/fetch-csv" &&
           !fetchCsvAuthorized(request, env) &&
@@ -2224,6 +2330,23 @@ export default {
       }
       if (url.pathname === "/api/feedback" && request.method === "POST") {
         return await handleFeedback(request, env);
+      }
+      if (url.pathname.startsWith("/api/social/")) {
+        return await handleSocial(request, url, {
+          // RPC stubs wrap each result in a Promise; the shapes match SocialBackend.
+          backend: env.SOCIAL ? (env.SOCIAL.getByName("social-v1") as unknown as SocialBackend) : null,
+          reply: (body, status = 200, extra) => {
+            const headers = new Headers({ "Content-Type": "application/json", ...corsHeadersFor(request, env), ...extra });
+            if (!extra?.["Cache-Control"]) headers.set("Cache-Control", "no-store");
+            applyBaselineSecurityHeaders(headers);
+            return new Response(JSON.stringify(body), { status, headers });
+          },
+          originOk: originAllowed(request.headers.get("Origin"), allowedOriginHostsFromEnv(env)),
+          ip: clientIp(request),
+          columnsFor: socialColumnsFor,
+          cache: typeof caches !== "undefined" ? caches.default : undefined,
+          waitUntil: (p) => ctx.waitUntil(p),
+        });
       }
       if (url.pathname === "/oembed" && request.method === "GET") {
         return await handleOEmbed(url, env);

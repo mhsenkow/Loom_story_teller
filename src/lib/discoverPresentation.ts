@@ -37,6 +37,11 @@ export function groupDiscoverStories(
     if (group) group.stories.push(story);
     else groups.set(id, { id, stories: [story] });
   }
+  // The feed's headline is the card for its question, even when a sibling scored higher.
+  for (const g of groups.values()) {
+    const i = g.stories.findIndex((s) => s.headline);
+    if (i > 0) g.stories.unshift(...g.stories.splice(i, 1));
+  }
   return [...groups.values()];
 }
 export const DISCOVER_SETTING_FILTERS = [
@@ -64,7 +69,9 @@ export function matchesDiscoverSetting(
         chart.comparePrevious ||
         (chart.sizeField &&
           ["pyramid", "slope", "dumbbell"].includes(chart.kind)) ||
-        chart.bumpMode === "delta"
+        chart.bumpMode === "delta" ||
+        chart.wordCloudMode === "compare" ||
+        chart.wordCloudMode === "grid"
       );
     case "facet":
       return !!chart.rowField;
@@ -133,6 +140,8 @@ export function discoverChartSettings(chart: ChartRecommendation): string[] {
   if (chart.residualOverlay) settings.push("Residuals");
   if (chart.anomalyHighlight) settings.push("Anomalies");
   if (chart.bumpMode === "delta") settings.push("Δ rank");
+  if (chart.wordCloudMode === "compare") settings.push("Word comparison");
+  if (chart.wordCloudMode === "grid") settings.push("Word cloud grid");
   return settings;
 }
 

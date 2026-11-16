@@ -89,6 +89,29 @@ describe("monitorCron", () => {
     expect(puts).toEqual(["mon:a"]);
   });
 
+  it("skips the KV read when list metadata says the bundle is not due", async () => {
+    const later = NOW + 60_000;
+    const store = new Map<string, string>([
+      ["mon:later", JSON.stringify({ monitors: [mon({ nextRunAt: later })], checks: {}, alerts: [], updatedAt: 0, syncedAt: NOW })],
+    ]);
+    const gets: string[] = [];
+    const kv: MonitorKv = {
+      get: async (k) => { gets.push(k); return JSON.parse(store.get(k) ?? "null"); },
+      put: async () => {},
+      delete: async (k) => { store.delete(k); },
+      list: async ({ prefix }) => ({
+        keys: [...store.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({
+          name,
+          metadata: { nextDue: later, exp: Math.floor((NOW + 45 * 86_400_000) / 1000) },
+        })),
+        list_complete: true,
+      }),
+    };
+    const r = await runMonitorCron(kv, NOW, async () => ({ mags: [6] }), parse);
+    expect(gets).toEqual([]);
+    expect(r).toEqual({ devices: 0, evaluated: 0 });
+  });
+
   it("clamps uploads and validates webhooks", () => {
     const list = sanitizeCloudMonitors([mon({ schedule: { kind: "interval", minutes: 1 } }), { id: "x", metric: { source: "nope" } }, ...Array.from({ length: 30 }, (_, i) => mon({ id: `m${i}` }))]);
     expect(list).toHaveLength(20);

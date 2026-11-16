@@ -17,14 +17,17 @@ import { DEFAULT_COLORS } from "./shared";
 import { directedUnit } from "../channelInvert";
 import { chartFont, chartTypeRamp } from "../chartType";
 import { markSymbols } from "../markSymbols";
+import { drawSizeKey, resolveChartInk } from "../chartInk";
 
 /** Top slices + "Other" so a pie never has more than 8 wedges. */
 export function pieSlices(rows: unknown[][], xi: number, yi: number, agg: YAggregateOption) {
   const groups = new Map<string, number[]>();
   for (const r of rows) {
     const k = String(r[xi]);
+    const value = yi < 0 || agg === "count" ? 1 : chartNumber(r[yi]);
+    if (!Number.isFinite(value)) continue;
     if (!groups.has(k)) groups.set(k, []);
-    groups.get(k)!.push(yi >= 0 ? chartNumber(r[yi]) : 1);
+    groups.get(k)!.push(value);
   }
   const all = [...groups.entries()]
     .map(([label, vals]) => ({ label, value: Math.max(0, aggregateValues(vals, agg)), other: [] as string[] }))
@@ -57,10 +60,14 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   const legendTexts = entries.map((e) => `${e.label}  ${pct(e.value)}`);
   const textW = widestText(ctx, legendTexts, legendFont);
   const portrait = plotH > plotW * 1.1;
-  const inlineLegend = !opts?.legendPosition || opts.legendPosition === "auto";
+  const inlineLegend = !opts?.mini && (!opts?.legendPosition || opts.legendPosition === "auto");
   const rowH = chartTypeRamp(opts?.axisFontSize).legend + 10;
-  const legendW = inlineLegend ? (portrait ? plotW : Math.min(plotW * 0.42, textW + 22)) : 0;
-  const legendH = inlineLegend ? (portrait ? Math.ceil(entries.length / 2) * rowH + 6 : entries.length * rowH) : 0;
+  const legendCapacity = Math.max(2, Math.floor((portrait ? plotH * 0.4 : plotH) / rowH) * (portrait ? 2 : 1));
+  const shownEntries = entries.length > legendCapacity ? entries.slice(0, legendCapacity - 1) : entries;
+  const hiddenCount = entries.length - shownEntries.length;
+  const legendCount = shownEntries.length + (hiddenCount > 0 ? 1 : 0);
+  const legendW = inlineLegend ? (portrait ? plotW : Math.min(plotW * (plotW < 320 ? 0.58 : 0.42), textW + 22)) : 0;
+  const legendH = inlineLegend ? (portrait ? Math.ceil(legendCount / 2) * rowH + 6 : legendCount * rowH) : 0;
   const pieW = portrait || !inlineLegend ? plotW : plotW - legendW - 16;
   const pieH = portrait && inlineLegend ? plotH - legendH - 8 : plotH;
   const cx = rect.left + pieW / 2;
@@ -86,14 +93,17 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
     ctx.globalAlpha = 1;
     ctx.stroke();
     // Percent on wedges big enough to hold it
-    if (sweep > 0.32 && (opts?.showDataLabels ?? opts?.chartDetail !== "plain")) {
+    if (!opts?.mini && sweep > 0.32 && (opts?.showDataLabels ?? opts?.chartDetail !== "plain")) {
       const mid = start + sweep / 2;
       const r2 = (radius + innerR) / 2;
       ctx.fillStyle = contrastingInk(fill);
       ctx.font = chartFont(Math.max(chartTypeRamp(opts?.axisFontSize).mark, Math.min(13, (radius - innerR) * 0.32)), fontFamily, 600);
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(pct(e.value), cx + Math.cos(mid) * r2, cy + Math.sin(mid) * r2);
+      const label = pct(e.value);
+      if (ctx.measureText(label).width + 6 <= sweep * r2 && radius - innerR >= chartTypeRamp(opts?.axisFontSize).mark + 4) {
+        ctx.fillText(label, cx + Math.cos(mid) * r2, cy + Math.sin(mid) * r2);
+      }
     }
     const firstOther = e.other.length
       ? rows.findIndex((r) => e.other.includes(String(r[xi])))
@@ -102,32 +112,38 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
       shape: "arc", cx, cy, r0: innerR, r1: radius, a0: start, a1: start + sweep,
       match: e.other.length ? [] : [[xi, e.label]],
       rowIndex: firstOther >= 0 ? firstOther : undefined,
+      reading: { label: e.label, value: e.value, measure: vTitle },
       summary: { columns: [xName, vTitle, "Share"], row: [e.label, formatTooltipNumber(e.value), pct(e.value)] },
     });
     start += sweep;
   });
 
   // Total in the hole
-  if (innerR > 26) {
+  if (!opts?.mini && innerR > 26) {
     ctx.fillStyle = opts?.themeText ?? "#e8e8ec";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.font = chartFont(Math.max(chartTypeRamp(opts?.axisFontSize).titleCompact, Math.min(22, innerR * 0.38)), fontFamily, 600);
-    ctx.fillText(formatDataValue(total), cx, cy - innerR * 0.08);
+    ctx.fillText(formatDataValue(total), cx, cy - chartTypeRamp(opts?.axisFontSize).titleCompact * 0.4);
     ctx.fillStyle = opts?.axisLabelColor ?? "#6b6b78";
     ctx.font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily);
-    ctx.fillText(fitTextEllipsis(ctx, agg === "count" ? "total rows" : "total", innerR * 1.6), cx, cy + innerR * 0.28);
+    ctx.fillText(fitTextEllipsis(ctx, agg === "count" ? "total rows" : "total", innerR * 1.6), cx, cy + chartTypeRamp(opts?.axisFontSize).mark * 0.85);
   }
 
   ctx.font = legendFont;
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
-  if (inlineLegend) entries.forEach((e, i) => {
+  if (inlineLegend) [...shownEntries, ...(hiddenCount ? [null] : [])].forEach((e, i) => {
     const colW = portrait ? plotW / 2 : legendW;
     const lx = portrait ? rect.left + (i % 2) * colW : rect.right - legendW;
     const ly = portrait
       ? rect.top + pieH + 14 + Math.floor(i / 2) * rowH
       : cy - legendH / 2 + i * rowH + rowH / 2;
+    if (!e) {
+      ctx.fillStyle = opts?.themeMuted ?? "#8b8b98";
+      ctx.fillText(fitTextEllipsis(ctx, `+${hiddenCount} more`, colW - 4), lx, ly);
+      return;
+    }
     ctx.fillStyle = cols[i % cols.length]!;
     ctx.globalAlpha = 1;
     ctx.fillRect(lx, ly - 5, 10, 10);
@@ -143,7 +159,7 @@ export function renderFullPie(ctx: CanvasRenderingContext2D, rows: unknown[][], 
   });
   ctx.textBaseline = "alphabetic";
   ctx.globalAlpha = 1;
-  setLegend(opts, inlineLegend || opts?.legendPosition === "none" ? [] : entries.map((e, i) => ({ label: `${e.label} · ${pct(e.value)}`, color: cols[i % cols.length]! })));
+  setLegend(opts, opts?.mini || inlineLegend || opts?.legendPosition === "none" ? [] : entries.map((e, i) => ({ label: `${e.label} · ${pct(e.value)}`, color: cols[i % cols.length]! })));
 }
 
 // --- Bubble (scatter with size) ---
@@ -269,45 +285,21 @@ export function renderFullBubble(
   if (symbolLegend) setLegend(opts, symbolLegend);
   else if (ci >= 0) setLegend(opts, [...catMap.entries()].map(([label, i]) => ({ label, color: palette[i % palette.length]! })));
 
-  // Size key: three nested reference circles, bottom-right inside the plot
-  if (sizeIdx >= 0 && maxR >= 4 && opts?.legendPosition !== "none") {
-    const steps = [0.1, 0.5, 1.0];
-    const font = chartFont(chartTypeRamp(opts?.axisFontSize).mark, fontFamily);
-    const labels = steps.map((t) => formatDataValue(sizeMin + t * sizeRange));
-    const labelW = widestText(ctx, labels, font);
-    const boxW = maxR * 2 + labelW + 22;
-    const boxH = maxR * 2 + 26;
-    const bx = w - pad - boxW - 6;
-    const by = h - pad - boxH - 6;
-    ctx.save();
-    ctx.globalAlpha = 0.9;
-    ctx.fillStyle = opts?.themeBg ?? "#111114";
-    ctx.fillRect(bx, by, boxW, boxH);
-    ctx.globalAlpha = 1;
-    ctx.font = font;
-    ctx.fillStyle = opts?.axisLabelColor ?? "#8b8b98";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(fitTextEllipsis(ctx, sName, boxW - 8), bx + 4, by + 3);
-    const baseY = by + boxH - 4;
-    const ccx = bx + 6 + maxR;
-    steps.forEach((t, i) => {
-      const r = minR + Math.sqrt(t) * (maxR - minR);
-      ctx.strokeStyle = opts?.axisLabelColor ?? "#8b8b98";
-      ctx.lineWidth = 0.8;
-      ctx.beginPath();
-      ctx.arc(ccx, baseY - r, r, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.setLineDash([2, 2]);
-      ctx.moveTo(ccx, baseY - 2 * r);
-      ctx.lineTo(ccx + maxR + 6, baseY - 2 * r);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.textBaseline = "middle";
-      ctx.fillText(labels[i]!, ccx + maxR + 8, baseY - 2 * r);
+  // Separate reference circles keep size labels readable at every density.
+  if (!opts?.mini && sizeIdx >= 0 && maxR >= 4 && opts?.legendPosition !== "none") {
+    drawSizeKey(ctx, {
+      x: rect.right - 6,
+      bottom: rect.bottom - 6,
+      min: sizeMin,
+      max: sizeMax,
+      radiusOf: (value) => minR + Math.sqrt(directedUnit((value - sizeMin) / sizeRange, opts?.channelInvert?.size)) * (maxR - minR),
+      title: sName,
+      ink: resolveChartInk(opts ?? {}),
+      fontFamily,
+      axisFontSize: opts?.axisFontSize,
+      maxWidth: plotW - 12,
+      anchor: "right",
     });
-    ctx.restore();
   }
 }
 

@@ -7,15 +7,15 @@ import type { LookTheme } from "./lookSystem";
 /** Matches `--color-bg` defaults in globals.css for each theme. */
 const THEME_CHROME: Record<LookTheme, string> = {
   dark: "#0a0a0c",
-  light: "#f2f2f0",
+  light: "#f0efeb",
   paper: "#e6dfd2",
   glass: "#dce6f4",
   frost: "#060a14",
   brutal: "#ffffff",
-  nes: "#1a1028",
+  nes: "#1a8ad4",
   contrast: "#000000",
-  loom: "#0c0f14",
-  tank: "#0d1117",
+  loom: "#0a0a0f",
+  tank: "#0a161c",
 };
 
 export function themeChromeColor(theme: LookTheme | "system", prefersDark: boolean): string {
