@@ -5,7 +5,7 @@ import { CHART_DEFINITION_LIST, chartDefinition } from "../chartDefinitions";
 // =================================================================
 
 import { clampGroupInto } from "../channelGroups";
-import { chartTimeWindowLabel, fieldLooksFutureDated } from "../chartTime";
+import { chartTimeWindowLabel, fieldLooksFutureDated, fieldTimeGrain } from "../chartTime";
 import { parseChartEmojiMap, type ChartEmojiMap } from "../chartEmoji";
 import { COLORS, defaultLineAreaAggregate, inferType, measureColumns } from "./columns";
 import { isGeoRegionField } from "../geoFields";
@@ -217,7 +217,7 @@ export function fitEncodingToKind(
   }
 
   if (ORDERED_X_KINDS.has(kind)) {
-    const isTimeLike = (c: ColumnInfo) => typeOf(c) === "temporal" || /^(year|yr|date|day|month|week|ts|time)$/i.test(c.name);
+    const isTimeLike = (c: ColumnInfo) => typeOf(c) === "temporal" || /^(year|yr|fy|fiscal_year|date|day|month|quarter|week|ts|time)$/i.test(c.name);
     const cur = byName.get(xField);
     if (!cur || !isTimeLike(cur)) {
       const time = columns.find((c) => isTimeLike(c) && c.name !== yField && c.distinct_count >= 3);
@@ -245,6 +245,11 @@ export function fitEncodingToKind(
 
   if (kind === "heatmap" || kind === "hexbin") {
     return { xField, yField, colorField: isNumeric(colorField) ? colorField : null };
+  }
+  // Glyph charts read Color as a second numeric feature (Chernoff eyes, star / petal length),
+  // not as groups — keep a measure there instead of dropping it for being "too many groups".
+  if ((kind === "chernoff" || kind === "glyphStar" || kind === "flower") && isNumeric(colorField)) {
+    return { xField, yField, colorField };
   }
   // Color must be a small set of groups; required kinds get the next-best category
   // Locked color is allowed a wider cardinality so “color by site” survives mark switches.
@@ -358,6 +363,7 @@ export function createChartRec(
       ? (chartTimeWindowLabel(
           timeWindow,
           fieldLooksFutureDated(timeWindowField) ? "forward" : "wall",
+          fieldTimeGrain(timeWindowField),
         )?.toLowerCase() ?? null)
       : null;
 

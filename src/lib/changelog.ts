@@ -25,6 +25,54 @@ export interface ChangelogRelease {
 
 export const CHANGELOG: ChangelogRelease[] = [
   {
+    id: "2026-11-19",
+    date: "2026-11-19",
+    title: "Follow the money",
+    summary: "The federal budget month by month, household finances, what a dollar buys in each state, and stories that show where a trend is heading.",
+    items: [
+      {
+        title: "Every federal dollar, in and out",
+        detail: "New in Data & sources → United States: the federal budget month by month since 2015 — taxes by source, spending by function, the deficit, tariff revenue, what the debt's interest costs, and the rate the Treasury pays — plus a line-by-line view that ranks every kind of spending. Interest now takes about one in five tax dollars, and the first look shows where that's heading.",
+      },
+      {
+        title: "Household finances, quarter by quarter",
+        detail: "Credit card and mortgage delinquency, saving, debt payments, revolving credit, how many years of pay a home costs, rents, and jobs since 1990, with recessions marked. The first look calls out whichever measure is at its most unusual in years.",
+      },
+      {
+        title: "What a dollar buys, state by state",
+        detail: "US states now include each state's price level and rents compared with the national average, and median income at local prices — so you can see where a paycheck stretches and where it shrinks.",
+      },
+      {
+        title: "Stories that look ahead",
+        detail: "Some stories open with a forecast band or rings around unusual months already drawn, using the same methods as Analyze. Forecasts now work on monthly and quarterly data, and the first look calls out records, the highest or lowest level in years, and breaks from pattern.",
+      },
+    ],
+  },
+  {
+    id: "2026-11-18",
+    date: "2026-11-18",
+    title: "The United States, month by month",
+    summary: "Every state's jobless rate each month, richer state and economy data, and charts that understand years and months.",
+    items: [
+      {
+        title: "Unemployment in every state, every month",
+        detail: "New in Data & sources → United States: the official jobless rate for all 50 states, DC, and Puerto Rico each month since 2008, with the change from a year earlier. It opens on a state map of the latest month, a state-by-year grid where 2009 and 2020 stand out, and how many states saw unemployment rise.",
+      },
+      {
+        title: "States and the economy, in more depth",
+        detail: "US states now include the 2025 survey, Census regions, and income after inflation. The economy adds jobs added each month, job openings, the 10-year Treasury rate, and recession months. Both open on new views, including regional comparisons, the Phillips and Beveridge curves, inflation stripes, a yearly jobs waterfall, and the yield curve by decade.",
+      },
+      {
+        title: "Charts that read the calendar",
+        detail: "On yearly and monthly data, Last year shows the newest year, and Last 30 days shows the newest month. Footnotes read 2012–2025 or Jan 2008 – Sep 2026. Heatmaps fold long date ranges into years and show all 52 states. Monthly bars stay in date order, and radar and face charts leave out codes and years.",
+      },
+      {
+        title: "Steadier government data",
+        detail: "US government feeds keep loading through short outages of the service that provides them. A failed request is retried, earlier data fills any gaps, and a saved copy stands in until the service is back.",
+      },
+    ],
+  },
+  {
     id: "2026-11-16",
     date: "2026-11-16",
     title: "Charts you can dig into",

@@ -24,6 +24,7 @@ import {
   type ThemeUiColors,
 } from "@/lib/chartPalettes";
 import { buildBarFacetGrid } from "@/lib/chartTooltip";
+import { classifyKeys } from "@/lib/chartAxes";
 import type { YAggregateOption } from "@/lib/recommendations";
 import { useLoomStore } from "@/lib/store";
 import { densityAwarePointMarks } from "@/lib/chartLayout";
@@ -46,6 +47,7 @@ import { aggregateThumbnailRows } from "@/lib/chartThumbnailAggregation";
 import { renderFullScatter } from "@/lib/canvasCharts/scatter";
 import { renderFullHeatmap } from "@/lib/canvasCharts/lineHeatmap";
 import { renderFullHexbin } from "@/lib/canvasCharts/statCharts";
+import { preferMeasureAxes } from "@/lib/canvasCharts/shared";
 
 const FALLBACK_COLORS = discreteSeriesColors(resolveChartColors({ paletteId: "categorical" }), 8);
 
@@ -1015,9 +1017,13 @@ function drawBar(
     group.push(value);
     groups.set(key, group);
   }
-  const entries = [...groups.entries()]
-    .map(([key, values]) => [key, aggregateValues(values, agg)] as [string, number])
-    .sort((a, b) => b[1] - a[1]).slice(0, limit);
+  const all = [...groups.entries()].map(([key, values]) => [key, aggregateValues(values, agg)] as [string, number]);
+  // Same rule as the full bar (computeBarModel): months / years / numbers keep their order,
+  // categories rank by value — "jobs added each month" must not read as a leaderboard.
+  const keys = classifyKeys(all.map((e) => e[0]));
+  const entries = keys.kind !== "band" && keys.sorted.length >= 3 && keys.sorted.length <= Math.max(40, limit)
+    ? (() => { const byKey = new Map(all); return keys.sorted.map((k) => [k, byKey.get(k) ?? 0] as [string, number]); })()
+    : all.sort((a, b) => b[1] - a[1]).slice(0, limit);
   if (entries.length === 0) return;
   const values = entries.map((entry) => entry[1]);
   const { min, max } = scaleDomain(yScale === "log" ? Math.min(...values) : Math.min(0, ...values), Math.max(0, ...values), yScale);
@@ -1427,7 +1433,7 @@ function drawRadar(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNames
     if (numCount >= sample.length * 0.5) numericAxes.push(c);
   }
   if (numericAxes.length < 3) return;
-  const axes = numericAxes.slice(0, 6);
+  const axes = preferMeasureAxes(numericAxes, columnNames).slice(0, 6);
   const n = axes.length;
   const ranges = axes.map(c => numericRange(rows, c));
 
@@ -1848,7 +1854,10 @@ function drawParallel(ctx: CanvasRenderingContext2D, rows: unknown[][], columnNa
     const ok = rows.slice(0, 20).some(r => !isNaN(Number(r[c])));
     if (!ok) continue;
     axes.push({ idx: c, min, max });
-    if (axes.length >= 5) break;
+  }
+  {
+    const keep = new Set(preferMeasureAxes(axes.map((a) => a.idx), columnNames));
+    axes.splice(0, axes.length, ...axes.filter((a) => keep.has(a.idx)).slice(0, 5));
   }
   if (axes.length < 3) return;
   const xs = axes.map((_, i) => pad + (i / (axes.length - 1)) * (w - 2 * pad));

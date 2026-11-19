@@ -11,7 +11,7 @@ import { timeBuckets } from "@/lib/canvasCharts/axisHelpers";
 import { buildXModel } from "@/lib/chartAxes";
 import { useLoomStore } from "@/lib/store";
 import { createChartMonitorDraft } from "@/lib/monitoring/chartBridge";
-import { analysisScope, analysisUnavailable, FORECAST_METHOD_LABEL, type ForecastMethod, type TimeSeriesAnalysis } from "@/lib/timeSeriesAnalysis";
+import { analysisScope, analysisUnavailable, calendarStepMonths, FORECAST_METHOD_LABEL, type ForecastMethod, type TimeSeriesAnalysis } from "@/lib/timeSeriesAnalysis";
 import { FocusCurtain } from "./FocusCurtain";
 import { ForecastMethodList } from "./ForecastCurtain";
 
@@ -28,7 +28,11 @@ export function useAnalysisConfig() {
     const xi = columns.indexOf(chart.xField), yi = columns.indexOf(chart.yField ?? "");
     const buckets = timeBuckets(rows, xi);
     const keys = [...new Set(rows.filter(r => yi < 0 || (r[yi] != null && r[yi] !== "" && Number.isFinite(Number(r[yi])))).map(buckets.keyOf))];
-    return { count: keys.length, kind: buildXModel(keys).kind };
+    const model = buildXModel(keys);
+    // Month gap between plotted points (12 when months fold into years) — turns a story's
+    // "24 months ahead" into the interval count the forecast input shows.
+    const times = model.kind === "time" ? model.keys.slice(-3).map((k) => ({ x: Date.parse(k.length === 10 ? `${k}T00:00:00Z` : k), y: 0 })) : [];
+    return { count: keys.length, kind: model.kind, stepMonths: calendarStepMonths(times) };
   }, [input, chart]);
   const scope = chart ? analysisScope(chart) : "";
   const config: TimeSeriesAnalysis = saved?.scope === scope ? saved : { scope };
@@ -55,7 +59,10 @@ function AnalysisCard({ title, outcome, status, explained, onExplain, children, 
 
 export default function AnalysisCards() {
   const { chart, config, update, unavailable, series } = useAnalysisConfig();
-  const [horizon, setHorizon] = useState(config.forecast?.horizon ?? 7);
+  const presetMonths = config.forecast?.horizonMonths;
+  const [horizon, setHorizon] = useState(
+    presetMonths && series.stepMonths ? Math.min(50, Math.max(1, Math.round(presetMonths / series.stepMonths))) : (config.forecast?.horizon ?? 7),
+  );
   const [method, setMethod] = useState<ForecastMethod>(config.forecast?.method ?? "line");
   const [season, setSeason] = useState(config.forecast?.season ?? 12);
   const [window, setWindow] = useState(config.anomaly?.window ?? 10);
@@ -78,7 +85,7 @@ export default function AnalysisCards() {
     {unavailable && <p className="text-xs p-3 rounded border border-loom-border text-loom-muted">{unavailable}</p>}
     {!unavailable && <p className="text-xs text-loom-muted">Analyzing {chart?.yField ?? "row count"} over {chart?.xField}. {series.count} plotted points. Forecast needs 8; detection needs more points than its lookback.</p>}
     <AnalysisCard title="Forecast" outcome={config.forecast ? `${methodLabel} is the path on the chart.` : "See where this series could go next."} enabled={config.forecast?.enabled} explained={curtain === "forecast"} onExplain={() => setCurtain("forecast")}
-      status={config.forecast ? unavailable || series.count < 8 ? "Paused · needs a supported chart with 8 plotted points" : `${config.forecast.enabled ? "On chart" : "Hidden"} · ${methodLabel} · ${config.forecast.horizon} future intervals` : `Next add uses ${methodLabel}`}
+      status={config.forecast ? unavailable || series.count < 8 ? "Paused · needs a supported chart with 8 plotted points" : `${config.forecast.enabled ? "On chart" : "Hidden"} · ${methodLabel} · ${config.forecast.horizonMonths ? `${config.forecast.horizonMonths} months ahead` : `${config.forecast.horizon} future intervals`}` : `Next add uses ${methodLabel}`}
       toggle={config.forecast ? () => update({ forecast: { ...config.forecast!, enabled: !config.forecast!.enabled } }) : undefined}
       remove={config.forecast ? () => update({ forecast: undefined }) : undefined}>
       <label className="block text-xs text-loom-muted">Forecast ahead <span className="text-loom-text">· intervals</span><AnalysisNumberInput label="Forecast intervals" value={horizon} min={1} max={50} onCommit={setHorizon} /></label>

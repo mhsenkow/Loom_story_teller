@@ -202,7 +202,7 @@ export function createPointerViewsSlice(set: Setter) {
               }
             : null);
         return {
-          ...chartActivationPatch(v.chart),
+          ...chartActivationPatch(v.chart, s.smartResults),
           chartVisualOverrides: v.visualOverrides,
           viewMode: "chart" as const,
           dashboardsExpanded: false,

@@ -1565,8 +1565,26 @@ async fn live_fetch_every_source() {
 }
 
 // ---------------------------------------------------------------
-// USAFacts Data gateway (usafacts_states / usafacts_nation)
+// USAFacts Data gateway (usafacts_states / usafacts_nation / usafacts_state_jobs)
 // ---------------------------------------------------------------
+
+fn usafacts_fixture(name: &str) -> Value {
+    usafacts_payload(&fixture_text(name)).unwrap()
+}
+
+fn usafacts_err(text: &str) -> UsafactsError {
+    usafacts_payload(text).unwrap_err()
+}
+
+/// One gateway reply whose tool payload (as `content[0].text`) is `payload`.
+fn usafacts_tool_reply(payload: Value, is_error: bool) -> String {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "result": { "isError": is_error, "content": [{ "type": "text", "text": payload.to_string() }] },
+    })
+    .to_string()
+}
 
 #[test]
 fn usafacts_gateway_envelopes() {
@@ -1583,19 +1601,137 @@ fn usafacts_gateway_envelopes() {
         "UNRATE"
     );
 
-    let acs = usafacts_payload(&fixture_text("usafacts_acs1_2024.sse")).unwrap();
+    let acs = usafacts_fixture("usafacts_acs1_2024.sse");
     assert_eq!(acs["results"][0][0], "NAME");
     let plain = r#"{"jsonrpc":"2.0","id":1,"result":{"structuredContent":{"observations":[]}}}"#;
     assert!(usafacts_payload(plain).unwrap()["observations"].is_array());
+    // BLS replies carry `Results` (and a non-string `message`) — a success shape.
+    let bls = usafacts_fixture("usafacts_bls_state_ur.sse");
+    assert_eq!(bls["Results"]["series"].as_array().unwrap().len(), 3);
+    let bls_like = serde_json::json!({ "kind": "x", "message": "y", "Results": { "series": [] } });
+    assert!(usafacts_payload(&usafacts_tool_reply(bls_like, false)).is_ok());
 
-    let err = usafacts_payload(&fixture_text("usafacts_error.sse")).unwrap_err();
-    assert!(err.contains("upstream_rejected"), "{err}");
+    let err = usafacts_err(&fixture_text("usafacts_error.sse"));
+    assert!(err.message.contains("upstream_rejected"), "{err}");
     assert!(
-        usafacts_payload(r#"{"jsonrpc":"2.0","error":{"message":"boom"}}"#)
-            .unwrap_err()
+        usafacts_err(r#"{"jsonrpc":"2.0","error":{"message":"boom"}}"#)
+            .message
             .contains("boom")
     );
     assert!(usafacts_payload("<html>").is_err());
+}
+
+#[test]
+fn usafacts_errors_are_classified() {
+    // ACS vintage not released yet: 404, gateway says not retryable → "not found", not a failure.
+    let err = usafacts_err(&fixture_text("usafacts_error.sse"));
+    assert_eq!(err.kind, "upstream_rejected");
+    assert_eq!(err.upstream_status, Some(404));
+    assert!(!err.retryable);
+    assert!(err.not_found());
+    assert!(err
+        .message
+        .starts_with("USAFacts upstream_rejected: HTTP 404"));
+    let as_string: String = err.into();
+    assert!(as_string.starts_with("USAFacts upstream_rejected:"));
+
+    // No `retryable` advice → decided by upstream_status.
+    let overloaded = usafacts_err(&usafacts_tool_reply(
+        serde_json::json!({ "kind": "upstream_error", "message": "HTTP 503", "upstream_status": 503 }),
+        true,
+    ));
+    assert!(overloaded.retryable);
+    assert!(!overloaded.not_found());
+    assert_eq!(overloaded.message, "USAFacts upstream_error: HTTP 503");
+    let rate_limited = usafacts_err(&usafacts_tool_reply(
+        serde_json::json!({ "kind": "upstream_error", "message": "slow down", "upstream_status": "429" }),
+        true,
+    ));
+    assert!(rate_limited.retryable);
+    // The gateway's own advice wins over the status.
+    let told_no = usafacts_err(&usafacts_tool_reply(
+        serde_json::json!({ "kind": "upstream_error", "message": "x", "upstream_status": 503, "retryable": false }),
+        true,
+    ));
+    assert!(!told_no.retryable);
+    // Error shape without isError (kind + message strings, no results) is still an error.
+    let shape = usafacts_err(&usafacts_tool_reply(
+        serde_json::json!({ "kind": "bad_args", "message": "nope", "upstream_status": 400 }),
+        false,
+    ));
+    assert_eq!(shape.kind, "bad_args");
+    assert!(!shape.retryable);
+
+    // JSON-RPC errors: -32603 / -32000…-32099 are the server's (transient); -326xx are ours.
+    let internal = usafacts_err(r#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"boom"}}"#);
+    assert!(internal.retryable);
+    assert_eq!(internal.kind, "jsonrpc");
+    assert_eq!(internal.message, "USAFacts: boom");
+    assert!(
+        usafacts_err(r#"{"jsonrpc":"2.0","error":{"code":-32001,"message":"busy"}}"#).retryable
+    );
+    assert!(
+        !usafacts_err(r#"{"jsonrpc":"2.0","error":{"code":-32602,"message":"bad"}}"#).retryable
+    );
+    assert!(!usafacts_err(r#"{"jsonrpc":"2.0","error":{"message":"boom"}}"#).retryable);
+
+    // An HTML page from an edge is unreadable and worth a retry; an empty result is not.
+    let html = usafacts_err("<html>502 Bad Gateway</html>");
+    assert_eq!(html.kind, "unreadable");
+    assert!(html.retryable);
+    assert_eq!(html.message, "USAFacts: unreadable reply");
+    let empty = usafacts_err(r#"{"jsonrpc":"2.0","id":1,"result":{}}"#);
+    assert_eq!(empty.kind, "empty");
+    assert!(!empty.retryable);
+    assert_eq!(empty.message, "USAFacts: empty payload");
+
+    for (status, retry) in [
+        (400, false),
+        (404, false),
+        (408, true),
+        (425, true),
+        (429, true),
+        (500, true),
+        (503, true),
+    ] {
+        assert_eq!(usafacts_retryable_status(status), retry, "{status}");
+    }
+}
+
+#[test]
+fn usafacts_acceptance_checks_and_panel_completeness() {
+    assert!(has_acs_rows(&usafacts_fixture("usafacts_acs1_2024.sse")));
+    assert!(!has_acs_rows(&serde_json::json!({ "results": [["NAME"]] })));
+    assert!(has_acs_rows(&serde_json::json!([["NAME"], ["Alabama"]])));
+    assert!(has_observations(&usafacts_fixture(
+        "usafacts_fred_cpi_annual.sse"
+    )));
+    assert!(!has_observations(
+        &serde_json::json!({ "observations": [] })
+    ));
+    assert!(has_bls_series(&usafacts_fixture(
+        "usafacts_bls_state_ur.sse"
+    )));
+    assert!(!has_bls_series(&serde_json::json!({
+        "status": "REQUEST_NOT_PROCESSED",
+        "Results": { "series": [{ "seriesID": "LASST010000000000003", "data": [] }] },
+    })));
+
+    // 14 vintages asked (2012–2025, no 2020).
+    assert_eq!(acs_panel(14, 14, 0), AcsPanel::Complete);
+    assert_eq!(
+        acs_panel(14, 13, 0),
+        AcsPanel::Complete,
+        "a 404 vintage is fine"
+    );
+    assert_eq!(acs_panel(14, 12, 1), AcsPanel::Gappy);
+    assert_eq!(
+        acs_panel(14, 7, 7),
+        AcsPanel::Gappy,
+        "exactly half still counts"
+    );
+    assert_eq!(acs_panel(14, 6, 8), AcsPanel::TooThin);
+    assert_eq!(acs_panel(14, 0, 0), AcsPanel::TooThin);
 }
 
 #[test]
@@ -1605,10 +1741,11 @@ fn usafacts_states_from_acs() {
     assert_eq!(years.last(), Some(&2025));
     assert!(!years.contains(&2020));
 
-    let table = usafacts_payload(&fixture_text("usafacts_acs1_2024.sse")).unwrap();
-    let rows = acs_states_rows(&[(2024, table)]);
+    let table = usafacts_fixture("usafacts_acs1_2024.sse");
+    let rows = acs_states_rows(&[(2024, table)], None, None);
     assert_eq!(rows.len(), 52);
     let al = rows.iter().find(|r| r[1] == s("AL")).unwrap();
+    assert_eq!(al.len(), spec("usafacts_states").columns.len());
     assert_eq!(al[0], s("01"));
     assert_eq!(al[2], s("Alabama"));
     assert_eq!(al[3], Cell::I64(2024));
@@ -1617,6 +1754,28 @@ fn usafacts_states_from_acs() {
     assert_eq!(al[6], Cell::F64(15.19));
     assert_eq!(al[7], Cell::F64(39.6));
     assert_eq!(al[8], Cell::F64(4.23));
+    // (637,543 bachelor's + 419,292 graduate) / 3,540,061 adults (B06009).
+    assert_eq!(al[9], Cell::F64(29.85));
+    assert_eq!(al[10], s("South"));
+    assert_eq!(al[11], Cell::Null, "no CPI → no real income");
+    let pr = rows.iter().find(|r| r[1] == s("PR")).unwrap();
+    assert_eq!(pr[10], s("Puerto Rico"));
+    // Puerto Rico leaves B06009 null and fills B06009PR: (506,436 + 214,691) / 2,428,065.
+    assert_eq!(pr[9], Cell::F64(29.7));
+    let dc = rows.iter().find(|r| r[1] == s("DC")).unwrap();
+    assert_eq!(dc[9], Cell::F64(65.46));
+    assert!(
+        rows.iter().all(|r| matches!(r[9], Cell::F64(_))),
+        "every state has an education share"
+    );
+    let regions: HashSet<String> = rows
+        .iter()
+        .map(|r| match &r[10] {
+            Cell::Str(v) => v.clone(),
+            other => panic!("region {:?}", other),
+        })
+        .collect();
+    assert_eq!(regions.len(), 5, "{:?}", regions);
 
     let db = test_db();
     assert_eq!(write_rows(&db, spec("usafacts_states"), &rows).unwrap(), 52);
@@ -1625,12 +1784,254 @@ fn usafacts_states_from_acs() {
         "SELECT state_abbr FROM usafacts_states ORDER BY median_household_income DESC LIMIT 1"
     )
     .is_some());
+    assert_eq!(
+        one(
+            &db,
+            "SELECT COUNT(*) FROM usafacts_states WHERE region = 'West'"
+        )
+        .as_deref(),
+        Some("13")
+    );
+}
+
+#[test]
+fn usafacts_states_education_falls_back_to_pr_tables() {
+    assert_eq!(ACS_STATE_VARS.len(), 14);
+    assert!(ACS_STATE_VARS.iter().all(|v| !v.starts_with("B15003")));
+    let header = [
+        "NAME",
+        "B01003_001E",
+        "B06009_001E",
+        "B06009_005E",
+        "B06009_006E",
+        "B06009PR_001E",
+        "B06009PR_005E",
+        "B06009PR_006E",
+        "state",
+    ];
+    let row = |fips: &str, us: [Value; 3], pr: [Value; 3]| -> Value {
+        let mut r = vec![Value::Null, Value::from("1000")];
+        r.extend(us);
+        r.extend(pr);
+        r.push(Value::from(fips));
+        Value::Array(r)
+    };
+    let n = |v: &str| Value::from(v);
+    let null = || [Value::Null, Value::Null, Value::Null];
+    let table = serde_json::json!({ "results": [
+        header,
+        // State: B06009 complete → used.
+        row("01", [n("1000"), n("200"), n("100")], null()),
+        // Puerto Rico: B06009 null → B06009PR.
+        row("72", null(), [n("2428065"), n("506436"), n("214691")]),
+        // B06009 incomplete (graduate jammed) → B06009PR, which is null → no share.
+        row("06", [n("1000"), n("200"), n("-666666666")], null()),
+        // Both trios present but B06009 complete wins.
+        row("36", [n("400"), n("100"), n("100")], [n("1000"), n("1"), n("1")]),
+        // Adults missing but degrees present → no share.
+        row("48", null(), [Value::Null, n("5"), n("5")]),
+    ]});
+    let rows = acs_states_rows(&[(2024, table)], None, None);
+    let edu = |abbr: &str| {
+        rows.iter()
+            .find(|r| r[1] == s(abbr))
+            .unwrap_or_else(|| panic!("{abbr}"))[9]
+            .clone()
+    };
+    assert_eq!(edu("AL"), Cell::F64(30.0));
+    assert_eq!(edu("PR"), Cell::F64(29.7));
+    assert_eq!(edu("CA"), Cell::Null);
+    assert_eq!(edu("NY"), Cell::F64(50.0));
+    assert_eq!(edu("TX"), Cell::Null);
+    // Name falls back when NAME is null.
+    assert_eq!(
+        rows.iter().find(|r| r[1] == s("PR")).unwrap()[2],
+        s("Puerto Rico")
+    );
+
+    // A vintage fetched without a dropped variable just lacks that column → NULL, rest intact.
+    let without = serde_json::json!({ "results": [
+        ["NAME", "B01003_001E", "B19013_001E", "B06009_001E", "B06009_005E", "state"],
+        ["Alabama", "5157699", "66659", "3540061", "637543", "01"],
+    ]});
+    let rows = acs_states_rows(&[(2025, without)], None, None);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][4], Cell::I64(5_157_699));
+    assert_eq!(rows[0][5], Cell::F64(66_659.0));
+    assert_eq!(rows[0][9], Cell::Null);
+}
+
+#[test]
+fn usafacts_acs_unknown_variable_is_dropped_and_retried() {
+    let census_400 = |body: &str| {
+        usafacts_err(&usafacts_tool_reply(
+            serde_json::json!({
+                "kind": "upstream_rejected",
+                "message": "HTTP 400 from https://api.census.gov/data/2025/acs/acs1",
+                "upstream_status": 400,
+                "upstream_body": body,
+                "retryable": false,
+            }),
+            true,
+        ))
+    };
+    let err = census_400("error: unknown variable 'B15003_024E'");
+    assert_eq!(err.upstream_status, Some(400));
+    assert!(!err.retryable && !err.not_found());
+    assert_eq!(
+        err.detail.as_deref(),
+        Some("error: unknown variable 'B15003_024E'")
+    );
+    assert_eq!(acs_unknown_variable(&err).as_deref(), Some("B15003_024E"));
+    assert_eq!(
+        acs_unknown_variable(&census_400(
+            "unknown variable 'bad name' then unknown variable 'B06009PR_005E'"
+        ))
+        .as_deref(),
+        Some("B06009PR_005E"),
+        "first well-formed match, like the regex"
+    );
+    assert_eq!(
+        acs_unknown_variable(&census_400("error: unknown predicate")),
+        None
+    );
+    assert_eq!(
+        acs_unknown_variable(&census_400("unknown variable ''")),
+        None
+    );
+    // Only a 400 with an agency body counts.
+    let not_found = usafacts_err(&fixture_text("usafacts_error.sse"));
+    assert!(not_found
+        .detail
+        .as_deref()
+        .unwrap()
+        .starts_with("HTTP Status 404"));
+    assert_eq!(acs_unknown_variable(&not_found), None);
+    let mut overloaded = census_400("error: unknown variable 'B06009_005E'");
+    overloaded.upstream_status = Some(503);
+    assert_eq!(acs_unknown_variable(&overloaded), None);
+    assert_eq!(
+        acs_unknown_variable(&usafacts_err(
+            r#"{"jsonrpc":"2.0","error":{"code":-32603,"message":"unknown variable 'X'"}}"#
+        )),
+        None
+    );
+    // upstream_body is kept to 300 chars.
+    let long = census_400(&"x".repeat(500));
+    assert_eq!(long.detail.map(|d| d.chars().count()), Some(300));
+
+    // Drop rules: the named variable only, ≤ 3 drops, never population, only if still asked.
+    let vars: Vec<&'static str> = ACS_STATE_VARS.to_vec();
+    let edu_gone = census_400("error: unknown variable 'B06009_005E'");
+    let next = acs_vars_without_unknown(&vars, &edu_gone, 0).unwrap();
+    assert_eq!(next.len(), vars.len() - 1);
+    assert!(!next.contains(&"B06009_005E"));
+    assert_eq!(next[0], "NAME");
+    assert!(acs_vars_without_unknown(&vars, &edu_gone, 2).is_some());
+    assert!(
+        acs_vars_without_unknown(&vars, &edu_gone, 3).is_none(),
+        "3 drops max"
+    );
+    assert!(
+        acs_vars_without_unknown(&next, &edu_gone, 1).is_none(),
+        "already dropped"
+    );
+    assert!(
+        acs_vars_without_unknown(&vars, &err, 0).is_none(),
+        "not asked for"
+    );
+    let pop_gone = census_400("error: unknown variable 'B01003_001E'");
+    assert!(acs_vars_without_unknown(&vars, &pop_gone, 0).is_none());
+    assert!(acs_vars_without_unknown(&vars, &not_found, 0).is_none());
+}
+
+#[test]
+fn usafacts_states_region_name_fallback_and_real_income() {
+    let cpi = fred_annual_cpi(&usafacts_fixture("usafacts_fred_cpi_annual.sse"));
+    assert_eq!(cpi.get(&2012), Some(&229.586));
+    assert_eq!(cpi.get(&2024), Some(&313.698));
+    assert_eq!(cpi.get(&2025), Some(&321.962));
+    assert!(
+        !cpi.contains_key(&2026),
+        "\".\" for an unfinished year is skipped"
+    );
+    assert_eq!(usafacts_cpi_annual_args()["frequency"], "a");
+    assert_eq!(
+        usafacts_cpi_annual_args()["observation_start"],
+        "2012-01-01"
+    );
+
+    let table = usafacts_fixture("usafacts_acs1_2024.sse");
+    let al_of = |rows: &[Row], year: i64| -> Row {
+        rows.iter()
+            .find(|r| r[1] == s("AL") && r[3] == Cell::I64(year))
+            .unwrap()
+            .clone()
+    };
+
+    // Newest vintage with a CPI level is 2024 → its real income equals nominal.
+    let rows = acs_states_rows(&[(2024, table.clone())], Some(&cpi), None);
+    assert_eq!(al_of(&rows, 2024)[11], Cell::F64(66_659.0));
+
+    // A 2012 table restated in 2024 dollars: × CPI2024 / CPI2012.
+    let rows = acs_states_rows(
+        &[(2012, table.clone()), (2024, table.clone())],
+        Some(&cpi),
+        None,
+    );
+    assert_eq!(rows.len(), 104);
+    assert_eq!(rows[0][3], Cell::I64(2024), "newest year first");
+    let al12 = al_of(&rows, 2012);
+    assert_eq!(al12[5], Cell::F64(66_659.0));
+    assert_eq!(
+        al12[11],
+        Cell::F64((66_659.0_f64 * 313.698 / 229.586).round())
+    );
+    assert_eq!(al12[11], Cell::F64(91_080.0));
+
+    // 2026 has no CPI level yet: dollars stay 2025's, and 2026 itself gets no real income.
+    let rows = acs_states_rows(
+        &[
+            (2024, table.clone()),
+            (2025, table.clone()),
+            (2026, table.clone()),
+        ],
+        Some(&cpi),
+        None,
+    );
+    assert_eq!(al_of(&rows, 2025)[11], Cell::F64(66_659.0));
+    assert_eq!(al_of(&rows, 2024)[11], Cell::F64(68_415.0));
+    assert_eq!(al_of(&rows, 2026)[11], Cell::Null);
+
+    // NAME missing → the state's own name; numeric FIPS is padded.
+    let bare = serde_json::json!({ "results": [
+        ["B01003_001E", "B19013_001E", "state"],
+        ["3203295", "-666666666", "72"],
+        ["5157699", "66659", 1],
+        ["1", "1", "99"],
+    ]});
+    let rows = acs_states_rows(&[(2024, bare)], Some(&cpi), None);
+    assert_eq!(rows.len(), 2, "unknown FIPS dropped");
+    let pr = rows.iter().find(|r| r[1] == s("PR")).unwrap();
+    assert_eq!(pr[2], s("Puerto Rico"));
+    assert_eq!(pr[10], s("Puerto Rico"));
+    assert_eq!(pr[5], Cell::Null, "jam value is no estimate");
+    assert_eq!(pr[11], Cell::Null);
+    let al = rows.iter().find(|r| r[1] == s("AL")).unwrap();
+    assert_eq!(al[0], s("01"));
+    assert_eq!(al[2], s("Alabama"));
+    assert_eq!(al[10], s("South"));
+    assert_eq!(al[11], Cell::F64(66_659.0));
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, spec("usafacts_states"), &rows).unwrap(), 2);
 }
 
 #[test]
 fn usafacts_nation_from_fred_and_fallback() {
-    let unrate = usafacts_payload(&fixture_text("usafacts_fred_unrate.sse")).unwrap();
-    let gas = usafacts_payload(&fixture_text("usafacts_fred_gas.sse")).unwrap();
+    assert_eq!(USAFACTS_NATION_SERIES.len(), 8);
+    let unrate = usafacts_fixture("usafacts_fred_unrate.sse");
+    let gas = usafacts_fixture("usafacts_fred_gas.sse");
     let payloads: Vec<Option<Value>> = USAFACTS_NATION_SERIES
         .iter()
         .map(|(_, id, _, _)| match *id {
@@ -1641,9 +2042,13 @@ fn usafacts_nation_from_fred_and_fallback() {
         .collect();
     let rows = fred_nation_rows(&payloads);
     let jan = rows.iter().find(|r| r[0] == s("2024-01-01")).unwrap();
+    assert_eq!(jan.len(), spec("usafacts_nation").columns.len());
     assert_eq!(jan[1], Cell::I64(2024));
     assert_eq!(jan[3], Cell::Null);
     assert!(matches!(jan[2], Cell::F64(v) if (v - 3.7).abs() < 0.05));
+    assert_eq!(jan[10], Cell::Null, "no payrolls → no jobs added");
+    assert_eq!(jan[11], s("2020s"));
+    assert_eq!(jan[12], s("Expansion"));
 
     let fb = fredgraph_nation_rows(
         &fixture_text("fredgraph_monthly.csv"),
@@ -1655,15 +2060,869 @@ fn usafacts_nation_from_fred_and_fallback() {
         "{:?}",
         jan[3]
     );
+    assert_eq!(jan[3], Cell::F64(3.09));
+    assert_eq!(jan[4], Cell::F64(157_032.0));
     assert_eq!(jan[7], Cell::F64(3.075));
+    assert_eq!(jan[8], Cell::Null, "JTSJOL not in the CSV fixture");
+    assert_eq!(jan[10], Cell::F64(175.0), "157032 − 156857");
     let jan23 = fb.iter().find(|r| r[0] == s("2023-01-01")).unwrap();
     assert_eq!(jan23[3], Cell::Null);
+    assert_eq!(jan23[10], Cell::Null, "no 2022-12 payrolls");
 
     let db = test_db();
     assert_eq!(
         write_rows(&db, spec("usafacts_nation"), &fb).unwrap() as usize,
         fb.len()
     );
+    assert_eq!(
+        one(&db, "SELECT recession FROM usafacts_nation LIMIT 1").as_deref(),
+        Some("Expansion")
+    );
+    let sql = snapshot_sql_limited("usafacts_nation", 2).unwrap();
+    let res = source_query(&db, "usafacts_nation", &sql, 2).unwrap();
+    assert_eq!(res.rows.len(), 2);
+}
+
+#[test]
+fn usafacts_nation_derived_columns() {
+    // PAYEMS-only payload: jobs added needs both this month and the calendar month before.
+    let obs = |pairs: &[(&str, &str)]| {
+        serde_json::json!({
+            "observations": pairs
+                .iter()
+                .map(|(d, v)| serde_json::json!({ "date": d, "value": v }))
+                .collect::<Vec<_>>()
+        })
+    };
+    let pay_i = USAFACTS_NATION_SERIES
+        .iter()
+        .position(|s| s.1 == "PAYEMS")
+        .unwrap();
+    let payrolls = obs(&[
+        ("1989-12-01", "107000"),
+        ("1990-01-01", "107133"),
+        ("1999-12-01", "130500"),
+        ("2007-12-01", "138000"),
+        ("2008-01-01", "137950.04"),
+        ("2009-06-01", "131000"),
+        ("2009-07-01", "130700"),
+        ("2020-02-01", "152500"),
+        ("2020-03-01", "151100"),
+        ("2020-04-01", "130400"),
+        ("2020-05-01", "."),
+        ("2020-06-01", "137800"),
+    ]);
+    let mut payloads = vec![None; USAFACTS_NATION_SERIES.len()];
+    payloads[pay_i] = Some(payrolls);
+    let rows = fred_nation_rows(&payloads);
+    let row = |m: &str| -> Row {
+        rows.iter()
+            .find(|r| r[0] == s(&format!("{m}-01")))
+            .unwrap_or_else(|| panic!("{m}"))
+            .clone()
+    };
+    assert!(rows.iter().all(|r| r[0] != s("1989-12-01")), "before 1990");
+    assert!(
+        rows.iter().all(|r| r[0] != s("2020-05-01")),
+        "all-null month dropped"
+    );
+    // 1989-12 is before the start but still the "month before" for 1990-01.
+    assert_eq!(row("1990-01")[10], Cell::F64(133.0));
+    assert_eq!(row("1990-01")[11], s("1990s"));
+    assert_eq!(row("1999-12")[10], Cell::Null, "1999-11 missing");
+    assert_eq!(row("1999-12")[11], s("1990s"));
+    assert_eq!(row("2008-01")[10], Cell::F64(-50.0), "−49.96 rounds to 0.1");
+    assert_eq!(row("2008-01")[11], s("2000s"));
+    assert_eq!(row("2009-07")[10], Cell::F64(-300.0));
+    assert_eq!(row("2020-04")[10], Cell::F64(-20_700.0));
+    assert_eq!(row("2020-06")[10], Cell::Null, "2020-05 was \".\"");
+    assert_eq!(row("2020-06")[11], s("2020s"));
+
+    for (m, state) in [
+        ("2007-12", "Expansion"),
+        ("2008-01", "Recession"),
+        ("2009-06", "Recession"),
+        ("2009-07", "Expansion"),
+        ("2020-02", "Expansion"),
+        ("2020-03", "Recession"),
+        ("2020-04", "Recession"),
+        ("2020-06", "Expansion"),
+    ] {
+        assert_eq!(row(m)[12], s(state), "{m}");
+    }
+    assert!(nber_recession("1990-08-01"));
+    assert!(nber_recession("1991-03"));
+    assert!(!nber_recession("1991-04"));
+    assert!(nber_recession("2001-11-01"));
+    assert!(!nber_recession("2001-12-01"));
+    assert_eq!(prev_month("2020-01"), "2019-12");
+    assert_eq!(prev_month("2020-10"), "2020-09");
+
+    let db = test_db();
+    assert_eq!(
+        write_rows(&db, spec("usafacts_nation"), &rows).unwrap() as usize,
+        rows.len()
+    );
+    assert_eq!(
+        one(
+            &db,
+            "SELECT COUNT(*) FROM usafacts_nation WHERE recession = 'Recession'"
+        )
+        .as_deref(),
+        Some("4")
+    );
+}
+
+#[test]
+fn usafacts_nation_fredgraph_fills_only_missing_series() {
+    assert_eq!(
+        fredgraph_nation_monthly_ids(),
+        vec!["UNRATE", "CPIAUCSL", "PAYEMS", "FEDFUNDS", "HOUST", "JTSJOL", "GS10"]
+    );
+    let fb = fredgraph_nation_payloads(
+        &fixture_text("fredgraph_monthly.csv"),
+        &fixture_text("fredgraph_gas.csv"),
+    );
+    assert_eq!(fb.len(), USAFACTS_NATION_SERIES.len());
+    let ids: Vec<&str> = USAFACTS_NATION_SERIES.iter().map(|s| s.1).collect();
+    let at = |id: &str| ids.iter().position(|x| *x == id).unwrap();
+    assert!(fb[at("JTSJOL")].is_none() && fb[at("GS10")].is_none());
+    // CPI comes back as YoY from levels; the first year has none.
+    let cpi_obs = fb[at("CPIAUCSL")].as_ref().unwrap()["observations"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(cpi_obs[0]["date"], "2023-01-01");
+    assert_eq!(cpi_obs[0]["value"], ".");
+
+    // The gateway returned UNRATE (one distinctive month) — the CSV must not touch it.
+    let mut payloads: Vec<Option<Value>> = vec![None; USAFACTS_NATION_SERIES.len()];
+    payloads[at("UNRATE")] = Some(serde_json::json!({
+        "observations": [{ "date": "2024-01-01", "value": "9.9" }]
+    }));
+    let merged = fill_missing_series(&payloads, fb);
+    let rows = fred_nation_rows(&merged);
+    let jan = rows.iter().find(|r| r[0] == s("2024-01-01")).unwrap();
+    assert_eq!(jan[2], Cell::F64(9.9), "gateway value kept");
+    assert_eq!(jan[4], Cell::F64(157_032.0), "payrolls filled from CSV");
+    let feb = rows.iter().find(|r| r[0] == s("2024-02-01")).unwrap();
+    assert_eq!(
+        feb[2],
+        Cell::Null,
+        "CSV UNRATE not mixed into a gateway series"
+    );
+    assert_eq!(feb[4], Cell::F64(157_238.0));
+    assert_eq!(feb[10], Cell::F64(206.0));
+}
+
+#[test]
+fn usafacts_state_jobs_from_bls() {
+    assert_eq!(
+        state_jobs_year_range(days_from_civil(2026, 11, 18)),
+        (2008, 2026)
+    );
+    let batches = bls_state_ur_batches(50);
+    assert_eq!(
+        batches.iter().map(Vec::len).collect::<Vec<_>>(),
+        vec![50, 2]
+    );
+    assert_eq!(batches[0][0], "LASST010000000000003");
+    assert_eq!(
+        batches[1],
+        vec!["LASST560000000000003", "LASST720000000000003"]
+    );
+    assert_eq!(bls_state_ur_series_id("06"), "LASST060000000000003");
+
+    let bls = usafacts_fixture("usafacts_bls_state_ur.sse");
+    let rows = bls_state_rows(std::slice::from_ref(&bls));
+    assert_eq!(rows.len(), 99, "3 states × 33 months");
+    assert_eq!(rows[0].len(), spec("usafacts_state_jobs").columns.len());
+    // Oldest month first, then state.
+    assert_eq!(rows[0][0], s("2024-01-01"));
+    assert_eq!(
+        rows[..3].iter().map(|r| r[3].clone()).collect::<Vec<_>>(),
+        vec![s("AL"), s("CA"), s("PR")]
+    );
+    assert_eq!(rows[98][0], s("2026-09-01"));
+    let find = |m: &str, abbr: &str| -> Row {
+        rows.iter()
+            .find(|r| r[0] == s(&format!("{m}-01")) && r[3] == s(abbr))
+            .unwrap_or_else(|| panic!("{m} {abbr}"))
+            .clone()
+    };
+    let pr = find("2024-01", "PR");
+    assert_eq!(pr[1], Cell::I64(2024));
+    assert_eq!(pr[2], s("72"));
+    assert_eq!(pr[4], s("Puerto Rico"));
+    assert_eq!(pr[5], s("Puerto Rico"));
+    assert_eq!(pr[6], Cell::F64(5.8));
+    let al = find("2025-01", "AL");
+    assert_eq!(al[2], s("01"));
+    assert_eq!(al[4], s("Alabama"));
+    assert_eq!(al[5], s("South"));
+    assert_eq!(find("2025-01", "CA")[5], s("West"));
+    // Year-over-year change exists from 2025 on (rounded to 0.01), never in 2024.
+    assert!(rows
+        .iter()
+        .filter(|r| r[1] == Cell::I64(2024))
+        .all(|r| r[7] == Cell::Null));
+    assert_eq!(al[7], Cell::F64(0.2));
+    assert_eq!(find("2025-11", "AL")[7], Cell::F64(-0.4));
+    assert_eq!(find("2026-09", "CA")[7], Cell::F64(-0.4));
+    assert_eq!(find("2026-09", "PR")[7], Cell::F64(0.5));
+    // October 2025 wasn't collected ("-") → NULL rate and change.
+    let oct = find("2025-10", "AL");
+    assert_eq!(oct[6], Cell::Null);
+    assert_eq!(oct[7], Cell::Null);
+    assert_eq!(find("2025-10", "PR")[7], Cell::F64(0.3));
+    assert!(rows
+        .iter()
+        .filter(|r| r[1] != Cell::I64(2024) && r[6] != Cell::Null)
+        .all(|r| r[7] != Cell::Null));
+
+    // M13 (annual average) and unknown series are skipped.
+    let extra = serde_json::json!({ "Results": { "series": [
+        { "seriesID": "LASST010000000000003", "data": [
+            { "year": "2024", "period": "M13", "value": "3.0" },
+            { "year": "2024", "period": "M00", "value": "3.0" }
+        ]},
+        { "seriesID": "LASST990000000000003", "data": [{ "year": "2024", "period": "M01", "value": "1" }] },
+        { "seriesID": "LASST0100000000000003", "data": [{ "year": "2024", "period": "M01", "value": "1" }] },
+        { "seriesID": "LNS14000000", "data": [{ "year": "2024", "period": "M01", "value": "1" }] }
+    ]}});
+    assert!(bls_state_rows(&[extra]).is_empty());
+
+    let db = test_db();
+    let sp = spec("usafacts_state_jobs");
+    assert_eq!(sp.mode, WriteMode::Replace);
+    assert!(KEEP_NEWEST_KINDS.contains(&sp.kind));
+    assert_eq!(write_rows(&db, sp, &rows).unwrap(), 99);
+    assert_eq!(
+        one(
+            &db,
+            "SELECT COUNT(*) FROM usafacts_state_jobs WHERE region = 'Puerto Rico'"
+        )
+        .as_deref(),
+        Some("33")
+    );
+    assert_eq!(
+        one(
+            &db,
+            "SELECT CAST(MAX(month) AS VARCHAR) FROM usafacts_state_jobs"
+        )
+        .as_deref(),
+        Some("2026-09-01")
+    );
+    // Keep-newest snapshot: the last rows of `month ASC, state_abbr`, still in that order.
+    let sql = snapshot_sql_limited("usafacts_state_jobs", 4).unwrap();
+    assert!(
+        sql.contains("ORDER BY month DESC, state_abbr DESC LIMIT 4"),
+        "{sql}"
+    );
+    let res = source_query(&db, "usafacts_state_jobs", &sql, 4).unwrap();
+    let got: Vec<(String, String)> = res
+        .rows
+        .iter()
+        .map(|r| (r[0].to_string(), r[3].to_string()))
+        .collect();
+    assert_eq!(got.len(), 4);
+    assert!(
+        got[0].0.contains("2026-08") && got[0].1.contains("PR"),
+        "{got:?}"
+    );
+    assert!(
+        got[1].0.contains("2026-09") && got[1].1.contains("AL"),
+        "{got:?}"
+    );
+    assert!(
+        got[3].0.contains("2026-09") && got[3].1.contains("PR"),
+        "{got:?}"
+    );
+
+    // ~12k rows (19 years × 12 months × 52 states) fit a Replace write.
+    let mut big: Vec<Row> = Vec::new();
+    for year in 2008..2027 {
+        for month in 1..=12 {
+            for st in US_STATES {
+                big.push(vec![
+                    s(&format!("{year}-{month:02}-01")),
+                    Cell::I64(year),
+                    s(st.0),
+                    s(st.1),
+                    s(st.2),
+                    s(st.3),
+                    Cell::F64(4.0),
+                    Cell::Null,
+                ]);
+            }
+        }
+    }
+    assert_eq!(big.len(), 11_856);
+    assert_eq!(write_rows(&db, sp, &big).unwrap(), 11_856);
+    assert_eq!(
+        one(&db, "SELECT COUNT(*) FROM usafacts_state_jobs").as_deref(),
+        Some("11856")
+    );
+}
+
+#[test]
+fn usafacts_state_jobs_fredgraph_fallback_matches_bls() {
+    let batches = fredgraph_state_id_batches(26);
+    assert_eq!(
+        batches.iter().map(Vec::len).collect::<Vec<_>>(),
+        vec![26, 26]
+    );
+    assert_eq!(batches[0][0], "ALUR");
+    assert!(batches.concat().contains(&"DCUR".to_string()));
+    assert_eq!(batches[1].last().map(String::as_str), Some("PRUR"));
+
+    let csv = fixture_text("fredgraph_state_ur.csv");
+    let fred = fredgraph_state_rows(&[csv.as_str()], 2024);
+    assert_eq!(fred.len(), 99);
+    // Same months, states, rates and year-over-year change as the BLS transform.
+    let bls = bls_state_rows(&[usafacts_fixture("usafacts_bls_state_ur.sse")]);
+    assert_eq!(fred, bls);
+
+    // From 2023 the CSV has 45 months; 2024 now gets its year-over-year change.
+    let all = fredgraph_state_rows(&[csv.as_str()], 2023);
+    assert_eq!(all.len(), 135);
+    let al24 = all
+        .iter()
+        .find(|r| r[0] == s("2024-01-01") && r[3] == s("AL"))
+        .unwrap();
+    assert_eq!(al24[6], Cell::F64(2.9));
+    assert_eq!(al24[7], Cell::F64(0.6));
+    // Blank cells (2025-10 AL/CA) are NULL rates.
+    let oct = all
+        .iter()
+        .find(|r| r[0] == s("2025-10-01") && r[3] == s("CA"))
+        .unwrap();
+    assert_eq!(oct[6], Cell::Null);
+    // Headers that aren't `{USPS}UR` are ignored.
+    assert!(fredgraph_state_rows(
+        &["observation_date,UNRATE,XXUR\n2024-01-01,3.7,1.0\n"],
+        2000
+    )
+    .is_empty());
+
+    let db = test_db();
+    assert_eq!(
+        write_rows(&db, spec("usafacts_state_jobs"), &all).unwrap(),
+        135
+    );
+}
+
+#[test]
+fn usafacts_fredgraph_guard_and_single_series() {
+    assert!(fredgraph_looks_like_csv(
+        "observation_date,UNRATE\n2024-01-01,3.7\n"
+    ));
+    assert!(fredgraph_looks_like_csv("\u{feff}observation_date,ALUR\n"));
+    assert!(fredgraph_looks_like_csv("DATE,GASREGW\n"));
+    assert!(fredgraph_looks_like_csv("date,x\n"), "case-insensitive");
+    assert!(fredgraph_looks_like_csv(&fixture_text(
+        "fredgraph_state_ur.csv"
+    )));
+    assert!(fredgraph_looks_like_csv(&fixture_text(
+        "fredgraph_monthly.csv"
+    )));
+    assert!(
+        !fredgraph_looks_like_csv("PK\u{3}\u{4}\u{14}\0observation_date,"),
+        "ZIP"
+    );
+    assert!(!fredgraph_looks_like_csv(
+        "<!DOCTYPE html><title>Error</title>"
+    ));
+    assert!(!fredgraph_looks_like_csv(" observation_date,X"));
+    assert!(!fredgraph_looks_like_csv(""));
+
+    let csv = fixture_text("fredgraph_q_psavert.csv");
+    let obs = fredgraph_observations(&csv, "PSAVERT").unwrap();
+    let list = obs["observations"].as_array().unwrap();
+    assert_eq!(list.len(), 35);
+    assert_eq!(
+        list[0],
+        serde_json::json!({ "date": "2018-01-01", "value": "5.8" })
+    );
+    assert!(has_observations(&obs));
+    assert!(
+        fredgraph_observations(&csv, "MSPUS").is_none(),
+        "wrong column"
+    );
+    assert!(fredgraph_observations("PK\u{3}\u{4}junk", "PSAVERT").is_none());
+    assert!(fredgraph_observations("<html>oops</html>", "PSAVERT").is_none());
+    let gaps = fredgraph_observations("observation_date,ICSA\n2020-01-01,\nnot-a-date,5\n", "ICSA")
+        .unwrap();
+    assert_eq!(
+        gaps["observations"],
+        serde_json::json!([{ "date": "2020-01-01", "value": "." }])
+    );
+}
+
+#[test]
+fn usafacts_bea_state_years_and_carry_forward() {
+    let sarpp = usafacts_fixture("usafacts_bea_sarpp1.sse");
+    assert!(bea_has_data(&sarpp));
+    assert!(!bea_has_data(
+        &serde_json::json!({ "BEAAPI": { "Results": { "Data": [] } } })
+    ));
+    let rpp = bea_state_years(&sarpp);
+    assert_eq!(rpp.len(), 51, "50 states + DC; US total dropped");
+    assert!(!rpp.contains_key("00"));
+    let al = rpp.get("01").unwrap();
+    assert_eq!(
+        al.keys().copied().collect::<Vec<_>>(),
+        (2020..=2024).collect::<Vec<_>>()
+    );
+    assert_eq!(al.get(&2024), Some(&88.823));
+    assert_eq!(rpp["06"].get(&2024), Some(&110.72));
+    assert_eq!(rpp["11"].get(&2024), Some(&109.901));
+
+    // The fixture ends at 2024; 2025 borrows it, 2026 is too far, earlier years are their own.
+    assert_eq!(bea_value_for(Some(al), 2024, 1), Some(88.823));
+    assert_eq!(bea_value_for(Some(al), 2025, 1), Some(88.823));
+    assert_eq!(bea_value_for(Some(al), 2026, 1), None);
+    assert_eq!(bea_value_for(Some(al), 2025, 0), None);
+    assert_eq!(bea_value_for(Some(al), 2021, 1), Some(88.062));
+    assert_eq!(bea_value_for(Some(al), 2019, 1), None);
+    assert_eq!(bea_value_for(None, 2024, 1), None);
+
+    // Thousands commas, counties, non-states and "(NA)".
+    let rpi = bea_state_years(&serde_json::json!({ "BEAAPI": { "Results": { "Data": [
+        { "GeoFips": "01000", "TimePeriod": "2024", "DataValue": "52,345" },
+        { "GeoFips": "00000", "TimePeriod": "2024", "DataValue": "60,000" },
+        { "GeoFips": "01001", "TimePeriod": "2024", "DataValue": "1" },
+        { "GeoFips": "99000", "TimePeriod": "2024", "DataValue": "1" },
+        { "GeoFips": "06000", "TimePeriod": "2024", "DataValue": "(NA)" },
+        { "GeoFips": "72000", "TimePeriod": 2023, "DataValue": 21000 }
+    ]}}}));
+    assert_eq!(rpi.len(), 2);
+    assert_eq!(rpi["01"].get(&2024), Some(&52_345.0));
+    assert_eq!(rpi["72"].get(&2023), Some(&21_000.0));
+    assert_eq!(
+        bea_regional_args("SARPP", "3"),
+        serde_json::json!({ "TableName": "SARPP", "LineCode": "3", "GeoFips": "STATE", "Year": "ALL" })
+    );
+    assert_eq!(
+        BEA_STATE_TABLES,
+        [("SARPP", "1"), ("SARPP", "3"), ("SARPI", "2")]
+    );
+
+    // Joined into the ACS panel: price level (carried into 2025), no rents table, local income.
+    let acs = usafacts_fixture("usafacts_acs1_2024.sse");
+    let cpi = fred_annual_cpi(&usafacts_fixture("usafacts_fred_cpi_annual.sse"));
+    let panel = BeaStatePanel {
+        rpp: Some(rpp),
+        rent: None,
+        rpi: Some(rpi),
+    };
+    let rows = acs_states_rows(
+        &[(2024, acs.clone()), (2025, acs)],
+        Some(&cpi),
+        Some(&panel),
+    );
+    let row = |abbr: &str, year: i64| -> Row {
+        rows.iter()
+            .find(|r| r[1] == s(abbr) && r[3] == Cell::I64(year))
+            .unwrap()
+            .clone()
+    };
+    let sp = spec("usafacts_states");
+    assert_eq!(sp.columns.len(), 16);
+    let at = |name: &str| sp.columns.iter().position(|c| c.0 == name).unwrap();
+    let al25 = row("AL", 2025);
+    assert_eq!(al25.len(), 16);
+    assert_eq!(
+        al25[at("real_median_income")],
+        Cell::F64(66_659.0),
+        "2025 dollars"
+    );
+    assert_eq!(
+        al25[at("price_level")],
+        Cell::F64(88.823),
+        "borrowed from 2024"
+    );
+    assert_eq!(al25[at("rent_price_level")], Cell::Null);
+    assert_eq!(al25[at("income_local_usd")], Cell::F64(75_047.0));
+    assert_eq!(al25[at("real_personal_income_pc")], Cell::F64(52_345.0));
+    let al24 = row("AL", 2024);
+    assert_eq!(al24[at("real_median_income")], Cell::F64(68_415.0));
+    assert_eq!(al24[at("income_local_usd")], Cell::F64(77_024.0));
+    let pr = row("PR", 2024);
+    assert_eq!(
+        pr[at("price_level")],
+        Cell::Null,
+        "BEA has no Puerto Rico RPP"
+    );
+    assert_eq!(pr[at("income_local_usd")], Cell::Null);
+    assert_eq!(
+        pr[at("real_personal_income_pc")],
+        Cell::F64(21_000.0),
+        "2024 borrows 2023"
+    );
+    assert_eq!(
+        row("PR", 2025)[at("real_personal_income_pc")],
+        Cell::Null,
+        "two years back is too far"
+    );
+
+    // No BEA at all → the four columns are NULL, the rest unchanged.
+    let plain = acs_states_rows(
+        &[(2024, usafacts_fixture("usafacts_acs1_2024.sse"))],
+        None,
+        None,
+    );
+    assert!(plain
+        .iter()
+        .all(|r| r[12..].iter().all(|c| *c == Cell::Null)));
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, sp, &rows).unwrap(), 104);
+    assert_eq!(
+        one(
+            &db,
+            "SELECT CAST(price_level AS VARCHAR) FROM usafacts_states WHERE state_abbr = 'CA' AND yr = 2025"
+        )
+        .as_deref(),
+        Some("110.72")
+    );
+}
+
+#[test]
+fn usafacts_budget_from_mts() {
+    assert_eq!(
+        mts9_filter(),
+        "line_code_nbr:in:(20,30,50,80,100,120,140,240,250,260,270,280,320,340)"
+    );
+    assert!(fiscaldata_mts9_url().contains(
+        "/v1/accounting/mts/mts_table_9?fields=record_date,line_code_nbr,current_month_rcpt_outly_amt&filter=line_code_nbr%3Ain%3A(20%2C30%2C50%2C"
+    ));
+    assert!(fiscaldata_mts9_url().ends_with("&sort=record_date&page%5Bsize%5D=10000"));
+    assert!(fiscaldata_avg_rates_url()
+        .contains("/v2/accounting/od/avg_interest_rates?fields=record_date,security_desc,avg_interest_rate_amt&filter=security_desc%3Aeq%3ATotal%20Marketable&"));
+    assert_eq!(fiscal_year("2024-09"), 2024);
+    assert_eq!(fiscal_year("2024-10"), 2025);
+
+    let mts = usafacts_fixture("usafacts_treasury_mts9.sse");
+    assert!(fiscal_data_has_rows(&mts));
+    assert!(!fiscal_data_has_rows(&serde_json::json!({ "data": [] })));
+    let months = mts_months(std::slice::from_ref(&mts));
+    assert_eq!(months.len(), 34);
+    assert!(months.values().all(|by_code| by_code.len() == 14));
+    assert_eq!(months.keys().next().map(String::as_str), Some("2024-01"));
+    assert_eq!(months.keys().last().map(String::as_str), Some("2026-10"));
+    assert_eq!(
+        months["2024-01"][&20],
+        Some(282.58),
+        "$282,579,404,979.89 → $B"
+    );
+
+    let rates = usafacts_fixture("usafacts_treasury_avg_rates.sse");
+    let rows = budget_rows(std::slice::from_ref(&mts), Some(&rates));
+    let sp = spec("usafacts_budget");
+    assert_eq!(rows.len(), 34);
+    assert_eq!(rows[0].len(), sp.columns.len());
+    let at = |name: &str| sp.columns.iter().position(|c| c.0 == name).unwrap();
+    let row = |m: &str| -> Row {
+        rows.iter()
+            .find(|r| r[0] == s(&format!("{m}-01")))
+            .unwrap_or_else(|| panic!("{m}"))
+            .clone()
+    };
+    assert_eq!(rows[0][0], s("2024-01-01"), "oldest month first");
+    assert_eq!(row("2024-01")[at("fy")], Cell::I64(2024));
+    assert_eq!(row("2024-10")[at("fy")], Cell::I64(2025));
+
+    // Deficit = outlays − receipts: positive is a deficit, April's tax month a surplus.
+    for m in ["2024-01", "2024-04", "2024-12", "2026-10"] {
+        let r = row(m);
+        let d = f64_of(&r[at("outlays_b")]) - f64_of(&r[at("receipts_b")]);
+        assert!((f64_of(&r[at("deficit_b")]) - d).abs() < 0.006, "{m}");
+    }
+    assert_eq!(row("2024-01")[at("deficit_b")], Cell::F64(21.93));
+    assert_eq!(row("2024-04")[at("deficit_b")], Cell::F64(-209.53));
+    assert_eq!(row("2024-04")[at("receipts_b")], Cell::F64(776.2));
+
+    // Interest TTM for 2024-12 = the twelve 2024 months; 2024-11 lacks 2023-12 → NULL.
+    let interest_2024: f64 = (1..=12)
+        .map(|mo| f64_of(&row(&format!("2024-{mo:02}"))[at("net_interest_b")]))
+        .sum();
+    let dec = row("2024-12");
+    assert_eq!(dec[at("net_interest_ttm_b")], Cell::F64(907.59));
+    assert!((f64_of(&dec[at("net_interest_ttm_b")]) - interest_2024).abs() < 0.005);
+    assert_eq!(row("2024-11")[at("net_interest_ttm_b")], Cell::Null);
+    assert_eq!(row("2024-11")[at("receipts_ttm_b")], Cell::Null);
+    assert_eq!(dec[at("receipts_ttm_b")], Cell::F64(4894.11));
+    assert_eq!(dec[at("outlays_ttm_b")], Cell::F64(6922.86));
+    assert_eq!(dec[at("deficit_ttm_b")], Cell::F64(2028.75));
+    assert_eq!(dec[at("interest_share_pct")], Cell::F64(18.54));
+    assert!(matches!(dec[at("defense_ttm_b")], Cell::F64(_)));
+    assert!(matches!(dec[at("customs_ttm_b")], Cell::F64(_)));
+
+    // Average rate on marketable debt joins by month; without it only that column is NULL.
+    assert_eq!(
+        row("2024-01")[at("avg_interest_rate_pct")],
+        Cell::F64(3.211)
+    );
+    assert_eq!(row("2026-10")[at("avg_interest_rate_pct")], Cell::F64(3.57));
+    let by_month = avg_rate_by_month(&rates);
+    assert_eq!(by_month.len(), 34);
+    let other_desc = serde_json::json!({ "data": [
+        { "record_date": "2024-01-31", "security_desc": "Treasury Bills", "avg_interest_rate_amt": "5.2" },
+        { "record_date": "2024-02-29", "avg_interest_rate_amt": "3.3" }
+    ]});
+    let only = avg_rate_by_month(&other_desc);
+    assert_eq!(only.len(), 1);
+    assert_eq!(only.get("2024-02"), Some(&3.3));
+    let no_rates = budget_rows(std::slice::from_ref(&mts), None);
+    for (a, b) in no_rates.iter().zip(&rows) {
+        for (i, (x, y)) in a.iter().zip(b).enumerate() {
+            if i == at("avg_interest_rate_pct") {
+                assert_eq!(*x, Cell::Null);
+            } else {
+                assert_eq!(x, y);
+            }
+        }
+    }
+
+    // trailing12 needs twelve consecutive months.
+    let mut series: MonthSeries = (1..=12)
+        .map(|mo| (format!("2025-{mo:02}"), Some(0.1)))
+        .collect();
+    assert_eq!(trailing12(&series, "2025-12"), Some(1.2));
+    series.insert("2025-06".into(), None);
+    assert_eq!(trailing12(&series, "2025-12"), None);
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, sp, &rows).unwrap(), 34);
+    let sql = snapshot_sql_limited("usafacts_budget", 2).unwrap();
+    let res = source_query(&db, "usafacts_budget", &sql, 2).unwrap();
+    assert_eq!(res.rows.len(), 2);
+    assert!(res.rows[1][0].to_string().contains("2026-10"));
+}
+
+#[test]
+fn usafacts_budget_lines_from_mts() {
+    let mts = usafacts_fixture("usafacts_treasury_mts9.sse");
+    let rows = budget_line_rows(std::slice::from_ref(&mts));
+    let sp = spec("usafacts_budget_lines");
+    assert_eq!(
+        rows.len(),
+        34 * 14,
+        "12 lines + Other receipts + Other outlays a month"
+    );
+    assert_eq!(rows[0].len(), sp.columns.len());
+    let find = |m: &str, line: &str| -> Row {
+        rows.iter()
+            .find(|r| r[0] == s(&format!("{m}-01")) && r[3] == s(line))
+            .unwrap_or_else(|| panic!("{m} {line}"))
+            .clone()
+    };
+    let flow_rows = |m: &str, flow: &str| -> Vec<Row> {
+        rows.iter()
+            .filter(|r| r[0] == s(&format!("{m}-01")) && r[2] == s(flow))
+            .cloned()
+            .collect()
+    };
+    let months = mts_months(std::slice::from_ref(&mts));
+    // Each month's lines (with "Other …") add up to its totals.
+    for m in ["2024-01", "2024-12", "2026-10"] {
+        for (flow, total) in [("Receipts", 120), ("Outlays", 340)] {
+            let parts = flow_rows(m, flow);
+            assert_eq!(parts.len(), if flow == "Receipts" { 6 } else { 8 });
+            let sum: f64 = parts.iter().map(|r| f64_of(&r[4])).sum();
+            let t = months[m][&total].unwrap();
+            assert!((sum - t).abs() < 0.011, "{m} {flow}: {sum} vs {t}");
+        }
+    }
+    let other = find("2024-12", "Other outlays");
+    assert_eq!(
+        other[1],
+        Cell::I64(2025),
+        "December is in the next fiscal year"
+    );
+    assert_eq!(other[2], s("Outlays"));
+    assert_eq!(other[4], Cell::F64(59.99));
+    assert_eq!(other[5], Cell::F64(721.47));
+    assert_eq!(other[6], Cell::F64(10.42));
+    let interest = find("2024-12", "Net interest");
+    assert_eq!(interest[5], Cell::F64(907.59));
+    assert_eq!(interest[6], Cell::F64(13.11));
+    assert_eq!(
+        find("2024-12", "Individual income taxes")[6],
+        Cell::F64(49.43)
+    );
+    let other_rec = find("2024-12", "Other receipts");
+    assert_eq!(other_rec[4], Cell::F64(5.97));
+    assert_eq!(other_rec[5], Cell::F64(133.5));
+    assert_eq!(other_rec[6], Cell::F64(2.73));
+    assert_eq!(
+        find("2024-12", "Customs duties (tariffs)")[2],
+        s("Receipts")
+    );
+    // Shares of each flow add up to ~100% once 12 months exist; before that they're NULL.
+    for flow in ["Receipts", "Outlays"] {
+        let total: f64 = flow_rows("2024-12", flow)
+            .iter()
+            .map(|r| f64_of(&r[6]))
+            .sum();
+        assert!((total - 100.0).abs() < 0.1, "{flow}: {total}");
+        assert!(flow_rows("2024-11", flow)
+            .iter()
+            .all(|r| r[5] == Cell::Null && r[6] == Cell::Null));
+    }
+    assert!(
+        rows.iter().all(|r| r[4] != Cell::Null),
+        "fixture is complete"
+    );
+
+    // A missing part makes that month's "Other" unknown rather than wrong.
+    let gap = serde_json::json!({ "data": [
+        { "record_date": "2025-01-31", "line_code_nbr": "120", "current_month_rcpt_outly_amt": "500000000000" },
+        { "record_date": "2025-01-31", "line_code_nbr": "20", "current_month_rcpt_outly_amt": "300000000000" }
+    ]});
+    let g = budget_line_rows(&[gap]);
+    assert_eq!(g.len(), 14);
+    let other = g.iter().find(|r| r[3] == s("Other receipts")).unwrap();
+    assert_eq!(other[4], Cell::Null);
+    assert_eq!(
+        g.iter()
+            .find(|r| r[3] == s("Individual income taxes"))
+            .unwrap()[4],
+        Cell::F64(300.0)
+    );
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, sp, &rows).unwrap(), 476);
+    let sql = snapshot_sql_limited("usafacts_budget_lines", 14).unwrap();
+    assert!(
+        sql.contains("ORDER BY month DESC, flow DESC, line DESC LIMIT 14"),
+        "{sql}"
+    );
+    let res = source_query(&db, "usafacts_budget_lines", &sql, 14).unwrap();
+    assert_eq!(res.rows.len(), 14);
+    assert!(res
+        .rows
+        .iter()
+        .all(|r| r[0].to_string().contains("2026-10")));
+}
+
+#[test]
+fn usafacts_household_quarterly_from_fred() {
+    assert_eq!(USAFACTS_HOUSEHOLD_SERIES.len(), 14);
+    assert_eq!(
+        household_fred_args("MSPUS"),
+        serde_json::json!({
+            "series_id": "MSPUS",
+            "observation_start": "1990-01-01",
+            "frequency": "q",
+            "aggregation_method": "avg",
+        })
+    );
+    assert_eq!(
+        household_fredgraph_url("PSAVERT"),
+        "https://fred.stlouisfed.org/graph/fredgraph.csv?id=PSAVERT&cosd=1990-01-01&fq=Quarterly&fam=avg"
+    );
+
+    let ids: Vec<&str> = USAFACTS_HOUSEHOLD_SERIES.iter().map(|s| s.1).collect();
+    let at_id = |id: &str| ids.iter().position(|x| *x == id).unwrap();
+    let mut payloads: Vec<Option<Value>> = vec![None; ids.len()];
+    payloads[at_id("MSPUS")] = Some(usafacts_fixture("usafacts_fred_q_mspus.sse"));
+    payloads[at_id("LES1252881500Q")] = Some(usafacts_fixture("usafacts_fred_q_les.sse"));
+    // The keyless fallback's shape feeds the same transform.
+    payloads[at_id("PSAVERT")] =
+        fredgraph_observations(&fixture_text("fredgraph_q_psavert.csv"), "PSAVERT");
+    let rows = household_rows(&payloads);
+    let sp = spec("usafacts_household");
+    assert_eq!(rows.len(), 35, "2018-Q1 … 2026-Q3");
+    assert_eq!(rows[0].len(), sp.columns.len());
+    let at = |name: &str| sp.columns.iter().position(|c| c.0 == name).unwrap();
+    let q = |d: &str| -> Row {
+        rows.iter()
+            .find(|r| r[0] == s(d))
+            .unwrap_or_else(|| panic!("{d}"))
+            .clone()
+    };
+    let first = q("2018-01-01");
+    assert_eq!(first[at("yr")], Cell::I64(2018));
+    assert_eq!(first[at("saving_rate_pct")], Cell::F64(5.8));
+    assert_eq!(first[at("median_home_price_usd")], Cell::F64(331_800.0));
+    assert_eq!(first[at("median_weekly_earnings_usd")], Cell::F64(875.0));
+    // 331,800 / (875 × 52) years of median full-time pay.
+    assert_eq!(first[at("home_price_years_of_pay")], Cell::F64(7.29));
+    assert_eq!(first[at("decade")], s("2010s"));
+    assert_eq!(first[at("card_delinquency_pct")], Cell::Null);
+    assert_eq!(
+        q("2020-01-01")[at("home_price_years_of_pay")],
+        Cell::F64(6.65)
+    );
+    assert_eq!(
+        q("2020-04-01")[at("home_price_years_of_pay")],
+        Cell::F64(6.05)
+    );
+    assert_eq!(
+        q("2026-07-01")[at("home_price_years_of_pay")],
+        Cell::F64(6.1)
+    );
+    // LES is "." for 2025-Q4 → no ratio.
+    assert_eq!(
+        q("2025-10-01")[at("median_weekly_earnings_usd")],
+        Cell::Null
+    );
+    assert_eq!(q("2025-10-01")[at("home_price_years_of_pay")], Cell::Null);
+    // NBER: 2020-Q1 holds March, 2020-Q2 holds April.
+    assert_eq!(q("2019-10-01")[at("recession")], s("Expansion"));
+    assert_eq!(q("2020-01-01")[at("recession")], s("Recession"));
+    assert_eq!(q("2020-04-01")[at("recession")], s("Recession"));
+    assert_eq!(q("2020-07-01")[at("recession")], s("Expansion"));
+    assert_eq!(q("2020-07-01")[at("decade")], s("2020s"));
+    assert!(quarter_in_recession("1990-07-01"), "August 1990");
+    assert!(!quarter_in_recession("1990-04-01"));
+    assert!(!quarter_in_recession("2007-10-01"));
+    assert!(quarter_in_recession("2008-01-01"));
+    assert!(quarter_in_recession("2009-04-01"));
+    assert!(!quarter_in_recession("2009-07-01"));
+    assert!(quarter_in_recession("2001-10-01"));
+    assert!(!quarter_in_recession("2019-10-01"), "Dec → Jan rollover");
+
+    // Monthly dates snap to the quarter start; REVOLSL / ICSA are scaled; pre-1990 dropped.
+    let mut scaled: Vec<Option<Value>> = vec![None; ids.len()];
+    scaled[at_id("REVOLSL")] = Some(serde_json::json!({ "observations": [
+        { "date": "2020-05-01", "value": "1234567" },
+        { "date": "1989-10-01", "value": "1" }
+    ]}));
+    scaled[at_id("ICSA")] = Some(serde_json::json!({ "observations": [
+        { "date": "2020-06-01", "value": "212000" }
+    ]}));
+    let s_rows = household_rows(&scaled);
+    assert_eq!(s_rows.len(), 1);
+    assert_eq!(s_rows[0][0], s("2020-04-01"));
+    assert_eq!(s_rows[0][at("revolving_credit_b")], Cell::F64(1234.57));
+    assert_eq!(s_rows[0][at("initial_claims_k")], Cell::F64(212.0));
+    assert!(household_rows(&vec![None; ids.len()]).is_empty());
+
+    let db = test_db();
+    assert_eq!(write_rows(&db, sp, &rows).unwrap(), 35);
+    let sql = snapshot_sql_limited("usafacts_household", 4).unwrap();
+    let res = source_query(&db, "usafacts_household", &sql, 4).unwrap();
+    assert_eq!(res.rows.len(), 4);
+    assert!(res.rows[3][0].to_string().contains("2026-07"));
+}
+
+#[test]
+fn keep_newest_kinds_match_typescript_registry() {
+    let src = include_str!("../../src/lib/sourceRegistry.ts");
+    let defs = &src[src.find("export const SOURCE_DEFS").expect("SOURCE_DEFS")..];
+    let mut ts: Vec<String> = defs
+        .split("def({")
+        .skip(1)
+        .filter(|chunk| chunk.lines().any(|l| l.trim() == "keepNewest: true,"))
+        .map(|chunk| unquote(line_value(chunk, "kind")))
+        .collect();
+    ts.sort();
+    let mut rust: Vec<String> = KEEP_NEWEST_KINDS.iter().map(|k| k.to_string()).collect();
+    rust.sort();
+    assert_eq!(rust, ts);
 }
 
 // ---------------------------------------------------------------

@@ -671,21 +671,132 @@ describe("/api/source/usafacts_*", () => {
   const toolArgs = (init?: RequestInit): ToolArgs =>
     (JSON.parse(String(init?.body)) as { params: { arguments: ToolArgs } }).params.arguments;
 
-  it("states: one ACS call per vintage; unreleased years are skipped", async () => {
-    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+  /**
+   * Gateway mock: ACS from the 2024 fixture (for 2024 only, or every vintage with `allYears`),
+   * the newest vintage unreleased (404), CPI annual.
+   */
+  const statesGateway = (opts: { failAcs?: boolean; allYears?: boolean } = {}) =>
+    async (url: string, init?: RequestInit) => {
       expect(url).toBe("https://data.mcp.usafacts.org/mcp");
       expect(init?.method).toBe("POST");
+      expect(new Headers(init?.headers).get("Mcp-Protocol-Version")).toBe("2025-03-26");
       const a = toolArgs(init);
+      if (a.tool_name === "getSeriesObservations") return sse("usafacts_fred_cpi_annual.sse");
+      if (a.tool_name === "getRegionalData") return sse("usafacts_bea_sarpp1.sse");
       expect(a.tool_name).toBe("getAcs1");
-      return a.arguments.year === "2024" ? sse("usafacts_acs1_2024.sse") : sse("usafacts_error.sse");
-    });
+      if (opts.failAcs) return new Response("bad gateway", { status: 502 });
+      const newest = String(new Date().getUTCFullYear() - 1);
+      const released = opts.allYears ? a.arguments.year !== newest : a.arguments.year === "2024";
+      return released ? sse("usafacts_acs1_2024.sse") : sse("usafacts_error.sse");
+    };
+  const acsYearsAsked = () =>
+    fetchMock.mock.calls.map(([, init]) => toolArgs(init as RequestInit)).filter((a) => a.tool_name === "getAcs1").map((a) => a.arguments.year);
+  const expireFeedCopy = (kind: string) => {
+    for (const k of [...cache.store.keys()]) if (k.startsWith(sourceCacheKey(kind))) cache.store.delete(k);
+  };
+
+  it("states: one ACS call per vintage + annual CPI; unreleased years are skipped", async () => {
+    fetchMock.mockImplementation(statesGateway());
     const res = await call("/api/source/usafacts_states");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][]; meta: { dollarsOf: number } };
     expect(body.columns[0]).toBe("state_fips");
+    expect(body.columns.slice(10, 12)).toEqual(["region", "real_median_income"]);
+    expect(body.columns.slice(-4)).toEqual(["price_level", "rent_price_level", "income_local_usd", "real_personal_income_pc"]);
     expect(body.rows.length).toBe(52);
     expect(body.rows.every((r) => r[3] === 2024)).toBe(true);
-    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(12);
+    expect(body.meta.dollarsOf).toBe(2024);
+    // Real income is the 2024 value itself when 2024 is the base year.
+    expect(body.rows.every((r) => r[11] === r[5])).toBe(true);
+    expect(acsYearsAsked().length).toBeGreaterThanOrEqual(12);
+  });
+
+  it("states: a refresh re-asks only the newest vintages; settled ones come from the memo", async () => {
+    fetchMock.mockImplementation(statesGateway({ allYears: true }));
+    expect((await call("/api/source/usafacts_states")).status).toBe(200);
+    await flush();
+    const first = acsYearsAsked();
+    fetchMock.mockClear();
+    expireFeedCopy("usafacts_states");
+    expect((await call("/api/source/usafacts_states")).status).toBe(200);
+    const second = acsYearsAsked();
+    const thisYear = new Date().getUTCFullYear();
+    // Years ≤ thisYear-3 are settled (30 days) and the one before was fetched today → only
+    // the still-unreleased newest vintage is asked again.
+    expect(first.length).toBeGreaterThanOrEqual(12);
+    expect(second).toEqual([String(thisYear - 1)]);
+    // CPI is fresh for a week → not asked again.
+    expect(fetchMock.mock.calls.some(([, init]) => toolArgs(init as RequestInit).tool_name === "getSeriesObservations")).toBe(false);
+  });
+
+  it("states: retries a transient gateway failure once", async () => {
+    const seen = new Map<string, number>();
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const a = toolArgs(init);
+      const k = `${a.tool_name}:${a.arguments.year ?? ""}`;
+      seen.set(k, (seen.get(k) ?? 0) + 1);
+      if (k === "getAcs1:2024" && seen.get(k) === 1) return new Response("overloaded", { status: 503 });
+      return statesGateway()(url, init);
+    });
+    const res = await call("/api/source/usafacts_states");
+    const body = (await res.json()) as { rows: unknown[][] };
+    expect(body.rows.length).toBe(52);
+    expect(seen.get("getAcs1:2024")).toBe(2);
+    // Not-found vintages are final: asked once each.
+    expect(seen.get("getAcs1:2015")).toBe(1);
+  });
+
+  it("states: a variable Census no longer knows costs that column, not the vintage", async () => {
+    const gets: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      const a = toolArgs(init);
+      if (a.tool_name === "getAcs1" && a.arguments.year === "2024") {
+        gets.push(a.arguments.get!);
+        if (a.arguments.get!.includes("B06009PR_006E")) {
+          const body = { kind: "upstream_rejected", message: "HTTP 400", upstream_status: 400, upstream_body: "error: unknown variable 'B06009PR_006E'", retryable: false };
+          return new Response(`data: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { isError: true, content: [{ type: "text", text: JSON.stringify(body) }] } })}\n`);
+        }
+      }
+      return statesGateway()(url, init);
+    });
+    const res = await call("/api/source/usafacts_states");
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    expect(gets).toHaveLength(2);
+    expect(gets[1]).not.toContain("B06009PR_006E");
+    expect(body.rows.length).toBe(52);
+    // The vintage survives with every other column (the transform nulls whatever is absent).
+    expect(body.rows.find((r) => r[1] === "AL")![body.columns.indexOf("bachelors_or_higher_pct")]).not.toBeNull();
+  });
+
+  it("states: the memo stands in for vintages that fail on a refresh", async () => {
+    fetchMock.mockImplementation(statesGateway({ allYears: true }));
+    expect((await call("/api/source/usafacts_states")).status).toBe(200);
+    await flush();
+    expireFeedCopy("usafacts_states");
+    fetchMock.mockImplementation(statesGateway({ failAcs: true }));
+    const res = await call("/api/source/usafacts_states");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: unknown[][] };
+    // Every released vintage (all but the newest) comes back from the memo, 52 states each.
+    const released = new Set(body.rows.map((r) => r[3]));
+    expect(released.size).toBe(new Date().getUTCFullYear() - 2012 - 2); // 2012 … last-1, minus 2020
+    expect(body.rows.length).toBe(released.size * 52);
+  });
+
+  it("states: with no edge copy, the KV last-good copy beats a 502", async () => {
+    const kv = createFakeKv();
+    const env = makeEnv({ LOOM_STORIES: kv as unknown as KVNamespace });
+    fetchMock.mockImplementation(statesGateway());
+    expect((await call("/api/source/usafacts_states", {}, env)).status).toBe(200);
+    await flush();
+    expect(kv.data.has("srclast:usafacts_states")).toBe(true);
+    // A different edge: empty Cache API, gateway down for every vintage.
+    cache.store.clear();
+    fetchMock.mockImplementation(statesGateway({ failAcs: true }));
+    const res = await call("/api/source/usafacts_states", {}, env);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Loom-Cache")).toBe("STALE-DURABLE");
+    expect(((await res.json()) as { rows: unknown[][] }).rows.length).toBe(52);
   });
 
   it("states: 502 when every vintage fails and nothing is cached", async () => {
@@ -722,5 +833,194 @@ describe("/api/source/usafacts_*", () => {
     const body = (await res.json()) as { rows: unknown[][] };
     expect(body.rows.length).toBeGreaterThan(12);
     expect(body.rows.every((r) => r[3] === null)).toBe(true);
+  });
+
+  it("nation: asks for all eight series; the CSV only fills the ones the gateway lacked", async () => {
+    const asked: string[] = [];
+    const csvUrls: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("fredgraph.csv")) {
+        csvUrls.push(url);
+        return new Response(fixture(url.includes("GASREGW") ? "fredgraph_gas.csv" : "fredgraph_monthly.csv"));
+      }
+      const id = toolArgs(init).arguments.series_id!;
+      asked.push(id);
+      return id === "UNRATE" ? sse("usafacts_fred_unrate.sse") : sse("usafacts_error.sse");
+    });
+    const res = await call("/api/source/usafacts_nation");
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    expect(asked.sort()).toEqual(["CPIAUCSL", "FEDFUNDS", "GASREGW", "GS10", "HOUST", "JTSJOL", "PAYEMS", "UNRATE"]);
+    expect(csvUrls.some((u) => u.includes("id=UNRATE,CPIAUCSL,PAYEMS,FEDFUNDS,HOUST,JTSJOL,GS10"))).toBe(true);
+    expect(body.columns.slice(-3)).toEqual(["jobs_added_k", "decade", "recession"]);
+    const unrate = (m: string) => body.rows.find((r) => r[0] === m)?.[2];
+    // Feb 2024 UNRATE: gateway fixture and fredgraph agree, but the gateway's copy is the one kept.
+    expect(unrate("2024-02-01")).toBe(3.9);
+    const feb = body.rows.find((r) => r[0] === "2024-02-01")!;
+    expect(feb[body.columns.indexOf("jobs_added_k")]).not.toBeNull(); // payrolls from the CSV
+    expect(feb[body.columns.indexOf("recession")]).toBe("Expansion");
+  });
+});
+
+// ---- /api/source/usafacts_state_jobs (BLS LAUS via the gateway) ---------
+
+describe("/api/source/usafacts_state_jobs", () => {
+  const fixture = (n: string) =>
+    readFileSync(resolvePath(__dirname, "../../src-tauri/tests/fixtures/sources", n), "utf8");
+  const sse = (n: string) => new Response(fixture(n), { headers: { "Content-Type": "text/event-stream" } });
+  const toolArgs = (init?: RequestInit) =>
+    (JSON.parse(String(init?.body)) as { params: { arguments: { source_id: string; tool_name: string; arguments: { seriesid: string[]; startyear: string; endyear: string } } } }).params.arguments;
+
+  it("two getSeriesData calls for 52 states, 19 years", async () => {
+    const calls: { seriesid: string[]; startyear: string; endyear: string }[] = [];
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const a = toolArgs(init);
+      expect([a.source_id, a.tool_name]).toEqual(["bls", "getSeriesData"]);
+      calls.push(a.arguments);
+      return sse("usafacts_bls_state_ur.sse");
+    });
+    const res = await call("/api/source/usafacts_state_jobs");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    expect(calls.map((c) => c.seriesid.length).sort()).toEqual([2, 50]);
+    expect(Number(calls[0]!.endyear) - Number(calls[0]!.startyear)).toBe(18);
+    expect(body.columns).toEqual(["month", "yr", "state_fips", "state_abbr", "state_name", "region", "unemployment_rate", "unemployment_change_yoy"]);
+    expect(body.rows.length).toBe(99); // the fixture holds AL, CA, PR
+  });
+
+  it("falls back to keyless fredgraph.csv when a BLS batch fails", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("fredgraph.csv")) {
+        expect(url).toMatch(/id=([A-Z]{2}UR,){25}[A-Z]{2}UR$/);
+        return new Response(fixture("fredgraph_state_ur.csv"));
+      }
+      return toolArgs(init).arguments.seriesid.length === 2 ? new Response("down", { status: 500 }) : sse("usafacts_bls_state_ur.sse");
+    });
+    const res = await call("/api/source/usafacts_state_jobs");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { rows: unknown[][] };
+    expect(body.rows.length).toBeGreaterThan(0);
+    expect(fetchMock.mock.calls.filter(([u]) => String(u).includes("fredgraph.csv")).length).toBe(2);
+  });
+
+  it("keeps the BLS rows it has when the fallback is down too", async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes("fredgraph.csv")) return new Response("down", { status: 503 });
+      return toolArgs(init).arguments.seriesid.length === 2 ? new Response("down", { status: 500 }) : sse("usafacts_bls_state_ur.sse");
+    });
+    const res = await call("/api/source/usafacts_state_jobs");
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { rows: unknown[][] }).rows.length).toBe(99);
+  });
+});
+
+// ---- /api/source/usafacts_budget* and usafacts_household ------------------------
+
+describe("/api/source/usafacts_budget, budget_lines, household", () => {
+  const fixture = (n: string) => readFileSync(resolvePath(__dirname, "../../src-tauri/tests/fixtures/sources", n), "utf8");
+  const sse = (n: string) => new Response(fixture(n), { headers: { "Content-Type": "text/event-stream" } });
+  const toolArgs = (init?: RequestInit) =>
+    (JSON.parse(String(init?.body)) as { params: { arguments: { source_id: string; tool_name: string; arguments: Record<string, unknown> } } }).params.arguments;
+  /** The gateway's MTS reply split into two 1000-row-style pages. */
+  const mtsPages = () => {
+    const raw = fixture("usafacts_treasury_mts9.sse").split("\n").filter((l) => l.startsWith("data:")).at(-1)!.slice(5);
+    const result = (JSON.parse(raw) as { result: { structuredContent: { data: unknown[] } } }).result.structuredContent;
+    const half = Math.ceil(result.data.length / 2);
+    const page = (n: number) => ({ data: result.data.slice((n - 1) * half, n * half), meta: { "total-pages": 2 } });
+    return (n: number) => new Response(`data: ${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { structuredContent: page(n) } })}\n`);
+  };
+
+  it("budget: pages through the gateway and joins the average rate", async () => {
+    const pages = mtsPages();
+    const asked: number[] = [];
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const a = toolArgs(init);
+      expect(a.source_id).toBe("treasury");
+      if (a.tool_name === "getAvgInterestRates") return sse("usafacts_treasury_avg_rates.sse");
+      const n = Number(a.arguments["page[number]"]);
+      asked.push(n);
+      return pages(n);
+    });
+    const res = await call("/api/source/usafacts_budget");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    expect(asked).toEqual([1, 2]);
+    expect(body.rows).toHaveLength(34);
+    const oct = body.rows.find((r) => r[0] === "2026-10-01")!;
+    expect(oct[body.columns.indexOf("interest_share_pct")]).toBeCloseTo(19.82, 2);
+    expect(oct[body.columns.indexOf("avg_interest_rate_pct")]).toBe(3.57);
+  });
+
+  it("budget_lines: reuses the budget memo instead of asking Treasury again", async () => {
+    const pages = mtsPages();
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const a = toolArgs(init);
+      return a.tool_name === "getAvgInterestRates" ? sse("usafacts_treasury_avg_rates.sse") : pages(Number(a.arguments["page[number]"]));
+    });
+    expect((await call("/api/source/usafacts_budget")).status).toBe(200);
+    await flush();
+    fetchMock.mockClear();
+    const res = await call("/api/source/usafacts_budget_lines");
+    const body = (await res.json()) as { rows: unknown[][] };
+    expect(body.rows.length).toBeGreaterThan(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("budget: falls back to direct Fiscal Data when the gateway is down", async () => {
+    const direct: string[] = [];
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url.startsWith("https://api.fiscaldata.treasury.gov/")) {
+        direct.push(url);
+        const raw = url.includes("avg_interest_rates") ? "usafacts_treasury_avg_rates.sse" : "usafacts_treasury_mts9.sse";
+        const line = fixture(raw).split("\n").filter((l) => l.startsWith("data:")).at(-1)!.slice(5);
+        return new Response(JSON.stringify((JSON.parse(line) as { result: { structuredContent: unknown } }).result.structuredContent));
+      }
+      return new Response("down", { status: 503 });
+    });
+    const res = await call("/api/source/usafacts_budget");
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { rows: unknown[][] }).rows).toHaveLength(34);
+    expect(direct.some((u) => u.includes("mts_table_9") && u.includes("page%5Bsize%5D=10000"))).toBe(true);
+    expect(direct.some((u) => u.includes("avg_interest_rates"))).toBe(true);
+  });
+
+  it("household: each series falls back to its own fredgraph CSV, and a ZIP doesn't count", async () => {
+    const csv: string[] = [];
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.startsWith("https://fred.stlouisfed.org/graph/fredgraph.csv")) {
+        csv.push(url);
+        if (url.includes("id=PSAVERT&")) return new Response(fixture("fredgraph_q_psavert.csv"));
+        return new Response("PK\u0003\u0004 not a csv");
+      }
+      const id = toolArgs(init).arguments.series_id;
+      if (id === "MSPUS") return sse("usafacts_fred_q_mspus.sse");
+      if (id === "LES1252881500Q") return sse("usafacts_fred_q_les.sse");
+      return new Response("down", { status: 502 });
+    });
+    const res = await call("/api/source/usafacts_household");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    const q = body.rows.find((r) => r[0] === "2024-01-01")!;
+    expect(q[body.columns.indexOf("saving_rate_pct")]).not.toBeNull(); // from fredgraph
+    expect(q[body.columns.indexOf("home_price_years_of_pay")]).toBeCloseTo(426800 / (1136 * 52), 2);
+    expect(q[body.columns.indexOf("card_delinquency_pct")]).toBeNull(); // ZIP rejected
+    expect(csv.every((u) => !u.includes(","))).toBe(true); // one series per request
+  });
+
+  it("states: BEA price levels land in the panel", async () => {
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const a = toolArgs(init);
+      if (a.source_id === "bea") {
+        if (a.arguments.TableName === "SARPP" && a.arguments.LineCode === "1") return sse("usafacts_bea_sarpp1.sse");
+        return new Response("down", { status: 503 });
+      }
+      if (a.tool_name === "getSeriesObservations") return sse("usafacts_fred_cpi_annual.sse");
+      return a.arguments.year === "2024" ? sse("usafacts_acs1_2024.sse") : sse("usafacts_error.sse");
+    });
+    const res = await call("/api/source/usafacts_states");
+    const body = (await res.json()) as { columns: string[]; rows: unknown[][] };
+    const ms = body.rows.find((r) => r[1] === "MS")!;
+    expect(ms[body.columns.indexOf("price_level")]).toBeCloseTo(86.953, 3);
+    expect(ms[body.columns.indexOf("income_local_usd")]).not.toBeNull();
+    expect(ms[body.columns.indexOf("rent_price_level")]).toBeNull(); // that BEA call failed: only its column is empty
   });
 });

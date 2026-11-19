@@ -25,6 +25,7 @@ import { formatDeltaLabel } from "./deltaCompare";
 import { chartFont, chartTypeRamp } from "./chartType";
 import { type MarkSymbols, drawMarkSymbol, markSymbols } from "./markSymbols";
 import type { HitTarget } from "./chartTooltip";
+import { NOT_A_MEASURE_NAME } from "./canvasCharts/shared";
 // ---------------------------------------------------------------------------
 // Renderers
 // ---------------------------------------------------------------------------
@@ -277,11 +278,13 @@ function numericColumn(rows: unknown[][], i: number): boolean {
 }
 
 /** Numeric feature columns: preferred encodings first, then other numeric columns (≤ max). */
+
 function featureColumns(rows: unknown[][], env: OddEnv, xi: number, prefer: number[], max = 6): number[] {
   const out: number[] = [];
   for (const i of prefer) if (i >= 0 && i !== xi && !out.includes(i) && numericColumn(rows, i)) out.push(i);
+  // Fill the remaining face parts / spokes with real measures only — "eye size = state fips" means nothing.
   for (let i = 0; i < env.columns.length && out.length < max; i++) {
-    if (i !== xi && !out.includes(i) && numericColumn(rows, i)) out.push(i);
+    if (i !== xi && !out.includes(i) && !NOT_A_MEASURE_NAME.test(env.columns[i] ?? "") && numericColumn(rows, i)) out.push(i);
   }
   return out.slice(0, max);
 }

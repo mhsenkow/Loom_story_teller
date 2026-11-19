@@ -4,7 +4,7 @@
 // =================================================================
 
 import { measureSuggestsGrowDown } from "../chartFieldHeuristics";
-import { chartTimeWindowLabel, fieldLooksFutureDated, pickDefaultTimeField, suggestedChartTimeWindows } from "../chartTime";
+import { chartTimeWindowLabel, fieldLooksFutureDated, fieldTimeGrain, pickDefaultTimeField, suggestedChartTimeWindows } from "../chartTime";
 import { inferType, measureColumns, yFieldSupportsLogScale } from "./columns";
 import { geoMapRecommendationReason, isGeoMapKind } from "../geoMapsRec";
 import { gpuSceneRecommendationReason, isGpuSceneKind } from "../gpuScenesRec";
@@ -511,6 +511,7 @@ export function expandRecommendationsWithExtras(
           const label = chartTimeWindowLabel(
             range,
             fieldLooksFutureDated(twField) ? "forward" : "wall",
+            fieldTimeGrain(twField),
           )?.toLowerCase() ?? range;
           pushVariant({
             ...rec,

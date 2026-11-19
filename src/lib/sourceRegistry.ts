@@ -45,6 +45,10 @@ export const SOURCE_KINDS = [
   "debt",
   "usafacts_states",
   "usafacts_nation",
+  "usafacts_state_jobs",
+  "usafacts_budget",
+  "usafacts_budget_lines",
+  "usafacts_household",
   "fema",
   "covid",
   "countries",
@@ -183,6 +187,11 @@ export interface SourceDef {
   color: "loom-accent" | "loom-success" | "loom-warning" | "loom-error";
   /** Max upstream rows retained in the browser buffer for this feed (when set). */
   parserRowCap?: number;
+  /**
+   * Columns computed from another column (`real_median_income` ← `median_household_income`).
+   * Discover won't plot one against its source — the "relationship" would be the formula.
+   */
+  derivedFrom?: Record<string, string | readonly string[]>;
 }
 
 const def = (d: SourceDef) => d;
@@ -792,8 +801,8 @@ export const SOURCE_DEFS: SourceDef[] = [
   def({
     kind: "usafacts_states",
     label: "US states, year by year",
-    description: "Population, income, poverty, education, and unemployment for every state since 2012 — Census survey data via USAFacts. Loads once.",
-    attribution: "Census ACS via USAFacts · public domain · not endorsed by the Census Bureau",
+    description: "Population, income (in today's dollars and at local prices), poverty, education, unemployment, and the cost of living for every state since 2012 — Census and BEA data via USAFacts. Loads once.",
+    attribution: "Census ACS and BEA regional price parities via USAFacts · public domain · not endorsed by the Census Bureau",
     homepage: "https://usafacts.org/mcp/",
     fileName: "US States (USAFacts)",
     table: "usafacts_states",
@@ -801,14 +810,24 @@ export const SOURCE_DEFS: SourceDef[] = [
       yr: "year",
       population: "people",
       median_household_income: "USD",
+      real_median_income: "USD",
       poverty_rate: "%",
       median_age: "years",
       unemployment_rate: "%",
       bachelors_or_higher_pct: "%",
+      price_level: "index (US = 100)",
+      rent_price_level: "index (US = 100)",
+      income_local_usd: "USD",
+      real_personal_income_pc: "USD",
     },
-    // One row per state-year (wide). Income is in each year's dollars; unemployment is the ACS survey rate.
-    columns: ["state_fips", "state_abbr", "state_name", "yr", "population", "median_household_income", "poverty_rate", "median_age", "unemployment_rate", "bachelors_or_higher_pct"],
-    types: ["VARCHAR", "VARCHAR", "VARCHAR", "INTEGER", "BIGINT", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE"],
+    // One row per state-year (wide). `median_household_income` is in each year's dollars;
+    // `real_median_income` restates it in the newest vintage's dollars (annual CPI-U).
+    // Unemployment is the ACS survey rate. `region` = Census region (PR on its own).
+    // BEA (2008+, PR not covered): `price_level` / `rent_price_level` are regional price parities
+    // (US = 100, the newest vintage borrows last year's); `income_local_usd` = real income at
+    // national-average prices; `real_personal_income_pc` = BEA real per-capita income (2017 $).
+    columns: ["state_fips", "state_abbr", "state_name", "yr", "population", "median_household_income", "poverty_rate", "median_age", "unemployment_rate", "bachelors_or_higher_pct", "region", "real_median_income", "price_level", "rent_price_level", "income_local_usd", "real_personal_income_pc"],
+    types: ["VARCHAR", "VARCHAR", "VARCHAR", "INTEGER", "BIGINT", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "VARCHAR", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE"],
     pollMs: 0,
     orderBy: "yr DESC, state_abbr",
     group: "us",
@@ -816,13 +835,14 @@ export const SOURCE_DEFS: SourceDef[] = [
     geo: "us",
     grain: "year",
     joinKeys: { state: "state_abbr", year: "yr" },
+    derivedFrom: { real_median_income: "median_household_income", income_local_usd: ["real_median_income", "price_level"] },
     color: "loom-accent",
   }),
   def({
     kind: "usafacts_nation",
     label: "US economy, month by month",
-    description: "Unemployment, inflation, jobs, interest rates, housing starts, and gas prices since 1990 — federal statistics via USAFacts.",
-    attribution: "FRED (BLS, Fed, Census, EIA) via USAFacts · public domain · not endorsed by the St. Louis Fed",
+    description: "Unemployment, inflation, jobs added, job openings, interest rates, housing starts, and gas prices since 1990, with recessions marked — federal statistics via USAFacts.",
+    attribution: "FRED (BLS, Fed, Census, EIA, Treasury) via USAFacts · public domain · not endorsed by the St. Louis Fed · recession dates: NBER",
     homepage: "https://usafacts.org/mcp/",
     fileName: "US Economy (USAFacts)",
     table: "usafacts_nation",
@@ -831,12 +851,17 @@ export const SOURCE_DEFS: SourceDef[] = [
       unemployment_rate: "%",
       inflation_yoy_pct: "%",
       payrolls_k: "thousand jobs",
+      jobs_added_k: "thousand jobs",
+      job_openings_k: "thousand jobs",
       fed_funds_rate: "%",
+      treasury_10y_rate: "%",
       housing_starts_k: "thousand units",
       gas_price_usd: "USD/gallon",
     },
-    columns: ["month", "yr", "unemployment_rate", "inflation_yoy_pct", "payrolls_k", "fed_funds_rate", "housing_starts_k", "gas_price_usd"],
-    types: ["DATE", "INTEGER", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE"],
+    // `jobs_added_k` = payrolls vs the month before; `decade` = "1990s"…; `recession` = NBER
+    // months after a peak through the trough ("Recession" / "Expansion"). Job openings start 2000-12.
+    columns: ["month", "yr", "unemployment_rate", "inflation_yoy_pct", "payrolls_k", "fed_funds_rate", "housing_starts_k", "gas_price_usd", "job_openings_k", "treasury_10y_rate", "jobs_added_k", "decade", "recession"],
+    types: ["DATE", "INTEGER", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "VARCHAR", "VARCHAR"],
     pollMs: 21_600_000,
     orderBy: "month ASC",
     keepNewest: true,
@@ -845,7 +870,132 @@ export const SOURCE_DEFS: SourceDef[] = [
     geo: "us",
     grain: "month",
     joinKeys: { month: "month", year: "yr" },
+    derivedFrom: { jobs_added_k: "payrolls_k" },
     color: "loom-success",
+  }),
+  def({
+    kind: "usafacts_state_jobs",
+    label: "State unemployment, month by month",
+    description: "The official jobless rate for every state, DC, and Puerto Rico each month since 2008, with the change from a year earlier — BLS data via USAFacts.",
+    attribution: "BLS Local Area Unemployment Statistics via USAFacts · public domain",
+    homepage: "https://usafacts.org/mcp/",
+    fileName: "State Unemployment (USAFacts)",
+    table: "usafacts_state_jobs",
+    units: {
+      yr: "year",
+      unemployment_rate: "%",
+      unemployment_change_yoy: "percentage points",
+    },
+    // One row per state-month (seasonally adjusted LAUS). ≤ 19 years × 12 × 52 ≈ 11.9k rows.
+    columns: ["month", "yr", "state_fips", "state_abbr", "state_name", "region", "unemployment_rate", "unemployment_change_yoy"],
+    types: ["DATE", "INTEGER", "VARCHAR", "VARCHAR", "VARCHAR", "VARCHAR", "DOUBLE", "DOUBLE"],
+    pollMs: 21_600_000,
+    orderBy: "month ASC, state_abbr",
+    keepNewest: true,
+    group: "us",
+    topics: ["economy", "people"],
+    geo: "us",
+    grain: "month",
+    joinKeys: { state: "state_abbr", month: "month", year: "yr" },
+    color: "loom-warning",
+    parserRowCap: 12_000,
+  }),
+  def({
+    kind: "usafacts_budget",
+    label: "Federal budget, month by month",
+    description: "Every month since 2015: taxes in, spending out, the deficit, what the debt's interest costs, tariff revenue, and the average rate the Treasury pays — with 12-month totals.",
+    attribution: "US Treasury Monthly Treasury Statement and Fiscal Data via USAFacts · public domain",
+    homepage: "https://usafacts.org/mcp/",
+    fileName: "Federal Budget (USAFacts)",
+    table: "usafacts_budget",
+    units: {
+      fy: "fiscal year",
+      receipts_b: "USD billions", outlays_b: "USD billions", deficit_b: "USD billions",
+      individual_income_tax_b: "USD billions", corporate_income_tax_b: "USD billions", payroll_tax_b: "USD billions", customs_duties_b: "USD billions",
+      defense_b: "USD billions", net_interest_b: "USD billions", social_security_b: "USD billions", medicare_b: "USD billions", health_b: "USD billions",
+      avg_interest_rate_pct: "%",
+      receipts_ttm_b: "USD billions", outlays_ttm_b: "USD billions", deficit_ttm_b: "USD billions",
+      net_interest_ttm_b: "USD billions", defense_ttm_b: "USD billions", customs_ttm_b: "USD billions",
+      interest_share_pct: "%",
+    },
+    // MTS Table 9 (monthly since 2015-03). `deficit_b` = outlays − receipts (positive = deficit).
+    // `*_ttm_b` = the 12 months ending that month; `interest_share_pct` = net interest ÷ receipts (12-month).
+    // `avg_interest_rate_pct` = average rate on total marketable debt.
+    columns: ["month", "fy", "receipts_b", "outlays_b", "deficit_b", "individual_income_tax_b", "corporate_income_tax_b", "payroll_tax_b", "customs_duties_b", "defense_b", "net_interest_b", "social_security_b", "medicare_b", "health_b", "avg_interest_rate_pct", "receipts_ttm_b", "outlays_ttm_b", "deficit_ttm_b", "net_interest_ttm_b", "defense_ttm_b", "customs_ttm_b", "interest_share_pct"],
+    types: ["DATE", "INTEGER", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE"],
+    pollMs: 21_600_000,
+    orderBy: "month ASC",
+    keepNewest: true,
+    group: "us",
+    topics: ["government", "economy"],
+    geo: "us",
+    grain: "month",
+    joinKeys: { month: "month" },
+    // A total against its own parts, or a 12-month sum against its month, only shows arithmetic.
+    derivedFrom: {
+      deficit_b: ["outlays_b", "receipts_b"],
+      individual_income_tax_b: "receipts_b", corporate_income_tax_b: "receipts_b", payroll_tax_b: "receipts_b", customs_duties_b: "receipts_b",
+      defense_b: "outlays_b", net_interest_b: "outlays_b", social_security_b: "outlays_b", medicare_b: "outlays_b", health_b: "outlays_b",
+      receipts_ttm_b: "receipts_b", outlays_ttm_b: "outlays_b", deficit_ttm_b: ["deficit_b", "outlays_ttm_b", "receipts_ttm_b"],
+      net_interest_ttm_b: "net_interest_b", defense_ttm_b: "defense_b", customs_ttm_b: "customs_duties_b",
+      interest_share_pct: ["net_interest_ttm_b", "receipts_ttm_b"],
+    },
+    color: "loom-error",
+  }),
+  def({
+    kind: "usafacts_budget_lines",
+    label: "Where federal money comes from and goes",
+    description: "Each tax source and each kind of spending, month by month since 2015, with its 12-month total and its share — watch net interest climb the ranks.",
+    attribution: "US Treasury Monthly Treasury Statement via USAFacts · public domain",
+    homepage: "https://usafacts.org/mcp/",
+    fileName: "Federal Budget Lines (USAFacts)",
+    table: "usafacts_budget_lines",
+    units: { fy: "fiscal year", amount_b: "USD billions", amount_ttm_b: "USD billions", share_ttm_pct: "%" },
+    derivedFrom: { amount_ttm_b: "amount_b", share_ttm_pct: "amount_ttm_b" },
+    // One row per month × line. Lines in a flow add up to its total ("Other receipts / outlays"
+    // close the gap). `share_ttm_pct` = the line's 12-month total ÷ its flow's 12-month total.
+    columns: ["month", "fy", "flow", "line", "amount_b", "amount_ttm_b", "share_ttm_pct"],
+    types: ["DATE", "INTEGER", "VARCHAR", "VARCHAR", "DOUBLE", "DOUBLE", "DOUBLE"],
+    pollMs: 21_600_000,
+    orderBy: "month ASC, flow, line",
+    keepNewest: true,
+    group: "us",
+    topics: ["government", "economy"],
+    geo: "us",
+    grain: "month",
+    joinKeys: { month: "month" },
+    color: "loom-error",
+  }),
+  def({
+    kind: "usafacts_household",
+    label: "Household finances, quarter by quarter",
+    description: "Saving, credit card and mortgage delinquency, debt payments, revolving credit, what a home costs in years of pay, rents, and jobs since 1990, with recessions marked.",
+    attribution: "FRED (Fed Board, BEA, BLS, Census, Labor Dept.) via USAFacts · public domain · not endorsed by the St. Louis Fed · recession dates: NBER",
+    homepage: "https://usafacts.org/mcp/",
+    fileName: "Household Finances (USAFacts)",
+    table: "usafacts_household",
+    units: {
+      yr: "year",
+      saving_rate_pct: "%", card_delinquency_pct: "%", consumer_delinquency_pct: "%", mortgage_delinquency_pct: "%",
+      debt_service_pct: "%", revolving_credit_b: "USD billions", median_home_price_usd: "USD", median_weekly_earnings_usd: "USD",
+      real_disposable_income_pc: "USD (2017)", homeownership_pct: "%", rental_vacancy_pct: "%",
+      prime_age_employment_pct: "%", labor_force_participation_pct: "%", initial_claims_k: "thousand claims a week",
+      home_price_years_of_pay: "years",
+    },
+    // Quarterly (monthly / weekly series averaged). `home_price_years_of_pay` = median new-home sale
+    // price ÷ (median full-time weekly earnings × 52). Debt service starts 2005, card delinquency 1991.
+    columns: ["quarter", "yr", "saving_rate_pct", "card_delinquency_pct", "consumer_delinquency_pct", "mortgage_delinquency_pct", "debt_service_pct", "revolving_credit_b", "median_home_price_usd", "median_weekly_earnings_usd", "real_disposable_income_pc", "homeownership_pct", "rental_vacancy_pct", "prime_age_employment_pct", "labor_force_participation_pct", "initial_claims_k", "home_price_years_of_pay", "decade", "recession"],
+    types: ["DATE", "INTEGER", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "DOUBLE", "VARCHAR", "VARCHAR"],
+    pollMs: 21_600_000,
+    orderBy: "quarter ASC",
+    keepNewest: true,
+    group: "us",
+    topics: ["economy", "people"],
+    geo: "us",
+    grain: "month",
+    joinKeys: { year: "yr" },
+    derivedFrom: { home_price_years_of_pay: ["median_home_price_usd", "median_weekly_earnings_usd"] },
+    color: "loom-warning",
   }),
   def({
     kind: "fema",

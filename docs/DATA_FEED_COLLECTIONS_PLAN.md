@@ -1,5 +1,9 @@
 # Data feed overhaul, USAFacts, Collections & Metrics — plan
 
+Status (2026-11-19): three more USAFacts feeds — `usafacts_budget`, `usafacts_budget_lines` (Treasury) and `usafacts_household` (FRED) — plus BEA price levels in `usafacts_states`, and forecasts / anomalies in the first look. See `docs/USAFACTS.md`.
+
+Status (2026-11-18): USAFacts hardening landed on top of Phase 1 — a third feed (`usafacts_state_jobs`, BLS LAUS by state and month), new columns on the other two, the 2025 ACS vintage (the B15003 renumbering is handled), retries, a per-feed memo and a KV last-good copy. See `docs/USAFACTS.md`.
+
 Status (2026-11-16): **Phases 0, 1 and 2 are fully in `main`.** `9a337d6` landed the catalog, USAFacts feeds and preferences; `a76854c` landed Phase 2's Discover ranking together with the owner's Discover rewrite. Nothing from this plan is left uncommitted. Production `/api/health` reports both USAFacts feeds `ok` (624 state-years, 442 months on 2026-11-16). A lighter Collections shipped in `65ed275` (`collections.ts` / `DataCollections.tsx`: datasets and charts grouped under an intent, with expiry). Phase 3's join keys and match rates, and Phases 4–5, haven't started. Update the checkboxes as work lands.
 
 ## Handoff (for the next agent / Cursor)

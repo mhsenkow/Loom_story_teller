@@ -76,6 +76,7 @@ const wikiBuf = emptyBuffer(
 /** Feeds whose full snapshot is larger than the default cap (debt: ~8.4k business days since 1993). */
 const SOURCE_MAX_ROWS: Partial<Record<SourceKind, number>> = {
   debt: 12_000,
+  usafacts_state_jobs: 12_000,
 };
 
 function bufferMaxRows(kind: SourceKind): number {
@@ -328,6 +329,10 @@ const SOURCE_MERGE: Record<SourceKind, { mode: "replace" | "append"; key?: numbe
   debt: { mode: "replace", key: 0 },
   usafacts_states: { mode: "replace" },
   usafacts_nation: { mode: "replace", key: 0 },
+  usafacts_state_jobs: { mode: "replace" }, // one row per state-month by construction
+  usafacts_budget: { mode: "replace", key: 0 },
+  usafacts_budget_lines: { mode: "replace" }, // month × line
+  usafacts_household: { mode: "replace", key: 0 },
   fema: { mode: "replace", key: 0 },
   covid: { mode: "replace" },
   countries: { mode: "replace" },

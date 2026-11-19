@@ -132,4 +132,12 @@ export interface ChartRecommendation {
   layoutDirection?: "auto" | "up" | "down" | "right" | "left" | null;
   /** High values draw as the low end of size, color, opacity, glow, outline, or depth. */
   channelInvert?: import("../channelInvert").ChannelInvert | null;
+  /**
+   * Analysis layers a story opens with (single-series line charts): a forecast band and / or
+   * anomaly rings, applied once when the chart becomes active and the person hasn't set their own.
+   */
+  analysisPreset?: {
+    forecast?: { horizon: number; horizonMonths?: number; method: import("../timeSeriesAnalysis").ForecastMethod; season?: number };
+    anomaly?: { window: number; threshold: number };
+  } | null;
 }

@@ -16,7 +16,11 @@ export const FORECAST_METHOD_LABEL: Record<ForecastMethod, string> = {
 
 export interface TimeSeriesAnalysis {
   scope: string;
-  forecast?: { enabled: boolean; horizon: number; method?: ForecastMethod; season?: number };
+  /**
+   * `horizon` counts plotted intervals. A story preset may give `horizonMonths` instead: the
+   * renderer folds long monthly series into years, so "24 months" must not become 24 years.
+   */
+  forecast?: { enabled: boolean; horizon: number; horizonMonths?: number; method?: ForecastMethod; season?: number };
   anomaly?: { enabled: boolean; window: number; threshold: number };
   events?: AnalysisEvent[];
 }
@@ -174,4 +178,44 @@ export function eventPosition(value: string, kind: "number" | "time" | "band"): 
   if (!value.trim() || kind === "band") return null;
   const n = kind === "time" ? Date.parse(value) : Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+// ---- Calendar-aware forecasting -----------------------------------------------------
+// Months are 28–31 days, so a monthly series on month starts has no single millisecond step:
+// the preview refused it as "irregular" and the overlay stepped in median-gap milliseconds,
+// drifting off month starts. Monthly, quarterly and yearly series step in whole months instead.
+
+const DAY_MS = 86_400_000;
+
+/** UTC midnight on the 1st → year * 12 + month; anything else → null. */
+export function calendarMonthIndex(ms: number): number | null {
+  if (!Number.isFinite(ms) || ms % DAY_MS !== 0) return null;
+  const d = new Date(ms);
+  return d.getUTCDate() === 1 ? d.getUTCFullYear() * 12 + d.getUTCMonth() : null;
+}
+
+const monthStartMs = (index: number) => Date.UTC(Math.floor(index / 12), ((index % 12) + 12) % 12, 1);
+
+/** Month-start points whose month gaps are all equal (1 = monthly, 3 = quarterly, 12 = yearly), else null. */
+export function calendarStepMonths(points: AnalysisPoint[]): number | null {
+  if (points.length < 2) return null;
+  const idx = points.map((p) => calendarMonthIndex(p.x));
+  if (idx.some((i) => i == null)) return null;
+  const gaps = idx.slice(1).map((m, i) => m! - idx[i]!);
+  return gaps.every((g) => g > 0 && g === gaps[0]) ? gaps[0]! : null;
+}
+
+/** forecastSeries on month-start series in whole-month steps; other series unchanged. */
+export function forecastCalendar(input: AnalysisPoint[], horizon: number, method: ForecastMethod = "line", season = 12): ForecastResult | null {
+  const points = input.filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)).sort((a, b) => a.x - b.x);
+  const idx = points.map((p) => calendarMonthIndex(p.x));
+  if (points.length < 2 || idx.some((i) => i == null)) return forecastSeries(input, horizon, method, season);
+  const result = forecastSeries(points.map((p, i) => ({ x: idx[i]!, y: p.y })), horizon, method, season);
+  if (!result) return null;
+  return {
+    ...result,
+    anchor: { x: monthStartMs(result.anchor.x), y: result.anchor.y },
+    step: result.step * 30.436875 * DAY_MS,
+    points: result.points.map((p) => ({ ...p, x: monthStartMs(p.x) })),
+  };
 }

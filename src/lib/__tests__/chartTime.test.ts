@@ -10,6 +10,7 @@ import {
   chartTimeRangeOptions,
   chartTimeWindowLabel,
   columnLooksTemporal,
+  fieldTimeGrain,
   composeChartFootnote,
   fieldLooksFutureDated,
   formatChartTimeFootnote,
@@ -185,5 +186,38 @@ describe("chartTime", () => {
       timeWindowField: null,
       timeWindow: "all",
     });
+  });
+
+  it("year columns keep whole years: 1y is the newest year, leap years or not", () => {
+    // 2024 is a leap year: 2025-01-01 minus 365 days is 2024-01-02, so the old cutoff kept one
+    // vintage after a leap year and two after any other.
+    for (const newest of [2024, 2025]) {
+      const rows = [[newest - 2, "a"], [newest - 1, "b"], [newest, "c"], [newest, "d"]];
+      const out = applyChartTimeWindow(rows, ["yr", "s"], { timeWindowField: "yr", timeWindow: "1y" }, Date.UTC(2026, 10, 18));
+      expect(out.rows.map((r) => r[1]), String(newest)).toEqual(["c", "d"]);
+    }
+    const strings = applyChartTimeWindow([["2023"], ["2024"]], ["year"], { timeWindowField: "year", timeWindow: "90d" });
+    expect(strings.rows).toEqual([["2024"]]);
+    expect(chartTimeWindowLabel("1y", "sample", "year")).toBe("Latest year");
+    expect(fieldTimeGrain("yr")).toBe("year");
+    expect(formatChartTimeFootnote([[2024], [2024]], ["yr"], { timeWindowField: "yr", timeWindow: "1y" })).toBe("Latest year · 2024"); // rows arrive windowed
+    expect(formatChartTimeFootnote([[2012], [2024]], ["yr"], { xField: "yr" })).toBe("2012–2024");
+    expect(formatChartTimeSpanRange(Date.UTC(2008, 0, 1), Date.UTC(2026, 8, 1), "month")).toBe("Jan 2008 – Sep 2026");
+  });
+
+  it("monthly series keep whole months: 30d is the newest month, 1y the last 12", () => {
+    const months = ["2025-09-01", "2025-10-01", "2026-08-01", "2026-09-01", "2026-10-01"].map((m) => [m]);
+    const now = Date.UTC(2026, 10, 18);
+    // Sep 1 is exactly 30 days before Oct 1, so a day cutoff kept two months.
+    expect(applyChartTimeWindow(months, ["month"], { timeWindowField: "month", timeWindow: "30d" }, now).rows).toEqual([["2026-10-01"]]);
+    expect(applyChartTimeWindow(months, ["month"], { timeWindowField: "month", timeWindow: "90d" }, now).rows).toHaveLength(3);
+    expect(applyChartTimeWindow(months, ["month"], { timeWindowField: "month", timeWindow: "1y" }, now).rows.map((r) => r[0]))
+      .toEqual(["2026-08-01", "2026-09-01", "2026-10-01"]);
+    expect(chartTimeWindowLabel("30d", "sample", "month")).toBe("Latest month");
+    expect(chartTimeWindowLabel("1y", "sample", "month")).toBe("Last 12 months");
+    expect(suggestedChartTimeWindows("month")).toEqual(["30d", "1y"]);
+    // Daily data keeps day arithmetic.
+    const days = [["2026-10-30"], ["2026-11-01"], ["2026-11-17"]];
+    expect(applyChartTimeWindow(days, ["date"], { timeWindowField: "date", timeWindow: "7d" }, now).rows).toEqual([["2026-11-17"]]);
   });
 });

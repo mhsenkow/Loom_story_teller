@@ -479,10 +479,17 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
   // Category × category: rank by frequency (or natural order for numbers / dates).
   // A wide numeric axis (category × measure) bins into ranges instead of
   // listing the first 20 raw values with a count of 1 each.
-  const axisKeys = (idx: number, numericHighFirst: boolean) => {
+  const axisKeys = (idx: number, numericHighFirst: boolean, bandCap: number) => {
     const freq = new Map<string, number>();
     for (const r of rows) if (r[idx] != null && r[idx] !== "") freq.set(String(r[idx]), (freq.get(String(r[idx])) ?? 0) + 1);
     const cls = classifyKeys([...freq.keys()]);
+    // A long date axis (225 months) folds into calendar years — cells aggregate within the year —
+    // instead of showing only its first 20 dates.
+    if (cls.kind === "time" && cls.sorted.length > 40) {
+      const yearOf = new Map(cls.sorted.map((k, i) => [k, String(new Date(cls.values[i]!).getUTCFullYear())]));
+      const labels = [...new Set(yearOf.values())].slice(-60);
+      return { labels, keyOf: (r: unknown[]) => yearOf.get(String(r[idx])) ?? "", binned: true };
+    }
     if (cls.kind === "number" && cls.values.length > 20) {
       const lo = cls.values[0]!;
       const hi = cls.values[cls.values.length - 1]!;
@@ -501,15 +508,16 @@ export function renderFullHeatmap(ctx: CanvasRenderingContext2D, rows: unknown[]
       return { labels: numericHighFirst ? [...labels].reverse() : labels, keyOf, binned: true };
     }
     const keys = cls.kind !== "band" ? cls.sorted : [...freq.keys()].sort((a, b) => freq.get(b)! - freq.get(a)!);
-    const top = keys.slice(0, 20);
+    // Rows stack, so a full set of US states (52) fits; columns keep the tighter cap.
+    const top = keys.slice(0, cls.kind === "band" ? bandCap : 40);
     return {
       labels: numericHighFirst && cls.kind === "number" ? [...top].reverse() : top,
       keyOf: (r: unknown[]) => String(r[idx]),
       binned: false,
     };
   };
-  const xAxis = axisKeys(xi, false);
-  const yAxis = axisKeys(yi, true);
+  const xAxis = axisKeys(xi, false, 20);
+  const yAxis = axisKeys(yi, true, 60);
   const xLabels = xAxis.labels;
   const yLabels = yAxis.labels;
   if (xLabels.length === 0 || yLabels.length === 0) return;

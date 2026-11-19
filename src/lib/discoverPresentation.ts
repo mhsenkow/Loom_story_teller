@@ -13,6 +13,8 @@ import {
   applyChartTimeWindow,
   chartDataTimeSpan,
   chartTimeWindowLabel,
+  fieldTimeGrain,
+  periodGrainOf,
   formatChartTimeSpanRange,
   pickDefaultTimeField,
 } from "./chartTime";
@@ -103,8 +105,11 @@ export function discoverChartLabel(kind: string): string {
 /** Human-readable settings, including the variants that share one chart kind. */
 export function discoverChartSettings(chart: ChartRecommendation): string[] {
   const settings: string[] = [];
-  if (chart.timeWindow && chart.timeWindow !== "all")
-    settings.push(`Window · ${chart.timeWindow}`);
+  if (chart.timeWindow && chart.timeWindow !== "all") {
+    // Year / month columns read as "Latest year" / "Last 12 months", not "1y".
+    const grain = fieldTimeGrain(chart.timeWindowField);
+    settings.push(`Window · ${(grain && chartTimeWindowLabel(chart.timeWindow, "sample", grain)) || chart.timeWindow}`);
+  }
   if (chart.rowField) settings.push(`Facet · ${chart.rowField}`);
   if (chart.shapeField) settings.push(`Shapes · ${chart.shapeField}`);
   if (chart.emojiField) settings.push(`Emoji · ${chart.emojiField}`);
@@ -217,11 +222,12 @@ export function discoverEvidence(story: DiscoverStory): {
   const window = chartTimeWindowLabel(
     story.chart.timeWindow,
     timed.mode ?? undefined,
+    fieldTimeGrain(field),
   );
   return {
     coverage,
     shortCoverage,
-    period: span ? formatChartTimeSpanRange(span.minMs, span.maxMs) : window,
+    period: span && field ? formatChartTimeSpanRange(span.minMs, span.maxMs, periodGrainOf(timed.rows, story.sample.columns, field)) : window,
     cached: story.snapshotCached === true,
   };
 }

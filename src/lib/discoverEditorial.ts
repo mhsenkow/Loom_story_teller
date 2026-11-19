@@ -49,6 +49,38 @@ const FIELD_LABELS: Record<string, string> = {
   abs_magnitude: "absolute magnitude",
   baro_altitude: "altitude",
   true_track: "heading",
+  // USAFacts (federal statistics)
+  fy: "fiscal year",
+  avg_interest_rate_pct: "average rate on the debt",
+  interest_share_pct: "interest's share of revenue",
+  inflation_yoy_pct: "inflation",
+  fed_funds_rate: "fed funds rate",
+  treasury_10y_rate: "10-year Treasury rate",
+  jobs_added_k: "jobs added (thousands)",
+  job_openings_k: "job openings (thousands)",
+  gas_price_usd: "gas price",
+  real_median_income: "real median income",
+  income_local_usd: "income at local prices",
+  price_level: "price level (US = 100)",
+  rent_price_level: "rent level (US = 100)",
+  real_personal_income_pc: "real income per person",
+  unemployment_change_yoy: "change in unemployment vs a year ago",
+  card_delinquency_pct: "credit card delinquency",
+  consumer_delinquency_pct: "consumer loan delinquency",
+  mortgage_delinquency_pct: "mortgage delinquency",
+  debt_service_pct: "debt payments' share of income",
+  saving_rate_pct: "saving rate",
+  home_price_years_of_pay: "years of pay for a home",
+  median_home_price_usd: "median new-home price",
+  median_weekly_earnings_usd: "median weekly pay",
+  real_disposable_income_pc: "real income per person",
+  prime_age_employment_pct: "prime-age employment",
+  labor_force_participation_pct: "labor-force participation",
+  initial_claims_k: "weekly jobless claims (thousands)",
+  revolving_credit_b: "revolving credit ($B)",
+  amount_b: "amount ($B)",
+  amount_ttm_b: "12-month amount ($B)",
+  share_ttm_pct: "share of 12-month total",
 };
 
 /** Trailing unit tokens a column name carries; the unit is shown on values instead. */
@@ -57,6 +89,9 @@ const UNIT_SUFFIX = /_(usd|pct|c|f|ms|kmh|kms|km|m|ft|cfs|hpa|kg|mb|min|s|secs|b
 export function discoverFieldLabel(field: string): string {
   const known = FIELD_LABELS[field];
   if (known) return known;
+  // Rolling 12-month totals and $-billion columns: "net_interest_ttm_b" → "12-month net interest ($B)".
+  if (field.endsWith("_ttm_b")) return `12-month ${discoverFieldLabel(`${field.slice(0, -6)}_b`).replace(/ \(\$B\)$/, "")} ($B)`;
+  if (field.endsWith("_b")) return `${field.slice(0, -2).replace(/_/g, " ")} ($B)`;
   const stem = UNIT_SUFFIX.test(field) ? field.replace(UNIT_SUFFIX, "") : field;
   return (stem || field)
     .replace(/_k$/, " (thousands)")
@@ -108,6 +143,9 @@ export function formatDiscoverValue(
           }).format(abs);
   const sign = n < 0 && body !== "0" ? MINUS : signed && n > 0 ? "+" : "";
   const unit = discoverFieldUnit(field, source);
+  if (unit === "USD billions") {
+    return abs >= 1000 ? `${sign}$${(abs / 1000).toFixed(2)}T` : `${sign}$${abs >= 100 ? Math.round(abs) : abs.toFixed(1)}B`;
+  }
   if (unit === "USD" || unit === "USD/coin") return `${sign}$${body}`;
   if (unit === "%" || unit === "°C" || unit === "°F") return `${sign}${body}${unit}`;
   if (unit && INLINE_UNITS.has(unit)) return `${sign}${body} ${unit}`;

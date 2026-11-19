@@ -24,7 +24,7 @@ import { axisFont, barPath, densityStops, labelGutter } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
 import { numRange } from "./primitives";
 import { formatDeltaLabel } from "../deltaCompare";
-import { DEFAULT_COLORS } from "./shared";
+import { DEFAULT_COLORS, preferMeasureAxes } from "./shared";
 export function renderFullPareto(
   ctx: CanvasRenderingContext2D,
   rows: unknown[][],
@@ -682,7 +682,10 @@ export function renderFullParallel(
     }).length;
     if (sampleN < Math.min(12, rows.length * 0.3)) continue;
     axes.push({ name: columnNames[c]!, idx: c, min, max });
-    if (axes.length >= 8) break;
+  }
+  {
+    const keep = new Set(preferMeasureAxes(axes.map((a) => a.idx), columnNames));
+    axes.splice(0, axes.length, ...axes.filter((a) => keep.has(a.idx)).slice(0, 8));
   }
   if (axes.length < 3) return;
 

@@ -10,6 +10,11 @@ const SOURCE_CACHE_KIND_REV: Record<string, number> = {
   // 2: subrequest-capped payloads (48 Pokémon, 42 Met objects) were cached for a day.
   pokemon: 2,
   met: 2,
+  // 2: new columns (region / real income; job openings, 10-year, jobs added, decade, recession)
+  //    and the 2025 ACS vintage, which the old B15003 variable list could not fetch.
+  // 3: BEA price levels (price_level, rent_price_level, income_local_usd, real_personal_income_pc).
+  usafacts_states: 3,
+  usafacts_nation: 2,
 };
 
 export function sourceCacheKey(kind: string): string {

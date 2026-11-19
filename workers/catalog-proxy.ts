@@ -73,17 +73,55 @@ import {
   londonDay,
   pageviewsPrimaryDaysAgo,
   worldBankWide,
+} from "./sourceTransforms";
+import {
   ACS_STATE_VARS,
+  FREDGRAPH_NATION_MONTHLY_IDS,
+  USAFACTS_CPI_ANNUAL,
   USAFACTS_GATEWAY,
   USAFACTS_NATION_SERIES,
   USAFACTS_NATION_START,
+  USAFACTS_PROTOCOL_VERSION,
+  UsafactsError,
   acsStateYears,
   acsStatesWide,
-  fredGraphNationMonthly,
+  acsUnknownVariable,
+  acsVintageSettled,
+  AVG_RATES_FIELDS,
+  AVG_RATES_FILTER,
+  BEA_STATE_TABLES,
+  FISCALDATA_AVG_RATES_URL,
+  FISCALDATA_MTS9_URL,
+  MTS9_FIELDS,
+  MTS9_FILTER,
+  USAFACTS_HOUSEHOLD_SERIES,
+  beaHasData,
+  beaStateYears,
+  budgetLines,
+  budgetMonthly,
+  compactBea,
+  compactFiscalData,
+  fiscalDataHasRows,
+  fredGraphLooksLikeCsv,
+  fredGraphObservations,
+  householdFredArgs,
+  householdFredGraphUrl,
+  householdQuarterly,
+  blsStateMonthly,
+  blsStateUrBatches,
+  compactBlsSeries,
+  compactFredObservations,
+  fredAnnualCpi,
+  fredGraphNationPayloads,
+  fredGraphStateIdBatches,
+  fredGraphStateMonthly,
   fredNationMonthly,
+  stateJobsYearRange,
+  usafactsHash,
   usafactsPayload,
+  usafactsRetryableStatus,
   usafactsToolCall,
-} from "./sourceTransforms";
+} from "./usafacts";
 import {
   ARXIV_PER_QUERY,
   ARXIV_QUERIES,
@@ -641,8 +679,21 @@ async function cachedUpstreamJson<T = unknown>(
   return data;
 }
 
-/** One USAFacts Data gateway tool call (keyless JSON-RPC POST) → the agency payload. */
-async function usafactsCall(sourceId: string, tool: string, args: Record<string, unknown>, timeoutMs = 20_000): Promise<unknown> {
+// ---- USAFacts Data gateway network layer -------------------------------------
+// The gateway is a keyless beta with no SLA, so every call is defensive:
+// one retry when the gateway (or the agency behind it) says the failure is
+// transient, and a per-feed memo in the Cache API holding each vintage /
+// series with its own fetch time. A refresh only asks for what's due (old ACS
+// vintages never change), and a failed call reuses its last copy instead of
+// leaving a hole. One memo read + at most one write per refresh keeps cache
+// operations well under the subrequest cap. Pure transforms: ./usafacts.ts.
+
+const USAFACTS_TIMEOUT_MS = 15_000;
+const USAFACTS_MEMO_ORIGIN = SUBCACHE_ORIGIN + "usafacts/";
+/** Oldest memo copy that may stand in for a failing call. */
+const USAFACTS_MEMO_KEEP_SECS = 60 * 86_400;
+
+async function usafactsCallOnce(sourceId: string, tool: string, args: Record<string, unknown>, timeoutMs: number): Promise<unknown> {
   let res: Response;
   try {
     res = await fetch(USAFACTS_GATEWAY, {
@@ -651,28 +702,186 @@ async function usafactsCall(sourceId: string, tool: string, args: Record<string,
         "User-Agent": UA,
         "Content-Type": "application/json",
         Accept: "application/json, text/event-stream",
+        "Mcp-Protocol-Version": USAFACTS_PROTOCOL_VERSION,
       },
       body: usafactsToolCall(sourceId, tool, args),
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     const name = e instanceof Error ? e.name : "";
-    throw new UpstreamError(
-      name === "TimeoutError" || name === "AbortError"
+    const timedOut = name === "TimeoutError" || name === "AbortError";
+    // A timeout already spent the budget; a dropped connection is worth one more try.
+    throw new UsafactsError(
+      timedOut
         ? `USAFacts timed out after ${Math.round(timeoutMs / 1000)}s`
         : `USAFacts unreachable: ${e instanceof Error ? e.message : String(e)}`,
+      { kind: timedOut ? "timeout" : "network", retryable: !timedOut },
     );
   }
   if (!res.ok) {
     res.body?.cancel().catch(() => {});
-    throw new UpstreamError(`USAFacts ${res.status}`);
+    throw new UsafactsError(`USAFacts ${res.status}`, { kind: "http", retryable: usafactsRetryableStatus(res.status), upstreamStatus: res.status });
   }
+  return usafactsPayload(await res.text());
+}
+
+/** One gateway tool call → the agency payload, retried once when the failure is transient. */
+async function usafactsCall(sourceId: string, tool: string, args: Record<string, unknown>, timeoutMs = USAFACTS_TIMEOUT_MS): Promise<unknown> {
   try {
-    return usafactsPayload(await res.text());
+    return await usafactsCallOnce(sourceId, tool, args, timeoutMs);
   } catch (e) {
-    throw new UpstreamError(e instanceof Error ? e.message : String(e));
+    if (!(e instanceof UsafactsError) || !e.retryable) throw e;
+    await new Promise((r) => setTimeout(r, 400 + Math.random() * 300));
+    return usafactsCallOnce(sourceId, tool, args, timeoutMs);
   }
 }
+
+interface UsafactsJob {
+  /** Memo key — stable for the same request. */
+  key: string;
+  /** A memo copy younger than this is used without calling the gateway. */
+  freshSecs: number;
+  call: () => Promise<unknown>;
+  /** Shrink the payload to what the transform reads before it's memoized. */
+  compact?: (payload: unknown) => unknown;
+  /** A 200 with nothing usable (e.g. BLS "REQUEST_NOT_PROCESSED") counts as a failure. */
+  accept?: (payload: unknown) => boolean;
+}
+
+interface UsafactsOutcome {
+  key: string;
+  payload: unknown;
+  /** memo = fresh copy, live = fetched now, stale = call failed so the memo copy stood in, none = nothing. */
+  from: "memo" | "live" | "stale" | "none";
+  error?: unknown;
+}
+
+type UsafactsMemo = Record<string, { at: number; payload: unknown }>;
+
+async function usafactsMemoized(ctx: WaitUntil, memoName: string, jobs: UsafactsJob[], limit: number): Promise<UsafactsOutcome[]> {
+  const memoKey = USAFACTS_MEMO_ORIGIN + memoName;
+  const cache = caches.default;
+  let memo: UsafactsMemo = {};
+  const hit = await cache.match(memoKey).catch(() => undefined);
+  if (hit) {
+    try {
+      const m = (await hit.json()) as unknown;
+      if (m && typeof m === "object" && !Array.isArray(m)) memo = m as UsafactsMemo;
+    } catch {
+      // Corrupt memo — start over; the next write replaces it.
+    }
+  }
+  const now = Date.now();
+  let changed = false;
+  const settled = await settleLimited(
+    jobs.map((job) => async (): Promise<UsafactsOutcome> => {
+      const kept = memo[job.key];
+      const age = kept && Number.isFinite(kept.at) ? now - kept.at : Infinity;
+      if (kept && age >= 0 && age <= job.freshSecs * 1000) return { key: job.key, payload: kept.payload, from: "memo" };
+      try {
+        const raw = await job.call();
+        const payload = job.compact ? job.compact(raw) : raw;
+        if (job.accept && !job.accept(payload)) throw new UsafactsError("USAFacts: empty result", { kind: "empty" });
+        memo[job.key] = { at: Date.now(), payload };
+        changed = true;
+        return { key: job.key, payload, from: "live" };
+      } catch (error) {
+        if (kept && age <= USAFACTS_MEMO_KEEP_SECS * 1000) return { key: job.key, payload: kept.payload, from: "stale", error };
+        return { key: job.key, payload: null, from: "none", error };
+      }
+    }),
+    limit,
+  );
+  if (changed) {
+    // Only keys still asked for, so retired vintages / series don't pile up.
+    const keep: UsafactsMemo = {};
+    for (const job of jobs) if (memo[job.key]) keep[job.key] = memo[job.key]!;
+    ctx.waitUntil(
+      cache
+        .put(memoKey, new Response(JSON.stringify(keep), {
+          headers: { "Content-Type": "application/json", "Cache-Control": `public, max-age=${USAFACTS_MEMO_KEEP_SECS}` },
+        }))
+        .catch(() => {}),
+    );
+  }
+  return settled.map((r, i) =>
+    r.status === "fulfilled" ? r.value : { key: jobs[i]!.key, payload: null, from: "none" as const, error: r.reason },
+  );
+}
+
+const hasObservations = (p: unknown) => Array.isArray((p as { observations?: unknown[] } | null)?.observations) && (p as { observations: unknown[] }).observations.length > 0;
+const hasAcsRows = (p: unknown) => {
+  const grid = Array.isArray(p) ? p : (p as { results?: unknown } | null)?.results;
+  return Array.isArray(grid) && grid.length > 1;
+};
+const hasBlsSeries = (p: unknown) =>
+  ((p as { Results?: { series?: { data?: unknown[] }[] } } | null)?.Results?.series ?? []).some((s) => (s.data?.length ?? 0) > 0);
+
+/** fredgraph.csv text, refusing the ZIP it sends for some multi-series asks (or an HTML error page). */
+async function fredGraphCsv(url: string, timeoutMs = 20_000): Promise<string> {
+  const text = await upstreamText("FRED", url, timeoutMs);
+  if (!fredGraphLooksLikeCsv(text)) throw new UpstreamError("FRED: fredgraph answered with something other than CSV");
+  return text;
+}
+
+/** All gateway pages of one Fiscal Data query (the gateway serves ≤ 1000 rows a page). */
+async function treasuryPages(tool: string, args: Record<string, unknown>): Promise<{ data: unknown[] }> {
+  const data: unknown[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const p = (await usafactsCall("treasury", tool, { ...args, "page[size]": 1000, "page[number]": page })) as { data?: unknown[]; meta?: { "total-pages"?: number } };
+    data.push(...(Array.isArray(p.data) ? p.data : []));
+    if (page >= Number(p.meta?.["total-pages"] ?? 1)) break;
+  }
+  return { data };
+}
+
+/** MTS Table 9 lines + average rates, shared by both budget feeds through one memo. */
+async function budgetPayloads(ctx: WaitUntil): Promise<{ pages: unknown[]; rates: unknown | null }> {
+  const direct = async (label: string, url: string) => compactFiscalData(JSON.parse(await upstreamText(label, url, 20_000)));
+  const out = await usafactsMemoized(
+    ctx,
+    `budget-${usafactsHash(MTS9_FILTER + AVG_RATES_FILTER)}`,
+    [
+      {
+        key: "mts9",
+        freshSecs: 12 * 3600,
+        call: async () => {
+          try {
+            return await treasuryPages("getOutlaysByFunction", { fields: MTS9_FIELDS, filter: MTS9_FILTER, sort: "record_date" });
+          } catch {
+            return direct("Fiscal Data", FISCALDATA_MTS9_URL);
+          }
+        },
+        compact: compactFiscalData,
+        accept: fiscalDataHasRows,
+      },
+      {
+        key: "avg-rates",
+        freshSecs: 12 * 3600,
+        call: async () => {
+          try {
+            return await treasuryPages("getAvgInterestRates", { fields: AVG_RATES_FIELDS, filter: AVG_RATES_FILTER, sort: "record_date" });
+          } catch {
+            return direct("Fiscal Data", FISCALDATA_AVG_RATES_URL);
+          }
+        },
+        compact: compactFiscalData,
+        accept: fiscalDataHasRows,
+      },
+    ],
+    2,
+  );
+  const mts = out.find((o) => o.key === "mts9")?.payload;
+  if (mts == null) throw new UpstreamError("Treasury: no Monthly Treasury Statement rows");
+  return { pages: [mts], rates: out.find((o) => o.key === "avg-rates")?.payload ?? null };
+}
+
+const fredArgs = (s: (typeof USAFACTS_NATION_SERIES)[number]) => ({
+  series_id: s.id,
+  observation_start: USAFACTS_NATION_START,
+  ...("units" in s ? { units: s.units } : {}),
+  ...("frequency" in s ? { frequency: s.frequency } : {}),
+});
 
 /** Run async jobs with at most `limit` in flight (polite fan-out to one upstream). */
 async function settleLimited<T>(jobs: (() => Promise<T>)[], limit: number): Promise<PromiseSettledResult<T>[]> {
@@ -972,48 +1181,172 @@ export const SOURCE_FETCHERS: Record<string, SourceFetcher> = {
     return JSON.stringify(worldBankWide(countryList, bodies));
   },
 
-  // USAFacts Data gateway (data.mcp.usafacts.org, keyless beta) — see usafactsCall above.
-  usafacts_states: async () => {
-    // One ACS 1-year call per vintage (2012 → last year); an unreleased year just fails.
-    // No keyless fallback: api.census.gov now requires a key, so the stale cache covers outages.
-    const years = acsStateYears();
-    const settled = await settleLimited(
-      years.map((year) => async () => ({
-        year,
-        table: await usafactsCall("census_acs", "getAcs1", { year: String(year), get: ACS_STATE_VARS.join(","), for: "state:*" }),
-      })),
-      4,
+  // USAFacts Data gateway (data.mcp.usafacts.org, keyless beta) — see the network layer above.
+  usafacts_states: async (ctx) => {
+    // One ACS 1-year call per vintage (2012 → last year) + annual CPI for real income.
+    // Settled vintages come from the memo for 30 days, so a daily refresh makes ~2 calls.
+    // No keyless fallback: api.census.gov now requires a key, so stale copies cover outages.
+    const now = Date.now();
+    const get = ACS_STATE_VARS.join(",");
+    const years = acsStateYears(now);
+    // A variable Census no longer knows costs that column for the vintage, not the vintage.
+    const acsVintage = async (year: number) => {
+      let vars: string[] = [...ACS_STATE_VARS];
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await usafactsCall("census_acs", "getAcs1", { year: String(year), get: vars.join(","), for: "state:*" });
+        } catch (e) {
+          const unknown = acsUnknownVariable(e);
+          if (!unknown || attempt >= 3 || !vars.includes(unknown) || unknown === "B01003_001E") throw e;
+          vars = vars.filter((v) => v !== unknown);
+        }
+      }
+    };
+    const out = await usafactsMemoized(
+      ctx,
+      `states-${usafactsHash(get)}`,
+      [
+        ...years.map((year) => ({
+          key: `acs1:${year}`,
+          freshSecs: acsVintageSettled(year, now) ? 30 * 86_400 : 86_400,
+          call: () => acsVintage(year),
+          accept: hasAcsRows,
+        })),
+        {
+          key: "cpi:annual",
+          freshSecs: 7 * 86_400,
+          call: () => usafactsCall("fred", "getSeriesObservations", { ...USAFACTS_CPI_ANNUAL }),
+          compact: compactFredObservations,
+          accept: hasObservations,
+        },
+        // BEA price levels by state (annual, published each December): 3 calls, reused for a week.
+        ...BEA_STATE_TABLES.map((t) => ({
+          key: `bea:${t.TableName}:${t.LineCode}`,
+          freshSecs: 7 * 86_400,
+          call: () => usafactsCall("bea", "getRegionalData", { TableName: t.TableName, LineCode: t.LineCode, GeoFips: "STATE", Year: "ALL" }),
+          compact: compactBea,
+          accept: beaHasData,
+        })),
+      ],
+      // Cold edges ask all ~14 at once (≈ 5 s, inside the first look's 10 s probe); warm refreshes ask ~2.
+      6,
     );
-    const ok = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
-    if (!ok.length) throw new UpstreamError("USAFacts: no ACS vintages returned");
-    return JSON.stringify(acsStatesWide(ok));
+    const acs = out.filter((o) => o.key.startsWith("acs1:"));
+    const tables = acs.flatMap((o) => (o.payload != null ? [{ year: Number(o.key.slice(5)), table: o.payload }] : []));
+    // A vintage that 404s simply isn't released yet; any other gap means the gateway is struggling.
+    const missing = acs.filter((o) => o.from === "none" && !(o.error instanceof UsafactsError && o.error.notFound));
+    if (!tables.length) throw new UpstreamError("USAFacts: no ACS vintages returned");
+    // Less than half the panel → let the edge's stale copy (or KV last-good) answer instead.
+    if (missing.length * 2 > acs.length) throw new UpstreamError(`USAFacts: ${missing.length} of ${acs.length} ACS vintages failed`);
+    const cpi = out.find((o) => o.key === "cpi:annual")?.payload;
+    const bea = (t: (typeof BEA_STATE_TABLES)[number]) => {
+      const p = out.find((o) => o.key === `bea:${t.TableName}:${t.LineCode}`)?.payload;
+      return p != null ? beaStateYears(p) : null;
+    };
+    const [rpp, rent, rpi] = BEA_STATE_TABLES.map(bea);
+    return JSON.stringify(acsStatesWide(tables, cpi != null ? fredAnnualCpi(cpi) : null, { rpp, rent, rpi }));
   },
 
-  usafacts_nation: async () => {
-    const settled = await settleLimited(
-      USAFACTS_NATION_SERIES.map((s) => () =>
-        usafactsCall("fred", "getSeriesObservations", {
-          series_id: s.id,
-          observation_start: USAFACTS_NATION_START,
-          ...("units" in s ? { units: s.units } : {}),
-          ...("frequency" in s ? { frequency: s.frequency } : {}),
-        }),
-      ),
+  usafacts_nation: async (ctx) => {
+    const out = await usafactsMemoized(
+      ctx,
+      `nation-${usafactsHash(JSON.stringify(USAFACTS_NATION_SERIES.map(fredArgs)))}`,
+      USAFACTS_NATION_SERIES.map((s) => ({
+        key: `fred:${s.id}`,
+        freshSecs: 12 * 3600,
+        call: () => usafactsCall("fred", "getSeriesObservations", fredArgs(s)),
+        compact: compactFredObservations,
+        accept: hasObservations,
+      })),
       3,
     );
-    const payloads = settled.map((r) => (r.status === "fulfilled" ? r.value : null));
+    const payloads = out.map((o) => o.payload);
     if (payloads.every((p) => p != null)) return JSON.stringify(fredNationMonthly(payloads));
-    // Any series missing → FRED's keyless CSV export for all of them (gas is weekly, so its own call).
+    // A series the gateway (and the memo) couldn't supply → FRED's keyless CSV export fills just
+    // that column (gas is weekly, so its own call). Two calls, whichever series are missing.
     try {
       const [monthly, gas] = await Promise.all([
-        upstreamText("FRED", "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE,CPIAUCSL,PAYEMS,FEDFUNDS,HOUST", 20_000),
-        upstreamText("FRED", `https://fred.stlouisfed.org/graph/fredgraph.csv?id=GASREGW&cosd=${USAFACTS_NATION_START}&fq=Monthly&fam=avg`, 20_000),
+        fredGraphCsv(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${FREDGRAPH_NATION_MONTHLY_IDS.join(",")}`, 20_000),
+        fredGraphCsv(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=GASREGW&cosd=${USAFACTS_NATION_START}&fq=Monthly&fam=avg`, 20_000),
       ]);
-      return JSON.stringify(fredGraphNationMonthly(monthly, gas));
+      const fallback = fredGraphNationPayloads(monthly, gas);
+      return JSON.stringify(fredNationMonthly(payloads.map((p, i) => p ?? fallback[i] ?? null)));
     } catch (e) {
       if (payloads.some((p) => p != null)) return JSON.stringify(fredNationMonthly(payloads));
       throw e;
     }
+  },
+
+  usafacts_state_jobs: async (ctx) => {
+    // BLS LAUS statewide unemployment, seasonally adjusted: 52 series in two getSeriesData calls.
+    const range = stateJobsYearRange();
+    const out = await usafactsMemoized(
+      ctx,
+      `state-jobs-${range.startyear}-${range.endyear}`,
+      blsStateUrBatches().map((ids, i) => ({
+        key: `bls:${i}:${usafactsHash(ids.join(","))}`,
+        freshSecs: 12 * 3600,
+        call: () => usafactsCall("bls", "getSeriesData", { seriesid: ids, ...range, catalog: false }, 25_000),
+        compact: compactBlsSeries,
+        accept: hasBlsSeries,
+      })),
+      2,
+    );
+    const payloads = out.map((o) => o.payload);
+    if (payloads.every((p) => p != null)) {
+      const cols = blsStateMonthly(payloads);
+      if (cols.rows.length) return JSON.stringify(cols);
+    }
+    // FRED mirrors LAUS as {USPS}UR (keyless CSV, two batches of 26).
+    try {
+      const csvs = await Promise.all(
+        fredGraphStateIdBatches().map((ids) => fredGraphCsv(`https://fred.stlouisfed.org/graph/fredgraph.csv?id=${ids.join(",")}`, 20_000)),
+      );
+      const cols = fredGraphStateMonthly(csvs, Number(range.startyear));
+      if (cols.rows.length) return JSON.stringify(cols);
+      throw new UpstreamError("FRED: no state unemployment rows");
+    } catch (e) {
+      const partial = payloads.filter((p) => p != null);
+      if (partial.length) return JSON.stringify(blsStateMonthly(partial));
+      throw e;
+    }
+  },
+
+  // Federal budget — Monthly Treasury Statement via the gateway, direct Fiscal Data as fallback.
+  usafacts_budget: async (ctx) => {
+    const { pages, rates } = await budgetPayloads(ctx);
+    return JSON.stringify(budgetMonthly(pages, rates));
+  },
+
+  usafacts_budget_lines: async (ctx) => JSON.stringify(budgetLines((await budgetPayloads(ctx)).pages)),
+
+  // Household finances — 14 quarterly FRED series; each falls back to its own fredgraph CSV.
+  usafacts_household: async (ctx) => {
+    const out = await usafactsMemoized(
+      ctx,
+      `household-${usafactsHash(USAFACTS_HOUSEHOLD_SERIES.map((s) => s.id).join(","))}`,
+      USAFACTS_HOUSEHOLD_SERIES.map((s) => ({
+        key: `fred:${s.id}`,
+        freshSecs: 12 * 3600,
+        call: async () => {
+          try {
+            return await usafactsCall("fred", "getSeriesObservations", householdFredArgs(s.id));
+          } catch (e) {
+            const csv = await upstreamText("FRED", householdFredGraphUrl(s.id), 20_000);
+            const obs = fredGraphObservations(csv, s.id);
+            if (!obs) throw e;
+            return obs;
+          }
+        },
+        compact: compactFredObservations,
+        accept: hasObservations,
+      })),
+      // 14 cold calls in ~2 waves (≈ 4–5 s) so the first look's 10 s probe isn't cut short.
+      7,
+    );
+    const payloads = out.map((o) => o.payload);
+    if (payloads.every((p) => p == null)) throw new UpstreamError("USAFacts: no household series returned");
+    return JSON.stringify(householdQuarterly(payloads));
   },
 
   // ---- Columnar feeds (`{ columns, rows }` in registry order) ----
@@ -1438,6 +1771,10 @@ export const SOURCE_TTL_SECS: Record<string, number> = {
   world_bank: 86_400,
   usafacts_states: 86_400,
   usafacts_nation: 43_200,
+  usafacts_state_jobs: 43_200,
+  usafacts_budget: 43_200,
+  usafacts_budget_lines: 43_200,
+  usafacts_household: 43_200,
   climate: 86_400,
   debt: 86_400,
   fireballs: 21_600,
@@ -1509,6 +1846,40 @@ function logSourceRequest(meta: Record<string, unknown>): void {
   console.log(JSON.stringify({ loom: "source", ...meta }));
 }
 
+/**
+ * Feeds whose last good payload is also kept in KV (global, durable), so an edge location
+ * with a cold Cache API can still answer while the upstream is down. Low-cadence feeds on a
+ * no-SLA upstream only — the USAFacts gateway is a beta and Census has no keyless fallback.
+ */
+export const DURABLE_SOURCE_KINDS: ReadonlySet<string> = new Set([
+  "usafacts_states", "usafacts_nation", "usafacts_state_jobs", "usafacts_budget", "usafacts_budget_lines", "usafacts_household",
+]);
+const DURABLE_KV_PREFIX = "srclast:";
+/** Per edge location, refresh the KV copy at most this often (KV writes are metered). */
+const DURABLE_WRITE_EVERY_SECS = 6 * 3600;
+const DURABLE_KEEP_SECS = 45 * 86_400;
+
+async function rememberDurable(kv: KVNamespace | undefined, cache: Cache, key: string, kind: string, text: string, fetchedAt: number): Promise<void> {
+  if (!kv || !DURABLE_SOURCE_KINDS.has(kind)) return;
+  const marker = `${key}:durable`;
+  if (await cache.match(marker).catch(() => undefined)) return;
+  await Promise.all([
+    kv.put(DURABLE_KV_PREFIX + kind, text, { expirationTtl: DURABLE_KEEP_SECS, metadata: { fetchedAt: String(fetchedAt) } }).catch(() => {}),
+    cache.put(marker, new Response("1", { headers: { "Cache-Control": `max-age=${DURABLE_WRITE_EVERY_SECS}` } })).catch(() => {}),
+  ]);
+}
+
+async function recallDurable(kv: KVNamespace | undefined, kind: string): Promise<{ text: string; fetchedAt: number } | null> {
+  if (!kv || !DURABLE_SOURCE_KINDS.has(kind)) return null;
+  try {
+    const { value, metadata } = await kv.getWithMetadata<{ fetchedAt?: string }>(DURABLE_KV_PREFIX + kind, "text");
+    if (typeof value !== "string" || !value) return null;
+    return { text: value, fetchedAt: Number(metadata?.fetchedAt) || 0 };
+  } catch {
+    return null;
+  }
+}
+
 async function refreshSourceCache(
   kind: string,
   fetcher: SourceFetcher,
@@ -1546,7 +1917,10 @@ async function refreshSourceCache(
       }),
     );
     logSourceRequest({ kind, cache: "REFRESH", ms: Date.now() - started, status: 200 });
-    await noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) });
+    await Promise.all([
+      noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) }),
+      rememberDurable(kv, cache, key, kind, text, now),
+    ]);
   } catch (e) {
     logSourceRequest({
       kind,
@@ -1617,6 +1991,7 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
             }))
             .catch(() => {}),
           noteSourceOutcome(kv, kind, { ok: true, rows: payloadRows(text) }),
+          rememberDurable(kv, cache, key, kind, text, fetchedAt),
         ]);
       },
       (e: unknown) => noteSourceOutcome(kv, kind, { ok: false, error: e instanceof Error ? e.message : String(e) }),
@@ -1647,6 +2022,12 @@ export async function handleSource(kind: string, request: Request, ctx: WaitUnti
       return sourceResponse(fallback.body, "STALE", cachedAt, request, ttl, stale);
     }
     cached?.body?.cancel().catch(() => {});
+    // No copy at this edge: the durable last-good copy (any edge's last success) beats a 502.
+    const durable = await recallDurable(kv, kind);
+    if (durable) {
+      logSourceRequest({ kind, cache: "STALE-DURABLE", ms: Date.now() - started, error: e instanceof Error ? e.message : String(e) });
+      return sourceResponse(durable.text, "STALE-DURABLE", durable.fetchedAt || Date.now() - sourceCacheMaxAge(ttl, stale) * 1000, request, ttl, stale);
+    }
     logSourceRequest({
       kind,
       cache: "ERROR",

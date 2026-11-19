@@ -13,6 +13,7 @@ import { type StorySequence, recommend } from "./recommend";
 import { type SourceKind } from "../sourceRegistry";
 import { CHART_KIND_OPTIONS, type ChartKind, type ChartRecommendation, type YAggregateOption } from "./types";
 import { enumerateDiscoverCharts } from "../discoverCandidates";
+import { isGeoRegionField } from "../geoFields";
 
 /** Dual-measure compares — always try to keep these in short discover windows. */
 export const CORE_COMPARE_KINDS: readonly ChartKind[] = ["pyramid", "dumbbell", "slope"];
@@ -354,6 +355,30 @@ export function guardCuratedChart(rec: ChartRecommendation, columns: ColumnInfo[
     yField: rec.yField,
     colorField: rec.colorField ?? null,
   });
+  // A time window on the X column bounds the bars ("jobs added, last 12 months" is 13 months,
+  // not 443) — the whole-table distinct count would otherwise swap X for some category.
+  if (rec.timeWindow && rec.timeWindow !== "all" && rec.timeWindowField === rec.xField && columns.some((c) => c.name === rec.xField)) {
+    fitted.xField = rec.xField;
+  }
+  // US states (52 with DC + PR) are a standard ranking axis, past the generic 40-category cap;
+  // as series (bump, small multiples) they're bounded by the chart's own top N.
+  const stateLike = (name: string | null | undefined) => {
+    const c = name ? columns.find((col) => col.name === name) : undefined;
+    return !!c && isGeoRegionField(c.name) && c.distinct_count <= 60;
+  };
+  if (fitted.xField !== rec.xField && stateLike(rec.xField)) {
+    if (fitted.colorField === null && rec.colorField && fitted.xField === rec.colorField) fitted.colorField = rec.colorField;
+    fitted.xField = rec.xField;
+  }
+  // A series color the author bounded with top N (states, budget lines) stays, even past 12 groups.
+  const bounded = (name: string | null | undefined) => {
+    const c = name ? columns.find((col) => col.name === name) : undefined;
+    return !!c && rec.topN != null && c.distinct_count <= 60;
+  };
+  if (fitted.colorField !== (rec.colorField ?? null) && bounded(rec.colorField)) {
+    fitted.colorField = rec.colorField ?? null;
+    if (fitted.xField !== rec.xField && columns.some((c) => c.name === rec.xField)) fitted.xField = rec.xField;
+  }
   let topN = rec.topN;
   let rowField = rec.rowField;
   for (const field of [fitted.colorField, rowField ?? null]) {
@@ -407,6 +432,7 @@ export function recommendSourceStory(
       deltaDisplay?: "off" | "diff" | "pct" | null;
       timeWindowField?: string | null;
       timeWindow?: ChartTimeRange | null;
+      analysisPreset?: ChartRecommendation["analysisPreset"];
     },
   ): ChartRecommendation => ({
     id: stableLiveChartId(
@@ -466,6 +492,7 @@ export function recommendSourceStory(
         ? (extraEnc.timeWindowField ?? undefined)
         : undefined,
     timeWindow: extraEnc?.timeWindow && extraEnc.timeWindow !== "all" ? extraEnc.timeWindow : undefined,
+    analysisPreset: extraEnc?.analysisPreset ?? undefined,
   });
 
   /** Curated first, then Facet/TopN/Compare, then full-schema recommend() (network, odd, …). */
@@ -897,34 +924,8 @@ export function recommendSourceStory(
       ]);
   }
 
-  if (kind === "usafacts_states") {
-    return finish("US states, year by year", [
-        mk("choropleth", "Income map", "Median household income by state (peak year, nominal $)", 98, "state_abbr", "median_household_income", null, "max"),
-        mk("choropleth", "Poverty map", "Average share of people below the poverty line since 2012", 96, "state_abbr", "poverty_rate", null, "mean"),
-        mk("bubble", "Education vs income", "Bachelor's-or-higher share against median income, sized by population", 95, "bachelors_or_higher_pct", "median_household_income", null, null, "population"),
-        mk("line", "Unemployment by year", "Average state unemployment rate (Census survey)", 93, "yr", "unemployment_rate", null, "mean"),
-        mk("line", "Income vs poverty over time", "Average state income against average poverty rate", 92, "yr", "median_household_income", null, "mean", null, { y2Field: "poverty_rate" }),
-        mk("bar", "Most populous states", "Peak population since 2012", 90, "state_name", "population", null, "max", null, { topN: 15 }),
-        mk("scatter", "Income vs poverty · residuals", "States off the income–poverty line", 88, "median_household_income", "poverty_rate", null, null, null, { residualOverlay: true }),
-        mk("line", "Median age by year", "The country is getting older", 86, "yr", "median_age", null, "mean"),
-        mk("corrMatrix", "What moves together", "Income · poverty · education · unemployment · age", 84, "median_household_income", "poverty_rate", null),
-        mk("bar", "Most educated states", "Average bachelor's-or-higher share", 82, "state_name", "bachelors_or_higher_pct", null, "mean", null, { topN: 15 }),
-      ]);
-  }
-
-  if (kind === "usafacts_nation") {
-    return finish("US economy, month by month", [
-        mk("line", "Unemployment rate", "Share of the labor force looking for work, since 1990", 98, "month", "unemployment_rate", null, "max"),
-        mk("line", "Inflation", "Consumer prices vs a year earlier (CPI, %)", 97, "month", "inflation_yoy_pct", null, "max"),
-        mk("line", "Rates vs inflation", "Fed funds rate against CPI inflation", 95, "month", "fed_funds_rate", null, "max", null, { y2Field: "inflation_yoy_pct" }),
-        mk("line", "Unemployment vs inflation", "The two halves of the Fed's job", 94, "month", "unemployment_rate", null, "max", null, { y2Field: "inflation_yoy_pct" }),
-        mk("line", "Gas prices", "Average regular gasoline, US$ per gallon", 92, "month", "gas_price_usd", null, "max"),
-        mk("line", "Jobs", "Nonfarm payrolls, thousands of jobs", 90, "month", "payrolls_k", null, "max"),
-        mk("scatter", "Phillips curve", "Unemployment against inflation, one dot per month", 88, "unemployment_rate", "inflation_yoy_pct", null),
-        mk("line", "Housing starts", "New homes started per month (thousands, annualized)", 86, "month", "housing_starts_k", null, "max", null, { rollingWindow: 7 }),
-        mk("bar", "Inflation by year", "Average year-over-year CPI change", 84, "yr", "inflation_yoy_pct", null, "mean"),
-        mk("corrMatrix", "What moves together", "Jobs · prices · rates · housing · gas", 82, "unemployment_rate", "inflation_yoy_pct", null),
-      ]);
+  if (isUsafactsKind(kind)) {
+    return finish(...usafactsStory(kind, mk, data));
   }
 
   if (kind === "firms") {
@@ -1196,4 +1197,290 @@ export function recommendSourceStory(
   }
 
   return finish(`${kind} data`, []);
+}
+
+// =================================================================
+// USAFacts feeds — one curated story per feed, across the chart catalog
+// =================================================================
+// Panel data (state × year, state × month) gets a "latest period" window for
+// maps and rankings, the full span for trends; rates are averaged, never summed;
+// mixed-unit pairs are rebased (z-score) so Discover keeps them honest.
+// Coverage matrix: docs/USAFACTS.md.
+
+/**
+ * Newest value of a column in the sample (years as numbers, months as "YYYY-MM-DD"), only
+ * counting rows where `withValue` is filled — a gas-only partial month isn't "the latest month".
+ */
+function newestCell(data: QueryResult | null, field: string, withValue?: string): string | number | null {
+  const i = data?.columns.indexOf(field) ?? -1;
+  if (!data || i < 0) return null;
+  const w = withValue ? data.columns.indexOf(withValue) : -1;
+  let best: string | number | null = null;
+  for (const r of data.rows) {
+    if (w >= 0 && r[w] == null) continue;
+    const v = r[i];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      if (best == null || (typeof best === "number" && v > best)) best = v;
+    } else if (typeof v === "string" && v) {
+      if (best == null || String(best) < v) best = v;
+    }
+  }
+  return best;
+}
+
+function monthLabel(v: string | number | null): string | null {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}/.test(v)) return null;
+  return new Date(`${v.slice(0, 7)}-15T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+const USAFACTS_KINDS = ["usafacts_states", "usafacts_nation", "usafacts_state_jobs", "usafacts_budget", "usafacts_budget_lines", "usafacts_household"] as const;
+type UsafactsKind = (typeof USAFACTS_KINDS)[number];
+const isUsafactsKind = (kind: string): kind is UsafactsKind => (USAFACTS_KINDS as readonly string[]).includes(kind);
+
+/** Forecast band (Loom's own methods) a single-series line opens with. */
+/** `months` ahead in calendar time — converted to plotted steps when the chart folds months into years. */
+const forecastPreset = (method: "holt" | "line", months: number, anomaly = false): ChartRecommendation["analysisPreset"] => ({
+  forecast: { horizon: months, horizonMonths: months, method },
+  ...(anomaly ? { anomaly: { window: 12, threshold: 3.5 } } : {}),
+});
+const anomalyPreset: ChartRecommendation["analysisPreset"] = { anomaly: { window: 12, threshold: 3.5 } };
+
+export function usafactsStory(
+  kind: UsafactsKind,
+  mk: (
+    k: ChartKind, title: string, subtitle: string, score: number,
+    xField: string, yField: string | null, colorField: string | null,
+    yAgg?: YAggregateOption | null,
+    sizeField?: string | null,
+    extraEnc?: {
+      zField?: string | null;
+      timeField?: string | null;
+      rowField?: string | null;
+      topN?: number | null;
+      y2Field?: string | null;
+      barStackMode?: "grouped" | "stacked" | "percent" | null;
+      rollingWindow?: 7 | 30 | null;
+      yScale?: "linear" | "log" | "symlog" | null;
+      seriesNormalize?: "index100" | "zscore" | null;
+      residualOverlay?: boolean | null;
+      anomalyHighlight?: boolean | null;
+      bumpMode?: "rank" | "delta" | null;
+      pyramidScaleMode?: "auto" | "shared" | "independent" | null;
+      deltaDisplay?: "off" | "diff" | "pct" | null;
+      timeWindowField?: string | null;
+      timeWindow?: ChartTimeRange | null;
+      analysisPreset?: ChartRecommendation["analysisPreset"];
+    },
+  ) => ChartRecommendation,
+  data: QueryResult | null,
+): [string, ChartRecommendation[]] {
+  if (kind === "usafacts_states") {
+    const yr = newestCell(data, "yr");
+    const when = yr == null ? "latest year" : String(yr);
+    const latest = { timeWindowField: "yr", timeWindow: "1y" as const };
+    return ["US states, year by year", [
+      // Maps + rankings: the newest vintage only.
+      mk("choropleth", "Income map", `Median household income by state, ${when}`, 98, "state_abbr", "median_household_income", null, "mean", null, latest),
+      mk("choropleth", "Poverty map", `Share of people below the poverty line, ${when}`, 96, "state_abbr", "poverty_rate", null, "mean", null, latest),
+      mk("bubble", "Education vs income", `Bachelor's-or-higher share against median income, sized by population, ${when}`, 95, "bachelors_or_higher_pct", "median_household_income", "region", null, "population", latest),
+      mk("line", "Real income by region", `Median income in ${when} dollars (CPI-U), average of each region's states`, 94, "yr", "real_median_income", "region", "mean"),
+      mk("heatmap", "Poverty, state by year", "Every state's poverty rate, every year since 2012", 93, "yr", "state_abbr", "poverty_rate", "mean"),
+      mk("pareto", "Where Americans live", `States ranked by population with the running share, ${when}`, 92, "state_name", "population", null, "sum", null, latest),
+      mk("choropleth", "Degrees map", `Adults 25+ with a bachelor's degree or more, ${when}`, 91, "state_abbr", "bachelors_or_higher_pct", null, "mean", null, latest),
+      mk("bump", "Income rank over time", "Where the highest-earning states place each year", 90, "yr", "median_household_income", "state_abbr", "mean", null, { bumpMode: "rank", topN: 12 }),
+      mk("line", "Income: paycheck vs buying power", `Average state median income, as reported vs in ${when} dollars`, 89, "yr", "median_household_income", null, "mean", null, { y2Field: "real_median_income" }),
+      mk("treemap", "Population by region", `Each state's share of the country, grouped by Census region, ${when}`, 88, "state_name", "population", "region", "sum", null, latest),
+      mk("scatter", "Income vs poverty · residuals", `States off the income–poverty line, ${when}`, 87, "median_household_income", "poverty_rate", null, null, null, { ...latest, residualOverlay: true }),
+      mk("box", "Income spread by region", `How far apart states sit within each region, ${when}`, 86, "region", "median_household_income", null, null, null, latest),
+      mk("sparkGrid", "Population, biggest states", "Small multiples since 2012 — who's still growing?", 85, "yr", "population", "state_abbr", "mean", null, { topN: 12 }),
+      mk("chernoff", "Region faces", `One face per region: wider = richer, taller = more degrees, eyes farther apart = more poverty, ${when}`, 84, "region", "median_household_income", "poverty_rate", null, "bachelors_or_higher_pct", latest),
+      mk("radar", "Region profiles", `Average state in each region across every measure, ${when}`, 83, "poverty_rate", "unemployment_rate", "region", null, null, latest),
+      mk("dumbbell", "Poverty vs unemployment", `The gap between the two rates in each state, ${when}`, 82, "state_abbr", "poverty_rate", null, "mean", "unemployment_rate", { ...latest, topN: 20 }),
+      mk("pyramid", "Poverty ↔ degrees by region", `Average poverty rate against bachelor's share, ${when}`, 81, "region", "poverty_rate", null, "mean", "bachelors_or_higher_pct", latest),
+      mk("stream", "Population by region over time", "How the country's people split across regions since 2012", 80, "yr", "population", "region", "sum"),
+      mk("beeswarm", "Every state's degree share", `One dot per state, by region, ${when}`, 79, "region", "bachelors_or_higher_pct", null, null, null, latest),
+      mk("ridgeline", "Unemployment spread by year", "How the spread of state unemployment (Census survey) moved", 78, "unemployment_rate", "yr", null),
+      mk("parallel", "Every state across the measures", `One line per state, colored by region, ${when}`, 77, "median_household_income", "poverty_rate", "region", null, null, latest),
+      mk("waffle", "Americans by region", `Share of the population in each Census region, ${when}`, 76, "region", "population", null, "sum", null, latest),
+      mk("violin", "Poverty spread by region", `Distribution of state poverty rates, ${when}`, 75, "region", "poverty_rate", null, null, null, latest),
+      mk("errorBars", "Real income by region", `Mean and spread of state median income, ${when}`, 74, "region", "real_median_income", null, "mean", null, latest),
+      mk("scatter3d", "Income × poverty × degrees", `Drag to orbit — states by region, ${when}`, 73, "median_household_income", "poverty_rate", "region", null, "population", { ...latest, zField: "bachelors_or_higher_pct" }),
+      mk("lollipop", "Most educated states", `Bachelor's-or-higher share, ${when}`, 72, "state_name", "bachelors_or_higher_pct", null, "mean", null, { ...latest, topN: 15 }),
+      mk("line", "Median age by year", "The country is getting older — average of states", 71, "yr", "median_age", "region", "mean"),
+      mk("corrMatrix", "What moves together", "Income · poverty · education · unemployment · age across every state-year", 70, "median_household_income", "poverty_rate", null),
+      mk("forceBubble", "States sized by people", `Bubbles by population, colored by region, ${when}`, 69, "state_abbr", "population", "region", "sum", null, latest),
+      mk("histogram", "How state incomes spread", `Median household income across states, ${when}`, 68, "median_household_income", null, null, null, null, latest),
+      mk("sunburst", "Regions → states", `Population nested by Census region, ${when}`, 67, "state_name", "population", "region", "sum", null, latest),
+      mk("choropleth", "Median age map", `Median age by state, ${when}`, 66, "state_abbr", "median_age", null, "mean", null, latest),
+      mk("contour", "Where income and poverty cluster", "Density of every state-year since 2012", 65, "median_household_income", "poverty_rate", null),
+      // Cost of living (BEA regional price parities; the newest vintage uses last year's prices).
+      mk("choropleth", "What $100 buys", `Price level vs the national average (100) — lower means a dollar goes further, ${when}`, 92.5, "state_abbr", "price_level", null, "mean", null, latest),
+      mk("scatter", "Paychecks vs prices", `Median income against the local price level — states above the line out-earn their prices, ${when}`, 91.5, "price_level", "median_household_income", "region", null, null, { ...latest, residualOverlay: true }),
+      mk("lollipop", "Income at local prices", `Median household income re-priced to national-average costs, ${when}`, 89.5, "state_name", "income_local_usd", null, "mean", null, { ...latest, topN: 15 }),
+      mk("choropleth", "Rent price level", `What rent costs vs the national average (100), ${when}`, 87.5, "state_abbr", "rent_price_level", null, "mean", null, latest),
+      mk("dumbbell", "Local prices stretch or shrink income", `Real median income → the same income at local prices, ${when}`, 86.5, "state_abbr", "real_median_income", null, "mean", "income_local_usd", { ...latest, topN: 20 }),
+      mk("slope", "Regions after local prices", `Average real median income → at local prices, ${when}`, 85.5, "region", "real_median_income", null, "mean", "income_local_usd", latest),
+      mk("heatmap", "Rents, state by year", "Rent price level vs the national average since 2012", 84.5, "yr", "state_abbr", "rent_price_level", "mean"),
+      mk("bump", "Real personal income rank", "Per-person income after prices and inflation (BEA), top states each year", 79.5, "yr", "real_personal_income_pc", "state_abbr", "mean", null, { bumpMode: "rank", topN: 12 }),
+    ]];
+  }
+
+  if (kind === "usafacts_nation") {
+    const m = monthLabel(newestCell(data, "month", "jobs_added_k"));
+    const lastYear = { timeWindowField: "month", timeWindow: "1y" as const };
+    return ["US economy, month by month", [
+      mk("line", "Unemployment rate", "Share of the labor force looking for work, since 1990", 98, "month", "unemployment_rate", null, "mean"),
+      mk("line", "Inflation", "Consumer prices vs a year earlier (CPI, %)", 97, "month", "inflation_yoy_pct", null, "mean"),
+      mk("bar", "Jobs added, last 12 months", `Change in nonfarm payrolls each month${m ? ` through ${m}` : ""} (thousands)`, 96, "month", "jobs_added_k", null, "sum", null, lastYear),
+      mk("line", "Rates vs inflation", "Fed funds rate against CPI inflation", 95, "month", "fed_funds_rate", null, "mean", null, { y2Field: "inflation_yoy_pct" }),
+      mk("connectedScatter", "Phillips curve, month by month", "Unemployment against inflation, joined in time order — each decade its own color", 94, "unemployment_rate", "inflation_yoy_pct", "decade", null, "month"),
+      mk("waterfall", "Jobs added per year", "Each year's net payroll change, building on the last (thousands)", 93, "yr", "jobs_added_k", null, "sum"),
+      mk("line", "Unemployment vs inflation", "The two halves of the Fed's job", 92, "month", "unemployment_rate", null, "mean", null, { y2Field: "inflation_yoy_pct" }),
+      mk("stripes", "Inflation stripes", "One stripe per month since 1990 — warm when prices ran hot", 91, "month", "inflation_yoy_pct", null),
+      mk("connectedScatter", "Beveridge curve", "Unemployment against job openings since 2000 — the labor market's loop", 90, "unemployment_rate", "job_openings_k", "decade", null, "month"),
+      mk("line", "Short vs long rates", "Fed funds against the 10-year Treasury — below the dashed line means inverted", 89, "month", "fed_funds_rate", null, "mean", null, { y2Field: "treasury_10y_rate" }),
+      mk("line", "The 10-year Treasury rate", "What the government — and every mortgage priced off it — pays to borrow for a decade; recent-trend forecast", 88.5, "month", "treasury_10y_rate", null, "mean", null, { analysisPreset: forecastPreset("holt", 24) }),
+      mk("box", "Unemployment in recessions", "Monthly jobless rate in NBER recession months vs expansions", 88, "recession", "unemployment_rate", null, null),
+      mk("scatter", "Phillips curve", "One dot per month, colored by recession", 87, "unemployment_rate", "inflation_yoy_pct", "recession"),
+      mk("line", "Job openings vs unemployment", "Openings and the jobless rate, rebased to compare their swings", 86, "month", "job_openings_k", null, "mean", null, { y2Field: "unemployment_rate", seriesNormalize: "zscore" }),
+      mk("spiral", "Unemployment spiral", "One turn per year since 1990", 85, "month", "unemployment_rate", null),
+      mk("box", "Inflation by decade", "Monthly year-over-year CPI, decade by decade", 84, "decade", "inflation_yoy_pct", null),
+      mk("line", "Gas prices", "Average regular gasoline, US$ per gallon", 83, "month", "gas_price_usd", null, "mean"),
+      mk("slope", "Yield curve by decade", "Average fed funds (start) to 10-year Treasury (end) — a steeper slope pays more to lend long", 82, "decade", "fed_funds_rate", null, "mean", "treasury_10y_rate"),
+      mk("line", "Jobs", "Nonfarm payrolls, thousands of jobs", 81, "month", "payrolls_k", null, "mean"),
+      mk("horizon", "Inflation horizon", "Bands fold the swings so 36 years fit in one strip", 80, "month", "inflation_yoy_pct", null),
+      mk("radar", "How each decade felt", "Average unemployment, inflation, rates, and gas by decade", 79, "unemployment_rate", "inflation_yoy_pct", "decade"),
+      mk("violin", "Unemployment by decade", "Distribution of the monthly jobless rate", 78, "decade", "unemployment_rate", null),
+      mk("pyramid", "Unemployment ↔ inflation by decade", "Average jobless rate against average inflation", 77, "decade", "unemployment_rate", null, "mean", "inflation_yoy_pct"),
+      mk("line", "Housing starts", "New homes started per month (thousands, annualized)", 76, "month", "housing_starts_k", null, "mean", null, { rollingWindow: 7 }),
+      mk("bar", "Inflation by year", "Average year-over-year CPI change", 75, "yr", "inflation_yoy_pct", null, "mean"),
+      mk("sparkGrid", "Unemployment, decade by decade", "One panel per decade", 74, "month", "unemployment_rate", "decade", "max"),
+      mk("ridgeline", "Fed funds by decade", "Where the policy rate sat in each decade", 73, "fed_funds_rate", "decade", null),
+      mk("histogram", "How often prices ran hot", "Distribution of monthly CPI inflation since 1990", 72, "inflation_yoy_pct", null, null),
+      mk("scatter3d", "Unemployment × inflation × rates", "Drag to orbit — months colored by decade", 71, "unemployment_rate", "inflation_yoy_pct", "decade", null, null, { zField: "fed_funds_rate" }),
+      mk("stripes", "Unemployment stripes", "One stripe per month since 1990", 70, "month", "unemployment_rate", null),
+      mk("corrMatrix", "What moves together", "Jobs · prices · rates · housing · gas", 69, "unemployment_rate", "inflation_yoy_pct", null),
+      mk("dumbbell", "Short vs long rates by decade", "Average fed funds and 10-year Treasury yield", 68, "decade", "fed_funds_rate", null, "mean", "treasury_10y_rate"),
+      // Jobs added is ruled by April 2020 (−20.5M) on any linear spread chart, so spreads use rates.
+      mk("errorBars", "Fed funds by decade", "Mean and spread of the policy rate", 67, "decade", "fed_funds_rate", null, "mean"),
+      mk("density", "Inflation by decade", "Smoothed distribution of monthly CPI inflation", 66, "inflation_yoy_pct", null, "decade"),
+      mk("area", "Jobs since 1990", "Nonfarm payrolls, thousands of jobs", 65, "month", "payrolls_k", null, "mean"),
+    ]];
+  }
+
+  if (kind === "usafacts_budget") {
+    const m = monthLabel(newestCell(data, "month", "receipts_b"));
+    const lastYear = { timeWindowField: "month", timeWindow: "1y" as const };
+    return ["Federal budget, month by month", [
+      mk("line", "Interest's bite out of every tax dollar", "Net interest as a share of federal revenue, 12-month totals — with Loom's recent-trend forecast", 98, "month", "interest_share_pct", null, "mean", null, { analysisPreset: forecastPreset("holt", 24) }),
+      mk("line", "Interest vs defense", "12-month net interest against 12-month national defense spending", 97, "month", "net_interest_ttm_b", null, "mean", null, { y2Field: "defense_ttm_b" }),
+      mk("line", "The deficit, 12 months at a time", "Outlays minus receipts over each trailing year — straight-line forecast", 96, "month", "deficit_ttm_b", null, "mean", null, { analysisPreset: forecastPreset("line", 24) }),
+      mk("line", "Tariff money in — and back out", "Customs duties each month; rings mark months far from their trailing pattern", 95, "month", "customs_duties_b", null, "mean", null, { analysisPreset: anomalyPreset }),
+      mk("bar", "Tariffs, the last 12 months", `Customs duties each month${m ? ` through ${m}` : ""} ($ billions; below zero = refunds)`, 94, "month", "customs_duties_b", null, "sum", null, lastYear),
+      mk("line", "Money in vs money out", "12-month receipts against 12-month outlays — the gap is the deficit", 93, "month", "receipts_ttm_b", null, "mean", null, { y2Field: "outlays_ttm_b" }),
+      mk("line", "What the Treasury pays to borrow", "Average interest rate on marketable debt — recent-trend forecast", 92, "month", "avg_interest_rate_pct", null, "mean", null, { analysisPreset: forecastPreset("holt", 24) }),
+      mk("connectedScatter", "The rate drives the bill", "Average rate on the debt against 12-month net interest, joined month by month", 91, "avg_interest_rate_pct", "net_interest_ttm_b", null, null, "month"),
+      mk("waterfall", "Deficits pile up", "Each fiscal year's deficit stacked on the last ($ billions; FY2015 starts in March, the newest year is partial)", 90, "fy", "deficit_b", null, "sum"),
+      mk("dumbbell", "An average month, in vs out", "Mean monthly receipts → mean monthly outlays, each fiscal year", 89, "fy", "receipts_b", null, "mean", "outlays_b"),
+      mk("scatter", "Higher rates, bigger bite", "Average rate on the debt against interest's share of revenue", 88, "avg_interest_rate_pct", "interest_share_pct", null),
+      mk("stripes", "Deficit stripes", "One stripe per month since 2015 — warm months borrowed the most", 87, "month", "deficit_b", null),
+      mk("spiral", "The tax calendar", "Monthly deficits, one turn per year — April's tax surplus shows every lap", 86, "month", "deficit_b", null),
+      mk("box", "Monthly deficits by fiscal year", "Spread of each year's months", 85, "fy", "deficit_b", null),
+      mk("line", "Tariffs, 12-month total", "Customs duties over each trailing year", 84, "month", "customs_ttm_b", null, "mean"),
+      mk("horizon", "Spending, folded", "Monthly outlays in bands", 83, "month", "outlays_b", null),
+      mk("corrMatrix", "What moves together", "Receipts · outlays · interest · rates · tariffs", 82, "net_interest_b", "avg_interest_rate_pct", null),
+      mk("histogram", "A typical month's deficit", "Distribution of monthly deficits since 2015 ($ billions)", 81, "deficit_b", null, null),
+      mk("scatter3d", "Rate × interest × deficit", "Drag to orbit — every month since 2016", 80, "avg_interest_rate_pct", "net_interest_ttm_b", null, null, null, { zField: "deficit_ttm_b" }),
+      mk("bar", "Net interest by fiscal year", "Interest paid each fiscal year ($ billions; partial years at the ends)", 79, "fy", "net_interest_b", null, "sum"),
+      mk("pyramid", "Interest ↔ defense, each fiscal year", "Mean monthly net interest against mean monthly defense", 78, "fy", "net_interest_b", null, "mean", "defense_b"),
+      mk("errorBars", "Interest per month, by fiscal year", "Mean and spread of monthly net interest", 77, "fy", "net_interest_b", null, "mean"),
+      mk("ridgeline", "Monthly deficits, year by year", "How each fiscal year's months spread", 76, "deficit_b", "fy", null),
+      mk("area", "Spending, 12 months at a time", "Total outlays over each trailing year ($ billions)", 75, "month", "outlays_ttm_b", null, "mean"),
+      mk("violin", "Deficit months by fiscal year", "Shape of each year's monthly deficits", 74, "fy", "deficit_b", null),
+      mk("beeswarm", "Every month's interest bill", "One dot per month, by fiscal year", 73, "fy", "net_interest_b", null),
+      mk("slope", "Receipts → outlays, each fiscal year", "Mean monthly money in → money out", 72, "fy", "receipts_b", null, "mean", "outlays_b"),
+      mk("sparkGrid", "Deficits, year by year", "One small panel per fiscal year", 71, "month", "deficit_b", "fy", "sum", null, { topN: 14 }),
+    ]];
+  }
+
+  if (kind === "usafacts_budget_lines") {
+    const lastYear = { timeWindowField: "month", timeWindow: "1y" as const };
+    const latest = { timeWindowField: "month", timeWindow: "30d" as const };
+    return ["Where federal money comes from and goes", [
+      mk("bump", "Net interest climbs the ranks", "Rank of every receipt and spending line by its 12-month total, each fiscal year", 98, "fy", "amount_ttm_b", "line", "mean", null, { bumpMode: "rank", topN: 14 }),
+      mk("line", "Every line, 12-month totals", "Receipt sources and spending functions, one panel each", 97, "month", "amount_ttm_b", "line", "max", null, { rowField: "flow", topN: 14 }),
+      mk("heatmap", "Each line's share, year by year", "Share of its flow's 12-month total, by fiscal year", 96, "fy", "line", "share_ttm_pct", "mean"),
+      mk("treemap", "The last 12 months: in vs out", "Every receipt source and spending function — the outlays block is bigger by the deficit", 95, "line", "amount_ttm_b", "flow", "sum", null, latest),
+      mk("sparkGrid", "Line by line", "12-month totals since 2016, one small multiple per line", 93, "month", "amount_ttm_b", "line", "max", null, { topN: 14 }),
+      mk("bar", "Every line, the last 12 months", "Receipts and spending side by side ($ billions)", 92, "line", "amount_ttm_b", "flow", "sum", null, { ...latest, topN: 14 }),
+      mk("sunburst", "Flows → lines", "The last 12 months nested by receipts and outlays", 90, "line", "amount_ttm_b", "flow", "sum", null, latest),
+      mk("lollipop", "Shares right now", "Each line's share of its flow, newest 12 months", 89, "line", "share_ttm_pct", null, "mean", null, latest),
+      mk("box", "How lumpy is each line?", "Spread of monthly amounts — tax months and interest dates stand out", 85, "line", "amount_b", null),
+      mk("radialBar", "The last 12 months, around the dial", "Every line's 12-month amount", 84, "line", "amount_ttm_b", null, "sum", null, latest),
+      mk("line", "Tariffs vs net interest, monthly", "Two lines from opposite sides of the ledger — monthly amounts, last 12 months", 83, "month", "amount_b", "line", "sum", null, { ...lastYear, topN: 14 }),
+      mk("ridgeline", "Shares over time", "Distribution of each line's share since 2016", 82, "share_ttm_pct", "line", null),
+    ]];
+  }
+
+  if (kind === "usafacts_household") {
+    return ["Household finances, quarter by quarter", [
+      mk("line", "Credit card delinquency", "Share of card balances 30+ days past due — recent-trend forecast and anomaly rings", 98, "quarter", "card_delinquency_pct", null, "mean", null, { analysisPreset: forecastPreset("holt", 24, true) }),
+      mk("line", "A home costs this many years of pay", "Median new-home price ÷ a year of median full-time pay — recent-trend forecast", 97, "quarter", "home_price_years_of_pay", null, "mean", null, { analysisPreset: forecastPreset("holt", 24) }),
+      mk("line", "The saving rate", "Share of disposable income households save — rings mark breaks from pattern", 96, "quarter", "saving_rate_pct", null, "mean", null, { analysisPreset: anomalyPreset }),
+      mk("line", "Home prices vs paychecks", "Median new-home price and median weekly pay, both rebased to 1990 = 100", 95.5, "quarter", "median_home_price_usd", null, "mean", null, { y2Field: "median_weekly_earnings_usd", seriesNormalize: "index100" }),
+      mk("line", "Card vs mortgage delinquency", "Two kinds of falling behind", 95, "quarter", "card_delinquency_pct", null, "mean", null, { y2Field: "mortgage_delinquency_pct" }),
+      mk("line", "Renting vs owning", "Rental vacancy and homeownership, rebased to compare their swings", 94, "quarter", "rental_vacancy_pct", null, "mean", null, { y2Field: "homeownership_pct", seriesNormalize: "zscore" }),
+      mk("line", "Empty rentals", "Share of rental homes sitting vacant — recent-trend forecast", 93.8, "quarter", "rental_vacancy_pct", null, "mean", null, { analysisPreset: forecastPreset("holt", 24) }),
+      mk("line", "Debt payments' share of income", "Required household debt payments ÷ disposable income — recent-trend forecast", 93.6, "quarter", "debt_service_pct", null, "mean", null, { analysisPreset: forecastPreset("holt", 24) }),
+      mk("line", "Revolving credit", "Credit card and other revolving balances ($ billions) — straight-line forecast", 93, "quarter", "revolving_credit_b", null, "mean", null, { analysisPreset: forecastPreset("line", 24) }),
+      mk("connectedScatter", "Debt payments vs delinquency", "Debt service share of income against card delinquency, joined quarter by quarter", 92, "debt_service_pct", "card_delinquency_pct", null, null, "quarter"),
+      mk("box", "Delinquency in recessions", "Card delinquency in NBER recession quarters vs expansions", 91, "recession", "card_delinquency_pct", null),
+      mk("scatter", "Saving vs falling behind", "Saving rate against card delinquency, colored by recession", 90, "saving_rate_pct", "card_delinquency_pct", "recession"),
+      mk("stripes", "Mortgage delinquency stripes", "One stripe per quarter since 1991 — the housing bust burns hot", 89, "quarter", "mortgage_delinquency_pct", null),
+      mk("line", "Working-age jobs vs participation", "Prime-age employment rate against labor-force participation", 88, "quarter", "prime_age_employment_pct", null, "mean", null, { y2Field: "labor_force_participation_pct" }),
+      mk("area", "Real income per person", "Disposable income per person after inflation (2017 dollars)", 87, "quarter", "real_disposable_income_pc", null, "mean"),
+      mk("violin", "Card delinquency by decade", "Distribution of quarterly delinquency rates", 86, "decade", "card_delinquency_pct", null),
+      mk("ridgeline", "Saving rate by decade", "How much households kept, decade by decade", 85, "saving_rate_pct", "decade", null),
+      mk("scatter3d", "Delinquency × debt service × saving", "Drag to orbit — quarters colored by recession", 84, "debt_service_pct", "card_delinquency_pct", "recession", null, null, { zField: "saving_rate_pct" }),
+      mk("corrMatrix", "What moves together", "Saving · delinquency · debt · housing · jobs", 83, "saving_rate_pct", "card_delinquency_pct", null),
+      mk("horizon", "Years of pay, folded", "The affordability path in bands", 82, "quarter", "home_price_years_of_pay", null),
+      mk("bar", "Jobless claims by year", "Average weekly initial claims (thousands)", 81, "yr", "initial_claims_k", null, "mean"),
+      mk("dumbbell", "Card vs mortgage, by decade", "Average card delinquency → mortgage delinquency", 80, "decade", "card_delinquency_pct", null, "mean", "mortgage_delinquency_pct"),
+      mk("errorBars", "Saving by decade", "Mean and spread of the saving rate", 79, "decade", "saving_rate_pct", null, "mean"),
+      mk("pyramid", "Card ↔ mortgage delinquency by decade", "Average rates side by side", 78, "decade", "card_delinquency_pct", null, "mean", "mortgage_delinquency_pct"),
+      mk("beeswarm", "Saving in recessions vs expansions", "One dot per quarter", 77, "recession", "saving_rate_pct", null),
+      mk("histogram", "How often homes cost this much", "Distribution of a home's price in years of pay since 1990", 76, "home_price_years_of_pay", null, null),
+      mk("sparkGrid", "Card delinquency, decade by decade", "One panel per decade", 75, "quarter", "card_delinquency_pct", "decade", "max"),
+      mk("density", "Delinquency in good times and bad", "Smoothed distribution, recessions vs expansions", 74, "card_delinquency_pct", null, "recession"),
+      mk("ecdf", "The saving rate's track record", "Share of quarters at or below each saving rate, recessions vs expansions", 73, "saving_rate_pct", null, "recession"),
+    ]];
+  }
+
+  // usafacts_state_jobs — one row per state-month (BLS LAUS)
+  const m = monthLabel(newestCell(data, "month", "unemployment_rate"));
+  const when = m ?? "latest month";
+  const latest = { timeWindowField: "month", timeWindow: "30d" as const };
+  const lastYear = { timeWindowField: "month", timeWindow: "1y" as const };
+  return ["State unemployment, month by month", [
+    mk("choropleth", "Unemployment map", `Official jobless rate by state, ${when}`, 98, "state_abbr", "unemployment_rate", null, "mean", null, latest),
+    mk("heatmap", "Every state, year by year", "Average jobless rate since 2008 — the 2009–10 and 2020 walls stand out", 97, "yr", "state_abbr", "unemployment_rate", "mean"),
+    mk("choropleth", "Change vs a year ago", `Percentage points up or down from 12 months earlier, ${when}`, 96, "state_abbr", "unemployment_change_yoy", null, "mean", null, latest),
+    mk("line", "Regions since 2008", "Average state jobless rate in each Census region", 95, "month", "unemployment_rate", "region", "mean"),
+    mk("bar", "Biggest rises vs a year ago", `States where unemployment climbed most, ${when}`, 94, "state_name", "unemployment_change_yoy", null, "mean", null, { ...latest, topN: 15 }),
+    mk("sparkGrid", "State by state", "Small multiples since 2008 for the states running highest", 93, "month", "unemployment_rate", "state_abbr", "mean", null, { topN: 12 }),
+    mk("lollipop", "Highest unemployment now", `Jobless rate, ${when}`, 92, "state_name", "unemployment_rate", null, "mean", null, { ...latest, topN: 15 }),
+    mk("bump", "Who runs highest, year by year", "Rank of each state's average jobless rate", 91, "yr", "unemployment_rate", "state_abbr", "mean", null, { bumpMode: "rank", topN: 12 }),
+    mk("box", "Spread across states each year", "How far apart the states sit, 2008 to now", 90, "yr", "unemployment_rate", null),
+    mk("beeswarm", "Every state, by region", `One dot per state, ${when}`, 89, "region", "unemployment_rate", null, null, null, latest),
+    mk("line", "Average state, last 12 months", "Mean of state rates by month", 88, "month", "unemployment_rate", null, "mean", null, lastYear),
+    mk("ridgeline", "Regions over the last year", "Distribution of state-months by region", 87, "unemployment_rate", "region", null, null, null, lastYear),
+    mk("violin", "Spread by region", "State jobless rates within each region over the last 12 months", 86, "region", "unemployment_rate", null, null, null, lastYear),
+    mk("errorBars", "Regions: mean and spread", "Last 12 months of state rates", 85, "region", "unemployment_rate", null, "mean", null, lastYear),
+    mk("horizon", "Unemployment horizon", "Average state rate since 2008, folded into bands", 84, "month", "unemployment_rate", null, "mean"),
+    mk("histogram", "How rates spread now", `Jobless rate across states, ${when}`, 83, "unemployment_rate", null, null, null, null, latest),
+    mk("stripes", "Unemployment stripes", "Average state rate, one stripe per month", 82, "month", "unemployment_rate", null),
+    mk("spiral", "Unemployment spiral", "Average state rate, one turn per year", 81, "month", "unemployment_rate", null),
+    mk("scatter", "Level vs change", `Jobless rate against its change from a year earlier, ${when}`, 80, "unemployment_rate", "unemployment_change_yoy", "region", null, null, latest),
+    mk("density", "Regions compared", `Smoothed distribution of state rates, last 12 months`, 79, "unemployment_rate", null, "region", null, null, lastYear),
+  ]];
 }

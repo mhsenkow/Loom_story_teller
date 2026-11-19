@@ -12,7 +12,7 @@ import { resolveDeepScanSource } from "../deepScan";
 import { runDeepScan } from "../deepScanClient";
 import { newLoomId } from "../loomId";
 import type { LoomState } from "./types";
-import { chartActivationPatch, prunedChartMaps } from "./coreSlice";
+import { analysisPresetPatch, chartActivationPatch, prunedChartMaps } from "./coreSlice";
 import { chartEditSnapshot, restoreChartEdit, chartHistoryCheckpoint, CHART_EDIT_HISTORY_LIMIT } from "../chartEditHistory";
 import { MAX_CUSTOM_CHART_LOOKS } from "../customChartLooks";
 import { sanitizeChartVisualOverrides } from "../chartVisualSanitize";
@@ -46,6 +46,8 @@ export type ChartSlice = Pick<
   | "swipeViz"
   | "closeVizSwipe"
 >;
+
+
 
 export function chartInitialState() {
   return {
@@ -106,6 +108,7 @@ export function createChartSliceFactory(
       })),
     setActiveChart: (chart, opts) =>
       set((s) => ({
+        ...analysisPresetPatch(s.smartResults, chart),
         chartEditRedoStack: [],
         chartEditGroup: null,
         activeChart: chart,
@@ -382,7 +385,7 @@ export function createChartSliceFactory(
       };
 
       if (direction === "right") {
-        Object.assign(patch, chartActivationPatch(rec));
+        Object.assign(patch, chartActivationPatch(rec, s.smartResults));
         const rest = s.chartRecs.filter((r) => r.id !== rec.id);
         patch.chartRecs = [rec, ...rest];
       }

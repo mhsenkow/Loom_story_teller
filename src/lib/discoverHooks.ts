@@ -12,12 +12,15 @@ import type { DiscoverKind } from "./discoverStories";
 import type { SourceKind } from "./sourceRegistry";
 import { isDiscoverPackKind } from "./discoverPacks";
 import { stormLevel } from "./webStreams";
+import { extremeSince, firstCrossAbove, monthName, monthlySeries, recentAnomaly, trendForecast } from "./seriesSignals";
 
 export type DiscoverHookResult = {
   hook: string;
   blurb: string;
   score: number;
   preferKind?: string;
+  /** The measure the hook is about — the headline opens on a chart whose Y is this field. */
+  preferField?: string;
   category: string;
 };
 
@@ -1315,23 +1318,31 @@ function hook_usafacts_states(
   sample: QueryResult,
   chart: ChartRecommendation,
 ): DiscoverHookResult {
-  // Richest state in the newest vintage, plus how many states saw unemployment rise vs the prior one
-  let latest = -Infinity;
+  // Richest state in the newest vintage; real income since the first vintage; who grew most;
+  // how many states saw (survey) unemployment rise vs the prior vintage.
+  const years = new Set<number>();
   for (let r = 0; r < sample.rows.length; r++) {
     const y = numAt(sample, r, "yr");
-    if (Number.isFinite(y) && y > latest) latest = y;
+    if (Number.isFinite(y)) years.add(y);
   }
-  let prior = -Infinity;
-  for (let r = 0; r < sample.rows.length; r++) {
-    const y = numAt(sample, r, "yr");
-    if (y < latest && y > prior) prior = y;
-  }
+  const sorted = [...years].sort((a, b) => a - b);
+  const latest = sorted.at(-1) ?? NaN;
+  const prior = sorted.at(-2) ?? NaN;
+  const first = sorted[0] ?? NaN;
   const unempPrior = new Map<string, number>();
+  const popFirst = new Map<string, number>();
+  const realFirst: number[] = [];
+  const realLatest: number[] = [];
   let topIncome = -Infinity;
   let topState = "";
   for (let r = 0; r < sample.rows.length; r++) {
     const y = numAt(sample, r, "yr");
-    if (y === prior) unempPrior.set(strAt(sample, r, "state_abbr"), numAt(sample, r, "unemployment_rate"));
+    const st = strAt(sample, r, "state_abbr");
+    const real = numAt(sample, r, "real_median_income");
+    if (Number.isFinite(real) && y === first) realFirst.push(real);
+    if (Number.isFinite(real) && y === latest) realLatest.push(real);
+    if (y === prior) unempPrior.set(st, numAt(sample, r, "unemployment_rate"));
+    if (y === first) popFirst.set(st, numAt(sample, r, "population"));
     if (y !== latest) continue;
     const inc = numAt(sample, r, "median_household_income");
     if (inc > topIncome) {
@@ -1341,20 +1352,41 @@ function hook_usafacts_states(
   }
   let rose = 0;
   let compared = 0;
+  let growName = "";
+  let growPct = -Infinity;
   for (let r = 0; r < sample.rows.length; r++) {
     if (numAt(sample, r, "yr") !== latest) continue;
-    const before = unempPrior.get(strAt(sample, r, "state_abbr"));
+    const st = strAt(sample, r, "state_abbr");
+    const before = unempPrior.get(st);
     const now = numAt(sample, r, "unemployment_rate");
-    if (before == null || !Number.isFinite(before) || !Number.isFinite(now)) continue;
-    compared++;
-    if (now > before) rose++;
+    if (before != null && Number.isFinite(before) && Number.isFinite(now)) {
+      compared++;
+      if (now > before) rose++;
+    }
+    const p0 = popFirst.get(st);
+    const p1 = numAt(sample, r, "population");
+    if (p0 && Number.isFinite(p1) && latest > first) {
+      const g = (p1 / p0 - 1) * 100;
+      if (g > growPct) {
+        growPct = g;
+        growName = strAt(sample, r, "state_name");
+      }
+    }
   }
+  const mean = (xs: number[]) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : NaN);
+  const realChange = (mean(realLatest) / mean(realFirst) - 1) * 100;
   if (topState && Number.isFinite(topIncome)) {
-    const movers = compared ? ` Unemployment rose in ${rose} of ${compared} states vs ${prior}.` : "";
+    const bits = [
+      Number.isFinite(realChange) && latest > first
+        ? `After inflation, the typical state's median income is ${realChange >= 0 ? "up" : "down"} ${Math.abs(realChange).toFixed(1)}% since ${first}.`
+        : "",
+      growName && Number.isFinite(growPct) ? `${growName} grew fastest (+${growPct.toFixed(1)}% people).` : "",
+      compared ? `Unemployment rose in ${rose} of ${compared} states vs ${prior}.` : "",
+    ].filter(Boolean);
     return {
       hook: `${topState} earns the most · $${Math.round(topIncome).toLocaleString("en-US")} median income (${latest})`,
-      blurb: `${chart.subtitle || chart.title}.${movers}`,
-      score: 84,
+      blurb: [`${chart.subtitle || chart.title}.`, ...bits].join(" "),
+      score: Number.isFinite(realChange) && Math.abs(realChange) >= 5 ? 86 : 84,
       preferKind: "choropleth",
       category: "Economy",
     };
@@ -1368,35 +1400,73 @@ function hook_usafacts_states(
   };
 }
 
+/** Economy readings worth leading with when they reach a level not seen in a decade or more. */
+const NATION_EXTREMES: { field: string; label: string; worse: "high" | "low"; unit: "%" | "$" | "k" }[] = [
+  { field: "treasury_10y_rate", label: "The 10-year Treasury rate is", worse: "high", unit: "%" },
+  { field: "unemployment_rate", label: "Unemployment is", worse: "high", unit: "%" },
+  { field: "inflation_yoy_pct", label: "Inflation is", worse: "high", unit: "%" },
+  { field: "fed_funds_rate", label: "The fed funds rate is", worse: "high", unit: "%" },
+  { field: "gas_price_usd", label: "Gas costs", worse: "high", unit: "$" },
+  { field: "job_openings_k", label: "Job openings are at", worse: "low", unit: "k" },
+  { field: "housing_starts_k", label: "Housing starts are at", worse: "low", unit: "k" },
+];
+
 function hook_usafacts_nation(
   n: number,
   sample: QueryResult,
   chart: ChartRecommendation,
 ): DiscoverHookResult {
+  // Lead with the jobs report: jobs added last month + unemployment; inflation, rates,
+  // an inverted yield curve, or an NBER recession go in the blurb.
   let latest = "";
-  let unemp = NaN;
-  let infl = NaN;
+  let row = -1;
   for (let r = 0; r < sample.rows.length; r++) {
     const m = strAt(sample, r, "month");
-    const u = numAt(sample, r, "unemployment_rate");
-    if (m > latest && Number.isFinite(u)) {
+    if (m > latest && Number.isFinite(numAt(sample, r, "unemployment_rate"))) {
       latest = m;
-      unemp = u;
-      infl = numAt(sample, r, "inflation_yoy_pct");
+      row = r;
     }
   }
-  if (latest && Number.isFinite(unemp)) {
-    const when = new Date(`${latest.slice(0, 7)}-15T00:00:00Z`).toLocaleDateString("en-US", {
-      month: "short",
-      year: "numeric",
-      timeZone: "UTC",
-    });
-    const inflText = Number.isFinite(infl) ? ` · inflation ${infl.toFixed(1)}%` : "";
+  if (row >= 0) {
+    const unemp = numAt(sample, row, "unemployment_rate");
+    const infl = numAt(sample, row, "inflation_yoy_pct");
+    const jobs = numAt(sample, row, "jobs_added_k");
+    const ff = numAt(sample, row, "fed_funds_rate");
+    const t10 = numAt(sample, row, "treasury_10y_rate");
+    const inRecession = strAt(sample, row, "recession") === "Recession";
+    const when = usMonthLabel(latest);
+    const jobsText = Number.isFinite(jobs) ? `${jobs >= 0 ? "+" : "−"}${formatThousands(Math.abs(jobs))} jobs` : "";
+    const extras = [
+      Number.isFinite(infl) ? `inflation ${infl.toFixed(1)}%` : "",
+      Number.isFinite(ff) ? `fed funds ${ff.toFixed(2)}%` : "",
+      Number.isFinite(ff) && Number.isFinite(t10) && t10 < ff ? "yield curve inverted" : "",
+      inRecession ? "in an NBER recession" : "",
+    ].filter(Boolean);
+    // A reading not seen in 10+ years (the 10-year yield at a 24-year high) outranks a routine jobs report.
+    const rare = NATION_EXTREMES.map((m) => ({ m, e: extremeSince(monthlySeries(sample, "month", m.field), m.worse) }))
+      .filter((x): x is { m: (typeof NATION_EXTREMES)[number]; e: NonNullable<ReturnType<typeof extremeSince>> } => !!x.e && (x.e.record || x.e.months >= 120))
+      .sort((a, b) => (b.e.record ? 1e6 : b.e.months) - (a.e.record ? 1e6 : a.e.months))[0];
+    if (rare) {
+      const { m, e } = rare;
+      const word = m.worse === "high" ? "highest" : "lowest";
+      const value = m.unit === "%" ? `${e.latest.y.toFixed(2)}%` : m.unit === "$" ? `$${e.latest.y.toFixed(2)}` : `${Math.round(e.latest.y).toLocaleString("en-US")}k`;
+      return {
+        hook: `${m.label} ${value} — ${e.record ? "a record since 1990" : `${word} since ${monthName(e.since!.t)}`}`,
+        blurb: [`${jobsText ? `${jobsText} in ${when}, ` : ""}unemployment ${unemp.toFixed(1)}%.`, extras.length ? `${extras.join(" · ")}.` : ""].filter(Boolean).join(" "),
+        score: 86 + Math.min(6, Math.round(e.months / 60)),
+        preferKind: "line",
+        preferField: m.field,
+        category: "Economy",
+      };
+    }
     return {
-      hook: `US unemployment ${unemp.toFixed(1)}%${inflText} (${when})`,
-      blurb: chart.subtitle || chart.title,
-      score: Number.isFinite(infl) && infl >= 3 ? 85 : 80,
-      preferKind: "line",
+      hook: jobsText
+        ? `${jobsText} in ${when} · unemployment ${unemp.toFixed(1)}%`
+        : `US unemployment ${unemp.toFixed(1)}%${Number.isFinite(infl) ? ` · inflation ${infl.toFixed(1)}%` : ""} (${when})`,
+      blurb: [`${chart.subtitle || chart.title}.`, extras.length ? `${extras.join(" · ")}.` : ""].filter(Boolean).join(" "),
+      score: 80 + (Number.isFinite(infl) && infl >= 3 ? 4 : 0) + (Number.isFinite(jobs) && jobs < 0 ? 4 : 0) + (inRecession ? 3 : 0),
+      // The "Jobs added, last 12 months" bars carry the headline number.
+      preferKind: jobsText ? "bar" : "line",
       category: "Economy",
     };
   }
@@ -1407,6 +1477,201 @@ function hook_usafacts_nation(
     preferKind: "line",
     category: "Economy",
   };
+}
+
+function hook_usafacts_state_jobs(
+  n: number,
+  sample: QueryResult,
+  chart: ChartRecommendation,
+): DiscoverHookResult {
+  // How many states saw the official jobless rate rise (or fall) over the past year.
+  let latest = "";
+  for (let r = 0; r < sample.rows.length; r++) {
+    const m = strAt(sample, r, "month");
+    if (m > latest && Number.isFinite(numAt(sample, r, "unemployment_rate"))) latest = m;
+  }
+  let rose = 0;
+  let fell = 0;
+  let compared = 0;
+  let top = -Infinity;
+  let topState = "";
+  for (let r = 0; r < sample.rows.length; r++) {
+    if (strAt(sample, r, "month") !== latest) continue;
+    const rate = numAt(sample, r, "unemployment_rate");
+    const d = numAt(sample, r, "unemployment_change_yoy");
+    if (Number.isFinite(rate) && rate > top) {
+      top = rate;
+      topState = strAt(sample, r, "state_name");
+    }
+    if (!Number.isFinite(d)) continue;
+    compared++;
+    // BLS publishes one decimal, so anything within ±0.05 pp is no change.
+    if (d > 0.05) rose++;
+    else if (d < -0.05) fell++;
+  }
+  if (latest && compared) {
+    const up = rose >= fell;
+    return {
+      hook: `Unemployment ${up ? "rose" : "fell"} in ${up ? rose : fell} of ${compared} states over the past year (${usMonthLabel(latest)})`,
+      blurb: [`${chart.subtitle || chart.title}.`, topState ? `Highest now: ${topState} at ${top.toFixed(1)}%.` : ""].filter(Boolean).join(" "),
+      score: 81 + (up && rose / compared >= 0.6 ? 4 : 0),
+      preferKind: "choropleth",
+      category: "Economy",
+    };
+  }
+  return {
+    hook: "Unemployment in every state since 2008",
+    blurb: chart.subtitle || chart.title,
+    score: 74,
+    preferKind: "choropleth",
+    category: "Economy",
+  };
+}
+
+/** "$1.06T" / "$970B" for an amount in billions. */
+function formatBillions(b: number): string {
+  const sign = b < 0 ? "−" : "";
+  const a = Math.abs(b);
+  return a >= 1000 ? `${sign}$${(a / 1000).toFixed(2)}T` : `${sign}$${a.toFixed(a >= 100 ? 0 : 1)}B`;
+}
+
+function hook_usafacts_budget(
+  n: number,
+  sample: QueryResult,
+  chart: ChartRecommendation,
+): DiscoverHookResult {
+  // Lead with what the debt costs: interest's share of every tax dollar and where its recent
+  // trend points (Loom's "Recent trend" forecast). Interest vs defense, the deficit and any
+  // anomaly in tariff receipts go in the blurb.
+  const share = monthlySeries(sample, "month", "interest_share_pct");
+  const latest = share.at(-1);
+  if (latest) {
+    const ahead = trendForecast(share, 24, "holt");
+    const interest = monthlySeries(sample, "month", "net_interest_ttm_b");
+    const defense = monthlySeries(sample, "month", "defense_ttm_b");
+    const passed = firstCrossAbove(interest, defense);
+    const deficit = monthlySeries(sample, "month", "deficit_ttm_b").at(-1);
+    const tariffs = recentAnomaly(monthlySeries(sample, "month", "customs_duties_b"), 12, 3.5, 6);
+    const extras = [
+      interest.at(-1) && passed
+        ? `Net interest (${formatBillions(interest.at(-1)!.y)} over 12 months) has outrun defense since ${monthName(passed)}.`
+        : "",
+      deficit ? `The 12-month deficit is ${formatBillions(deficit.y)}.` : "",
+      tariffs
+        ? `Tariff receipts broke pattern in ${monthName(tariffs.t)}: ${formatBillions(tariffs.y)} against a typical ${formatBillions(tariffs.baseline)}.`
+        : "",
+    ].filter(Boolean);
+    const cents = (v: number) => `${v.toFixed(1)}¢`;
+    const trend = ahead && ahead.y > latest.y + 0.2 ? ` — the recent trend points to ${cents(ahead.y)} by ${monthName(ahead.t)}` : "";
+    return {
+      hook: `Interest takes ${cents(latest.y)} of every federal tax dollar${trend}`,
+      blurb: [`${chart.subtitle || chart.title}.`, ...extras].join(" "),
+      score: 84 + (latest.y >= 15 ? 4 : 0) + (ahead && ahead.y > latest.y ? 2 : 0),
+      preferKind: "line",
+      preferField: "interest_share_pct",
+      category: "Economy",
+    };
+  }
+  return { hook: "Every dollar in and out of the Treasury", blurb: chart.subtitle || chart.title, score: 74, preferKind: "line", category: "Economy" };
+}
+
+function hook_usafacts_budget_lines(
+  n: number,
+  sample: QueryResult,
+  chart: ChartRecommendation,
+): DiscoverHookResult {
+  // Where net interest ranks among spending lines (12-month totals), first month vs newest.
+  const at = (c: string) => sample.columns.indexOf(c);
+  const [mi, fi, li, ti] = [at("month"), at("flow"), at("line"), at("amount_ttm_b")];
+  const byMonth = new Map<string, { line: string; v: number }[]>();
+  for (const r of sample.rows) {
+    if (r[fi] !== "Outlays" || String(r[li]).startsWith("Other")) continue;
+    const v = Number(r[ti]);
+    if (r[ti] == null || !Number.isFinite(v)) continue;
+    const m = String(r[mi]);
+    byMonth.set(m, [...(byMonth.get(m) ?? []), { line: String(r[li]), v }]);
+  }
+  const months = [...byMonth.keys()].sort();
+  const rankIn = (m: string | undefined) => {
+    const lines = m ? [...(byMonth.get(m) ?? [])].sort((a, b) => b.v - a.v) : [];
+    const i = lines.findIndex((l) => l.line === "Net interest");
+    return i < 0 ? null : { rank: i + 1, of: lines.length, v: lines[i]!.v };
+  };
+  const first = rankIn(months[0]);
+  const now = rankIn(months.at(-1));
+  if (first && now) {
+    const climbed = now.rank < first.rank;
+    return {
+      hook: climbed
+        ? `Net interest climbed from #${first.rank} to #${now.rank} in federal spending`
+        : `Net interest is #${now.rank} of ${now.of} spending lines`,
+      blurb: `${chart.subtitle || chart.title}. ${formatBillions(now.v)} over the 12 months to ${monthName(months.at(-1)!)}, up from ${formatBillions(first.v)} in the 12 months to ${monthName(months[0]!)}.`,
+      score: 82 + (climbed ? 4 : 0),
+      preferKind: "bump",
+      category: "Economy",
+    };
+  }
+  return { hook: "Where federal money comes from and goes", blurb: chart.subtitle || chart.title, score: 74, preferKind: "bump", category: "Economy" };
+}
+
+/** Household strain measures, in reading order, with the direction that means trouble. */
+const HOUSEHOLD_STRAIN: { field: string; label: string; worse: "high" | "low"; unit: "%" | "years" | "k" }[] = [
+  { field: "card_delinquency_pct", label: "Credit card delinquency", worse: "high", unit: "%" },
+  { field: "consumer_delinquency_pct", label: "Consumer loan delinquency", worse: "high", unit: "%" },
+  { field: "mortgage_delinquency_pct", label: "Mortgage delinquency", worse: "high", unit: "%" },
+  { field: "debt_service_pct", label: "Debt payments' share of income", worse: "high", unit: "%" },
+  { field: "saving_rate_pct", label: "The saving rate", worse: "low", unit: "%" },
+  { field: "home_price_years_of_pay", label: "A home's price in years of pay", worse: "high", unit: "years" },
+  { field: "rental_vacancy_pct", label: "Rental vacancy", worse: "high", unit: "%" },
+  { field: "initial_claims_k", label: "Weekly jobless claims", worse: "high", unit: "k" },
+  { field: "prime_age_employment_pct", label: "Prime-age employment", worse: "low", unit: "%" },
+];
+
+function hook_usafacts_household(
+  n: number,
+  sample: QueryResult,
+  chart: ChartRecommendation,
+): DiscoverHookResult {
+  // The strain measure at its most unusual: a record, else the longest "highest / lowest since".
+  const fmt = (v: number, unit: "%" | "years" | "k") => (unit === "%" ? `${v.toFixed(2)}%` : unit === "years" ? `${v.toFixed(1)} years` : `${Math.round(v)}k`);
+  let best: { m: (typeof HOUSEHOLD_STRAIN)[number]; e: NonNullable<ReturnType<typeof extremeSince>>; points: ReturnType<typeof monthlySeries> } | null = null;
+  for (const m of HOUSEHOLD_STRAIN) {
+    const points = monthlySeries(sample, "quarter", m.field);
+    const e = extremeSince(points, m.worse);
+    if (!e || e.months < 12) continue;
+    const weight = e.record ? e.months + 600 : e.months;
+    const bestWeight = best ? (best.e.record ? best.e.months + 600 : best.e.months) : -1;
+    if (weight > bestWeight) best = { m, e, points };
+  }
+  if (best) {
+    const { m, e, points } = best;
+    const word = m.worse === "high" ? "highest" : "lowest";
+    const when = e.record ? `a record since ${monthName(points[0]!.t).slice(-4)}` : `${word} since ${monthName(e.since!.t)}`;
+    const ahead = trendForecast(points, 8, "holt", 40);
+    const worsening = ahead && (m.worse === "high" ? ahead.y > e.latest.y : ahead.y < e.latest.y);
+    return {
+      hook: `${m.label}: ${fmt(e.latest.y, m.unit)}, ${when}`,
+      blurb: [
+        `${chart.subtitle || chart.title}.`,
+        worsening ? `On its recent trend: ${fmt(ahead!.y, m.unit)} by ${monthName(ahead!.t)}.` : "",
+      ].filter(Boolean).join(" "),
+      score: 80 + Math.min(8, Math.round(e.months / 24)) + (e.record ? 2 : 0),
+      preferKind: "line",
+      preferField: m.field,
+      category: "Economy",
+    };
+  }
+  return { hook: "How American households are holding up", blurb: chart.subtitle || chart.title, score: 74, preferKind: "line", category: "Economy" };
+}
+
+/** "Oct 2026" for a "YYYY-MM-DD" month. */
+function usMonthLabel(month: string): string {
+  return new Date(`${month.slice(0, 7)}-15T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "numeric", timeZone: "UTC" });
+}
+
+/** Thousands of jobs → "142k" / "1.4M". */
+function formatThousands(k: number): string {
+  return k >= 1000 ? `${(k / 1000).toFixed(1)}M` : `${Math.round(k)}k`;
 }
 
 function hook_wiki(
@@ -1804,6 +2069,10 @@ export const DISCOVER_HOOKS: { [K in SourceKind | "wiki"]: DiscoverHookFn } = {
   "debt": hook_debt,
   "usafacts_states": hook_usafacts_states,
   "usafacts_nation": hook_usafacts_nation,
+  "usafacts_state_jobs": hook_usafacts_state_jobs,
+  "usafacts_budget": hook_usafacts_budget,
+  "usafacts_budget_lines": hook_usafacts_budget_lines,
+  "usafacts_household": hook_usafacts_household,
   "fireballs": hook_fireballs,
   "satellites": hook_satellites,
   "internet_outages": hook_internet_outages,

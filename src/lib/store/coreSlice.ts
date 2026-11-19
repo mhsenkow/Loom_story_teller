@@ -6,9 +6,33 @@ import type { ChartRecommendation } from "../recommendations";
 import type { ChartChromeSection, ChartChromeFocus } from "../chartChromeLink";
 import type { DiveLink, DiveQuery } from "../dive";
 import type { ChartLink } from "../chartLink";
-import type { LoomState, ViewMode, PanelTab, FileEntry, ColumnInfo, QueryResult } from "./types";
-export function chartActivationPatch(rec: ChartRecommendation): Partial<LoomState> {
+import type { LoomState, ViewMode, PanelTab, FileEntry, ColumnInfo, QueryResult, SmartResults } from "./types";
+import { analysisScope, analysisUnavailable } from "../timeSeriesAnalysis";
+
+/**
+ * A story's analysis preset (forecast band, anomaly rings) becomes the chart's analysis the first
+ * time it's active — never over settings the person already made for that chart.
+ */
+export function analysisPresetPatch(current: SmartResults | null, chart: ChartRecommendation | null | undefined): { smartResults?: SmartResults } {
+  const preset = chart?.analysisPreset;
+  if (!chart || !preset || analysisUnavailable(chart)) return {};
+  const scope = analysisScope(chart);
+  if (current?.analysis?.scope === scope) return {};
   return {
+    smartResults: {
+      ...current,
+      analysis: {
+        scope,
+        ...(preset.forecast ? { forecast: { enabled: true, ...preset.forecast } } : {}),
+        ...(preset.anomaly ? { anomaly: { enabled: true, ...preset.anomaly } } : {}),
+      },
+    },
+  };
+}
+
+export function chartActivationPatch(rec: ChartRecommendation, current: SmartResults | null = null): Partial<LoomState> {
+  return {
+    ...analysisPresetPatch(current, rec),
     activeChart: rec,
     vegaSpec: rec.spec ?? null,
     aiSuggestionReason: null,
@@ -138,6 +162,7 @@ export function createCoreSlice(set: Setter, _get: Getter, initialState: Record<
     }) =>
       set((s) => ({
         ...datasetScopedResetSlice(initialState),
+        ...analysisPresetPatch(null, payload.activeChart),
         selectedFile: payload.file,
         columnStats: payload.stats ?? [],
         sampleRows: payload.sample ?? null,

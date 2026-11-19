@@ -85,11 +85,15 @@ describe("keep-newest history feeds", () => {
   it("matches KEEP_NEWEST_KINDS in sources.rs", async () => {
     const { SOURCE_DEFS } = await import("../sourceRegistry");
     const ts = SOURCE_DEFS.filter((d) => d.keepNewest).map((d) => d.kind).sort();
-    const block = readRustSources().match(/pub const KEEP_NEWEST_KINDS: &\[&str\] = &\[([^\]]*)\];/);
+    const block = readRustSources().match(/pub const KEEP_NEWEST_KINDS: &\[&str\] =\s*&\[([^\]]*)\];/);
     expect(block, "KEEP_NEWEST_KINDS not found in sources.rs").toBeTruthy();
     const rust = [...block![1]!.matchAll(/"([^"]+)"/g)].map((m) => m[1]!).sort();
     expect(ts).toEqual(rust);
-    // Only ascending feeds make sense here
-    for (const d of SOURCE_DEFS.filter((x) => x.keepNewest)) expect(d.orderBy).toMatch(/ ASC$/);
+    // Only ascending feeds make sense here: the leading key is ASC and no term is DESC
+    // (multi-key orders like "month ASC, state_abbr" are reversed term by term in Rust).
+    for (const d of SOURCE_DEFS.filter((x) => x.keepNewest)) {
+      expect(d.orderBy.split(",")[0]).toMatch(/ ASC$/);
+      expect(d.orderBy).not.toMatch(/\bDESC\b/i);
+    }
   });
 });

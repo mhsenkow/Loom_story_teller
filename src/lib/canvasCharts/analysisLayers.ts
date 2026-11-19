@@ -1,13 +1,20 @@
 // Analysis layers use the line renderer's exact domains and plotting rectangle.
-import { forecastSeries, detectSeriesAnomalies, eventPosition, type AnalysisPoint, type TimeSeriesAnalysis } from "../timeSeriesAnalysis";
+import { calendarStepMonths, forecastCalendar, detectSeriesAnomalies, eventPosition, type AnalysisPoint, type TimeSeriesAnalysis } from "../timeSeriesAnalysis";
 import type { ChartRenderOpts } from "../chartRenderTypes";
 import type { PlotRect } from "../chartLooks";
 import { chartFont } from "../chartType";
 import { pushHit } from "./plumbing";
 
+/** Plotted steps for a forecast: a calendar horizon divided by the plotted month step (yearly buckets → 12). */
+export function forecastSteps(points: AnalysisPoint[], forecast: NonNullable<TimeSeriesAnalysis["forecast"]>): number {
+  if (!forecast.horizonMonths) return forecast.horizon;
+  const step = calendarStepMonths(points.slice(-3));
+  return step ? Math.min(50, Math.max(1, Math.round(forecast.horizonMonths / step))) : forecast.horizon;
+}
+
 export function computeAnalysis(points: AnalysisPoint[], config?: TimeSeriesAnalysis) {
   return {
-    forecast: config?.forecast?.enabled ? forecastSeries(points, config.forecast.horizon, config.forecast.method ?? "line", config.forecast.season ?? 12) : null,
+    forecast: config?.forecast?.enabled ? forecastCalendar(points, forecastSteps(points, config.forecast), config.forecast.method ?? "line", config.forecast.season ?? 12) : null,
     anomalies: config?.anomaly?.enabled ? detectSeriesAnomalies(points, config.anomaly.window, config.anomaly.threshold) : [],
   };
 }

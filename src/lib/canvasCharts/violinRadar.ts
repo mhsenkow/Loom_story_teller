@@ -18,7 +18,7 @@ import { fillMaterialPath } from "./material";
 import { axisFont, barPath, drawZeroLine, labelGutter, widestText } from "./axisHelpers";
 import { groupedDistributions } from "./distributions";
 import { numRange } from "./primitives";
-import { DEFAULT_COLORS } from "./shared";
+import { DEFAULT_COLORS, preferMeasureAxes } from "./shared";
 import { chartEmojiLabel } from "../chartEmoji";
 import { drawMarkSymbol, markSymbols } from "../markSymbols";
 
@@ -137,7 +137,8 @@ export function renderFullRadar(
     }
   }
   if (numericAxes.length < 3) return;
-  const axes = numericAxes.slice(0, 8);
+  const measureIdx = new Set(preferMeasureAxes(numericAxes.map((a) => a.idx), columnNames));
+  const axes = numericAxes.filter((a) => measureIdx.has(a.idx)).slice(0, 8);
   const n = axes.length;
 
   const ranges = axes.map(a => numRange(rows, a.idx));

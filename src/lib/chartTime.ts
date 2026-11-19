@@ -151,13 +151,66 @@ export function fieldLooksFutureDated(fieldName: string): boolean {
   return /^(approach_ts|net|expires)$/i.test(fieldName) || /approach|launch.?net|expires/i.test(fieldName);
 }
 
+/** Calendar-period columns whose windows count whole periods instead of days. */
+export type ChartTimeGrain = "year" | "month";
+
+/** Whole-year columns (`yr`, `year`, `fy_year`): any window keeps whole years, and "1y" is the latest one. */
+export function fieldLooksYearGrain(fieldName: string | null | undefined): boolean {
+  return !!fieldName && (/^(yr|year)$/i.test(fieldName) || /_year$/i.test(fieldName));
+}
+
+/** Monthly series keyed by the first of the month (`month`, `obs_month`). */
+export function fieldLooksMonthGrain(fieldName: string | null | undefined): boolean {
+  return !!fieldName && (/^(month|year_?month|ym)$/i.test(fieldName) || /_month$/i.test(fieldName));
+}
+
+/** Name-based grain for labels where only the column name is known. */
+export function fieldTimeGrain(fieldName: string | null | undefined): ChartTimeGrain | null {
+  return fieldLooksYearGrain(fieldName) ? "year" : fieldLooksMonthGrain(fieldName) ? "month" : null;
+}
+
+/** A bare calendar year (2024 or "2024") — parsed as Jan 1, so windows must compare years, not days. */
+function isYearGrainCell(value: unknown): boolean {
+  if (typeof value === "number") return Number.isInteger(value) && value >= 1000 && value <= 2999;
+  return typeof value === "string" && /^\s*\d{4}\s*$/.test(value);
+}
+
+/** Year / month grain when the column's name says so and its values agree (labels only). */
+export function periodGrainOf(rows: unknown[][], columns: string[], field: string): ChartTimeGrain | null {
+  const grain = fieldTimeGrain(field);
+  const i = columns.indexOf(field);
+  if (!grain || i < 0) return null;
+  for (const r of rows) {
+    const v = r[i];
+    if (v == null || v === "") continue;
+    const t = parseChartTime(v);
+    if (t == null) continue;
+    if (grain === "year" ? !isYearGrainCell(v) : !isMonthStart(t)) return null;
+  }
+  return grain;
+}
+
+/** Midnight UTC on the 1st — a month bucket. */
+function isMonthStart(t: number): boolean {
+  const d = new Date(t);
+  return d.getUTCDate() === 1 && t % 86_400_000 === 0;
+}
+
+const DAY_MS = 86_400_000;
+const monthIndex = (t: number) => {
+  const d = new Date(t);
+  return d.getUTCFullYear() * 12 + d.getUTCMonth();
+};
+
 /**
  * Windows worth suggesting when we only know the column name (Discover /
  * Suggestions) — not the sample span. Year columns skip short windows;
  * future event times get forward-looking windows only.
  */
 export function suggestedChartTimeWindows(fieldName: string): Exclude<ChartTimeRange, "all">[] {
-  if (/^(yr|year)$/i.test(fieldName) || /_year$/i.test(fieldName)) return ["1y"];
+  if (fieldLooksYearGrain(fieldName)) return ["1y"];
+  // Latest month, then the last 12 months.
+  if (fieldLooksMonthGrain(fieldName)) return ["30d", "1y"];
   if (fieldLooksFutureDated(fieldName)) return ["24h", "7d", "30d"];
   if (
     /^(ts|time|timestamp|acq_ts|epoch|created_at)$/i.test(fieldName) ||
@@ -185,11 +238,24 @@ export function chartTimeAnchorMode(sampleMax: number, now = Date.now()): ChartT
   return "sample";
 }
 
+/** Whole calendar periods a window keeps on period-grain data (at least one). */
+export function periodsInWindow(ms: number, grain: ChartTimeGrain): number {
+  return Math.max(1, Math.round(ms / ((grain === "year" ? 365 : 30.44) * DAY_MS)));
+}
+
 export function chartTimeWindowLabel(
   range: ChartTimeRange | null | undefined,
   mode: ChartTimeAnchorMode = "wall",
+  grain: ChartTimeGrain | null = null,
 ): string | null {
   if (!range || range === "all") return null;
+  // Calendar-period data keeps whole periods counted back from the newest (see applyChartTimeWindow).
+  if (grain && mode !== "forward") {
+    const ms = CHART_TIME_RANGES.find((r) => r.value === range)?.ms ?? 0;
+    if (grain === "year") return "Latest year";
+    const months = periodsInWindow(ms, "month");
+    return months <= 1 ? "Latest month" : `Last ${months} months`;
+  }
   const past = CHART_TIME_RANGES.find((r) => r.value === range)?.label ?? range;
   if (mode !== "forward") return past;
   switch (range) {
@@ -257,9 +323,14 @@ export function applyChartTimeWindow<T extends unknown[]>(
   if (idx < 0) return { rows, filtered: false, kept: total, total, mode: null, sourceIndices: rows.map((_, i) => i) };
 
   let max = -Infinity;
+  let yearGrain = true;
+  let monthGrain = true;
   const times = rows.map((r) => {
-    const t = parseChartTime(r[idx]);
+    const v = r[idx];
+    const t = parseChartTime(v);
     if (t != null && t > max) max = t;
+    if (t != null && yearGrain && !isYearGrainCell(v)) yearGrain = false;
+    if (t != null && monthGrain && !isMonthStart(t)) monthGrain = false;
     return t;
   });
   if (!Number.isFinite(max)) return { rows, filtered: false, kept: total, total, mode: null, sourceIndices: rows.map((_, i) => i) };
@@ -274,6 +345,20 @@ export function applyChartTimeWindow<T extends unknown[]>(
     next.push(rows[i]!);
     sourceIndices.push(i);
   };
+  if ((yearGrain || monthGrain) && mode !== "forward") {
+    // Years parse as Jan 1 and monthly series sit on the 1st, so a day-count cutoff kept one
+    // or two periods depending on leap years and month lengths. Count whole periods back from
+    // the newest instead: "1y" on years = the newest year; "30d" on months = the newest month.
+    const grain: ChartTimeGrain = yearGrain ? "year" : "month";
+    const n = periodsInWindow(spec.ms, grain);
+    const period = (t: number) => (grain === "year" ? new Date(t).getUTCFullYear() : monthIndex(t));
+    const newest = period(max);
+    rows.forEach((_, i) => {
+      const t = times[i];
+      if (t != null && period(t) > newest - n) keep(i);
+    });
+    return { rows: next, filtered: true, kept: next.length, total, mode: "sample", sourceIndices };
+  }
   if (mode === "forward") {
     const end = now + spec.ms;
     rows.forEach((_, i) => {
@@ -344,7 +429,16 @@ function formatUtcTime(ms: number): string {
 }
 
 /** Human range for a span (UTC), e.g. "Jan 8, 2020 – Oct 6, 2026". */
-export function formatChartTimeSpanRange(minMs: number, maxMs: number): string {
+export function formatChartTimeSpanRange(minMs: number, maxMs: number, grain: ChartTimeGrain | null = null): string {
+  // Whole-year / whole-month columns: "2025", "2012–2025", "Oct 2026", "Jan 2008 – Sep 2026".
+  if (grain === "year") {
+    const a = new Date(minMs).getUTCFullYear();
+    const b = new Date(maxMs).getUTCFullYear();
+    return a === b ? String(a) : `${a}–${b}`;
+  }
+  if (grain === "month") {
+    return minMs === maxMs ? formatUtcMonthYear(minMs) : `${formatUtcMonthYear(minMs)} – ${formatUtcMonthYear(maxMs)}`;
+  }
   if (minMs === maxMs) {
     const dt = new Date(minMs);
     const midnight =
@@ -397,7 +491,7 @@ export function formatChartTimeFootnote(
   if (!field) return null;
   const span = chartDataTimeSpan(rows, columns, field);
   if (!span) return null;
-  const range = formatChartTimeSpanRange(span.minMs, span.maxMs);
+  const range = formatChartTimeSpanRange(span.minMs, span.maxMs, periodGrainOf(rows, columns, field));
   const mode =
     fieldLooksFutureDated(field) && span.maxMs > Date.now()
       ? "forward"
@@ -405,6 +499,7 @@ export function formatChartTimeFootnote(
   const windowBit = chartTimeWindowLabel(
     rec?.timeWindow && rec.timeWindow !== "all" ? (rec.timeWindow as ChartTimeRange) : null,
     mode,
+    fieldTimeGrain(field),
   );
   if (windowBit) return `${windowBit} · ${range}`;
   // All-time / no window: still answer “when?”

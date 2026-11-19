@@ -10,7 +10,7 @@ import { buildXModel } from "./chartAxes";
 import { groupChartChannels } from "./channelGroups";
 import { partitionRowsByFacet } from "./chartFacets";
 import { buildDataCube, binRows, CUBE_MAX_BINS } from "./dataCube";
-import { detectSeriesAnomalies, forecastSeries, type ForecastMethod } from "./timeSeriesAnalysis";
+import { calendarStepMonths, detectSeriesAnomalies, forecastCalendar, type ForecastMethod } from "./timeSeriesAnalysis";
 import { rollingMean, normalizeSeriesValues } from "./dsTransforms";
 
 export type ChartAnomalyMethod = "mad" | "iqr" | "z-score" | "trailing";
@@ -206,10 +206,12 @@ export function chartForecast(rows: unknown[][], columns: string[], xField: stri
   let reason: string | null = points.length < 8 ? "Need at least 8 distinct ordered values with a finite measure." : null;
   if (!reason) {
     const gaps = points.slice(1).map((p, i) => p.x - points[i].x), step = median(gaps);
-    if (gaps.some(g => Math.abs(g - step) > Math.max(step * 1e-6, 1e-9))) reason = "Intervals are irregular or missing. Aggregate to regular intervals before forecasting.";
+    // Calendar months / quarters / years are regular even though their lengths in days differ.
+    const calendar = time && calendarStepMonths(points) != null;
+    if (!calendar && gaps.some(g => Math.abs(g - step) > Math.max(step * 1e-6, 1e-9))) reason = "Intervals are irregular or missing. Aggregate to regular intervals before forecasting.";
     else if (method === "seasonal" && points.length < season * 2) reason = "Repeat the cycle needs at least two complete cycles.";
   }
-  const forecast = reason ? null : forecastSeries(points, horizon, method, season);
+  const forecast = reason ? null : forecastCalendar(points, horizon, method, season);
   if (time && forecast?.points.some(p => !Number.isFinite(new Date(p.x).getTime()))) return { points, forecast: null, reason: "Forecast dates exceed the supported calendar range.", time };
   return { points, forecast, reason: reason ?? (forecast ? null : "Choose valid forecast parameters."), time };
 }

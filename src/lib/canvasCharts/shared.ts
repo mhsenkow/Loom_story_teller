@@ -45,3 +45,15 @@ export function isNumericType(dt: string): boolean {
   const t = dt.toUpperCase();
   return ["INTEGER", "BIGINT", "FLOAT", "DOUBLE", "DECIMAL", "REAL", "HUGEINT", "TINYINT", "SMALLINT", "UBIGINT", "UINTEGER", "USMALLINT", "UTINYINT"].some(n => t.includes(n));
 }
+
+/** Numeric-looking columns that aren't measures: codes ("01" FIPS), ids, years, coordinates. */
+export const NOT_A_MEASURE_NAME = /(^|_)(id|ids|code|fips|key|uuid|zip|rank|yr|year|month|day|date|ts|time|lat|lon|lng|latitude|longitude)($|_)/i;
+
+/**
+ * Auto-picked axes (radar spokes, parallel axes): drop code / id / time columns when at least
+ * `min` real measures remain — a "state fips" spoke or a "year" axis compares nothing.
+ */
+export function preferMeasureAxes(indices: number[], columnNames: string[], min = 3): number[] {
+  const measures = indices.filter((i) => !NOT_A_MEASURE_NAME.test(columnNames[i] ?? ""));
+  return measures.length >= min ? measures : indices;
+}

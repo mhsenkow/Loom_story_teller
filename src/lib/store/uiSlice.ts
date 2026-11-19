@@ -189,7 +189,7 @@ export function createUiSlice(set: Setter, get: Getter, initialState: Record<str
         vizSwipeSkipped: s.vizSwipeSkipped + (direction === "left" ? 1 : 0),
       };
       if (direction === "right") {
-        Object.assign(patch, chartActivationPatch(rec));
+        Object.assign(patch, chartActivationPatch(rec, s.smartResults));
         patch.chartRecs = [rec, ...s.chartRecs.filter((r) => r.id !== rec.id)];
       }
       const nextIndex = s.vizSwipeIndex + 1;

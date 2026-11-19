@@ -171,8 +171,8 @@ export function consumeDiscoverRefreshRequest(): boolean {
 /** All poll sources (same set as Sidebar live cards). */
 const SCAN_KINDS: readonly SourceKind[] = ALL_SOURCE_KINDS;
 
-/** Cap on stories shown in the discover grid (primary + alts across every feed). */
-export const DISCOVER_STORY_LIMIT = 10_000;
+/** Cap on stories shown in the discover grid (primary + alts across every feed); ≥ feeds × variants. */
+export const DISCOVER_STORY_LIMIT = 12_000;
 
 /** iPad / iPhone / Android — fewer cards so the grid stays snappy. */
 export const DISCOVER_STORY_LIMIT_MOBILE = 120;
@@ -263,8 +263,18 @@ function chartHasRowsInWindow(chart: ChartRecommendation, sample: QueryResult): 
 function pickPreferredChart(
   charts: ChartRecommendation[],
   preferKind?: string,
+  preferField?: string,
 ): ChartRecommendation | null {
   if (!charts.length) return null;
+  // A hook about one measure ("Rental vacancy: highest since 2014") opens on a chart of that measure.
+  if (preferField) {
+    const ofField = charts.filter((c) => c.yField === preferField);
+    const sameKind = ofField.filter((c) => !preferKind || c.kind === preferKind);
+    // That measure on its own, ideally with its forecast / anomaly layers ready, before a comparison.
+    const solo = (c: ChartRecommendation) => !c.y2Field && !c.colorField && !c.seriesNormalize;
+    const hit = sameKind.find((c) => solo(c) && c.analysisPreset) ?? sameKind.find(solo) ?? sameKind[0] ?? ofField[0];
+    if (hit) return hit;
+  }
   if (preferKind) {
     const hit = charts.find((c) => c.kind === preferKind);
     if (hit) return hit;
@@ -347,7 +357,7 @@ function* buildDiscoverStorySteps(
   });
   if (!sample.rows.length || !charts.length || maxVariants <= 0) return [];
   const seed = discoverHookFor(kind, sample, charts[0]!);
-  const primaryChart = pickPreferredChart(charts, seed.preferKind)!;
+  const primaryChart = pickPreferredChart(charts, seed.preferKind, seed.preferField)!;
   const primary = discoverHookFor(kind, sampleForChart(primaryChart, sample), primaryChart);
   const makeStory = (chart: ChartRecommendation, index: number): DiscoverStory => editorialDiscoverStory({
     id: `discover-${kind}${index ? `-alt${index}` : ""}`,
@@ -432,11 +442,14 @@ function* buildDiscoverStorySteps(
     else representatives.unshift(head);
   }
   const represented = new Set(representatives.map((s) => s.id));
-  const out = representatives.length <= maxVariants
-    ? [...representatives, ...orderDiscoverStories(all.filter((s) => !represented.has(s.id)), (s) => s.score, maxVariants - representatives.length)]
-      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
-    : orderDiscoverStories(all, (s) => s.score, maxVariants);
-  return out;
+  if (representatives.length <= maxVariants) {
+    return [...representatives, ...orderDiscoverStories(all.filter((s) => !represented.has(s.id)), (s) => s.score, maxVariants - representatives.length)]
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  }
+  // More kinds than slots: rank everything — but the headline still keeps a slot.
+  const picked = orderDiscoverStories(all, (s) => s.score, maxVariants);
+  if (head && picked.length && !picked.some((s) => s.id === head.id)) picked[picked.length - 1] = head;
+  return picked;
 }
 
 export function buildDiscoverStories(...args: Parameters<typeof buildDiscoverStorySteps>): DiscoverStory[] {

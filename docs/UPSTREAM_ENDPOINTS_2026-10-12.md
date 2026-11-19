@@ -18,8 +18,12 @@ Desktop (`src-tauri/src/sources.rs` + `stream.rs`) and the catalog Worker (`work
 | starlink | CelesTrak GP JSON | Debris / incomplete objects skipped |
 | fx | `api.frankfurter.dev/v1/` (Worker **and** desktop) | Legacy `api.frankfurter.app` only redirects — not used. Shared `fx.json` + `fx_parity_expected.json` gate (Vitest + Rust) |
 | world_bank / debt / covid / countries | World Bank / OWID-style JSON | Worker cache TTLs in catalog-proxy |
-| usafacts_states | USAFacts Data gateway (`data.mcp.usafacts.org`, beta, keyless) → Census ACS 1-year | 24h cache; no fallback (api.census.gov needs a key) — stale cache on outage |
-| usafacts_nation | USAFacts Data gateway → FRED observations | 12h cache; fallback `fred.stlouisfed.org/graph/fredgraph.csv` (keyless) |
+| usafacts_states | USAFacts Data gateway (`data.mcp.usafacts.org`, beta, keyless) → Census ACS 1-year + FRED annual CPI | 24h cache; per-vintage memo (settled 30 d); no keyless fallback (api.census.gov needs a key) — memo, edge stale copy, then KV last-good |
+| usafacts_nation | USAFacts Data gateway → FRED observations (8 series) | 12h cache; per-series memo; `fred.stlouisfed.org/graph/fredgraph.csv` fills only missing series; KV last-good |
+| usafacts_budget | USAFacts Data gateway → Treasury MTS Table 9 (paged ≤ 1000 rows) + average interest rates | 12h cache; memo shared with budget_lines; direct `api.fiscaldata.treasury.gov` (keyless, 10k rows); KV last-good |
+| usafacts_budget_lines | Same Treasury query, reshaped long (month × line) | as usafacts_budget |
+| usafacts_household | USAFacts Data gateway → 14 FRED series, quarterly averages | 12h cache; per-series memo; one `fredgraph.csv` per series (multi-series quarterly asks return a ZIP); KV last-good |
+| usafacts_state_jobs | USAFacts Data gateway → BLS LAUS `getSeriesData` (52 series, 2 calls) | 12h cache; per-batch memo; `fredgraph.csv` `{USPS}UR` (2 × 26 ids); KV last-good |
 
 ## Machine-checked inventory
 
